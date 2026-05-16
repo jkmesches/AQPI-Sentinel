@@ -1,5 +1,7 @@
 // Typed fetch wrapper for the Sentinel REST API.
 
+import { url } from './origin';
+
 export interface StatusRow {
 	check_id: string;
 	target: string;
@@ -45,7 +47,7 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	const ctl = new AbortController();
 	const t = setTimeout(() => ctl.abort(), timeoutMs);
 	try {
-		const r = await fetch(path, {
+		const r = await fetch(url(path), {
 			headers: { accept: 'application/json' },
 			credentials: 'include',
 			signal: ctl.signal
@@ -87,7 +89,7 @@ export const api = {
 	alarms:        (status = 'open')  => get<Alarm[]>(`/api/alarms?status=${status}&limit=200`),
 	alarm:         (id: number)       => get<Alarm & { ack: { acked_by: string; acked_at: string; note: string } | null; notifications: unknown[] }>(`/api/alarms/${id}`),
 	ack:           (id: number, body: { note?: string } = {}) =>
-		fetch(`/api/alarms/${id}/ack`, {
+		fetch(url(`/api/alarms/${id}/ack`), {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			credentials: 'include',
@@ -97,7 +99,7 @@ export const api = {
 			return r.json();
 		}),
 	unack:         (id: number) =>
-		fetch(`/api/alarms/${id}/unack`, { method: 'POST', credentials: 'include' }).then((r) => {
+		fetch(url(`/api/alarms/${id}/unack`), { method: 'POST', credentials: 'include' }).then((r) => {
 			if (!r.ok) throw new Error(`unack → HTTP ${r.status}`);
 			return r.json();
 		}),

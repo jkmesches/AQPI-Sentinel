@@ -3,6 +3,7 @@
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket } from '$lib/api';
 	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText } from '$lib/format';
 	import LazyImage from '$lib/components/LazyImage.svelte';
+	import { url as apiUrl } from '$lib/origin';
 
 	type Bucket = '1m' | '5m' | '15m' | '1h' | '6h' | '1d';
 	const BUCKETS: { key: Bucket; label: string; pageLimit: number }[] = [
@@ -636,7 +637,7 @@
 					     decodes for runs the user may never scroll to. -->
 					{#if isImageQc(run.check_id) && (run.payload as any)?.source}
 						{@const src = (run.payload as any).source}
-						{@const url = `/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`}
+						{@const url = apiUrl(`/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`)}
 						{@const ageMin = (Date.now() - new Date(run.finished_at).getTime()) / 60000}
 						<div class="mt-3">
 							<div class="text-[10px] text-[var(--color-muted)] uppercase tracking-wider mb-1">

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { severityChip } from '$lib/format';
+	import { url as apiUrl } from '$lib/origin';
 
 	type Tab = 'alarms' | 'checks';
 
@@ -56,7 +57,7 @@
 		});
 		if (stage) params.set('stage', stage);
 		if (target) params.set('target', target);
-		window.open(`/api/history/export.csv?${params}`, '_blank');
+		window.open(apiUrl(`/api/history/export.csv?${params}`), '_blank');
 	}
 
 	onMount(load);

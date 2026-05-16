@@ -1,6 +1,8 @@
-// Auth store. Loads /api/auth/me on startup, exposes login/logout.
+// Auth store. Bearer-token sessions stored in localStorage.
 
 import { goto } from '$app/navigation';
+
+const TOKEN_KEY = 'sentinel.token';
 
 export interface AuthUser {
 	id: number;
@@ -13,6 +15,10 @@ class AuthStore {
 	user = $state<AuthUser | null>(null);
 	loading = $state(true);
 	error = $state<string | null>(null);
+	// Token is read by lib/origin.installFetchPrefix() to attach the
+	// Authorization header to every /api/* fetch, and by lib/ws.ts to
+	// append ?token=... on the WebSocket URL.
+	token = $state<string | null>(null);
 
 	private bootstrapPromise?: Promise<void>;
 
@@ -20,14 +26,18 @@ class AuthStore {
 		if (this.bootstrapPromise) return this.bootstrapPromise;
 		this.bootstrapPromise = (async () => {
 			try {
-				const r = await fetch('/api/auth/me', { credentials: 'include' });
+				if (typeof localStorage !== 'undefined') {
+					this.token = localStorage.getItem(TOKEN_KEY);
+				}
+				if (!this.token) { this.loading = false; return; }
+				const r = await fetch('/api/auth/me');   // installFetchPrefix adds header
 				if (r.ok) {
 					this.user = (await r.json()) as AuthUser;
 				} else {
-					this.user = null;
+					this.clearToken();
 				}
 			} catch {
-				this.user = null;
+				this.clearToken();
 			} finally {
 				this.loading = false;
 			}
@@ -41,7 +51,6 @@ class AuthStore {
 			const r = await fetch('/api/auth/login', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
 				body: JSON.stringify({ email, password })
 			});
 			if (!r.ok) {
@@ -53,7 +62,11 @@ class AuthStore {
 				this.error = msg;
 				return { ok: false, error: msg };
 			}
-			this.user = (await r.json()) as AuthUser;
+			const j = await r.json();
+			this.setToken(j.token);
+			this.user = {
+				id: j.id, email: j.email, role: j.role, display_name: j.display_name
+			};
 			return { ok: true };
 		} catch (e) {
 			const msg = (e as Error).message;
@@ -64,20 +77,25 @@ class AuthStore {
 
 	async logout(): Promise<void> {
 		try {
-			await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+			await fetch('/api/auth/logout', { method: 'POST' });
 		} catch { /* */ }
+		this.clearToken();
 		this.user = null;
-		// drop the cached bootstrap so a subsequent navigation re-reads
 		this.bootstrapPromise = undefined;
 		goto('/');
 	}
 
-	get isAuthed(): boolean {
-		return this.user !== null;
+	private setToken(t: string) {
+		this.token = t;
+		try { localStorage.setItem(TOKEN_KEY, t); } catch { /* */ }
 	}
-	get isAdmin(): boolean {
-		return this.user?.role === 'admin';
+	private clearToken() {
+		this.token = null;
+		try { localStorage.removeItem(TOKEN_KEY); } catch { /* */ }
 	}
+
+	get isAuthed(): boolean { return this.user !== null; }
+	get isAdmin(): boolean  { return this.user?.role === 'admin'; }
 }
 
 export const auth = new AuthStore();

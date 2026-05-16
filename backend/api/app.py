@@ -123,6 +123,20 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Sentinel", version="0.1.0", lifespan=lifespan)
+
+    # CORS — frontend (:3000) and backend (:8000) are cross-origin in
+    # prod. Auth uses Authorization: Bearer headers rather than cookies
+    # so we don't need allow_credentials=True (which would force exact
+    # origin matching). Simple wildcard is fine for a private LAN.
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["x-sentinel-cache"],
+    )
+
     app.include_router(status_routes.router)
     app.include_router(checks_routes.router)
     app.include_router(alarms_routes.router)

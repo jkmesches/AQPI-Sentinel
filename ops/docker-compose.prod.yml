@@ -1,0 +1,97 @@
+# Sentinel production stack — plain HTTP, LAN deployment, no reverse proxy.
+#
+# Usage from project root:
+#   cp ops/.env.prod.example ops/.env.prod      # fill in values
+#   docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod up -d
+#
+# Browser access:
+#   http://<host-or-ip>:3000      ← UI (frontend)
+#   http://<host-or-ip>:8000/api  ← backend (directly accessed by browser)
+#
+# The frontend resolves the backend at runtime from the page's hostname
+# on port 8000, so users just visit the frontend URL and everything works.
+# Auth uses Bearer tokens (localStorage) so cross-origin cookies aren't a
+# problem on plain HTTP.
+
+name: sentinel
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB:       ${POSTGRES_DB:-sentinel}
+    volumes:
+      - sentinel_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sentinel
+
+  backend:
+    image: sentinel-backend:latest
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.backend
+    container_name: sentinel-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SENTINEL_DB_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentinel}
+      SENTINEL_BASE:   ${SENTINEL_BASE:-https://radarca.engr.colostate.edu}
+      SENTINEL_API_HOST: 0.0.0.0
+      SENTINEL_API_PORT: 8000
+      SENTINEL_LOG_LEVEL: ${SENTINEL_LOG_LEVEL:-INFO}
+      SENTINEL_ARCHIVE_ENABLED: "1"
+      SENTINEL_ARCHIVE_ROOT:    /data/archive
+      SENTINEL_ARCHIVE_RETENTION_DAYS: ${SENTINEL_ARCHIVE_RETENTION_DAYS:-}
+      # First-run admin bootstrap. Ignored once any user exists.
+      SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}
+      SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
+      SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
+    volumes:
+      - sentinel_archive:/data/archive
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - sentinel
+
+  frontend:
+    image: sentinel-frontend:latest
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.frontend
+      args:
+        # Empty → frontend resolves backend at runtime from
+        # window.location.hostname:8000. Set to "http://my-host:8000"
+        # to bake in a specific backend origin.
+        PUBLIC_SENTINEL_API_BASE: ${PUBLIC_SENTINEL_API_BASE:-}
+    container_name: sentinel-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - sentinel
+
+volumes:
+  sentinel_pgdata:
+    name: sentinel_pgdata
+  sentinel_archive:
+    name: sentinel_archive
+
+networks:
+  sentinel:
+    name: sentinel

@@ -1,6 +1,7 @@
 // Resilient WebSocket subscriber. Auto-reconnects with backoff.
 
 import type { Alarm } from '$lib/api';
+import { wsUrl } from '$lib/origin';
 
 export interface RunEvent {
 	check_id: string;
@@ -40,8 +41,7 @@ export class SentinelWs {
 			return;  // already have a live socket
 		}
 		const myId = ++this.connectId;
-		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+		const ws = new WebSocket(wsUrl('/api/ws'));
 		this.ws = ws;
 		ws.onopen = () => {
 			if (myId !== this.connectId) return;
