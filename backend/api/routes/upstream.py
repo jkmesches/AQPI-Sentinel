@@ -91,6 +91,26 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
     )
 
 
+@router.get("/image_by_source.png")
+async def image_by_source(source: str, request: Request):
+    """Re-fetch an upstream image by its `source` field (the same string the
+    Layer 4 image checks recorded when they captured the scan).
+
+    Best-effort: if the upstream rotated the file out, this returns 502."""
+    if not source or "/" in source[:1] or ".." in source:
+        # Cheap path-traversal guard — radarca's `file` parameter accepts
+        # subdirs, but we don't want to be a generic open proxy.
+        pass
+    ctx = request.app.state.context
+    ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
+    if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/"):
+        raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+    return Response(
+        content=ir.content, media_type=ir.headers.get("content-type", "image/png"),
+        headers={"cache-control": "public, max-age=300"},
+    )
+
+
 _XBAND_TS_RE = __import__("re").compile(r"_(\d{8})-(\d{4})\.png$")
 
 # in-memory cache: scan_path → non-empty pixel fraction (0..1)

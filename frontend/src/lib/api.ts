@@ -51,9 +51,29 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	}
 }
 
+export interface TimelineCell { status: 'pass' | 'warn' | 'fail' | 'error' | 'skip'; n: number }
+export interface TimelineBucket { ts: string; cells: Record<string, TimelineCell> }
+export interface TimelinePage {
+	bucket: string;
+	bucket_s: number;
+	until: string;
+	since: string;
+	buckets: TimelineBucket[];
+	older_cursor: string;
+}
+
 export const api = {
 	status:        ()                  => get<StatusRollup>('/api/status'),
 	checks:        ()                  => get<CheckMeta[]>('/api/checks'),
+	timeline:      (bucket: string, limit = 120, until?: string) => {
+		const p = new URLSearchParams({ bucket, limit: String(limit) });
+		if (until) p.set('until', until);
+		return get<TimelinePage>(`/api/history/timeline?${p}`, 15000);
+	},
+	historyRuns:   (check_id: string, target: string, since: string, until: string, limit = 50) => {
+		const p = new URLSearchParams({ check_id, target, since, until, limit: String(limit) });
+		return get<CheckRun[]>(`/api/history/runs?${p}`, 15000);
+	},
 	latest:        (id: string)        => get<CheckRun>(`/api/checks/${id}/latest`),
 	history:       (id: string, n = 50) => get<CheckRun[]>(`/api/checks/${id}/history?limit=${n}`),
 	metric:        (id: string, m: string, n = 60) =>
