@@ -2,6 +2,7 @@
 
 import { api, type StatusRollup, type Alarm, type CheckMeta } from '$lib/api';
 import { SentinelWs, type WsEvent } from '$lib/ws';
+import { diag } from '$lib/diag';
 
 class SentinelState {
 	rollup     = $state<StatusRollup | null>(null);
@@ -21,6 +22,14 @@ class SentinelState {
 	private ws?: SentinelWs;
 	private liveSince = $state<Date | null>(null);
 
+	// Cheap fingerprints of the last successful fetch, used by refresh() to
+	// skip the reactive replacement when the new payload is byte-identical
+	// to the old. On a healthy idle system this means most refresh ticks
+	// do zero subscriber work.
+	private _rollupSig = '';
+	private _alarmsSig = '';
+	private _checksSig = '';
+
 	async refresh() {
 		// Each fetch settles independently — loading drops on the first
 		// success, but the function only RESOLVES once all three are done so
@@ -32,15 +41,37 @@ class SentinelState {
 		};
 		const tasks = [
 			api.status().then(
-				(r) => { this.detectTransitions(r); this.rollup = r; anyOk = true; dropLoading(); },
+				(r) => {
+					anyOk = true;
+					dropLoading();
+					const sig = JSON.stringify(r);
+					if (sig === this._rollupSig) return;
+					this._rollupSig = sig;
+					this.detectTransitions(r);
+					this.rollup = r;
+				},
 				(e) => { this.error = (e as Error).message; dropLoading(); }
 			),
 			api.alarms('open').then(
-				(a) => { this.alarms = a; anyOk = true; dropLoading(); },
+				(a) => {
+					anyOk = true;
+					dropLoading();
+					const sig = JSON.stringify(a);
+					if (sig === this._alarmsSig) return;
+					this._alarmsSig = sig;
+					this.alarms = a;
+				},
 				(e) => { this.error = (e as Error).message; dropLoading(); }
 			),
 			api.checks().then(
-				(c) => { this.checks = c; anyOk = true; dropLoading(); },
+				(c) => {
+					anyOk = true;
+					dropLoading();
+					const sig = JSON.stringify(c);
+					if (sig === this._checksSig) return;
+					this._checksSig = sig;
+					this.checks = c;
+				},
 				(e) => { this.error = (e as Error).message; dropLoading(); }
 			)
 		];
@@ -101,19 +132,36 @@ class SentinelState {
 			if (e.type === 'hello') this.liveSince = new Date();
 			return;
 		}
-		this.lastUpdate = new Date();
+		// Intentionally don't touch `lastUpdate` here — the 1s tickTimer in
+		// the layout drives `sinceUpdate` on its own, and per-event writes
+		// just trigger redundant reactive recomputation for every header
+		// element that reads `lastUpdate`.
 		if (e.type === 'hello') {
 			this.liveSince = new Date();
+			this.lastUpdate = new Date();
 			return;
 		}
 		if (e.type === 'run') {
 			this.mergeRun(e.run);
 			if (e.run.metrics) {
-				if (!this.pendingMetrics) this.pendingMetrics = [];
-				this.pendingMetrics.push({ check_id: e.run.check_id, metrics: e.run.metrics });
-				if (!this.metricsScheduled) {
-					this.metricsScheduled = true;
-					queueMicrotask(() => this.flushMetrics());
+				// Skip metrics whose value equals the last sample for the
+				// same key — sparklines don't render any differently from
+				// duplicate trailing samples, and avoiding the push prevents
+				// flushMetrics from rebuilding the whole metrics map.
+				let anyChanged = false;
+				for (const [m, v] of Object.entries(e.run.metrics)) {
+					const k = `${e.run.check_id}|${m}`;
+					const arr = this.metrics[k];
+					const last = arr && arr.length ? arr[arr.length - 1] : undefined;
+					if (last !== v) { anyChanged = true; break; }
+				}
+				if (anyChanged) {
+					if (!this.pendingMetrics) this.pendingMetrics = [];
+					this.pendingMetrics.push({ check_id: e.run.check_id, metrics: e.run.metrics });
+					if (!this.metricsScheduled) {
+						this.metricsScheduled = true;
+						queueMicrotask(() => this.flushMetrics());
+					}
 				}
 			}
 			return;
@@ -172,6 +220,20 @@ class SentinelState {
 		summary: string;
 	}) {
 		if (!this.rollup) return;
+		// Dedupe on STATUS ONLY. The summary string from L1 product checks
+		// includes time-varying age (`age=+3m45s` → `age=+3m48s`) so every
+		// run reports a slightly different summary even though the status
+		// is the same. If we deduped on summary too, ~30 events/min would
+		// each force a full mergeRun rebuild for purely cosmetic age-string
+		// drift. The 5s polling refresh picks up updated summaries on its
+		// own cadence; for live updates we only care about status flips.
+		const stageList = this.rollup.stages[run.stage];
+		if (stageList) {
+			const existing = stageList.find((r) => r.check_id === run.check_id);
+			if (existing && existing.status === run.status) {
+				return;
+			}
+		}
 		if (!this.pendingMerge) this.pendingMerge = new Map();
 		this.pendingMerge.set(run.check_id, {
 			check_id: run.check_id,
@@ -225,10 +287,12 @@ class SentinelState {
 		this.started = true;
 		this.intervalMs = intervalMs;
 		this.refresh().then(() => this.refreshSparklines());
-		this.startTimer();
-		this.ws = new SentinelWs();
-		this.ws.subscribe((e) => this.handleWs(e));
-		this.ws.connect();
+		if (diag.poll) this.startTimer();
+		if (diag.ws) {
+			this.ws = new SentinelWs();
+			this.ws.subscribe((e) => this.handleWs(e));
+			this.ws.connect();
+		}
 
 		// Pause polling when the tab is in the background; otherwise an
 		// open-but-hidden Sentinel tab keeps hammering /api/status every 5s
@@ -239,7 +303,7 @@ class SentinelState {
 				if (document.hidden) {
 					this.stopTimer();
 				} else {
-					this.startTimer();
+					if (diag.poll) this.startTimer();
 					this.refresh();
 				}
 			};

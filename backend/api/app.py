@@ -55,18 +55,40 @@ async def lifespan(app: FastAPI):
     )
     sched = Scheduler(store, ctx, engine=engine)
     # scheduler also emits run events for the live stream
-    sched.on_result = lambda r: asyncio.create_task(ws.broadcast({
-        "type": "run",
-        "run": {
-            "check_id": r.check_id, "target": r.target, "stage": r.stage,
-            "status": r.status,
-            "started_at": r.started_at.isoformat(),
-            "finished_at": r.finished_at.isoformat(),
-            "summary": r.summary,
-            "payload": r.payload,
-            "metrics": r.metrics,
-        },
-    }))
+    # WS run events: broadcast ONLY when status changes (or first event for
+    # a check). On a healthy system 95%+ of consecutive runs return the
+    # same status, so without this gate we were pushing ~30 events/min for
+    # no UI-visible reason — the source of the idle-tab freeze. The 5s
+    # polling refresh keeps non-transition state fresh on its own.
+    #
+    # Metric samples (sparkline data) ride on these transition events,
+    # which means sparklines update only on transitions + every 5s polling
+    # tick. That's plenty for an at-a-glance dashboard; finer-grained
+    # streaming can be added per-page if it's ever needed.
+    _last_broadcast_status: dict[str, str] = {}
+
+    def _maybe_broadcast(r):
+        key = r.check_id
+        prev = _last_broadcast_status.get(key)
+        if prev == r.status:
+            return
+        _last_broadcast_status[key] = r.status
+        asyncio.create_task(ws.broadcast({
+            "type": "run",
+            "run": {
+                "check_id":    r.check_id,
+                "target":      r.target,
+                "stage":       r.stage,
+                "status":      r.status,
+                "prev_status": prev,                 # None on first event
+                "started_at":  r.started_at.isoformat(),
+                "finished_at": r.finished_at.isoformat(),
+                "summary":     r.summary,
+                "metrics":     r.metrics,
+            },
+        }))
+
+    sched.on_result = _maybe_broadcast
     await sched.start()
 
     app.state.store = store

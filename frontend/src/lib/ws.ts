@@ -10,8 +10,9 @@ export interface RunEvent {
 	started_at: string;
 	finished_at: string;
 	summary: string;
-	payload: Record<string, unknown> | null;
 	metrics: Record<string, number> | null;
+	// NOTE: server no longer sends `payload` on WS events. Use REST
+	// (/api/checks/{id}/latest) when the full check payload is needed.
 }
 
 export type WsEvent =

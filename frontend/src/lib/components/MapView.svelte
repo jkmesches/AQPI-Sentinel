@@ -497,11 +497,13 @@
 		// We deliberately omit a `Date.now()` cache-buster so MapLibre and the
 		// browser cache the image — every paint-tick / toggle was previously
 		// triggering a fresh proxy fetch because the URL kept changing.
-		// `pokeOverlays` (the 120s scheduled refresh) appends its own buster
-		// when we actually want to refetch.
+		// `pokeOverlays` increments `_forceBuster` to a 30s-quantized value
+		// when it actually wants a refetch; including it as a param means
+		// multiple force-refreshes within the same 30s share a cache hit.
 		const t = nexradTimeIso;
 		const qs = new URLSearchParams({ radar: id, moment: currentMoment });
 		if (t) qs.set('time', t);
+		if (_forceBuster) qs.set('_t', String(_forceBuster));
 		return `/api/upstream/xband_scan.png?${qs.toString()}`;
 	}
 
@@ -657,29 +659,31 @@
 
 	// ---- periodic scan refresh ---------------------------------------------
 	let scanRefresh: ReturnType<typeof setInterval>;
-	function pokeOverlays() {
-		// Periodically pulls fresh imagery for whatever is on-screen, via
-		// updateImage() so there's no flash.
-		if (composite !== 'none' && map?.getSource('comp-overlay')) {
-			renderCompositeFrame();
+
+	// Background `pokeOverlays` runs every ~2 minutes to pull fresh imagery.
+	// The previous implementation called `updateImage` directly for every
+	// active radar in parallel, with a `Date.now()` cache-buster on the URL
+	// — so each cycle fired N simultaneous unthrottled PNG decodes with
+	// guaranteed cache misses. On the Live page with 5+ active radars this
+	// was the dominant background-CPU cost and the most likely contributor
+	// to the idle-tab wedge.
+	//
+	// We now route through `syncRadarOverlayTime({ force: true })` which
+	// applies the decode-throttle semaphore (≤4 in flight), uses token
+	// supersession so a newer state change cancels in-flight preloads,
+	// and uses a coarse 30s-quantized cache-buster (`_force_buster()`) so
+	// multiple users / multiple poke cycles within the same window share
+	// browser-cache hits.
+	let _forceBuster = 0;
+	function _bumpForceBuster() { _forceBuster = Math.floor(Date.now() / 30_000); }
+	async function pokeOverlays() {
+		if (!map || !styleReady) return;
+		_bumpForceBuster();
+		if (composite !== 'none' && map.getSource('comp-overlay')) {
+			await renderCompositeFrame();
 		}
-		if (activeRadars.length > 0 && styleReady && map) {
-			for (const id of activeRadars) {
-				const src = map.getSource(radarSrcId(id)) as maplibregl.ImageSource | undefined;
-				if (!src) continue;
-				const r = radars.find((x) => x.id === id);
-				if (!r) continue;
-				const e = radarExtent(r);
-				src.updateImage({
-					url: `/api/upstream/xband_scan.png?radar=${id}&_=${Date.now()}`,
-					coordinates: [
-						[e.west, e.north],
-						[e.east, e.north],
-						[e.east, e.south],
-						[e.west, e.south]
-					]
-				});
-			}
+		if (activeRadars.length > 0) {
+			await syncRadarOverlayTime();
 		}
 	}
 
@@ -774,7 +778,13 @@
 			style: styleUrl(),
 			center: [-122.6, 37.95],
 			zoom: 7.2,
-			attributionControl: { compact: true }
+			attributionControl: { compact: true },
+			// Bound MapLibre's tile cache. Default is undefined → grows
+			// effectively unbounded. We don't pan, so a small cap suffices.
+			maxTileCacheSize: 32,
+			// Stop rendering when not in viewport; the default `false` is
+			// fine for foreground but doesn't help backgrounded tabs.
+			refreshExpiredTiles: false
 		});
 		requestAnimationFrame(() => map?.resize());
 		resizeObs = new ResizeObserver(() => map?.resize());
