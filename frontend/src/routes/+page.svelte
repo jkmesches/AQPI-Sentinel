@@ -42,6 +42,10 @@
 		await api.ack(id, { user: 'dashboard', note: 'acked from UI' });
 		await sentinel.refresh();
 	}
+	async function unack(id: number) {
+		await api.unack(id);
+		await sentinel.refresh();
+	}
 
 	const sevColor: Record<string, string> = {
 		info: 'text-[var(--color-info)]',
@@ -137,9 +141,11 @@
 					  opened.toISOString().slice(11, 16) +
 					  'Z'
 					: opened.toISOString().slice(11, 19) + 'Z'}
+				{@const isAcked = !!a.ack}
 				<li
-					class="row-hover sev-bar grid grid-cols-[2.5rem_3.2rem_3rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {sevColor[a.severity] ??
+					class="row-hover sev-bar grid grid-cols-[2.5rem_3.2rem_3rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
 						''}"
+					title={isAcked ? `acked by ${a.ack?.acked_by} at ${a.ack?.acked_at}${a.ack?.note ? ' — ' + a.ack.note : ''}` : ''}
 				>
 					<span class={severityChip(a.severity)}>{a.severity}</span>
 					<span class="num text-[10.5px] text-[var(--color-muted)]">{a.stage}</span>
@@ -154,13 +160,30 @@
 					<span class="num text-[10.5px] text-[var(--color-faint)]">
 						{fmtAge(ageS)}
 					</span>
-					<span class="truncate text-[var(--color-muted)] text-[11.5px]">{a.message}</span>
-					<button
-						class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
-						onclick={() => ack(a.id)}
-					>
-						ack
-					</button>
+					<span class="truncate text-[var(--color-muted)] text-[11.5px]">
+						{#if isAcked}
+							<span class="text-[10px] uppercase tracking-wider text-[var(--color-ok)] mr-1">acked · {a.ack?.acked_by}</span>
+						{/if}
+						{a.message}
+					</span>
+					{#if isAcked}
+						<button
+							type="button"
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
+							onclick={() => unack(a.id)}
+							title="undo acknowledgement"
+						>
+							unack
+						</button>
+					{:else}
+						<button
+							type="button"
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
+							onclick={() => ack(a.id)}
+						>
+							ack
+						</button>
+					{/if}
 				</li>
 			{/each}
 			{#if !sentinel.alarms.length}

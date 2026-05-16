@@ -26,6 +26,7 @@ export interface CheckRun extends StatusRow {
 	payload: Record<string, unknown> | null;
 	artifacts: string[];
 }
+export interface AlarmAck { acked_by: string; acked_at: string | null; note: string | null }
 export interface Alarm {
 	id: number;
 	check_id: string;
@@ -37,6 +38,7 @@ export interface Alarm {
 	suppressed_by: string | null;
 	message: string;
 	payload: Record<string, unknown> | null;
+	ack?: AlarmAck | null;
 }
 
 async function get<T>(path: string, timeoutMs = 8000): Promise<T> {

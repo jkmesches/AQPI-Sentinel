@@ -98,17 +98,13 @@ class SentinelState {
 		}
 		if (e.type === 'run') {
 			this.mergeRun(e.run);
-			// append metric values incrementally so sparklines move live
 			if (e.run.metrics) {
-				const upd: Record<string, number[]> = { ...this.metrics };
-				for (const [m, v] of Object.entries(e.run.metrics)) {
-					const k = `${e.run.check_id}|${m}`;
-					const arr = (upd[k] ?? []).slice();
-					arr.push(v as number);
-					if (arr.length > 30) arr.shift();
-					upd[k] = arr;
+				if (!this.pendingMetrics) this.pendingMetrics = [];
+				this.pendingMetrics.push({ check_id: e.run.check_id, metrics: e.run.metrics });
+				if (!this.metricsScheduled) {
+					this.metricsScheduled = true;
+					queueMicrotask(() => this.flushMetrics());
 				}
-				this.metrics = upd;
 			}
 			return;
 		}
@@ -130,6 +126,32 @@ class SentinelState {
 		}
 	}
 
+	// Bursty WS streams can fire ~1 run/sec across 36 checks. We coalesce
+	// many runs into one atomic rollup replacement on the next microtask so
+	// Svelte's reactivity machinery runs once per burst, not per row.
+	private pendingMerge?: Map<string, any>;
+	private mergeScheduled = false;
+	private pendingMetrics?: { check_id: string; metrics: Record<string, number> }[];
+	private metricsScheduled = false;
+
+	private flushMetrics() {
+		this.metricsScheduled = false;
+		const pending = this.pendingMetrics;
+		this.pendingMetrics = undefined;
+		if (!pending?.length) return;
+		const next = { ...this.metrics };
+		for (const { check_id, metrics } of pending) {
+			for (const [m, v] of Object.entries(metrics)) {
+				const k = `${check_id}|${m}`;
+				const arr = (next[k] ?? []).slice();
+				arr.push(v as number);
+				if (arr.length > 30) arr.shift();
+				next[k] = arr;
+			}
+		}
+		this.metrics = next;
+	}
+
 	private mergeRun(run: {
 		check_id: string;
 		target: string;
@@ -140,10 +162,8 @@ class SentinelState {
 		summary: string;
 	}) {
 		if (!this.rollup) return;
-		const stages = { ...this.rollup.stages };
-		const list = (stages[run.stage] ?? []).slice();
-		const i = list.findIndex((r) => r.check_id === run.check_id);
-		const row = {
+		if (!this.pendingMerge) this.pendingMerge = new Map();
+		this.pendingMerge.set(run.check_id, {
 			check_id: run.check_id,
 			target: run.target,
 			stage: run.stage,
@@ -151,47 +171,106 @@ class SentinelState {
 			started_at: run.started_at,
 			finished_at: run.finished_at,
 			summary: run.summary
-		};
-		if (i >= 0) list[i] = row;
-		else list.push(row);
-		stages[run.stage] = list;
-		// recompute counts for this stage
-		const c = list.reduce(
-			(acc, r) => {
-				acc.total++;
-				(acc as Record<string, number>)[r.status]++;
-				return acc;
-			},
-			{ pass: 0, warn: 0, fail: 0, error: 0, skip: 0, total: 0 } as Record<string, number>
-		);
-		this.rollup = { ...this.rollup, stages, counts: { ...this.rollup.counts, [run.stage]: c as any } };
+		});
+		if (this.mergeScheduled) return;
+		this.mergeScheduled = true;
+		queueMicrotask(() => this.flushMerge());
+	}
+
+	private flushMerge() {
+		this.mergeScheduled = false;
+		const pending = this.pendingMerge;
+		this.pendingMerge = undefined;
+		if (!pending || !this.rollup) return;
+		// Build a single new stages+counts snapshot atomically so the rollup
+		// signal fires exactly once per microtask, regardless of how many
+		// runs arrived this tick.
+		const stages: typeof this.rollup.stages = {};
+		for (const [k, v] of Object.entries(this.rollup.stages)) {
+			stages[k] = v.slice();
+		}
+		for (const row of pending.values()) {
+			const list = (stages[row.stage] ??= []);
+			const i = list.findIndex((r) => r.check_id === row.check_id);
+			if (i >= 0) list[i] = row;
+			else list.push(row);
+		}
+		const counts: typeof this.rollup.counts = { ...this.rollup.counts };
+		for (const [stage, list] of Object.entries(stages)) {
+			const c = { pass: 0, warn: 0, fail: 0, error: 0, skip: 0, total: list.length };
+			for (const r of list) (c as Record<string, number>)[r.status]++;
+			counts[stage] = c as any;
+		}
+		this.rollup = { ...this.rollup, stages, counts };
 	}
 
 	private started = false;
+	private intervalMs = 30000;
+	private visibilityHandler?: () => void;
 
 	start(intervalMs = 30000) {
 		// idempotent — guards against Svelte HMR / repeated mounts during dev
 		// from accumulating intervals + websockets until the tab freezes.
 		if (this.started) return;
 		this.started = true;
+		this.intervalMs = intervalMs;
 		this.refresh().then(() => this.refreshSparklines());
-		this.timer = setInterval(() => this.refresh(), intervalMs);
+		this.startTimer();
 		this.ws = new SentinelWs();
 		this.ws.subscribe((e) => this.handleWs(e));
 		this.ws.connect();
+
+		// Pause polling when the tab is in the background; otherwise an
+		// open-but-hidden Sentinel tab keeps hammering /api/status every 5s
+		// and accumulating WS state updates until the page comes back and
+		// has to apply hundreds of queued mutations at once.
+		if (typeof document !== 'undefined') {
+			this.visibilityHandler = () => {
+				if (document.hidden) {
+					this.stopTimer();
+				} else {
+					this.startTimer();
+					this.refresh();
+				}
+			};
+			document.addEventListener('visibilitychange', this.visibilityHandler);
+		}
 	}
 
 	stop() {
 		this.started = false;
-		if (this.timer) {
-			clearInterval(this.timer);
-			this.timer = undefined;
-		}
+		this.stopTimer();
 		if (this.ws) {
 			this.ws.stop();
 			this.ws = undefined;
+		}
+		if (this.visibilityHandler && typeof document !== 'undefined') {
+			document.removeEventListener('visibilitychange', this.visibilityHandler);
+			this.visibilityHandler = undefined;
+		}
+	}
+
+	private startTimer() {
+		if (this.timer) return;
+		this.timer = setInterval(() => this.refresh(), this.intervalMs);
+	}
+	private stopTimer() {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = undefined;
 		}
 	}
 }
 
 export const sentinel = new SentinelState();
+
+// HMR cleanup. Without this, every save in dev rebuilds this module and
+// instantiates a fresh SentinelState, but the previous instance's polling
+// timer + WebSocket keep running because nothing tells them to stop. After
+// a dozen edits the tab is running a dozen zombie pollers in parallel,
+// each driving its own reactive updates — the freeze symptom.
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => {
+		try { sentinel.stop(); } catch { /* */ }
+	});
+}

@@ -27,37 +27,47 @@ export class SentinelWs {
 	private backoff = 1000;
 	private listeners: ((e: WsEvent) => void)[] = [];
 	private stopped = false;
+	// Monotonic connect id — invalidates stale onclose handlers from
+	// previously-discarded WebSocket instances so they can't trigger
+	// another reconnect after we've already started a new one.
+	private connectId = 0;
+	private reconnectTimer?: ReturnType<typeof setTimeout>;
 
 	connect() {
+		if (this.stopped) return;
+		if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+			return;  // already have a live socket
+		}
+		const myId = ++this.connectId;
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		this.ws = new WebSocket(`${proto}://${location.host}/api/ws`);
-		this.ws.onopen = () => {
+		const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+		this.ws = ws;
+		ws.onopen = () => {
+			if (myId !== this.connectId) return;
 			this.backoff = 1000;
 		};
-		this.ws.onmessage = (m) => {
+		ws.onmessage = (m) => {
+			if (myId !== this.connectId) return;
 			let e: WsEvent;
-			try {
-				e = JSON.parse(m.data);
-			} catch {
-				return;
-			}
+			try { e = JSON.parse(m.data); } catch { return; }
 			if (e.type === 'ping') {
-				try {
-					this.ws?.send('pong');
-				} catch { /* */ }
+				try { ws.send('pong'); } catch { /* */ }
 				return;
 			}
 			for (const fn of this.listeners) fn(e);
 		};
-		this.ws.onclose = () => {
-			if (this.stopped) return;
-			setTimeout(() => this.connect(), this.backoff);
+		ws.onclose = () => {
+			// Only the current connect-id schedules a reconnect; a stale
+			// close from a previously-discarded WS is ignored.
+			if (myId !== this.connectId || this.stopped) return;
+			if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = setTimeout(() => this.connect(), this.backoff);
 			this.backoff = Math.min(this.backoff * 2, 15000);
 		};
-		this.ws.onerror = () => {
-			try {
-				this.ws?.close();
-			} catch { /* */ }
+		ws.onerror = () => {
+			// Don't call close() here — onclose will fire on its own and
+			// drive the reconnect path. Calling close() from onerror used
+			// to cause duplicate close events in some browsers.
 		};
 	}
 
@@ -67,8 +77,13 @@ export class SentinelWs {
 
 	stop() {
 		this.stopped = true;
-		try {
-			this.ws?.close();
-		} catch { /* */ }
+		this.connectId++;          // invalidate any in-flight handlers
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = undefined;
+		}
+		try { this.ws?.close(); } catch { /* */ }
+		this.ws = undefined;
+		this.listeners.length = 0; // drop refs so GC can reclaim subscribers
 	}
 }
