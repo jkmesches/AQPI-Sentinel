@@ -146,3 +146,27 @@ def load_config(path: str | Path | None = None) -> AlertsConfig:
     raw = yaml.safe_load(p.read_text()) or {}
     raw = _interpolate_env(raw)
     return AlertsConfig.model_validate(raw)
+
+
+async def load_config_from_db_or_yaml(pool) -> AlertsConfig:
+    """Prefer a settings(key='alerts_config') row over the on-disk YAML.
+    Falls back to the YAML file (and finally an empty config) so a fresh
+    install with no DB row still has a sane default. The admin UI saves
+    to the DB row and triggers `engine.reload(...)`."""
+    import json as _json
+    try:
+        row = await pool.fetchrow(
+            "SELECT value FROM settings WHERE key = 'alerts_config'"
+        )
+    except Exception:
+        row = None
+    if row is not None:
+        val = row["value"]
+        if isinstance(val, str):
+            val = _json.loads(val)
+        try:
+            return AlertsConfig.model_validate(val)
+        except Exception:
+            # bad DB row — fall through to YAML
+            pass
+    return load_config()

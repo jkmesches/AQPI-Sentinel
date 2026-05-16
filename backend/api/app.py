@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from ..alarms.engine import AlarmEngine
-from ..alarms.models import load_config as load_alerts_config
+from ..alarms.models import load_config_from_db_or_yaml
 from ..checks.network import NetworkMonitor
 from ..checks.transports import CheckContext
 from ..checks.transports.browser import BrowserClient
@@ -20,6 +20,7 @@ from .routes import admin as admin_routes
 from .routes import alarms as alarms_routes
 from .routes import auth as auth_routes
 from .routes import checks as checks_routes
+from .routes import users as users_routes
 from .routes import debug as debug_routes
 from .routes import history as history_routes
 from .routes import radars as radars_routes
@@ -54,7 +55,7 @@ async def lifespan(app: FastAPI):
     ws = ConnectionManager()
     app.state.ws = ws
 
-    alerts_cfg = load_alerts_config()
+    alerts_cfg = await load_config_from_db_or_yaml(store.pool)
     engine = AlarmEngine(store, alerts_cfg)
     # alarm events → all WS clients
     async def _push_alarm(event_type, payload):
@@ -132,6 +133,8 @@ def create_app() -> FastAPI:
     app.include_router(debug_routes.router)
     app.include_router(auth_routes.router)
     app.include_router(admin_routes.router)
+    app.include_router(users_routes.router)
+    app.include_router(users_routes.public_router)
     app.include_router(ws_router)
 
     @app.get("/")

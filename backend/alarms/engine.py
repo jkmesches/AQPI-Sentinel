@@ -43,6 +43,20 @@ class AlarmEngine:
         # listeners notified on alarm/run events (P1.5 WebSocket)
         self._listeners: list = []
 
+    async def reload(self, new_cfg: AlertsConfig) -> None:
+        """Hot-swap the engine's config. Triggered from the admin UI after
+        a routing-config edit lands so changes don't require a restart."""
+        old_sinks = self.sinks
+        self.cfg = new_cfg
+        self.router = Router(new_cfg)
+        self.sinks = build_sinks(new_cfg)
+        wh = old_sinks.get("webhook") if isinstance(old_sinks, dict) else None
+        if wh and hasattr(wh, "aclose"):
+            try:
+                await wh.aclose()
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

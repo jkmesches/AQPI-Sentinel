@@ -43,22 +43,22 @@
 					Silences
 				</a>
 				<a
-					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
 					href="/admin/users"
 				>
-					Users <span class="text-[10px]">(soon)</span>
+					Users
 				</a>
 				<a
-					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
 					href="/admin/alerts"
 				>
-					Alert routing <span class="text-[10px]">(soon)</span>
+					Alert routing
 				</a>
 				<a
-					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
 					href="/admin/audit"
 				>
-					Audit log <span class="text-[10px]">(soon)</span>
+					Audit log
 				</a>
 			</nav>
 		</aside>
