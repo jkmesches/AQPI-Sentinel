@@ -91,6 +91,16 @@ class SentinelState {
 	}
 
 	private handleWs(e: WsEvent) {
+		// When the tab is hidden, drop run + alarm mutations entirely. The
+		// next visibilitychange triggers a full refresh that re-reads the
+		// authoritative state from /api/status + /api/alarms. Without this,
+		// a backgrounded tab keeps mutating reactive state for ~30 events/
+		// minute, all of which apply at once when the tab comes back —
+		// a known wedge trigger.
+		if (typeof document !== 'undefined' && document.hidden) {
+			if (e.type === 'hello') this.liveSince = new Date();
+			return;
+		}
 		this.lastUpdate = new Date();
 		if (e.type === 'hello') {
 			this.liveSince = new Date();
