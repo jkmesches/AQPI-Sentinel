@@ -1,0 +1,67 @@
+# Sentinel alert routing config. Reload via POST /api/alerts/reload (soon).
+# ${VARS} are env-interpolated at load.
+
+# --- SMTP for the email sink (optional). If unset, email sink is disabled. ---
+# smtp:
+#   host: smtp.fastmail.com
+#   port: 587
+#   starttls: true
+#   username: ${SMTP_USER}
+#   password: ${SMTP_PASS}
+#   from: "Sentinel <sentinel@yourdomain.example>"
+#   reply_to: ops@yourdomain.example
+
+receivers:
+  - name: console
+    console: true
+
+  # Example email receiver (commented until SMTP is configured):
+  # - name: oncall-primary
+  #   email: ["you@example.com"]
+  #   template: default
+  #
+  # Example webhook receiver (Discord, ntfy, etc.):
+  # - name: chat
+  #   webhook: ${DISCORD_WEBHOOK_URL}
+
+escalation_policies:
+  - name: standard
+    steps:
+      - delay: 0m
+        receivers: [console]
+      # When SMTP is configured, add escalating steps:
+      # - delay: 15m
+      #   receivers: [oncall-primary]
+      # - delay: 60m
+      #   receivers: [oncall-primary, chat]
+
+  - name: hard-page
+    steps:
+      - delay: 0m
+        receivers: [console]
+      # - delay: 5m
+      #   receivers: [oncall-primary]
+
+routes:
+  # L0 — site / origin down: page immediately, hard.
+  - match: {stage: L0}
+    severity_floor: critical
+    policy: hard-page
+    repeat_interval: 10m
+
+  # L2 radar: anything not pass goes to standard.
+  - match: {stage: L2}
+    policy: standard
+    repeat_interval: 1h
+
+  # L1 product: standard, with hourly repeats while open.
+  - match: {stage: L1}
+    policy: standard
+    repeat_interval: 1h
+
+  # Catch-all: anything else just goes to console.
+  - match: {}
+    policy: standard
+    repeat_interval: 4h
+
+silences: []

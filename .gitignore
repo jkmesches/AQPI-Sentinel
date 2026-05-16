@@ -1,0 +1,35 @@
+# --- Python ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / SvelteKit / Vite ---
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vite/
+
+# --- Runtime data ---
+data/
+!data/.keep
+
+# --- Local config / secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- Validation test artifacts (regenerable) ---
+validation_tests/samples/
+validation_tests/screenshots/
+validation_tests/state/
+
+# --- Editor / OS junk ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

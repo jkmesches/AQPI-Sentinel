@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" class="h-full bg-canvas text-default" data-theme="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'&gt;&lt;rect width='16' height='16' fill='%2322c55e'/&gt;&lt;/svg&gt;" />
+		<title>Sentinel</title>
+		<!-- inline pre-paint theme to avoid flash of dark-then-light -->
+		<script>
+			(function () {
+				try {
+					var m = localStorage.getItem('sentinel-theme') || 'auto';
+					var dark = m === 'dark' || (m === 'auto' &&
+						window.matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+				} catch (e) {}
+			})();
+		</script>
+		%sveltekit.head%
+	</head>
+	<body class="h-full antialiased">
+		<div class="h-full">%sveltekit.body%</div>
+	</body>
+</html>

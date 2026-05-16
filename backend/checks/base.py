@@ -1,0 +1,57 @@
+"""Universal Check interface and result envelope.
+
+This is the hinge for extensibility: every monitoring probe — current or
+future, HTTP or filesystem or SSH or anything else — is a ``Check`` subclass
+that emits a ``CheckResult``. The scheduler, store, alarm router, API, and
+frontend all consume the generic ``CheckResult`` shape.
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .transports import CheckContext
+
+
+Status = Literal["pass", "warn", "fail", "skip", "error"]
+
+
+@dataclass
+class CheckResult:
+    """One execution of a check. Persisted to ``check_runs``; numerics in
+    ``metrics`` are also written to ``metric_samples`` for time-series."""
+
+    check_id:    str
+    target:      str
+    stage:       str
+    status:      Status
+    started_at:  datetime
+    finished_at: datetime
+    summary:     str                       = ""
+    payload:     dict[str, Any]            = field(default_factory=dict)
+    metrics:     dict[str, float]          = field(default_factory=dict)
+    artifacts:   list[str]                 = field(default_factory=list)
+
+
+class Check:
+    """Subclass + override the class attributes + ``run()``.
+
+    For parameterized checks (one per product / radar / mount point) override
+    ``__init__`` and set the instance-specific attributes there, then register
+    each instance with ``register(MyCheck(target="X"))`` instead of decorating
+    the class.
+    """
+
+    id:         str = ""
+    stage:      str = ""
+    target:     str = ""
+    cadence_s:  int = 60
+    depends_on: list[str] = []
+
+    async def run(self, ctx: "CheckContext") -> CheckResult:
+        raise NotImplementedError
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
