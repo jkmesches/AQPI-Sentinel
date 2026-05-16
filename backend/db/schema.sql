@@ -210,3 +210,12 @@ CREATE TABLE IF NOT EXISTS admin_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_user   ON admin_audit(user_email, at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON admin_audit(action, at DESC);
+
+-- Generic settings key→JSON store. Used for SMTP config, alert routing
+-- snapshot, future runtime knobs. Read on demand; write via admin API.
+CREATE TABLE IF NOT EXISTS settings (
+  key          TEXT PRIMARY KEY,
+  value        JSONB NOT NULL,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by   TEXT
+);
