@@ -30,6 +30,9 @@ class Settings:
     archive_enabled: bool
     archive_root: Path
     archive_retention_days: int | None    # None == permanent
+    admin_email: str                       # bootstrap admin (only used if no users exist)
+    admin_password: str
+    admin_display_name: str
 
 
 def _load() -> Settings:
@@ -52,6 +55,9 @@ def _load() -> Settings:
         archive_enabled=os.environ.get("SENTINEL_ARCHIVE_ENABLED", "1") not in ("0", "false", "no"),
         archive_root=Path(os.environ.get("SENTINEL_ARCHIVE_ROOT", str(data_dir / "archive"))).resolve(),
         archive_retention_days=retention,
+        admin_email=os.environ.get("SENTINEL_ADMIN_EMAIL", ""),
+        admin_password=os.environ.get("SENTINEL_ADMIN_PASSWORD", ""),
+        admin_display_name=os.environ.get("SENTINEL_ADMIN_DISPLAY_NAME", ""),
     )
 
 

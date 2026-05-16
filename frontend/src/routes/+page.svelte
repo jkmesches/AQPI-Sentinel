@@ -7,6 +7,7 @@
 	import { fmtAge, severityChip, statusText, statusBorder } from '$lib/format';
 	import { api } from '$lib/api';
 	import { diag } from '$lib/diag';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	const radarRows = $derived(
 		(sentinel.rollup?.stages?.L2 ?? []).slice().sort((a, b) => a.target.localeCompare(b.target))
@@ -40,12 +41,20 @@
 	}
 
 	async function ack(id: number) {
-		await api.ack(id, { user: 'dashboard', note: 'acked from UI' });
-		await sentinel.refresh();
+		try {
+			await api.ack(id, { note: 'acked from UI' });
+			await sentinel.refresh();
+		} catch (e) {
+			alert(`ack failed: ${(e as Error).message}`);
+		}
 	}
 	async function unack(id: number) {
-		await api.unack(id);
-		await sentinel.refresh();
+		try {
+			await api.unack(id);
+			await sentinel.refresh();
+		} catch (e) {
+			alert(`unack failed: ${(e as Error).message}`);
+		}
 	}
 
 	const sevColor: Record<string, string> = {
@@ -177,7 +186,15 @@
 						{/if}
 						{a.message}
 					</span>
-					{#if isAcked}
+					{#if !auth.user}
+						<a
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+							href="/login?next={encodeURIComponent('/')}"
+							title="sign in to acknowledge alarms"
+						>
+							sign in
+						</a>
+					{:else if isAcked}
 						<button
 							type="button"
 							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"

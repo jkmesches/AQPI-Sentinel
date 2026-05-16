@@ -45,7 +45,11 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	const ctl = new AbortController();
 	const t = setTimeout(() => ctl.abort(), timeoutMs);
 	try {
-		const r = await fetch(path, { headers: { accept: 'application/json' }, signal: ctl.signal });
+		const r = await fetch(path, {
+			headers: { accept: 'application/json' },
+			credentials: 'include',
+			signal: ctl.signal
+		});
 		if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
 		return (await r.json()) as T;
 	} finally {
@@ -82,9 +86,20 @@ export const api = {
 		get<{ ts: string; value: number }[]>(`/api/checks/${id}/metrics?metric=${m}&limit=${n}`),
 	alarms:        (status = 'open')  => get<Alarm[]>(`/api/alarms?status=${status}&limit=200`),
 	alarm:         (id: number)       => get<Alarm & { ack: { acked_by: string; acked_at: string; note: string } | null; notifications: unknown[] }>(`/api/alarms/${id}`),
-	ack:           (id: number, body: { user?: string; note?: string }) =>
-		fetch(`/api/alarms/${id}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+	ack:           (id: number, body: { note?: string } = {}) =>
+		fetch(`/api/alarms/${id}/ack`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify(body)
+		}).then((r) => {
+			if (!r.ok) throw new Error(`ack → HTTP ${r.status}`);
+			return r.json();
+		}),
 	unack:         (id: number) =>
-		fetch(`/api/alarms/${id}/unack`, { method: 'POST' }).then(r => r.json()),
+		fetch(`/api/alarms/${id}/unack`, { method: 'POST', credentials: 'include' }).then((r) => {
+			if (!r.ok) throw new Error(`unack → HTTP ${r.status}`);
+			return r.json();
+		}),
 	silences:      ()                  => get<unknown[]>('/api/silences')
 };

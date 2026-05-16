@@ -16,7 +16,9 @@ from ..config import SETTINGS
 from ..db.store import Store
 from ..registry import CHECKS, all_stages
 from ..scheduler import Scheduler
+from .routes import admin as admin_routes
 from .routes import alarms as alarms_routes
+from .routes import auth as auth_routes
 from .routes import checks as checks_routes
 from .routes import debug as debug_routes
 from .routes import history as history_routes
@@ -35,6 +37,19 @@ async def lifespan(app: FastAPI):
              len(CHECKS), sorted(all_stages()))
     store = Store(SETTINGS.db_url)
     await store.connect()
+
+    # Bootstrap the first admin from env vars on a fresh database. No-op
+    # if users already exist.
+    if SETTINGS.admin_email and SETTINGS.admin_password:
+        from .. import auth as _A
+        created = await _A.bootstrap_admin(
+            store.pool,
+            email=SETTINGS.admin_email,
+            password=SETTINGS.admin_password,
+            display_name=SETTINGS.admin_display_name or None,
+        )
+        if created:
+            log.info("bootstrapped first admin: %s", SETTINGS.admin_email)
 
     ws = ConnectionManager()
     app.state.ws = ws
@@ -115,6 +130,8 @@ def create_app() -> FastAPI:
     app.include_router(radars_routes.router)
     app.include_router(upstream_routes.router)
     app.include_router(debug_routes.router)
+    app.include_router(auth_routes.router)
+    app.include_router(admin_routes.router)
     app.include_router(ws_router)
 
     @app.get("/")

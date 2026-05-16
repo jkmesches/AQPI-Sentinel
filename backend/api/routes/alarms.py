@@ -1,7 +1,15 @@
-"""Alarm + ack + notification endpoints. Admin gating is wired later — for
-v1 we trust the request body's ``user`` field and audit it."""
+"""Alarm + ack + notification endpoints.
+
+Reads (GET) are anonymous. Writes (ack / unack) require login — the
+acker's identity comes from their session, not the request body, and
+every action is audited to `admin_audit`.
+"""
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Request, Body
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, Request, Body
+
+from ... import auth as A
+from .auth import require_user
 
 router = APIRouter(prefix="/api/alarms")
 
@@ -50,20 +58,32 @@ async def get_alarm(alarm_id: int, request: Request):
 
 
 @router.post("/{alarm_id}/ack")
-async def ack(alarm_id: int, request: Request, body: dict = Body(...)):
-    user = body.get("user") or "anonymous"
-    note = body.get("note")
+async def ack(
+    alarm_id: int, request: Request,
+    user: Annotated[dict, Depends(require_user)],
+    body: dict = Body(default={}),
+):
+    note = (body or {}).get("note")
+    pool = request.app.state.store.pool
     row = await request.app.state.store.fetch_alarm(alarm_id)
     if not row:
         raise HTTPException(404, "no such alarm")
-    await request.app.state.store.ack_alarm(alarm_id, user=user, note=note)
-    return {"ok": True, "alarm_id": alarm_id, "user": user}
+    await request.app.state.store.ack_alarm(alarm_id, user=user["email"], note=note)
+    await A.audit(pool, user_email=user["email"], action="alarm.ack",
+                  target=f"alarm:{alarm_id}", payload={"note": note})
+    return {"ok": True, "alarm_id": alarm_id, "user": user["email"]}
 
 
 @router.post("/{alarm_id}/unack")
-async def unack(alarm_id: int, request: Request):
+async def unack(
+    alarm_id: int, request: Request,
+    user: Annotated[dict, Depends(require_user)],
+):
+    pool = request.app.state.store.pool
     row = await request.app.state.store.fetch_alarm(alarm_id)
     if not row:
         raise HTTPException(404, "no such alarm")
     await request.app.state.store.unack_alarm(alarm_id)
+    await A.audit(pool, user_email=user["email"], action="alarm.unack",
+                  target=f"alarm:{alarm_id}")
     return {"ok": True, "alarm_id": alarm_id}

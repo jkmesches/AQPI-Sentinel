@@ -3,6 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import NavLink from '$lib/components/NavLink.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -14,6 +15,7 @@
 
 	onMount(() => {
 		theme.start();
+		auth.bootstrap();
 		sentinel.start(5000);
 		if (diag.tick) tickTimer = setInterval(() => (now = new Date()), 1000);
 	});
@@ -74,6 +76,9 @@
 			<NavLink href="/" label="Live" />
 			<NavLink href="/timeline" label="Timeline" />
 			<NavLink href="/history" label="History" />
+			{#if auth.isAdmin}
+				<NavLink href="/admin" label="Admin" />
+			{/if}
 		</nav>
 
 		<div class="ml-auto flex items-center gap-6 text-[11px]">
@@ -117,6 +122,31 @@
 			</div>
 
 			<ThemeToggle />
+
+			<!-- AUTH CHIP -->
+			<div class="flex items-center gap-2 border-l border-[var(--color-border)] pl-3 text-[11px]">
+				{#if auth.loading}
+					<span class="text-[var(--color-faint)]">…</span>
+				{:else if auth.user}
+					<span class="num text-[var(--color-bright)]" title={`${auth.user.email} · ${auth.user.role}`}>
+						{auth.user.display_name || auth.user.email}
+					</span>
+					<button
+						type="button"
+						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]"
+						onclick={() => auth.logout()}
+					>
+						sign out
+					</button>
+				{:else}
+					<a
+						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+						href="/login"
+					>
+						sign in
+					</a>
+				{/if}
+			</div>
 		</div>
 	</header>
 
