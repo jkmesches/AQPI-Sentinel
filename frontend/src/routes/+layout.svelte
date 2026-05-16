@@ -71,6 +71,7 @@
 
 		<nav class="flex items-center gap-1 border-l border-[var(--color-border)] pl-3">
 			<NavLink href="/" label="Live" />
+			<NavLink href="/timeline" label="Timeline" />
 			<NavLink href="/history" label="History" />
 		</nav>
 

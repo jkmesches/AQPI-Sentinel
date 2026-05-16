@@ -83,6 +83,54 @@ export function statusText(s: string): string {
 	);
 }
 
+// Stage colour + display label. Keeps the timeline header readable for someone
+// who's never seen our L0/L1/L2 layering before.
+export function stageColor(s: string): string {
+	return (
+		{
+			L0:        'text-[var(--color-info)]',
+			L1:        'text-[var(--color-default)]',
+			L2:        'text-[var(--color-bright)]',
+			L3:        'text-[var(--color-warn)]',
+			'L4-T1T2': 'text-[var(--color-critical)]'
+		}[s] ?? 'text-[var(--color-muted)]'
+	);
+}
+export function stageLabel(s: string): string {
+	return (
+		{
+			L0:        'Site',
+			L1:        'Products',
+			L2:        'Radars',
+			L3:        'Cross-check',
+			'L4-T1T2': 'Image QC'
+		}[s] ?? s
+	);
+}
+
+// Turn a check_id + target into something a non-engineer can read at a glance.
+// We special-case the major check families; everything else falls back to a
+// cleaned-up version of the target.
+export function prettyCheckLabel(checkId: string, target: string): string {
+	const t = target.replaceAll('_', ' ');
+	if (checkId.startsWith('layer0.tls.'))           return 'TLS cert';
+	if (checkId.startsWith('layer0.origin.'))        return 'Origin live';
+	if (checkId.startsWith('layer0.website.public')) return 'Public page';
+	if (checkId.startsWith('layer0.website.root'))   return 'Root 404';
+	if (checkId.startsWith('layer0.'))               return titleCase(t);
+	if (checkId.startsWith('layer1.product.'))       return titleCase(t);
+	if (checkId.startsWith('layer1.stream.'))        return 'Stream API';
+	if (checkId.startsWith('layer1.vector.'))        return `Overlay · ${titleCase(t)}`;
+	if (checkId.startsWith('layer2.radar.'))         return target;            // XSCV / CBAND
+	if (checkId.startsWith('layer3.'))               return `Reconcile · ${titleCase(t)}`;
+	if (checkId.startsWith('layer4.xband.'))         return target;
+	if (checkId.startsWith('layer4.'))               return titleCase(t);
+	return titleCase(t);
+}
+function titleCase(s: string): string {
+	return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function severityChip(s: string): string {
 	const base = 'px-1 py-0 text-[10px] uppercase tracking-wider rounded-sm border';
 	const v =
