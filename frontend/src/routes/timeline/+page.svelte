@@ -2,16 +2,21 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket } from '$lib/api';
 	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText } from '$lib/format';
+	import LazyImage from '$lib/components/LazyImage.svelte';
 
 	type Bucket = '1m' | '5m' | '15m' | '1h' | '6h' | '1d';
 	const BUCKETS: { key: Bucket; label: string; pageLimit: number }[] = [
-		{ key: '1m',  label: '1 min',   pageLimit: 60 },
-		{ key: '5m',  label: '5 min',   pageLimit: 120 },
-		{ key: '15m', label: '15 min',  pageLimit: 96 },
-		{ key: '1h',  label: '1 hour',  pageLimit: 168 },
-		{ key: '6h',  label: '6 hours', pageLimit: 120 },
-		{ key: '1d',  label: '1 day',   pageLimit: 90 }
+		{ key: '1m',  label: '1 min',   pageLimit: 30 },
+		{ key: '5m',  label: '5 min',   pageLimit: 40 },
+		{ key: '15m', label: '15 min',  pageLimit: 40 },
+		{ key: '1h',  label: '1 hour',  pageLimit: 48 },
+		{ key: '6h',  label: '6 hours', pageLimit: 40 },
+		{ key: '1d',  label: '1 day',   pageLimit: 30 }
 	];
+	// Hard cap on total accumulated rows. Beyond this we evict the oldest
+	// so the table doesn't grow unbounded as the user scrolls — a 4-figure
+	// row count combined with ~15 cells/row tips browsers into freeze.
+	const MAX_BUCKETS = 300;
 
 	const STAGE_ORDER = ['L0', 'L1', 'L2', 'L3', 'L4-T1T2'];
 
@@ -38,11 +43,13 @@
 		pass: 'PASS', warn: 'WARN', fail: 'FAIL', error: 'ERROR', skip: 'SKIP', unknown: '—'
 	};
 
-	// Static cell+row geometry — referenced both in CSS and in sticky offsets.
-	const ROW_H        = 24;   // px, body cell height
-	const STAGE_ROW_H  = 24;   // px, sticky stage band height
-	const COL_W        = 32;   // px, body cell width
-	const TIME_COL_W   = 132;  // px, sticky left column
+	// Static cell+row geometry. Rows = checks (horizontal labels on the left,
+	// no rotation), columns = time buckets oldest→newest.
+	const ROW_H         = 22;   // px, per-check row height
+	const TIME_COL_W    = 12;   // px, default per-bucket column width
+	const LABEL_COL_W   = 220;  // px, sticky left label column
+	const TIME_HDR_H    = 32;   // px, sticky top time-header height
+	const STAGE_ROW_H   = 22;   // px, height of a "[Stage]" separator row
 
 	let tab           = $state<Tab>('radars');
 	let bucket        = $state<Bucket>('5m');
@@ -52,7 +59,7 @@
 	let loading       = $state(false);
 	let loadingMore   = $state(false);
 	let error         = $state<string | null>(null);
-	let live          = $state(true);
+	let live          = $state(false);
 	let liveTimer: ReturnType<typeof setInterval> | undefined;
 
 	const cfg     = $derived(BUCKETS.find((b) => b.key === bucket)!);
@@ -78,11 +85,15 @@
 	const flatColumns = $derived(groupedColumns.flatMap((g) => g.cols));
 	const totalCols   = $derived(flatColumns.length);
 
-	// Use horizontal labels when there are few columns; vertical otherwise.
-	const horizontalLabels = $derived(totalCols <= 5);
-	const headerLabelH = $derived(horizontalLabels ? 28 : 88);  // px
-	const headerColW   = $derived(horizontalLabels ? 96 : COL_W);
-	const bodyColW     = $derived(horizontalLabels ? 96 : COL_W);
+	// Per-bucket column width — wider when fewer buckets so the row doesn't
+	// feel sparse; narrower when many to keep the whole window on screen.
+	const bodyColW = $derived.by(() => {
+		const n = buckets.length;
+		if (n <= 12) return 28;
+		if (n <= 40) return 16;
+		if (n <= 80) return 12;
+		return 10;
+	});
 
 	const cellKey = (col: CheckMeta) => `${col.id}|${col.target}`;
 
@@ -106,7 +117,9 @@
 		loadingMore = true;
 		try {
 			const page = await api.timeline(bucket, cfg.pageLimit, olderCursor);
-			buckets = [...buckets, ...page.buckets];
+			let merged = [...buckets, ...page.buckets];
+			if (merged.length > MAX_BUCKETS) merged = merged.slice(0, MAX_BUCKETS);
+			buckets = merged;
 			olderCursor = page.older_cursor;
 		} catch (e) {
 			error = (e as Error).message;
@@ -138,26 +151,27 @@
 		untrack(() => loadInitial());
 	}
 
-	let sentinelEl: HTMLDivElement | undefined = $state();
-	let io: IntersectionObserver | undefined;
-	$effect(() => {
-		if (!sentinelEl) return;
-		io?.disconnect();
-		io = new IntersectionObserver(
-			(es) => { if (es[0]?.isIntersecting) untrack(() => loadMore()); },
-			{ rootMargin: '400px 0px' }
-		);
-		io.observe(sentinelEl);
-		return () => io?.disconnect();
-	});
+	// Manual pagination only — auto-loading on scroll let users accumulate
+	// thousands of cells and lock up the tab. They can now click "Load older"
+	// to grow the table on demand.
 
+	let visHandler: (() => void) | undefined;
 	onMount(() => {
 		loadInitial();
 		liveTimer = setInterval(tickLive, 30_000);
+		visHandler = () => {
+			if (document.hidden) {
+				if (liveTimer) { clearInterval(liveTimer); liveTimer = undefined; }
+			} else if (live && !liveTimer) {
+				liveTimer = setInterval(tickLive, 30_000);
+				tickLive();
+			}
+		};
+		document.addEventListener('visibilitychange', visHandler);
 	});
 	onDestroy(() => {
 		if (liveTimer) clearInterval(liveTimer);
-		io?.disconnect();
+		if (visHandler) document.removeEventListener('visibilitychange', visHandler);
 	});
 
 	let detail = $state<{
@@ -303,8 +317,14 @@
 			if (t2.range_ring && t2.range_ring.verdict !== 'OK' && t2.range_ring.verdict !== 'N/A') {
 				out.push(`Range-ring artifact: **${t2.range_ring.verdict}**.`);
 			}
-			if (t2.frozen && t2.frozen.verdict === 'FROZEN') {
-				out.push(`**Frame identical** to the previous run (frozen-frame detection tripped).`);
+			if (t2.frozen) {
+				if (t2.frozen.verdict === 'FROZEN') {
+					out.push(`**Frame identical** to the previous run (frozen-frame detection tripped).`);
+				} else if (t2.frozen.verdict === 'QUIET_LOW_COV') {
+					out.push(`Frame identical to previous run, but coverage is low — treated as a quiet/clear scene, not a stuck feed.`);
+				} else if (t2.frozen.verdict === 'QUIET_SLOW') {
+					out.push(`Frame identical to previous run, expected for this slow-cadence forecast product.`);
+				}
 			}
 		}
 
@@ -407,105 +427,109 @@
 		{:else if !buckets.length}
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">no data in this window.</div>
 		{:else}
-			<table class="border-separate timeline-grid" style="border-spacing:0;">
-				<thead>
-					<tr>
-						<th
-							class="sticky left-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] px-3 text-left text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
-							style="top:0; height:{STAGE_ROW_H}px; min-width:{TIME_COL_W}px; width:{TIME_COL_W}px;"
-						>
-							time (utc)
-						</th>
-						{#each groupedColumns as g}
-							<th
-								class="sticky z-20 bg-[var(--color-canvas)] border-b border-l border-[var(--color-border)] px-2 text-center text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
-								style="top:0; height:{STAGE_ROW_H}px;"
-								colspan={g.cols.length}
-							>
-								{stageLabel(g.stage)} <span class="text-[var(--color-faint)] num">({g.cols.length})</span>
-							</th>
-						{/each}
-					</tr>
-					<tr>
-						<th
-							class="sticky left-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] px-3 text-left text-[10px] text-[var(--color-faint)]"
-							style="top:{STAGE_ROW_H}px; height:{headerLabelH}px;"
-						>
-							<span class="num">{cfg.label} buckets</span>
-						</th>
-						{#each flatColumns as col}
-							<th
-								class="sticky z-20 bg-[var(--color-canvas)] border-b border-[var(--color-border)] p-0 text-[11px] text-[var(--color-default)] num"
-								style="top:{STAGE_ROW_H}px; height:{headerLabelH}px; min-width:{headerColW}px; max-width:{headerColW}px; width:{headerColW}px;"
-								title="{col.id} · {col.target} · every {col.cadence_s}s"
-							>
-								{#if horizontalLabels}
-									<div class="h-full w-full flex items-center justify-center px-1">
-										<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
-									</div>
-								{:else}
-									<div
-										class="h-full w-full flex items-end justify-center pb-1"
-										style="writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; line-height:1;"
-									>
-										<span class="truncate" style="max-height:5.2rem;">
-											{prettyCheckLabel(col.id, col.target)}
-										</span>
-									</div>
-								{/if}
-							</th>
-						{/each}
-					</tr>
-				</thead>
-				<tbody>
-					{#each buckets as b}
-						{@const ts = fmtRowTs(b.ts)}
-						{@const hourBoundary = new Date(b.ts).getUTCMinutes() === 0}
-						<tr class="hover:bg-[var(--color-elevated)]/30">
-							<td
-								class="sticky left-0 z-10 bg-[var(--color-canvas)] border-r border-[var(--color-border)] px-3 text-[11px] num {hourBoundary
-									? 'text-[var(--color-bright)] border-t border-t-[var(--color-border)]'
-									: 'text-[var(--color-default)]'}"
-								style="height:{ROW_H}px;"
-								title={`${b.ts} · ${relativeAge(b.ts)}`}
-							>
-								<div class="flex items-baseline gap-2 leading-none">
-									<span>{ts.primary}</span>
-									<span class="text-[9.5px] text-[var(--color-faint)]">{ts.secondary}</span>
-								</div>
-							</td>
-							{#each flatColumns as col}
-								{@const cell = b.cells[cellKey(col)]}
-								{@const st = cell?.status ?? 'unknown'}
-								<td
-									class="p-0 text-center align-middle cursor-pointer"
-									style="min-width:{bodyColW}px; max-width:{bodyColW}px; width:{bodyColW}px; height:{ROW_H}px;"
-									onclick={() => openDetail(b, col)}
-									title={cell
-										? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cell.n} run${cell.n === 1 ? '' : 's'} · ${ts.primary} UTC`
-										: `${prettyCheckLabel(col.id, col.target)} · no data · ${ts.primary} UTC`}
-								>
-									<span
-										class="block mx-auto"
-										style="width:{bodyColW - 6}px; height:{ROW_H - 6}px; background:{STATUS_BG[st]}; border:1px solid var(--color-border); border-radius:2px;"
-									></span>
-								</td>
-							{/each}
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-
+			<!--
+			  Pivoted layout: rows = checks, columns = time buckets
+			  (oldest on the left, newest on the right). Horizontal text
+			  everywhere — no rotation, alignment is trivially correct.
+			-->
+			{@const orderedBuckets = [...buckets].reverse()}
 			<div
-				bind:this={sentinelEl}
-				class="px-4 py-3 text-center text-[11px] text-[var(--color-muted)]"
+				class="timeline-grid grid"
+				style="grid-template-columns: {LABEL_COL_W}px repeat({orderedBuckets.length}, {bodyColW}px); width: max-content;"
 			>
+				<!-- TOP-LEFT CORNER -->
+				<div
+					class="sticky left-0 top-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
+					style="height:{TIME_HDR_H}px;"
+				>
+					check · time →
+				</div>
+
+				<!-- TIME HEADER ROW (sticky top). The cells themselves are only
+				     bodyColW wide, so we let the text overflow horizontally
+				     anchored to the left edge — labels run into the empty
+				     space of the next non-labelled cells and stay readable. -->
+				{#each orderedBuckets as b, bi}
+					{@const ts = fmtRowTs(b.ts)}
+					{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
+					{@const showLabel = onTheHour || bi === 0 || bi === orderedBuckets.length - 1}
+					<div
+						class="tl-cell sticky top-0 z-20 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num text-[var(--color-faint)]"
+						style="height:{TIME_HDR_H}px; position: sticky; overflow: visible;{onTheHour ? ' color: var(--color-bright); box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
+						title={`${b.ts} · ${relativeAge(b.ts)}`}
+					>
+						{#if showLabel}
+							<span
+								class="absolute bottom-1 whitespace-nowrap {onTheHour ? 'text-[var(--color-bright)]' : 'text-[var(--color-default)]'}"
+								style="{bi === orderedBuckets.length - 1 ? 'right:2px;' : 'left:2px;'}"
+							>{ts.primary}</span>
+						{:else}
+							<span class="absolute inset-x-0 bottom-0.5 text-center opacity-30">·</span>
+						{/if}
+					</div>
+				{/each}
+
+				<!-- ONE BLOCK PER STAGE -->
+				{#each groupedColumns as g}
+					<!-- Stage separator (sticky-left label + full-width strip) -->
+					<div
+						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center px-3 text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
+						style="height:{STAGE_ROW_H}px;"
+					>
+						<span>{stageLabel(g.stage)}</span>
+						<span class="ml-2 text-[var(--color-faint)] num">({g.cols.length})</span>
+					</div>
+					<div
+						class="tl-cell border-b border-t border-[var(--color-border)] bg-[var(--color-canvas)]"
+						style="height:{STAGE_ROW_H}px; grid-column: span {orderedBuckets.length};"
+					></div>
+
+					<!-- Per-check rows in this stage -->
+					{#each g.cols as col}
+						<div
+							class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] text-[var(--color-bright)] num"
+							style="height:{ROW_H}px;"
+							title="{col.id} · target={col.target} · every {col.cadence_s}s"
+						>
+							<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
+						</div>
+						{#each orderedBuckets as b}
+							{@const cell = b.cells[cellKey(col)]}
+							{@const st = cell?.status ?? 'unknown'}
+							{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
+							<button
+								type="button"
+								class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
+								style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
+								onclick={() => openDetail(b, col)}
+								title={cell
+									? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cell.n} run${cell.n === 1 ? '' : 's'} · ${fmtRowTs(b.ts).primary} UTC`
+									: `${prettyCheckLabel(col.id, col.target)} · no data · ${fmtRowTs(b.ts).primary} UTC`}
+							>
+								<span
+									class="block"
+									style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{STATUS_BG[st]}; border-radius:2px;"
+								></span>
+							</button>
+						{/each}
+					{/each}
+				{/each}
+			</div>
+
+			<div class="flex items-center justify-center gap-3 px-4 py-3 text-[11px] text-[var(--color-muted)]">
 				{#if loadingMore}
-					loading older…
-				{:else if olderCursor}
-					· scroll for older ·
+					<span>loading older…</span>
+				{:else if olderCursor && buckets.length < MAX_BUCKETS}
+					<button
+						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+						onclick={loadMore}
+					>
+						load older ({cfg.label} × {cfg.pageLimit})
+					</button>
+				{:else if buckets.length >= MAX_BUCKETS}
+					<span class="text-[var(--color-faint)]">cap reached ({MAX_BUCKETS} rows) — pick a coarser grain</span>
 				{:else}
-					end of data
+					<span>end of data</span>
 				{/if}
 			</div>
 		{/if}
@@ -606,27 +630,39 @@
 						{/each}
 					</ul>
 
-					<!-- Image (L4 image QC only) -->
+					<!-- Image (L4 image QC only). LazyImage defers the fetch +
+					     decode until the placeholder is actually visible, so
+					     opening this panel doesn't kick off N parallel PNG
+					     decodes for runs the user may never scroll to. -->
 					{#if isImageQc(run.check_id) && (run.payload as any)?.source}
+						{@const src = (run.payload as any).source}
+						{@const url = `/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`}
+						{@const ageMin = (Date.now() - new Date(run.finished_at).getTime()) / 60000}
 						<div class="mt-3">
 							<div class="text-[10px] text-[var(--color-muted)] uppercase tracking-wider mb-1">
 								captured image
 							</div>
 							<a
-								href={`/api/upstream/image_by_source.png?source=${encodeURIComponent((run.payload as any).source)}`}
+								href={url}
 								target="_blank"
 								rel="noreferrer"
 								class="block border border-[var(--color-border)] bg-black"
 							>
-								<img
-									src={`/api/upstream/image_by_source.png?source=${encodeURIComponent((run.payload as any).source)}`}
-									alt="captured scan"
-									class="block w-full h-auto"
-									loading="lazy"
-								/>
+								{#snippet imgError()}
+									<div class="p-4 text-center text-[11px] text-[var(--color-muted)] leading-relaxed">
+										<div class="text-[var(--color-faint)] uppercase tracking-wider text-[10px] mb-1">
+											Image no longer available
+										</div>
+										<div>Radarca only keeps the last ~2 h of scans before rotating files out.</div>
+										<div class="mt-1 text-[var(--color-faint)]">
+											This scan was captured {Math.round(ageMin)} min ago — the original PNG has been deleted upstream.
+										</div>
+									</div>
+								{/snippet}
+								<LazyImage src={url} alt="captured scan" minHeight={180} errorSnippet={imgError} />
 							</a>
-							<div class="mt-1 text-[10px] text-[var(--color-faint)] num truncate" title={(run.payload as any).source}>
-								source: {(run.payload as any).source}
+							<div class="mt-1 text-[10px] text-[var(--color-faint)] num truncate" title={src}>
+								source: {src}
 							</div>
 						</div>
 					{/if}
@@ -664,5 +700,18 @@
 <style>
 	.timeline-grid {
 		font-variant-numeric: tabular-nums;
+	}
+	/* The body cells are layout-independent islands — nothing inside any one
+	 * cell influences its neighbours' size or position. `contain: layout
+	 * style paint` tells the browser that explicitly so it can skip
+	 * restyle/reflow on neighbours when one changes (live update, hover,
+	 * etc.) and so scroll events don't force a full display-list rebuild.
+	 *
+	 * Firefox profiler caught the grid's scroll container generating
+	 * 4998 DisplayList builds and 3052 ViewManagerFlushes during normal
+	 * use — almost entirely paint/layout overhead. `contain` cuts that
+	 * scaling pressure. */
+	.timeline-grid > .tl-cell {
+		contain: layout style paint;
 	}
 </style>

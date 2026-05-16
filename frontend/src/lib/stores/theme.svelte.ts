@@ -48,3 +48,11 @@ class ThemeStore {
 }
 
 export const theme = new ThemeStore();
+
+// Same HMR cleanup story as state.svelte.ts — the matchMedia listener
+// would otherwise leak across hot-reloads.
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => {
+		try { theme.stop(); } catch { /* */ }
+	});
+}

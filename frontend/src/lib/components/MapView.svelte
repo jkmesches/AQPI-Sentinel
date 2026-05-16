@@ -25,6 +25,65 @@
 	// time we call setData on a source, which would race our own mutators.
 	let styleReady = false;
 
+	// -------------------------------------------------------------------------
+	// Image-decode throttle. The trace showed >900s of CPU in
+	// `MOZ_Z_inflate_fast` + `PremultiplyChunk_SSE2` during heavy map
+	// interaction — fetching N radar overlays concurrently when the user
+	// scrubs / changes moment / plays through steps. Each PNG decode lands on
+	// the main thread and stacks up.
+	//
+	// Pattern: a tiny semaphore that pre-decodes an image via Image().decode()
+	// (which respects `decoding="async"`), capped at MAX_INFLIGHT_DECODES. We
+	// `await` the preload before calling MapLibre's `updateImage(url)` so
+	// MapLibre's subsequent fetch is a cache hit and decode is essentially
+	// instant. Token-based supersession lets a newer scrub abandon an old
+	// preload mid-queue.
+	const MAX_INFLIGHT_DECODES = 4;
+	let _decodesInFlight = 0;
+	const _decodeQueue: (() => void)[] = [];
+	function _pumpDecodes() {
+		while (_decodesInFlight < MAX_INFLIGHT_DECODES && _decodeQueue.length) {
+			const fn = _decodeQueue.shift()!;
+			_decodesInFlight++;
+			fn();
+		}
+	}
+	async function preloadImage(url: string, isCurrent: () => boolean): Promise<boolean> {
+		// Wait for a free slot.
+		await new Promise<void>((resolve) => {
+			_decodeQueue.push(resolve);
+			_pumpDecodes();
+		});
+		try {
+			if (!isCurrent()) return false;
+			const img = new Image();
+			img.decoding = 'async';
+			img.src = url;
+			await img.decode();
+			return isCurrent();
+		} catch {
+			return false;
+		} finally {
+			_decodesInFlight--;
+			_pumpDecodes();
+		}
+	}
+
+	// Debounce helper for sync functions that get hammered by scrubber drags
+	// or rapid button presses.
+	function debounce<T extends unknown[]>(fn: (...a: T) => void, ms: number) {
+		let h: ReturnType<typeof setTimeout> | undefined;
+		const wrapped = (...args: T) => {
+			if (h) clearTimeout(h);
+			h = setTimeout(() => {
+				h = undefined;
+				fn(...args);
+			}, ms);
+		};
+		wrapped.flush = () => { if (h) { clearTimeout(h); h = undefined; fn(...([] as unknown as T)); } };
+		return wrapped;
+	}
+
 	type Composite = 'none' | 'comp_ref' | 'comp_now' | 'water_depth';
 	let composite = $state<Composite>('none');
 	let nexradEnabled = $state(false);
@@ -233,7 +292,8 @@
 		}
 	}
 
-	function renderCompositeFrame() {
+	let _compositeToken = 0;
+	async function renderCompositeFrame() {
 		if (!map || !styleReady) return;
 		const e = COMP_EXTENT[composite];
 		if (!e || stepIdx < 0) {
@@ -241,6 +301,8 @@
 			if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
 			return;
 		}
+		const myToken = ++_compositeToken;
+		const isCurrent = () => myToken === _compositeToken && !!map && styleReady;
 		const url = `/api/upstream/product_image.png?product_id=${composite}&step=${stepIdx}&_=${Date.now()}`;
 		const coords: [number, number][] = [
 			[e.west, e.north],
@@ -248,15 +310,18 @@
 			[e.east, e.south],
 			[e.west, e.south]
 		];
-		const src = map.getSource('comp-overlay') as maplibregl.ImageSource | undefined;
+		// Preload first so the inflate+premultiply lands off the main path,
+		// then ask MapLibre to swap in the cached bytes.
+		const ok = await preloadImage(url, isCurrent);
+		if (!ok || !isCurrent()) return;
+		const src = map!.getSource('comp-overlay') as maplibregl.ImageSource | undefined;
 		if (src && typeof src.updateImage === 'function') {
-			// Hot-swap the image bytes in place — no flash, no layer churn.
 			src.updateImage({ url, coordinates: coords });
 		} else {
-			if (map.getLayer('comp-overlay-layer')) map.removeLayer('comp-overlay-layer');
-			if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
-			map.addSource('comp-overlay', { type: 'image', url, coordinates: coords });
-			map.addLayer(
+			if (map!.getLayer('comp-overlay-layer')) map!.removeLayer('comp-overlay-layer');
+			if (map!.getSource('comp-overlay')) map!.removeSource('comp-overlay');
+			map!.addSource('comp-overlay', { type: 'image', url, coordinates: coords });
+			map!.addLayer(
 				{
 					id: 'comp-overlay-layer',
 					type: 'raster',
@@ -279,10 +344,43 @@
 		playing = false;
 		if (playTimer) { clearInterval(playTimer); playTimer = undefined; }
 	}
+	// `activity` is the per-step non-empty-pixel fraction returned from
+	// /api/upstream/activity. Dead-still steps (activity ≈ 0) carry no info
+	// for the user but cost a full image fetch + decode round. In play mode
+	// we skip them — capped to avoid jumping past everything when the whole
+	// timeline is quiet.
+	const ACTIVITY_FLOOR = 0.005;     // <0.5% of pixels = blank
+	const MAX_SKIP_PER_TICK = 6;
+	function _nextInterestingStep(from: number): number {
+		const n = steps.length;
+		if (n === 0) return 0;
+		let i = (from + 1) % n;
+		let skipped = 0;
+		// Only skip if we *have* activity data; otherwise step linearly.
+		while (
+			skipped < MAX_SKIP_PER_TICK &&
+			activity.length === n &&
+			activity[i] !== undefined &&
+			activity[i] < ACTIVITY_FLOOR &&
+			i !== from
+		) {
+			i = (i + 1) % n;
+			skipped++;
+		}
+		return i;
+	}
 	function tick() {
 		if (steps.length === 0) return;
-		stepIdx = (stepIdx + 1) % steps.length;
+		stepIdx = _nextInterestingStep(stepIdx);
 		syncAllToStep();
+	}
+	// Per-frame load count under typical settings: 1 composite + N radars +
+	// 1 NEXRAD ≈ 1+N+1 image decodes per tick. Keep the average load below
+	// ~5 images per second so the main thread never falls behind.
+	function _playIntervalMs(): number {
+		const n = activeRadars.length;
+		const ms = 600 + n * 180 + (composite !== 'none' ? 200 : 0) + (nexradEnabled ? 200 : 0);
+		return Math.min(ms, 3000);
 	}
 	function togglePlay() {
 		if (playing) {
@@ -290,7 +388,7 @@
 		} else {
 			if (steps.length === 0) return;
 			playing = true;
-			playTimer = setInterval(tick, 750);
+			playTimer = setInterval(tick, _playIntervalMs());
 		}
 	}
 	function syncAllToStep() {
@@ -302,7 +400,11 @@
 	function stepLast()  { stopPlay(); stepIdx = steps.length - 1; syncAllToStep(); }
 	function stepPrev()  { stopPlay(); stepIdx = (stepIdx - 1 + steps.length) % steps.length; syncAllToStep(); }
 	function stepNext()  { stopPlay(); stepIdx = (stepIdx + 1) % steps.length; syncAllToStep(); }
-	function scrub(i: number) { stopPlay(); stepIdx = i; syncAllToStep(); }
+	// `oninput` on the scrubber fires on every drag pixel — collapse a burst
+	// into one sync 80 ms after the user comes to rest. stepIdx still
+	// updates on every input so the visual scrubber position tracks live.
+	const _syncScrubbed = debounce(syncAllToStep, 80);
+	function scrub(i: number) { stopPlay(); stepIdx = i; _syncScrubbed(); }
 
 	// Timestamp the scrubber is currently pointing at. null = "latest" / live.
 	// Drives NEXRAD's WMS-T and per-radar xband_scan time-alignment alike.
@@ -391,34 +493,38 @@
 	const radarSrcId = (id: string) => `radar-${id}-src`;
 
 	function xbandScanUrl(id: string): string {
-		const t = nexradTimeIso;   // null when latest / no composite — get latest
-		const qs = new URLSearchParams({
-			radar: id,
-			moment: currentMoment,
-			_: String(Date.now())
-		});
+		// Build a URL whose key params (radar/moment/time) are the dedup key.
+		// We deliberately omit a `Date.now()` cache-buster so MapLibre and the
+		// browser cache the image — every paint-tick / toggle was previously
+		// triggering a fresh proxy fetch because the URL kept changing.
+		// `pokeOverlays` (the 120s scheduled refresh) appends its own buster
+		// when we actually want to refetch.
+		const t = nexradTimeIso;
+		const qs = new URLSearchParams({ radar: id, moment: currentMoment });
 		if (t) qs.set('time', t);
 		return `/api/upstream/xband_scan.png?${qs.toString()}`;
 	}
 
+	// Track which radar overlays we've added so refresh doesn't have to walk
+	// the entire MapLibre style. Previously this called `map.getStyle().layers`
+	// which deep-copies the basemap style on every invocation — very expensive
+	// when opacity-slider drags fire ~60 of these per second.
+	const _addedOverlays = new Set<string>();
+
 	function refreshRadarOverlays() {
 		if (!map || !styleReady) return;
 		const active = new Set(activeRadars);
-		const present = new Set<string>();
-		map.getStyle().layers.forEach((l) => {
-			const m = l.id.match(/^radar-(.+)-layer$/);
-			if (m) present.add(m[1]);
-		});
-		// remove ones no longer active
-		for (const id of present) {
-			if (!active.has(id)) {
-				if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
-				if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
-			}
+
+		// remove overlays no longer active
+		for (const id of [..._addedOverlays]) {
+			if (active.has(id)) continue;
+			if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
+			if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
+			_addedOverlays.delete(id);
 		}
-		// add new
+		// add overlays newly active
 		for (const id of active) {
-			if (present.has(id) && map.getSource(radarSrcId(id))) continue;
+			if (_addedOverlays.has(id)) continue;
 			const r = radars.find((x) => x.id === id);
 			if (!r) continue;
 			const e = radarExtent(r);
@@ -438,66 +544,85 @@
 				source: radarSrcId(id),
 				paint: { 'raster-opacity': overlayOpacity }
 			});
-		}
-		// keep existing layers' opacity in sync
-		for (const id of active) {
-			if (map.getLayer(radarLayerId(id))) {
-				map.setPaintProperty(radarLayerId(id), 'raster-opacity', overlayOpacity);
-			}
+			_addedOverlays.add(id);
 		}
 		syncBaseSources();
 	}
 
-	function syncRadarOverlayTime() {
+	// Opacity changes are a hot path (slider drag) — keep them off the heavy
+	// add/remove path. setPaintProperty is O(1) per layer.
+	function applyOpacity() {
 		if (!map || !styleReady) return;
-		for (const id of activeRadars) {
-			const src = map.getSource(radarSrcId(id)) as maplibregl.ImageSource | undefined;
+		for (const id of _addedOverlays) {
+			if (map.getLayer(radarLayerId(id))) {
+				map.setPaintProperty(radarLayerId(id), 'raster-opacity', overlayOpacity);
+			}
+		}
+	}
+
+	let _radarSyncToken = 0;
+	async function syncRadarOverlayTime() {
+		if (!map || !styleReady) return;
+		const myToken = ++_radarSyncToken;
+		const isCurrent = () => myToken === _radarSyncToken && !!map && styleReady;
+		// Snapshot the targets so a later mutation to activeRadars doesn't
+		// race the loop.
+		const targets = activeRadars
+			.map((id) => {
+				const r = radars.find((x) => x.id === id);
+				if (!r) return null;
+				return { id, url: xbandScanUrl(id), e: radarExtent(r) };
+			})
+			.filter((t): t is { id: string; url: string; e: { west: number; north: number; east: number; south: number } } => t !== null);
+
+		for (const t of targets) {
+			if (!isCurrent()) return;
+			const ok = await preloadImage(t.url, isCurrent);
+			if (!ok || !isCurrent()) continue;
+			const src = map!.getSource(radarSrcId(t.id)) as maplibregl.ImageSource | undefined;
 			if (!src) continue;
-			const r = radars.find((x) => x.id === id);
-			if (!r) continue;
-			const e = radarExtent(r);
 			src.updateImage({
-				url: xbandScanUrl(id),
+				url: t.url,
 				coordinates: [
-					[e.west, e.north],
-					[e.east, e.north],
-					[e.east, e.south],
-					[e.west, e.south]
+					[t.e.west, t.e.north],
+					[t.e.east, t.e.north],
+					[t.e.east, t.e.south],
+					[t.e.west, t.e.south]
 				]
 			});
 		}
 	}
 
 	// ---- reactive sync ------------------------------------------------------
-	// Defensive: $effect tracking on array reads can be unreliable in some
-	// Svelte 5 builds. Mutator functions call refreshRadarOverlays() directly
-	// too, so the map updates regardless.
+	// Mutator helpers (setSelection / toggleRadar / etc.) directly call the
+	// corresponding refresh fn. The $effects below cover state changes that
+	// don't go through those helpers — composite mode, moment, opacity,
+	// NEXRAD toggle, theme. We intentionally don't track `activeRadars` here
+	// to avoid double-firing on every click.
 	$effect(() => {
 		void radarStatus;
-		void activeRadars;
 		syncBaseSources();
 	});
 	$effect(() => {
 		void composite;
-		void activeRadars.length;
-		void currentMoment;            // re-load manifest when moment changes (radar-driven timeline only)
+		void activeRadars.length;       // crossing 0↔N flips manifest source
+		void currentMoment;
 		untrack(() => { loadComposite(); });
 	});
 	$effect(() => {
 		void nexradEnabled;
 		refreshNexrad();
 	});
-	// keep NEXRAD's time-aware tiles in sync with the scrubber
 	$effect(() => {
 		void nexradTimeIso;
 		syncNexradTime();
 	});
+	// Opacity slider — cheap setPaintProperty per layer, no source churn.
 	$effect(() => {
-		void activeRadars;
 		void overlayOpacity;
-		refreshRadarOverlays();
+		applyOpacity();
 	});
-	// switching the moment swaps every active overlay to that moment.
+	// Moment switch — swaps every active overlay to the new moment.
 	$effect(() => {
 		void currentMoment;
 		syncRadarOverlayTime();
