@@ -14,6 +14,7 @@ Each cycle:
 """
 from __future__ import annotations
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 from ..archive import save_image as _archive_save
@@ -27,6 +28,46 @@ from .imaging import tier1_stats, tier2_heuristics
 # Module-level in-memory store of last pHash per (check_id, target). Survives
 # the process; will be moved to image_archive in a later milestone (P4.0).
 _LAST_PHASH: dict[str, str] = {}
+
+
+def _parse_step_ts(s: dict) -> datetime | None:
+    """Raw upstream mosaic step dicts carry `timestamp`, not `ts` (the latter
+    is what our /api/upstream/product_steps proxy emits to the frontend, but
+    we hit productDetail directly here). Treat as UTC, parse, return None on
+    missing / unparseable."""
+    ts = s.get("timestamp") or s.get("ts")
+    if not ts:
+        return None
+    try:
+        # Normalize trailing Z + missing tz to UTC.
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
+
+
+def _step_closest_to_now(steps: list[dict]) -> dict | None:
+    """Pick the step whose timestamp is nearest to wall-clock now. Falls back
+    to `steps[-1]` if no step has a parseable timestamp (observed products
+    don't always include `ts`)."""
+    if not steps:
+        return None
+    now = datetime.now(timezone.utc)
+    best: tuple[float, dict] | None = None
+    for s in steps:
+        dt = _parse_step_ts(s)
+        if dt is None:
+            continue
+        delta = abs((dt - now).total_seconds())
+        if best is None or delta < best[0]:
+            best = (delta, s)
+    if best is not None:
+        return best[1]
+    return steps[-1]
 
 
 class Layer4ImageCheck(Check):
@@ -78,7 +119,17 @@ class Layer4ImageCheck(Check):
         steps = r.json().get("steps", [])
         if not steps:
             return None, "no steps"
-        latest = steps[-1]["imageName"]
+        # Pick the step closest to wall-clock now (in either direction) rather
+        # than steps[-1]. For observed products (comp_ref, qpe_*) `steps[-1]`
+        # IS roughly "now" so this is a no-op. For forecast products
+        # (water_depth, comp_now, max_water_depth, water_level), `steps[-1]`
+        # is the furthest-out forecast horizon — e.g. water_depth's `-1` is
+        # tomorrow 06:00, not the current depth. QC-ing tomorrow's forecast
+        # as if it were the current state is what made these tickers warn.
+        target_step = _step_closest_to_now(steps)
+        if target_step is None:
+            return None, "no parseable step timestamps"
+        latest = target_step["imageName"]
         file_path = image_path(self.identifier, latest)
         ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData",
                                 params={"file": file_path})
