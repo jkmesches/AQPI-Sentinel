@@ -1,0 +1,155 @@
+@import 'tailwindcss';
+
+/* =========================================================================
+ * SENTINEL — operations-center tokens (radarca-monitoring-plan.md §6.2)
+ * Refined for a cleaner, more deliberate command-center feel:
+ *   - cooler near-black canvas
+ *   - elevated panel surfaces with subtle gradient
+ *   - tighter hairlines
+ *   - one-display + one-prose typeface so labels and data are visually distinct
+ * ========================================================================= */
+
+@theme {
+	/* color (dark, default) */
+	--color-canvas:        #07080b;     /* deep slate, slightly cool */
+	--color-surface:       #0e1015;     /* panels */
+	--color-surface-hi:    #131620;     /* elevated row hover */
+	--color-elevated:      #1a1d27;
+	--color-border:        #181b22;
+	--color-border-strong: #262a35;
+	--color-default:       #d4d8e0;
+	--color-muted:         #61667a;
+	--color-faint:         #404657;
+	--color-bright:        #f5f7fa;
+
+	/* status (dark) */
+	--color-ok:       #34d399;
+	--color-warn:     #fbbf24;
+	--color-fail:     #f87171;
+	--color-info:     #60a5fa;
+	--color-suppress: #6b7280;
+	--color-critical: #f472b6;
+
+	/* dBZ accents — mirrors comp_ref colormap */
+	--color-dbz-1: #4b006e;
+	--color-dbz-2: #2e3192;
+	--color-dbz-3: #0080ff;
+	--color-dbz-4: #00c800;
+	--color-dbz-5: #fff000;
+	--color-dbz-6: #ff7f00;
+	--color-dbz-7: #d90000;
+
+	/* typography */
+	--font-display: 'Inter Tight', 'InterVariable', system-ui, sans-serif;
+	--font-mono:    ui-monospace, 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+	--font-numeric: var(--font-mono);
+}
+
+html, body { height: 100%; }
+body {
+	background:
+		radial-gradient(1200px 600px at 50% -200px, var(--bg-glow) 0%, transparent 70%),
+		var(--color-canvas);
+	color: var(--color-default);
+	font-family: var(--font-display);
+	font-feature-settings: 'cv11', 'ss01';
+	letter-spacing: 0.005em;
+	transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+/* dark glow (default) */
+:root, [data-theme="dark"] {
+	--bg-glow: #0d111a;
+}
+
+/* ===========================================================================
+   LIGHT THEME — same semantic tokens, inverted surface + adjusted statuses
+   for sufficient contrast on a white canvas.
+   =========================================================================== */
+[data-theme="light"] {
+	--color-canvas:        #f3f4f7;
+	--color-surface:       #ffffff;
+	--color-surface-hi:    #f0f2f6;
+	--color-elevated:      #e8ebf0;
+	--color-border:        #e0e4ea;
+	--color-border-strong: #c8ced8;
+	--color-default:       #1d2330;
+	--color-muted:         #5b6473;
+	--color-faint:         #9097a3;
+	--color-bright:        #07080b;
+
+	--color-ok:       #16a34a;
+	--color-warn:     #ca8a04;
+	--color-fail:     #dc2626;
+	--color-info:     #2563eb;
+	--color-suppress: #64748b;
+	--color-critical: #be185d;
+
+	--bg-glow: #e9edf4;
+}
+
+* { border-color: var(--color-border); }
+
+/* numerics + ids — always mono with tabular figures */
+.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* small uppercase label (used for section headers, chip text, etc.) */
+.label {
+	font-size: 10.5px;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	font-weight: 500;
+}
+
+/* surface treatments */
+.panel {
+	background:
+		linear-gradient(180deg, rgba(255,255,255,0.012) 0%, rgba(0,0,0,0) 24%),
+		var(--color-surface);
+	border: 1px solid var(--color-border);
+}
+
+/* hover row */
+.row-hover:hover { background: var(--color-surface-hi); }
+
+/* severity left-edge stripe on alarm rows */
+.sev-bar { position: relative; }
+.sev-bar::before {
+	content: '';
+	position: absolute;
+	left: 0; top: 0; bottom: 0;
+	width: 3px;
+	background: currentColor;
+	opacity: 0.85;
+}
+
+/* status pulse — only on transition */
+@keyframes pulse-once {
+	0%   { box-shadow: 0 0 0 0 currentColor; }
+	70%  { box-shadow: 0 0 0 7px transparent; }
+	100% { box-shadow: 0 0 0 0 transparent; }
+}
+.pulse { animation: pulse-once 0.7s ease-out 1; }
+
+/* hairline scrollbars (webkit) */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* sparkline */
+svg.spark { display: inline-block; vertical-align: middle; }
+svg.spark path.fill   { opacity: 0.18; }
+svg.spark path.stroke { opacity: 0.95; }
+
+/* maplibre — match current theme */
+.maplibregl-ctrl-attrib {
+	background: rgba(0,0,0,0.55) !important;
+	color: #d4d8e0 !important;
+	font-size: 10px !important;
+	font-family: var(--font-display) !important;
+}
+.maplibregl-ctrl-attrib a { color: #f5f7fa !important; }
+[data-theme="light"] .maplibregl-ctrl-attrib { background: rgba(255,255,255,0.85) !important; color: #1d2330 !important; }
+[data-theme="light"] .maplibregl-ctrl-attrib a { color: #07080b !important; }
+.maplibregl-canvas:focus { outline: none; }

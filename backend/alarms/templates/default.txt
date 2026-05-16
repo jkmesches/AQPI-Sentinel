@@ -1,0 +1,12 @@
+[SENTINEL {{ severity }}]  {{ stage }}  {{ check_id }}
+Target:     {{ target }}
+Severity:   {{ severity|lower }}{% if alarm.payload.get('promoted_from') %} (promoted from {{ alarm.payload['promoted_from'] }}){% endif %}
+Opened:     {{ opened_at }}
+Step:       {{ step_idx }}{% if policy %}  ({{ policy }}){% endif %}
+
+Message:    {{ message }}
+
+{% if alarm.payload %}Payload (truncated):
+{{ alarm.payload|tojson(indent=2) }}{% endif %}
+
+— Sentinel
