@@ -15,7 +15,7 @@
 		loading = true;
 		banner = null;
 		try {
-			const r = await fetch('/api/admin/alerts', { credentials: 'include' });
+			const r = await fetch('/api/admin/alerts');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			const j = await r.json();
 			text = YAML.stringify(j.value ?? {}, { indent: 2 });
@@ -49,7 +49,7 @@
 			const r = await fetch('/api/admin/alerts', {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ value })
 			});
 			const j = await r.json();

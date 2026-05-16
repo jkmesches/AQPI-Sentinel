@@ -13,7 +13,7 @@
 	async function load() {
 		loading = true; error = null;
 		try {
-			const r = await fetch('/api/admin/audit?limit=500', { credentials: 'include' });
+			const r = await fetch('/api/admin/audit?limit=500');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			rows = await r.json();
 		} catch (e) {

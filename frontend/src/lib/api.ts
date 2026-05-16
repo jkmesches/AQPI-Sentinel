@@ -47,9 +47,13 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	const ctl = new AbortController();
 	const t = setTimeout(() => ctl.abort(), timeoutMs);
 	try {
+		// No `credentials: 'include'`: auth rides on the Authorization
+		// header (installFetchPrefix attaches the Bearer token). With
+		// credentials:include and allow_origins=["*"], the browser blocks
+		// the response because ACA-Origin can't be `*` for credentialed
+		// requests — which broke all side-panel data in prod.
 		const r = await fetch(url(path), {
 			headers: { accept: 'application/json' },
-			credentials: 'include',
 			signal: ctl.signal
 		});
 		if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
@@ -92,14 +96,13 @@ export const api = {
 		fetch(url(`/api/alarms/${id}/ack`), {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			credentials: 'include',
 			body: JSON.stringify(body)
 		}).then((r) => {
 			if (!r.ok) throw new Error(`ack → HTTP ${r.status}`);
 			return r.json();
 		}),
 	unack:         (id: number) =>
-		fetch(url(`/api/alarms/${id}/unack`), { method: 'POST', credentials: 'include' }).then((r) => {
+		fetch(url(`/api/alarms/${id}/unack`), { method: 'POST' }).then((r) => {
 			if (!r.ok) throw new Error(`unack → HTTP ${r.status}`);
 			return r.json();
 		}),

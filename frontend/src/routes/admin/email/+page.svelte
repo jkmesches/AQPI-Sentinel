@@ -28,7 +28,7 @@
 		loading = true;
 		banner = null;
 		try {
-			const r = await fetch('/api/admin/settings/smtp', { credentials: 'include' });
+			const r = await fetch('/api/admin/settings/smtp');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			const j = await r.json();
 			if (j.value) {
@@ -51,7 +51,7 @@
 			const r = await fetch('/api/admin/settings/smtp', {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ value: { ...v, port: Number(v.port) } })
 			});
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -71,7 +71,7 @@
 			const r = await fetch('/api/admin/email/test', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ to: testTo })
 			});
 			const j = await r.json();
