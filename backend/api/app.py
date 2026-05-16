@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from ..alarms.engine import AlarmEngine
 from ..alarms.models import load_config as load_alerts_config
+from ..checks.network import NetworkMonitor
 from ..checks.transports import CheckContext
 from ..checks.transports.browser import BrowserClient
 from ..checks.transports.http import HttpClient
@@ -17,6 +18,7 @@ from ..registry import CHECKS, all_stages
 from ..scheduler import Scheduler
 from .routes import alarms as alarms_routes
 from .routes import checks as checks_routes
+from .routes import debug as debug_routes
 from .routes import history as history_routes
 from .routes import radars as radars_routes
 from .routes import silences as silences_routes
@@ -45,7 +47,12 @@ async def lifespan(app: FastAPI):
     engine.add_listener(_push_alarm)
     await engine.start()
 
-    ctx = CheckContext(http=HttpClient(), browser=BrowserClient())
+    net = NetworkMonitor()
+    await net.start()
+    ctx = CheckContext(
+        http=HttpClient(), browser=BrowserClient(),
+        network=net, pool=store.pool,
+    )
     sched = Scheduler(store, ctx, engine=engine)
     # scheduler also emits run events for the live stream
     sched.on_result = lambda r: asyncio.create_task(ws.broadcast({
@@ -85,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(history_routes.router)
     app.include_router(radars_routes.router)
     app.include_router(upstream_routes.router)
+    app.include_router(debug_routes.router)
     app.include_router(ws_router)
 
     @app.get("/")

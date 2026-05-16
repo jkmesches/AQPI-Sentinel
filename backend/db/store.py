@@ -194,15 +194,32 @@ class Store:
     async def list_alarms(
         self, *, status: str = "open", limit: int = 200,
     ) -> list[dict]:
+        """LEFT JOIN the most-recent un-revoked ack so the dashboard can
+        render acked-but-still-open alarms differently from un-acked ones
+        without an extra round-trip per row."""
         assert self.pool is not None
         if status == "open":
-            where = "WHERE closed_at IS NULL"
+            where = "WHERE a.closed_at IS NULL"
         elif status == "closed":
-            where = "WHERE closed_at IS NOT NULL"
+            where = "WHERE a.closed_at IS NOT NULL"
         else:
             where = ""
         rows = await self.pool.fetch(
-            f"SELECT * FROM alarms {where} ORDER BY opened_at DESC LIMIT $1",
+            f"""
+            SELECT a.*,
+                   ak.acked_by, ak.acked_at, ak.note AS ack_note
+            FROM alarms a
+            LEFT JOIN LATERAL (
+                SELECT acked_by, acked_at, note
+                FROM alarm_acks
+                WHERE alarm_id = a.id AND revoked_at IS NULL
+                ORDER BY acked_at DESC
+                LIMIT 1
+            ) ak ON true
+            {where}
+            ORDER BY a.opened_at DESC
+            LIMIT $1
+            """,
             limit,
         )
         return [dict(r) for r in rows]

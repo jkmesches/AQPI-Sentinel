@@ -16,7 +16,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ..config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path
+from ..archive import save_image as _archive_save
+from ..config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, l4_profile
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import worst_of
@@ -98,29 +99,71 @@ class Layer4ImageCheck(Check):
                 payload={"reason": src},
             )
 
+        # Archive the captured PNG so the timeline detail panel can still
+        # show this scan after the upstream rotates the file out (radarca
+        # keeps only ~2 h of composites / ~1 h of X-band scans). Saved
+        # off-thread so it doesn't add to the check's wall-clock time.
+        if SETTINGS.archive_enabled and ctx.pool is not None:
+            asyncio.create_task(
+                _archive_save(
+                    ctx.pool, SETTINGS.archive_root,
+                    source=src, content=png_bytes,
+                    content_type="image/png",
+                    origin_url=f"{SETTINGS.base}/api/imageData?file={src}",
+                )
+            )
+
+        # Per-product QC profile knobs. Forecast products and color-ramp
+        # scalar fields get relaxed thresholds; see config.L4_PROFILES.
+        prof = l4_profile(self.identifier)
+        extreme_threshold  = float(prof["extreme_threshold"])
+        skip_frozen        = bool(prof["skip_frozen"])
+        frozen_min_cov_pct = float(prof["frozen_min_cov_pct"])
+
         # Offload CPU work to a thread so the asyncio loop stays responsive.
         t1 = await asyncio.to_thread(tier1_stats, png_bytes)
-        t2 = await asyncio.to_thread(tier2_heuristics, png_bytes, self.kind)
+        t2 = await asyncio.to_thread(
+            tier2_heuristics, png_bytes, self.kind, extreme_threshold
+        )
 
-        # Frozen-frame detection
+        # Demote SATURATED to OK_LOW_COV on sparse scenes: when only a few
+        # percent of pixels are active, "40% of them are in one color bin"
+        # is statistical noise rather than a real anomaly. Same coverage
+        # floor as the frozen-frame gate.
+        if (t2["extreme"]["verdict"] == "SATURATED"
+                and t1["coverage_pct"] < frozen_min_cov_pct):
+            t2["extreme"]["verdict"] = "OK_LOW_COV"
+
+        # Frozen-frame detection — gated by coverage and by profile.
+        # A pHash match on a near-empty frame is expected ("calm world,"
+        # not "stuck feed"); a pHash match on a slow-cadence forecast
+        # product is also expected. Both demote to QUIET, which counts as
+        # pass in the rollup.
         prev_phash = _LAST_PHASH.get(self.id)
         if prev_phash is not None and prev_phash == t1["phash"]:
-            frozen_verdict = "FROZEN"
+            if skip_frozen:
+                frozen_verdict = "QUIET_SLOW"      # slow-cadence product
+            elif t1["coverage_pct"] < frozen_min_cov_pct:
+                frozen_verdict = "QUIET_LOW_COV"   # quiet sky, just clutter
+            else:
+                frozen_verdict = "FROZEN"
         else:
             frozen_verdict = "OK"
         _LAST_PHASH[self.id] = t1["phash"]
 
         sub_verdicts: list[str] = []
-        def _v(name: str, verdict: str, ok_values=("OK", "N/A", "EMPTY", "TOO_SPARSE")):
-            if verdict in ok_values:
-                sub_verdicts.append("pass")
-            else:
-                sub_verdicts.append("warn")
+        # Verdicts we treat as "pass" (no anomaly worth alarming on).
+        OK_VERDICTS = (
+            "OK", "N/A", "EMPTY", "TOO_SPARSE",
+            "QUIET_LOW_COV", "QUIET_SLOW", "OK_LOW_COV",
+        )
+        def _v(name: str, verdict: str):
+            sub_verdicts.append("pass" if verdict in OK_VERDICTS else "warn")
 
-        _v("extreme",     t2["extreme"]["verdict"])
-        _v("speckle",     t2["speckle"]["verdict"])
-        _v("range_ring",  t2["range_ring"]["verdict"])
-        _v("frozen",      frozen_verdict)
+        _v("extreme",    t2["extreme"]["verdict"])
+        _v("speckle",    t2["speckle"]["verdict"])
+        _v("range_ring", t2["range_ring"]["verdict"])
+        _v("frozen",     frozen_verdict)
 
         overall = worst_of(*sub_verdicts) if sub_verdicts else "pass"
 
@@ -135,8 +178,12 @@ class Layer4ImageCheck(Check):
             ),
             payload={
                 "source": src,
+                "profile": prof,
                 "tier1": t1,
-                "tier2": {**t2, "frozen": {"verdict": frozen_verdict, "prev_phash": prev_phash}},
+                "tier2": {
+                    **t2,
+                    "frozen": {"verdict": frozen_verdict, "prev_phash": prev_phash},
+                },
             },
             metrics={
                 "coverage_pct": float(t1["coverage_pct"]),
