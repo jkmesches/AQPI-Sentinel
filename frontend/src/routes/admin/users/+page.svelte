@@ -26,7 +26,7 @@
 		loading = true;
 		error = null;
 		try {
-			const r = await fetch('/api/admin/users', { credentials: 'include' });
+			const r = await fetch('/api/admin/users');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			rows = await r.json();
 		} catch (e) {
@@ -44,7 +44,7 @@
 			const r = await fetch('/api/admin/users', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ email: newEmail.trim(), role: newRole, display_name: newDisplay || null })
 			});
 			const j = await r.json();
@@ -66,7 +66,7 @@
 			const r = await fetch(`/api/admin/users/${u.id}`, {
 				method: 'PATCH',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ disabled: !u.disabled_at })
 			});
 			const j = await r.json();
@@ -82,7 +82,7 @@
 			const r = await fetch(`/api/admin/users/${u.id}`, {
 				method: 'PATCH',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({ role })
 			});
 			const j = await r.json();
@@ -96,7 +96,7 @@
 	async function reissueReset(u: UserRow) {
 		try {
 			const r = await fetch(`/api/admin/users/${u.id}/reset`, {
-				method: 'POST', credentials: 'include'
+				method: 'POST'
 			});
 			const j = await r.json();
 			if (!r.ok) throw new Error(j?.detail ?? `HTTP ${r.status}`);
@@ -110,7 +110,7 @@
 		if (!confirm(`Delete user ${u.email}? Cannot be undone.`)) return;
 		try {
 			const r = await fetch(`/api/admin/users/${u.id}`, {
-				method: 'DELETE', credentials: 'include'
+				method: 'DELETE'
 			});
 			const j = await r.json();
 			if (!r.ok) throw new Error(j?.detail ?? `HTTP ${r.status}`);

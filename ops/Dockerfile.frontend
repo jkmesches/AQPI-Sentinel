@@ -41,11 +41,10 @@ COPY --from=build /app/build         ./build
 COPY --from=build /app/node_modules  ./node_modules
 COPY --from=build /app/package.json  ./
 
-# Non-root.
-RUN addgroup -g 1000 sentinel \
- && adduser -u 1000 -G sentinel -D sentinel \
- && chown -R sentinel:sentinel /app
-USER sentinel
+# Non-root. node:20-alpine ships a built-in `node` user (UID/GID 1000)
+# so we reuse it rather than create our own and collide on the GID.
+RUN chown -R node:node /app
+USER node
 
 EXPOSE 3000
 

@@ -27,7 +27,7 @@
 		loading = true;
 		error = null;
 		try {
-			const r = await fetch('/api/silences', { credentials: 'include' });
+			const r = await fetch('/api/silences');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			rows = await r.json();
 		} catch (e) {
@@ -41,7 +41,7 @@
 		if (!confirm(`Delete silence "${sid}"?`)) return;
 		try {
 			const r = await fetch(`/api/silences/${encodeURIComponent(sid)}`, {
-				method: 'DELETE', credentials: 'include'
+				method: 'DELETE'
 			});
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			await load();
@@ -58,7 +58,7 @@
 			const r = await fetch('/api/silences', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				credentials: 'include',
+				
 				body: JSON.stringify({
 					id:       newId,
 					matchers,
