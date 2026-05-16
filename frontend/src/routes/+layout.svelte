@@ -7,6 +7,7 @@
 	import NavLink from '$lib/components/NavLink.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { fmtAge } from '$lib/format';
+	import { diag } from '$lib/diag';
 
 	let now = $state(new Date());
 	let tickTimer: ReturnType<typeof setInterval>;
@@ -14,7 +15,7 @@
 	onMount(() => {
 		theme.start();
 		sentinel.start(5000);
-		tickTimer = setInterval(() => (now = new Date()), 1000);
+		if (diag.tick) tickTimer = setInterval(() => (now = new Date()), 1000);
 	});
 	onDestroy(() => {
 		theme.stop();
@@ -142,6 +143,12 @@
 		{/if}
 	</nav>
 
+	{#if diag.anyDisabled}
+		<div class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[11px] num text-[var(--color-warn)]">
+			DIAG: disabled = {diag.raw.join(', ')}
+			<a class="ml-3 underline" href={location.pathname}>clear</a>
+		</div>
+	{/if}
 	<main class="flex-1 overflow-hidden">
 		{@render children?.()}
 	</main>

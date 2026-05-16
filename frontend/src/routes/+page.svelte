@@ -6,6 +6,7 @@
 	import SectionHeader from '$lib/components/SectionHeader.svelte';
 	import { fmtAge, severityChip, statusText, statusBorder } from '$lib/format';
 	import { api } from '$lib/api';
+	import { diag } from '$lib/diag';
 
 	const radarRows = $derived(
 		(sentinel.rollup?.stages?.L2 ?? []).slice().sort((a, b) => a.target.localeCompare(b.target))
@@ -68,7 +69,9 @@
 					<span class="num text-[13px] text-[var(--color-bright)] tracking-wide">{r.target}</span>
 					<span class="label {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
 					<span class="ml-2 {statusText(r.status)}">
-						<Sparkline data={spark} width={72} height={16} />
+						{#if diag.spark}
+							<Sparkline data={spark} width={72} height={16} />
+						{/if}
 					</span>
 					<span class="num text-[10.5px] text-[var(--color-muted)]">
 						{latest ? `${latest|0}/h` : ''}
@@ -96,7 +99,13 @@
 	<section class="panel col-span-6 row-span-1 flex flex-col overflow-hidden">
 		<SectionHeader title="Network" count="6 radars · 3 NEXRAD" right="EPSG:3857 · Stadia · alidade" />
 		<div class="flex-1">
-			<MapView />
+			{#if diag.map}
+				<MapView />
+			{:else}
+				<div class="flex h-full items-center justify-center text-[12px] text-[var(--color-muted)] uppercase tracking-[0.18em]">
+					map disabled · ?diag=no-map
+				</div>
+			{/if}
 		</div>
 	</section>
 
@@ -114,7 +123,9 @@
 						{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
 					</span>
 					<span class={statusText(r.status)}>
-						<Sparkline data={spark} width={48} height={14} />
+						{#if diag.spark}
+							<Sparkline data={spark} width={48} height={14} />
+						{/if}
 					</span>
 				</li>
 			{/each}
