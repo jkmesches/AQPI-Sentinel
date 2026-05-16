@@ -36,6 +36,24 @@ class Store:
             init=_init_codecs,
         )
         log.info("postgres pool established")
+        await self._apply_schema()
+
+    async def _apply_schema(self) -> None:
+        """Apply backend/db/schema.sql idempotently on startup. All
+        statements are CREATE TABLE/INDEX IF NOT EXISTS so re-running
+        on an existing DB is a no-op. Lets a fresh deploy (empty
+        postgres volume) come up clean without an out-of-band
+        migration step."""
+        assert self.pool is not None
+        from pathlib import Path
+        schema_path = Path(__file__).resolve().parent / "schema.sql"
+        if not schema_path.exists():
+            log.warning("schema.sql not found at %s — skipping auto-migrate", schema_path)
+            return
+        sql = schema_path.read_text()
+        async with self.pool.acquire() as conn:
+            await conn.execute(sql)
+        log.info("schema applied (idempotent)")
 
     async def close(self) -> None:
         if self.pool is not None:

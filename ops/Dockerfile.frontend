@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1.7
+#
+# Sentinel frontend image. Multi-stage:
+#   1. Build the SvelteKit app with adapter-node → ./build/
+#   2. Runtime image with just Node + the built bundle
+#
+# Build:  docker build -f ops/Dockerfile.frontend -t sentinel-frontend .
+# Run:    via ops/docker-compose.prod.yml
+
+# ---------- 1) build stage ----------
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+
+COPY frontend/ ./
+# `PUBLIC_SENTINEL_API_BASE` can be set at build time to bake in a
+# specific backend origin. If not set, the frontend resolves the
+# backend at runtime from window.location.hostname:8000.
+ARG PUBLIC_SENTINEL_API_BASE=
+ENV PUBLIC_SENTINEL_API_BASE=$PUBLIC_SENTINEL_API_BASE
+RUN npm run build
+
+# Drop dev dependencies so the runtime stage only carries what `node build`
+# actually needs (mainly cookie / set-cookie-parser used by adapter-node).
+RUN npm prune --omit=dev
+
+
+# ---------- 2) runtime stage ----------
+FROM node:20-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000
+
+# Copy only what the Node server needs.
+COPY --from=build /app/build         ./build
+COPY --from=build /app/node_modules  ./node_modules
+COPY --from=build /app/package.json  ./
+
+# Non-root.
+RUN addgroup -g 1000 sentinel \
+ && adduser -u 1000 -G sentinel -D sentinel \
+ && chown -R sentinel:sentinel /app
+USER sentinel
+
+EXPOSE 3000
+
+CMD ["node", "build"]

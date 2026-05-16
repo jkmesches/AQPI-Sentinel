@@ -9,6 +9,11 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { fmtAge } from '$lib/format';
 	import { diag } from '$lib/diag';
+	import { installFetchPrefix } from '$lib/origin';
+
+	// Routes /api/* fetches to the prod backend host when not on dev's
+	// :5173 (i.e. in production, with no reverse proxy). No-op in dev.
+	installFetchPrefix();
 
 	let now = $state(new Date());
 	let tickTimer: ReturnType<typeof setInterval>;

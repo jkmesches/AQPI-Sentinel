@@ -68,8 +68,19 @@ router = APIRouter()
 
 
 @router.websocket("/api/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, token: str | None = None):
+    """Accepts an optional `?token=<sid>` so authed clients can be
+    identified (browser WebSocket constructors can't set custom
+    headers). The dashboard is publicly readable so we don't reject
+    unauthed clients here — `token` is a hook for future per-user
+    event routing."""
     manager: ConnectionManager = ws.app.state.ws
+    if token:
+        try:
+            from .. import auth as A
+            await A.fetch_session(ws.app.state.store.pool, token)
+        except Exception:
+            pass
     await manager.connect(ws)
     try:
         await ws.send_text(

@@ -1,13 +1,21 @@
 """Login / logout / me + a `current_user` dependency for protected routes.
 
-Cookie-based sessions: a UUID stored in `sessions`, set as an HttpOnly
-SameSite=Lax cookie. Reads of the cookie + session look-up live in this
-module; protected routes Depend(require_user) or Depend(require_admin).
+Bearer-token sessions: a UUID stored in `sessions`, returned in the
+login response. The frontend stores it in localStorage and sends it on
+every protected request as `Authorization: Bearer <token>`. We still
+set the value as a cookie too for browser convenience in dev — either
+source authenticates a request.
+
+Why not cookies alone? In the production no-proxy deployment the
+frontend (:3000) and backend (:8000) are cross-origin, and browsers
+won't send SameSite=Lax cookies cross-origin. SameSite=None would
+require HTTPS, which we don't have on the LAN. Bearer tokens sidestep
+both constraints.
 """
 from __future__ import annotations
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 
 from ... import auth as A
 
@@ -18,15 +26,27 @@ router = APIRouter(prefix="/api/auth")
 # Dependencies
 # ---------------------------------------------------------------------------
 
+def _extract_token(authorization: str | None, cookie: str | None) -> str | None:
+    if authorization:
+        parts = authorization.split(None, 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+            return parts[1].strip()
+    if cookie:
+        return cookie
+    return None
+
+
 async def current_user(
     request: Request,
+    authorization: Annotated[str | None, Header()] = None,
     sentinel_session: Annotated[str | None, Cookie()] = None,
 ) -> dict | None:
-    """Return the user row attached to the session cookie, or None."""
-    if not sentinel_session:
+    """Return the user row attached to the session token, or None."""
+    token = _extract_token(authorization, sentinel_session)
+    if not token:
         return None
     pool = request.app.state.store.pool
-    return await A.fetch_session(pool, sentinel_session)
+    return await A.fetch_session(pool, token)
 
 
 async def require_user(user: Annotated[dict | None, Depends(current_user)]) -> dict:
@@ -70,6 +90,8 @@ async def login(request: Request, response: Response, body: dict):
         user_agent=request.headers.get("user-agent"),
         ip=(request.client.host if request.client else None),
     )
+    # Cookie is still set for dev convenience (same-origin via Vite proxy).
+    # Production uses the returned `token` via Authorization: Bearer.
     response.set_cookie(
         A.COOKIE_NAME, sid,
         httponly=True, samesite="lax",
@@ -77,18 +99,23 @@ async def login(request: Request, response: Response, body: dict):
     )
     await A.audit(pool, user_email=u["email"], action="login")
     return {
-        "id": u["id"], "email": u["email"],
-        "role": u["role"], "display_name": u.get("display_name"),
+        "token":        sid,
+        "id":           u["id"],
+        "email":        u["email"],
+        "role":         u["role"],
+        "display_name": u.get("display_name"),
     }
 
 
 @router.post("/logout")
 async def logout(
     request: Request, response: Response,
+    authorization: Annotated[str | None, Header()] = None,
     sentinel_session: Annotated[str | None, Cookie()] = None,
 ):
-    if sentinel_session:
-        await A.destroy_session(request.app.state.store.pool, sentinel_session)
+    token = _extract_token(authorization, sentinel_session)
+    if token:
+        await A.destroy_session(request.app.state.store.pool, token)
     response.delete_cookie(A.COOKIE_NAME, samesite="lax")
     return {"ok": True}
 

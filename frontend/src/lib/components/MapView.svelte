@@ -5,6 +5,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import TimeControls from '$lib/components/TimeControls.svelte';
+	import { url as apiUrl } from '$lib/origin';
 
 	interface RadarMeta {
 		id: string;
@@ -303,7 +304,7 @@
 		}
 		const myToken = ++_compositeToken;
 		const isCurrent = () => myToken === _compositeToken && !!map && styleReady;
-		const url = `/api/upstream/product_image.png?product_id=${composite}&step=${stepIdx}&_=${Date.now()}`;
+		const url = apiUrl(`/api/upstream/product_image.png?product_id=${composite}&step=${stepIdx}&_=${Date.now()}`);
 		const coords: [number, number][] = [
 			[e.west, e.north],
 			[e.east, e.north],
@@ -504,7 +505,7 @@
 		const qs = new URLSearchParams({ radar: id, moment: currentMoment });
 		if (t) qs.set('time', t);
 		if (_forceBuster) qs.set('_t', String(_forceBuster));
-		return `/api/upstream/xband_scan.png?${qs.toString()}`;
+		return apiUrl(`/api/upstream/xband_scan.png?${qs.toString()}`);
 	}
 
 	// Track which radar overlays we've added so refresh doesn't have to walk

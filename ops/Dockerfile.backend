@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.7
+#
+# Sentinel backend image.
+#
+# Bundles Playwright + Chromium (used by the L3 overlay-parity check).
+# This is the bulk of the image size (~700MB extra). If you don't need
+# Layer 3 you can strip the playwright install steps.
+#
+# Build:  docker build -f ops/Dockerfile.backend -t sentinel-backend .
+# Run:    via ops/docker-compose.prod.yml
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Small system deps + tini for proper PID-1 behaviour.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libpq5 \
+        curl \
+        tini \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Python deps first so layer caches when only app code changes.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Playwright + chromium browser, into a shared path so the non-root
+# user can read them. `install-deps` apt-installs chromium's runtime
+# libraries; do it in one shot before clearing the apt index again.
+RUN python -m playwright install-deps chromium \
+ && python -m playwright install chromium \
+ && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+
+# App code. alerts.yaml is the on-disk fallback used until an admin
+# saves a config via /admin/alerts (then the DB row wins).
+COPY backend ./backend
+COPY alerts.yaml ./alerts.yaml
+
+# Non-root runtime user. Owns /app, /data, and the playwright cache so
+# it can launch chromium.
+RUN useradd --uid 1000 --create-home sentinel \
+ && mkdir -p /data/archive \
+ && chown -R sentinel:sentinel /app /data /ms-playwright
+USER sentinel
+
+ENV SENTINEL_DATA_DIR=/data \
+    SENTINEL_ARCHIVE_ROOT=/data/archive
+
+EXPOSE 8000
+
+# tini → uvicorn (via backend.main, which loads .env then starts uvicorn).
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "backend.main"]
