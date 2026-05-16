@@ -808,13 +808,29 @@
 		});
 
 		scanRefresh = setInterval(pokeOverlays, 120_000);
+		// Suspend the 120s overlay refresher AND any active play loop when
+		// the tab is hidden. Without this, an open-but-backgrounded Sentinel
+		// tab keeps decoding fresh PNGs in the background indefinitely,
+		// which eventually wedges the tab once memory grows enough.
+		visHandler = () => {
+			if (document.hidden) {
+				if (scanRefresh) { clearInterval(scanRefresh); scanRefresh = undefined as any; }
+				if (playTimer) { clearInterval(playTimer); playTimer = undefined; }
+			} else {
+				if (!scanRefresh) scanRefresh = setInterval(pokeOverlays, 120_000);
+				if (playing && !playTimer) playTimer = setInterval(tick, _playIntervalMs());
+			}
+		};
+		document.addEventListener('visibilitychange', visHandler);
 	});
 
+	let visHandler: (() => void) | undefined;
 	onDestroy(() => {
 		stopPlay();
 		if (scanRefresh) clearInterval(scanRefresh);
 		resizeObs?.disconnect();
 		map?.remove();
+		if (visHandler) document.removeEventListener('visibilitychange', visHandler);
 	});
 
 	const compOptions: { key: Composite; label: string; short: string }[] = [
