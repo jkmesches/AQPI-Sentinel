@@ -30,6 +30,10 @@
 	let nexradEnabled = $state(false);
 	let overlayOpacity = $state(0.8);
 
+	// Layers panel show/hide — persisted per browser.
+	let panelOpen = $state(true);
+	const PANEL_KEY = 'sentinel-layers-open';
+
 	// Per-radar moment chooser — applies to every active overlay.
 	type Moment = 'Reflectivity' | 'Velocity' | 'Differential Reflectivity' | 'PhiDP' | 'RhoHV';
 	let currentMoment = $state<Moment>('Reflectivity');
@@ -635,6 +639,10 @@
 	}
 
 	onMount(async () => {
+		try {
+			const saved = localStorage.getItem(PANEL_KEY);
+			if (saved === 'closed') panelOpen = false;
+		} catch { /* */ }
 		radars = await fetch('/api/radars/meta').then((r) => r.json());
 		map = new maplibregl.Map({
 			container: mapDiv,
@@ -701,15 +709,45 @@
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 
 	<!-- LAYERS CONTROL -->
+	{#if !panelOpen}
+		<!-- Collapsed: a single compact badge -->
+		<button
+			class="pointer-events-auto absolute right-3 top-3 flex items-center gap-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 px-2 py-1 text-[10.5px] shadow-xl backdrop-blur transition-colors hover:bg-[var(--color-elevated)]"
+			onclick={() => { panelOpen = true; try { localStorage.setItem(PANEL_KEY, 'open'); } catch { /* */ } }}
+			title="show layers"
+		>
+			<svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor" class="text-[var(--color-muted)]">
+				<polygon points="2,2 10,2 8,5 4,5" />
+				<polygon points="3,6 9,6 7,9 5,9" />
+				<polygon points="4,10 8,10 7,11 5,11" />
+			</svg>
+			<span class="label tracking-[0.2em] text-[var(--color-default)]">Layers</span>
+			<span class="num text-[9.5px] text-[var(--color-faint)]">
+				{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
+			</span>
+		</button>
+	{:else}
 	<div
 		class="pointer-events-auto absolute right-3 top-3 flex w-[280px] max-h-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
 	>
 		<!-- Header -->
-		<div class="flex items-baseline justify-between border-b border-[var(--color-border)] px-3 py-1.5">
-			<span class="label tracking-[0.2em]">Layers</span>
-			<span class="num text-[9.5px] text-[var(--color-faint)]">
-				{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
-			</span>
+		<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5">
+			<div class="flex items-baseline gap-2">
+				<span class="label tracking-[0.2em]">Layers</span>
+				<span class="num text-[9.5px] text-[var(--color-faint)]">
+					{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
+				</span>
+			</div>
+			<button
+				class="inline-flex h-4 w-4 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				title="hide panel"
+				aria-label="hide layers panel"
+				onclick={() => { panelOpen = false; try { localStorage.setItem(PANEL_KEY, 'closed'); } catch { /* */ } }}
+			>
+				<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5">
+					<line x1="2.5" y1="6" x2="9.5" y2="6" />
+				</svg>
+			</button>
 		</div>
 
 		<!-- Composite — single pill row -->
@@ -858,6 +896,7 @@
 			</span>
 		</div>
 	</div>
+	{/if}
 	</div>
 
 	<!-- time controls strip — below the map -->
