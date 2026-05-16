@@ -1,19 +1,17 @@
-"""Admin endpoints: settings (SMTP, alert routing), test-email, silences
-(create/delete already in silences.py; this file owns the GET-with-extras
-view for the admin UI), user management, audit log viewer.
+"""Admin endpoints: settings (SMTP, alert routing), test-email,
+audit log viewer.
 
 All endpoints require an admin session.
 """
 from __future__ import annotations
 import json
 import logging
-import socket
-import ssl
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ... import auth as A
+from ...alarms.models import AlertsConfig
 from .auth import require_admin
 
 log = logging.getLogger(__name__)
@@ -180,3 +178,113 @@ async def email_test(
         await A.audit(pool, user_email=user["email"], action="email.test",
                       payload={"to": to_addr, "ms": ms, "ok": False, "error": msg_err})
         raise HTTPException(502, msg_err)
+
+
+# ---------------------------------------------------------------------------
+# Alert routing config
+# ---------------------------------------------------------------------------
+
+ALERTS_KEY = "alerts_config"
+
+
+@router.get("/alerts")
+async def get_alerts(
+    request: Request, user: Annotated[dict, Depends(require_admin)],
+):
+    """Return the current routing config. If no DB row exists yet, returns
+    the on-disk YAML so the editor can show the starting state."""
+    pool = request.app.state.store.pool
+    row = await pool.fetchrow(
+        "SELECT value, updated_at, updated_by FROM settings WHERE key = $1",
+        ALERTS_KEY,
+    )
+    if row is not None:
+        val = row["value"]
+        if isinstance(val, str):
+            val = json.loads(val)
+        return {
+            "source":     "db",
+            "value":      val,
+            "updated_at": row["updated_at"].isoformat(),
+            "updated_by": row["updated_by"],
+        }
+    # Fall back to disk
+    from ...alarms.models import load_config as _load_yaml
+    cfg = _load_yaml()
+    return {
+        "source":     "yaml",
+        "value":      cfg.model_dump(mode="json"),
+        "updated_at": None,
+        "updated_by": None,
+    }
+
+
+@router.put("/alerts")
+async def put_alerts(
+    request: Request, user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    """Validate the submitted routing config, persist to DB, hot-reload
+    the running alarm engine."""
+    value = body.get("value")
+    if value is None:
+        raise HTTPException(400, "missing 'value'")
+    try:
+        new_cfg = AlertsConfig.model_validate(value)
+    except Exception as e:
+        raise HTTPException(400, f"invalid config: {e}")
+    pool = request.app.state.store.pool
+    serialized = new_cfg.model_dump(mode="json")
+    await pool.execute(
+        """
+        INSERT INTO settings (key, value, updated_at, updated_by)
+        VALUES ($1, $2::jsonb, now(), $3)
+        ON CONFLICT (key) DO UPDATE
+          SET value = EXCLUDED.value,
+              updated_at = EXCLUDED.updated_at,
+              updated_by = EXCLUDED.updated_by
+        """,
+        ALERTS_KEY, json.dumps(serialized), user["email"],
+    )
+    # Hot-reload the running engine so changes take effect without a restart.
+    engine = getattr(request.app.state, "engine", None)
+    if engine is not None:
+        try:
+            await engine.reload(new_cfg)
+        except Exception:
+            log.exception("alarm engine reload failed")
+    await A.audit(pool, user_email=user["email"], action="alerts.put",
+                  payload={"receivers": len(serialized.get("receivers") or []),
+                           "routes":    len(serialized.get("routes") or []),
+                           "policies":  len(serialized.get("escalation_policies") or [])})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Audit log viewer
+# ---------------------------------------------------------------------------
+
+@router.get("/audit")
+async def list_audit(
+    request: Request, user: Annotated[dict, Depends(require_admin)],
+    limit: int = 200,
+):
+    if limit < 1 or limit > 1000:
+        raise HTTPException(400, "limit must be 1..1000")
+    pool = request.app.state.store.pool
+    rows = await pool.fetch(
+        "SELECT id, at, user_email, action, target, payload "
+        "FROM admin_audit ORDER BY at DESC LIMIT $1",
+        limit,
+    )
+    return [
+        {
+            "id":         r["id"],
+            "at":         r["at"].isoformat(),
+            "user_email": r["user_email"],
+            "action":     r["action"],
+            "target":     r["target"],
+            "payload":    r["payload"],
+        }
+        for r in rows
+    ]
