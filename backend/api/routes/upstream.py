@@ -91,23 +91,78 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
     )
 
 
+from collections import OrderedDict as _OrderedDict
+
+from ...archive import lookup_by_source as _archive_lookup
+from ...archive import save_image as _archive_save
+
+# LRU cache (process-local). Bytes are kept in-memory so re-rendering the
+# same timeline cell doesn't hit the disk or radarca again. Bounded so
+# memory stays predictable; eviction is FIFO-by-recency.
+_IMAGE_CACHE: "_OrderedDict[str, tuple[bytes, str]]" = _OrderedDict()
+_IMAGE_CACHE_MAX = 256
+
+
 @router.get("/image_by_source.png")
 async def image_by_source(source: str, request: Request):
-    """Re-fetch an upstream image by its `source` field (the same string the
-    Layer 4 image checks recorded when they captured the scan).
+    """Serve the captured image for an L4 source path.
 
-    Best-effort: if the upstream rotated the file out, this returns 502."""
-    if not source or "/" in source[:1] or ".." in source:
-        # Cheap path-traversal guard — radarca's `file` parameter accepts
-        # subdirs, but we don't want to be a generic open proxy.
-        pass
-    ctx = request.app.state.context
+    Lookup order:
+      1. In-memory LRU cache (this process).
+      2. Local archive (data/archive + image_index → sha256).
+      3. Upstream radarca (last-resort, populates archive on success).
+
+    Returns 502 only if the upstream rotated the file out AND we don't
+    have it archived locally."""
+    cached = _IMAGE_CACHE.get(source)
+    if cached is not None:
+        body, ct = cached
+        _IMAGE_CACHE.move_to_end(source)
+        return Response(
+            content=body, media_type=ct,
+            headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "lru"},
+        )
+
+    # Local archive — survives upstream rotation.
+    app = request.app
+    store = getattr(app.state, "store", None)
+    pool = store.pool if store else None
+    if pool is not None and SETTINGS.archive_enabled:
+        hit = await _archive_lookup(pool, SETTINGS.archive_root, source)
+        if hit is not None:
+            body, ct = hit
+            _IMAGE_CACHE[source] = (body, ct)
+            while len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
+                _IMAGE_CACHE.popitem(last=False)
+            return Response(
+                content=body, media_type=ct,
+                headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "disk"},
+            )
+
+    # Upstream fallback.
+    ctx = app.state.context
     ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
     if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/"):
         raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+    body = ir.content
+    ct = ir.headers.get("content-type", "image/png")
+    _IMAGE_CACHE[source] = (body, ct)
+    while len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
+        _IMAGE_CACHE.popitem(last=False)
+    # Opportunistically archive — same logic as a live L4 capture, so a
+    # source we proxy-fetched for the first time gets a long-term home.
+    if pool is not None and SETTINGS.archive_enabled:
+        import asyncio
+        asyncio.create_task(
+            _archive_save(
+                pool, SETTINGS.archive_root,
+                source=source, content=body, content_type=ct,
+                origin_url=f"{SETTINGS.base}/api/imageData?file={source}",
+            )
+        )
     return Response(
-        content=ir.content, media_type=ir.headers.get("content-type", "image/png"),
-        headers={"cache-control": "public, max-age=300"},
+        content=body, media_type=ct,
+        headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "upstream"},
     )
 
 

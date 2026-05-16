@@ -42,6 +42,29 @@ class Scheduler:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         log.info("scheduler stopped")
 
+    def _maybe_downgrade_for_network(self, check: Check, result: CheckResult) -> CheckResult:
+        net = getattr(self.ctx, "network", None)
+        if net is None or net.online:
+            return result
+        if result.status not in ("fail", "error"):
+            return result
+        # Don't muzzle the control check itself.
+        if check.id.startswith("layer0.net."):
+            return result
+        snap = net.snapshot()
+        return CheckResult(
+            check_id=result.check_id, target=result.target, stage=result.stage,
+            status="skip",
+            started_at=result.started_at, finished_at=result.finished_at,
+            summary="local network offline — upstream not reachable",
+            payload={
+                "reason":            "local_network_offline",
+                "original_status":   result.status,
+                "original_summary":  result.summary,
+                "network":           snap,
+            },
+        )
+
     async def _loop(self, check: Check) -> None:
         # initial random jitter (0..1 s) to spread the first wave
         await asyncio.sleep(random.uniform(0, 1.0))
@@ -60,6 +83,15 @@ class Scheduler:
                     summary=f"{type(e).__name__}: {e}",
                     payload={"exception": type(e).__name__, "message": str(e)},
                 )
+
+            # Local-network blame shield: if our own internet is down (per the
+            # NetworkMonitor) and the check came back fail/error, demote to
+            # `skip` so we don't fire alarms or draw red cells for what is
+            # actually a problem on our side.
+            #
+            # Exempt the control check itself (it MUST surface offline as
+            # fail) and the synthetic L4 'reason' skips (already skip).
+            result = self._maybe_downgrade_for_network(check, result)
 
             try:
                 await self.store.write_check_run(result)

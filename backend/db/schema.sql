@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS image_observations (
 );
 CREATE INDEX IF NOT EXISTS idx_obs_recent ON image_observations(product_id, ts DESC);
 
+-- Source-path → sha256 lookup. Lets us serve an archived image when the
+-- frontend requests it by the same `source` string the L4 check originally
+-- captured. Many sources map to one sha256 (dedup via pHash-equal scans).
+CREATE TABLE IF NOT EXISTS image_index (
+  source        TEXT PRIMARY KEY,
+  sha256        TEXT NOT NULL REFERENCES image_archive(sha256),
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_image_index_sha ON image_index(sha256);
+
 -- =========================================================================
 -- ALERTING (§14)
 -- =========================================================================

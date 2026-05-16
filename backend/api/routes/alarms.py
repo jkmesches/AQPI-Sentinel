@@ -8,9 +8,22 @@ router = APIRouter(prefix="/api/alarms")
 
 def _ser(row: dict) -> dict:
     out = dict(row)
-    for k in ("opened_at", "closed_at"):
-        if out.get(k) is not None:
-            out[k] = out[k].isoformat()
+    for k in ("opened_at", "closed_at", "acked_at"):
+        v = out.get(k)
+        if v is not None and hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+    # Promote the LATERAL-joined ack columns into a nested "ack" object,
+    # mirroring the shape /api/alarms/{id} already returns.
+    if out.get("acked_by"):
+        out["ack"] = {
+            "acked_by": out.pop("acked_by"),
+            "acked_at": out.pop("acked_at", None),
+            "note":     out.pop("ack_note", None),
+        }
+    else:
+        for k in ("acked_by", "acked_at", "ack_note"):
+            out.pop(k, None)
+        out["ack"] = None
     return out
 
 

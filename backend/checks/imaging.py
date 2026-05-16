@@ -137,13 +137,24 @@ def t2_range_ring(arr: np.ndarray, threshold: float = 0.80) -> dict[str, Any]:
     }
 
 
-def tier2_heuristics(png_bytes: bytes, kind: str = "mosaic") -> dict[str, Any]:
+def tier2_heuristics(
+    png_bytes: bytes,
+    kind: str = "mosaic",
+    extreme_threshold: float = 0.40,
+) -> dict[str, Any]:
     """Combined T2 sub-detectors. ``kind`` ∈ {"xband", "mosaic"}; range_ring
-    only runs for ``xband`` (circular disc images)."""
+    only runs for ``xband`` (circular disc images).
+
+    ``extreme_threshold`` is the max single-color-bin fraction before we call
+    a frame SATURATED. The default (0.40) suits radar imagery where a
+    near-monochrome scene is genuinely anomalous; forecast products that
+    encode scalar fields with thresholded color ramps (water_depth, etc.)
+    routinely exceed 0.40 in normal operation and should pass a much
+    higher threshold from the caller's product profile."""
     im = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
     arr = np.asarray(im)
     out = {
-        "extreme": t2_all_extreme(arr),
+        "extreme": t2_all_extreme(arr, threshold=extreme_threshold),
         "speckle": t2_speckle(arr),
     }
     out["range_ring"] = t2_range_ring(arr) if kind == "xband" else {"verdict": "N/A"}

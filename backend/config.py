@@ -27,6 +27,9 @@ class Settings:
     api_host: str
     api_port: int
     log_level: str
+    archive_enabled: bool
+    archive_root: Path
+    archive_retention_days: int | None    # None == permanent
 
 
 def _load() -> Settings:
@@ -36,13 +39,19 @@ def _load() -> Settings:
             "SENTINEL_DB_URL is not set. Copy .env.example to .env or export "
             "it before launching."
         )
+    data_dir = Path(os.environ.get("SENTINEL_DATA_DIR", "./data")).resolve()
+    retention_env = os.environ.get("SENTINEL_ARCHIVE_RETENTION_DAYS", "").strip()
+    retention = int(retention_env) if retention_env else None
     return Settings(
         db_url=db,
         base=os.environ.get("SENTINEL_BASE", "https://radarca.engr.colostate.edu"),
-        data_dir=Path(os.environ.get("SENTINEL_DATA_DIR", "./data")).resolve(),
+        data_dir=data_dir,
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
         api_port=int(os.environ.get("SENTINEL_API_PORT", "8000")),
         log_level=os.environ.get("SENTINEL_LOG_LEVEL", "INFO"),
+        archive_enabled=os.environ.get("SENTINEL_ARCHIVE_ENABLED", "1") not in ("0", "false", "no"),
+        archive_root=Path(os.environ.get("SENTINEL_ARCHIVE_ROOT", str(data_dir / "archive"))).resolve(),
+        archive_retention_days=retention,
     )
 
 
@@ -82,24 +91,30 @@ PRODUCTS = {
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": -3000, "min_png_bytes": 5_000,
                                "unit": "dBZ"},
+    # Forecast products legitimately produce sub-5KB PNGs when no precip is
+    # predicted (most of a clear day), so `min_png_bytes` is lowered to 1500
+    # — enough to detect a truly-corrupt zero-byte / placeholder response
+    # but not flag the "clear sky" image as suspiciously small.
     "fcst_total_precip":      {"details": "total_precip/details_in.json",
                                "image_dir": "total_precip/images/",
                                "cadence_s": 3600, "expected_steps": 74,
-                               "max_freshness_s": 7200, "min_png_bytes": 5_000,
+                               "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True},
     "fcst_total_precip_cum":  {"details": "total_precip_cumulative/details_in.json",
                                "image_dir": "total_precip_cumulative/images/",
                                "cadence_s": 3600, "expected_steps": 74,
-                               "max_freshness_s": 7200, "min_png_bytes": 5_000,
+                               "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True},
     "fcst_precip_rate":       {"details": "precip_rate/details_in.json",
                                "image_dir": "precip_rate/images/",
                                "cadence_s": 900, "expected_steps": 72,
-                               "max_freshness_s": 7200, "min_png_bytes": 5_000,
+                               "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in/h", "unit_subdir": True},
+    # Temperature model extended its forecast horizon — currently publishes
+    # ~129 hourly steps (was 75 when this config was first written).
     "fcst_temp":              {"details": "temperature/details_F.json",
                                "image_dir": "temperature/images/",
-                               "cadence_s": 3600, "expected_steps": 75,
+                               "cadence_s": 3600, "expected_steps": 130,
                                "max_freshness_s": 7200, "min_png_bytes": 5_000,
                                "unit": "F", "unit_subdir": True},
     "water_level":            {"details": "water_level/details.json",
@@ -157,6 +172,48 @@ X_MOMENTS = list(MOMENT_TO_PREFIX_DEFAULT.keys())
 
 # Temperature uses "F" or "Deg" (note: NOT "DEG") for its subdir.
 TEMP_UNIT_SUBDIR = {"F": "F", "DEG": "Deg"}
+
+
+# --------------------------------------------------------------------------
+# Layer 4 image-QC profiles — per-product knobs for the heuristics.
+#
+# Why this exists: the default thresholds were tuned for radar imagery,
+# where a saturated frame or a frame identical to the previous one is a
+# real anomaly. Several forecast/model products instead encode scalar
+# fields (water depth, accumulated precip, temperature) with thresholded
+# color ramps that legitimately cluster pixels at color endpoints, and
+# update on a much slower cadence than our 120s poll — so the default
+# verdicts fire on normal operation. Override here per product.
+# --------------------------------------------------------------------------
+DEFAULT_L4_PROFILE: dict[str, object] = {
+    "extreme_threshold": 0.40,
+    # FROZEN means the pHash matches the previous run exactly. We always
+    # suppress it on a low-coverage frame (a radar staring at clutter on a
+    # quiet day is going to produce identical frames — that's not a stuck
+    # feed, it's a calm world). `skip_frozen=True` suppresses FROZEN even
+    # when coverage is high: appropriate for forecast products whose
+    # cadence is slower than the L4 check cadence.
+    "skip_frozen":         False,
+    # Coverage floor (percent of pixels with data) below which FROZEN
+    # always demotes to QUIET regardless of profile.
+    "frozen_min_cov_pct":  5.0,
+}
+
+L4_PROFILES: dict[str, dict[str, object]] = {
+    # Hydrology forecasts — thresholded color ramps, hourly cadence.
+    "water_depth":     {"extreme_threshold": 0.85, "skip_frozen": True},
+    "max_water_depth": {"extreme_threshold": 0.85, "skip_frozen": True},
+    "water_level":     {"extreme_threshold": 0.85, "skip_frozen": True},
+    "max_water_level": {"extreme_threshold": 0.85, "skip_frozen": True},
+    # Nowcast composite — blank when no precip, identical frames between
+    # ~2-min model runs are expected.
+    "comp_now":        {"extreme_threshold": 0.60, "skip_frozen": True},
+}
+
+
+def l4_profile(identifier: str) -> dict[str, object]:
+    """Merge any per-product overrides over the defaults."""
+    return {**DEFAULT_L4_PROFILE, **L4_PROFILES.get(identifier, {})}
 
 
 def image_path(product_id: str, image_name: str) -> str:
