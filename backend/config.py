@@ -160,6 +160,33 @@ RADAR_FOLDER = {
 # Radar-status API uses these aliases for the same radars.
 STATUS_TO_RADAR = {"EBAY": "XEBY", "CBand": "CBAND"}
 
+# Per-radar GHOST_UP detection threshold: max wall-clock seconds since the
+# newest image filename's timestamp before we treat the radar as silent.
+# Values are ~1.5× each radar's observed worst-case gap, with a 4-min floor
+# (no point firing on a single missed scan when the cadence is tight).
+#
+# Methodology: sample /api/xbandRadarImages/ for each radar, take the max
+# observed inter-scan gap over the rolling ~1 h window, round up to the
+# nearest minute. Re-tune periodically; cadences drift.
+#
+# Last calibrated 2026-05-17 — see PR audit, gap distributions were:
+#   XEBY  median 180s, max 180s  → 300s   (very regular 3-min cadence)
+#   XSCW  median 120s, max 480s  → 720s   (mostly 2-min, occasional 8-min)
+#   XSCR  median 120s, max 180s  → 300s   (mostly 2-min, occasional 3-min)
+#   XSWR  median 120s, max 120s  → 240s   (perfect 2-min cadence)
+#   CBAND median 240s, max 300s  → 480s   (variable 2-5 min)
+#   XSCV  (down at calibration)  → 600s   (X-band default)
+#
+# Default for any radar not listed: 600s.
+RADAR_SILENT_FAIL_S = {
+    "XEBY":  300,
+    "XSCV":  600,
+    "XSCW":  720,
+    "XSCR":  300,
+    "XSWR":  240,
+    "CBAND": 480,
+}
+
 # Moment name → productPrefix mapping (the JS bundle's `j` object + L's CBAND
 # exception).
 MOMENT_TO_PREFIX_DEFAULT = {
