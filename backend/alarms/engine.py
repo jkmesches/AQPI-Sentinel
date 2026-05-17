@@ -43,13 +43,44 @@ class AlarmEngine:
         # listeners notified on alarm/run events (P1.5 WebSocket)
         self._listeners: list = []
 
+    async def _patch_smtp_from_settings(self, cfg: AlertsConfig) -> None:
+        """Pull canonical SMTP from settings.smtp into ``cfg.smtp``.
+
+        Without this, any caller that hands us a new AlertsConfig (e.g. the
+        /admin/alerts PUT serializing back a config whose opaque smtp field
+        is None) would wipe the email sink. settings.smtp is the source of
+        truth — alerts_config.smtp is legacy and intentionally ignored.
+        """
+        from ..auth.email import load_smtp_settings, to_alerts_smtp_dict
+        from .models import SmtpConfig
+        smtp_settings = await load_smtp_settings(self.store.pool)
+        if smtp_settings is None:
+            cfg.smtp = None
+        else:
+            cfg.smtp = SmtpConfig.model_validate(to_alerts_smtp_dict(smtp_settings))
+
     async def reload(self, new_cfg: AlertsConfig) -> None:
         """Hot-swap the engine's config. Triggered from the admin UI after
         a routing-config edit lands so changes don't require a restart."""
+        await self._patch_smtp_from_settings(new_cfg)
         old_sinks = self.sinks
         self.cfg = new_cfg
         self.router = Router(new_cfg)
         self.sinks = build_sinks(new_cfg)
+        wh = old_sinks.get("webhook") if isinstance(old_sinks, dict) else None
+        if wh and hasattr(wh, "aclose"):
+            try:
+                await wh.aclose()
+            except Exception:
+                pass
+
+    async def refresh_smtp(self, pool=None) -> None:
+        """Reload SMTP from settings.smtp and rebuild sinks. Called by the
+        /admin/email PUT so changes take effect without a process restart.
+        The ``pool`` argument is unused but kept for backwards compat."""
+        await self._patch_smtp_from_settings(self.cfg)
+        old_sinks = self.sinks
+        self.sinks = build_sinks(self.cfg)
         wh = old_sinks.get("webhook") if isinstance(old_sinks, dict) else None
         if wh and hasattr(wh, "aclose"):
             try:

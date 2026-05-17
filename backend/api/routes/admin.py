@@ -56,6 +56,11 @@ async def get_setting(
         val = json.loads(val)
     if key == SMTP_KEY:
         val = _scrub(val)
+        # Surface the default from_name to the UI when none is saved yet so
+        # the field shows the right placeholder instead of blank.
+        if isinstance(val, dict) and not val.get("from_name"):
+            from ...auth.email import DEFAULT_FROM_NAME
+            val["from_name"] = DEFAULT_FROM_NAME
     return {
         "key":        key,
         "value":      val,
@@ -93,20 +98,36 @@ async def put_setting(
                     merged[k] = v
                 value = merged
 
+    # Pass the dict directly: asyncpg has a jsonb codec registered (see
+    # backend/db/store.py) that handles encoding. Passing json.dumps(value)
+    # here would double-encode and store the row as a jsonb STRING instead
+    # of a jsonb OBJECT, which then makes downstream loaders see the wrong
+    # type and silently disable features (e.g. the email sink).
     await pool.execute(
         """
         INSERT INTO settings (key, value, updated_at, updated_by)
-        VALUES ($1, $2::jsonb, now(), $3)
+        VALUES ($1, $2, now(), $3)
         ON CONFLICT (key) DO UPDATE
           SET value = EXCLUDED.value,
               updated_at = EXCLUDED.updated_at,
               updated_by = EXCLUDED.updated_by
         """,
-        key, json.dumps(value), user["email"],
+        key, value, user["email"],
     )
     await A.audit(pool, user_email=user["email"], action=f"settings.put",
                   target=f"settings:{key}",
                   payload={"keys": list(value.keys()) if isinstance(value, dict) else None})
+
+    # SMTP changes need to propagate to the running alarm engine's email
+    # sink so alarm dispatch picks up the new from_name / credentials
+    # without a process restart.
+    if key == SMTP_KEY:
+        engine = getattr(request.app.state, "engine", None)
+        if engine is not None:
+            try:
+                await engine.refresh_smtp(pool)
+            except Exception:
+                log.exception("engine.refresh_smtp failed")
     return {"ok": True, "key": key}
 
 
@@ -145,9 +166,10 @@ async def email_test(
     import aiosmtplib
     from email.message import EmailMessage
     import time
+    from ...auth.email import from_header
 
     msg = EmailMessage()
-    msg["From"] = from_addr
+    msg["From"] = from_header(cfg)
     msg["To"] = to_addr
     msg["Subject"] = subject
     msg.set_content(
@@ -235,16 +257,18 @@ async def put_alerts(
         raise HTTPException(400, f"invalid config: {e}")
     pool = request.app.state.store.pool
     serialized = new_cfg.model_dump(mode="json")
+    # Pass the dict directly — see comment in put_setting about the jsonb
+    # codec / double-encoding pitfall.
     await pool.execute(
         """
         INSERT INTO settings (key, value, updated_at, updated_by)
-        VALUES ($1, $2::jsonb, now(), $3)
+        VALUES ($1, $2, now(), $3)
         ON CONFLICT (key) DO UPDATE
           SET value = EXCLUDED.value,
               updated_at = EXCLUDED.updated_at,
               updated_by = EXCLUDED.updated_by
         """,
-        ALERTS_KEY, json.dumps(serialized), user["email"],
+        ALERTS_KEY, serialized, user["email"],
     )
     # Hot-reload the running engine so changes take effect without a restart.
     engine = getattr(request.app.state, "engine", None)
@@ -258,6 +282,85 @@ async def put_alerts(
                            "routes":    len(serialized.get("routes") or []),
                            "policies":  len(serialized.get("escalation_policies") or [])})
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Dispatch a synthetic test alert through one routing rule.
+#
+# Uses the currently-running engine config (so the user must save first).
+# Targets the rule's policy's *first* step only — same shape the real
+# dispatcher fires on opening, no escalation delay involved.
+# ---------------------------------------------------------------------------
+
+@router.post("/alerts/test")
+async def test_alert(
+    request: Request, user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    from datetime import datetime, timezone
+    route_idx = body.get("route_index")
+    if not isinstance(route_idx, int):
+        raise HTTPException(400, "route_index (int) required")
+    engine = getattr(request.app.state, "engine", None)
+    if engine is None:
+        raise HTTPException(500, "alarm engine not running")
+    cfg = engine.cfg
+    if route_idx < 0 or route_idx >= len(cfg.routes):
+        raise HTTPException(400, f"route_index {route_idx} out of range")
+    route = cfg.routes[route_idx]
+    policy = cfg.policy(route.policy)
+    if policy is None:
+        raise HTTPException(400, f"plan {route.policy!r} not found")
+    if not policy.steps:
+        raise HTTPException(400, f"plan {route.policy!r} has no steps")
+    step = policy.steps[0]
+
+    fake_alarm = {
+        "id":             -1,
+        "check_id":       route.match.get("check_id") or "test.synthetic",
+        "target":         route.match.get("target")   or "TEST",
+        "stage":          route.match.get("stage")    or "L0",
+        "severity":       route.severity_floor or "warn",
+        "status_at_open": route.match.get("status_at_open") or "warn",
+        "opened_at":      datetime.now(timezone.utc),
+        "suppressed_by":  None,
+        "message":        "[TEST] Synthetic alert from the admin UI — no actual alarm fired.",
+        "payload":        {"test": True},
+    }
+    results: list[dict] = []
+    for receiver_name in step.receivers:
+        recv = cfg.receiver(receiver_name)
+        if recv is None:
+            results.append({"receiver": receiver_name, "channel": None,
+                            "ok": False, "error": "unknown receiver"})
+            continue
+        channels: list[str] = []
+        if recv.email:   channels.append("email")
+        if recv.webhook: channels.append("webhook")
+        if recv.console: channels.append("console")
+        if not channels:
+            results.append({"receiver": receiver_name, "channel": None,
+                            "ok": False, "error": "no channels configured"})
+            continue
+        for ch in channels:
+            sink = engine.sinks.get(ch)
+            if sink is None:
+                results.append({"receiver": receiver_name, "channel": ch,
+                                "ok": False, "error": "sink unavailable"})
+                continue
+            try:
+                sr = await sink.send(fake_alarm, recv, route, 0)
+                results.append({"receiver": receiver_name, "channel": ch,
+                                "ok": sr.delivered, "error": sr.error})
+            except Exception as e:
+                results.append({"receiver": receiver_name, "channel": ch,
+                                "ok": False, "error": f"{type(e).__name__}: {e}"})
+    pool = request.app.state.store.pool
+    await A.audit(pool, user_email=user["email"], action="alerts.test",
+                  payload={"route_index": route_idx, "results": results})
+    ok_overall = bool(results) and all(r["ok"] for r in results)
+    return {"ok": ok_overall, "results": results,
+            "step_receivers": list(step.receivers)}
 
 
 # ---------------------------------------------------------------------------
