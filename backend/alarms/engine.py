@@ -32,6 +32,14 @@ def _utcnow() -> datetime:
 
 
 class AlarmEngine:
+    # Auto-close ACKed alarms whose underlying check has been pass/skip
+    # for at least this many seconds. Catches alarms left orphaned when a
+    # check transitions warn→skip (heuristic fix, dependency change) and
+    # the close-on-pass handler in evaluate() doesn't fire. Run cadence
+    # for the cleanup loop:
+    AUTOCLOSE_CLEAN_S = 6 * 3600   # 6 h of clean runs required to close
+    AUTOCLOSE_CADENCE_S = 1800     # run the sweep at most every 30 min
+
     def __init__(self, store, cfg: AlertsConfig | None = None):
         self.store = store
         self.cfg = cfg if cfg is not None else AlertsConfig()
@@ -42,6 +50,8 @@ class AlarmEngine:
         self._ticker_task: asyncio.Task | None = None
         # listeners notified on alarm/run events (P1.5 WebSocket)
         self._listeners: list = []
+        # last time we ran the stale-ACKed auto-close sweep
+        self._last_autoclose: datetime | None = None
 
     async def _patch_smtp_from_settings(self, cfg: AlertsConfig) -> None:
         """Pull canonical SMTP from settings.smtp into ``cfg.smtp``.
@@ -128,7 +138,12 @@ class AlarmEngine:
     # ------------------------------------------------------------------
     async def evaluate(self, result):
         existing = await self.store.find_open_alarm(result.check_id, result.target)
-        if result.status == "pass":
+        # Treat skip the same as pass for alarm bookkeeping. A check that
+        # returns skip ran but couldn't make a meaningful assessment
+        # (e.g. a forecast product whose only differentiating sub-checks
+        # are themselves skip-eligible). It's not a problem state, so we
+        # close any existing alarm and don't open a new one.
+        if result.status in ("pass", "skip"):
             if existing:
                 await self.store.close_alarm(existing["id"], when=result.finished_at)
                 await self._emit("alarm_close", {**dict(existing), "closed_at": result.finished_at.isoformat()})
@@ -182,15 +197,71 @@ class AlarmEngine:
 
     async def _tick(self):
         rows = await self.store.list_open_alarms()
+        now = _utcnow()
+
+        # Periodic stale-ACKed sweep. Cheap query, runs every 30 min, and
+        # ensures alarms acknowledged but no longer relevant don't linger
+        # forever (e.g. when a check goes warn→skip after a heuristic
+        # change). Independent of `rows` — needs to run even if all open
+        # alarms got list-filtered to empty above.
+        if (self._last_autoclose is None
+            or (now - self._last_autoclose).total_seconds() >= self.AUTOCLOSE_CADENCE_S):
+            try:
+                await self._close_stale_acked(now)
+            except Exception:
+                log.exception("auto-close stale ACKed alarms failed")
+            self._last_autoclose = now
+
         if not rows:
             return
-        now = _utcnow()
         active_silences = await self.store.list_active_silences(now)
         for alarm in rows:
             try:
                 await self._process(alarm, now, active_silences)
             except Exception:
                 log.exception("processing alarm %s", alarm.get("id"))
+
+    async def _close_stale_acked(self, now: datetime) -> None:
+        """Close ACKed alarms whose underlying check has been pass/skip
+        for AUTOCLOSE_CLEAN_S. Single SQL pass; emits alarm_close for
+        each so the UI updates."""
+        pool = self.store.pool
+        # Note: alarm_acks may have multiple rows per alarm (re-acks). The
+        # EXISTS subquery just checks "ever acked."
+        rows = await pool.fetch(
+            f"""
+            SELECT a.id, a.check_id, a.target, a.stage, a.severity,
+                   a.opened_at, a.message, a.payload
+            FROM alarms a
+            WHERE a.closed_at IS NULL
+              AND EXISTS (SELECT 1 FROM alarm_acks k WHERE k.alarm_id = a.id)
+              AND NOT EXISTS (
+                SELECT 1 FROM check_runs r
+                WHERE r.check_id = a.check_id
+                  AND r.target   = a.target
+                  AND r.finished_at > now() - interval '{self.AUTOCLOSE_CLEAN_S} seconds'
+                  AND r.status NOT IN ('pass', 'skip')
+              )
+              AND EXISTS (
+                SELECT 1 FROM check_runs r
+                WHERE r.check_id = a.check_id
+                  AND r.target   = a.target
+                  AND r.finished_at > now() - interval '{self.AUTOCLOSE_CLEAN_S} seconds'
+                  AND r.status IN ('pass', 'skip')
+              )
+            """
+        )
+        for row in rows:
+            await self.store.close_alarm(row["id"], when=now)
+            log.info(
+                "auto-closed stale ACKed alarm %s (%s/%s): no non-OK runs in %dh",
+                row["id"], row["check_id"], row["target"], self.AUTOCLOSE_CLEAN_S // 3600,
+            )
+            await self._emit("alarm_close", {
+                **dict(row),
+                "closed_at": now.isoformat(),
+                "auto_close_reason": "acked_and_recovered",
+            })
 
     async def _process(self, alarm: dict, now: datetime, silences: list[dict]):
         if alarm["suppressed_by"]:
