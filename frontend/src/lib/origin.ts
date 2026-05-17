@@ -22,11 +22,14 @@ const _envBase = (import.meta.env.PUBLIC_SENTINEL_API_BASE as string | undefined
 function detect(): string {
 	if (_envBase) return _envBase.replace(/\/$/, '');
 	if (typeof window === 'undefined') return '';
-	// Dev: Vite serves both the page and the proxied API on the same port,
-	// so leave URLs relative.
-	if (window.location.port === '5173') return '';
-	// Prod: same hostname, port 8000.
-	return `${window.location.protocol}//${window.location.hostname}:8000`;
+	// Port-3000 = "raw docker compose, no proxy" — backend lives at the
+	// sibling port 8000 on the same host. Anything else (5173 dev with
+	// Vite proxy, 80/443/empty behind a reverse proxy like Traefik that
+	// routes /api/*) is same-origin and we leave URLs relative.
+	if (window.location.port === '3000') {
+		return `${window.location.protocol}//${window.location.hostname}:8000`;
+	}
+	return '';
 }
 
 export const API_BASE = detect();
