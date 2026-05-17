@@ -174,3 +174,14 @@ svg.spark path.stroke { opacity: 0.95; }
 }
 .maplibregl-ctrl-attrib a { color: var(--map-attrib-link) !important; }
 .maplibregl-canvas:focus { outline: none; }
+
+/* ===========================================================================
+   MOBILE — touch-target + iOS-quirk fixes for the /m/* route tree.
+   These cascade to desktop too but are harmless there.
+   =========================================================================== */
+@media (max-width: 768px) {
+	/* iOS auto-zooms on focus when input font-size < 16px. Enforce a floor. */
+	input, select, textarea { font-size: 16px; }
+	/* Stop the rubber-band pull-to-refresh from arguing with page scroll. */
+	html, body { overscroll-behavior-y: contain; }
+}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/state';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -10,6 +11,10 @@
 	import { fmtAge } from '$lib/format';
 	import { diag } from '$lib/diag';
 	import { installFetchPrefix } from '$lib/origin';
+
+	// Mobile routes (/m/*) supply their own chrome — skip the desktop
+	// header / stage strip / overflow-hidden main when we're under /m.
+	const isMobile = $derived(page.url.pathname.startsWith('/m'));
 
 	// Routes /api/* fetches to the prod backend host when not on dev's
 	// :5173 (i.e. in production, with no reverse proxy). No-op in dev.
@@ -64,6 +69,10 @@
 	let { children }: { children: any } = $props();
 </script>
 
+{#if isMobile}
+	<!-- /m/* routes render their own shell via src/routes/m/+layout.svelte -->
+	{@render children?.()}
+{:else}
 <div class="flex h-full flex-col">
 	<!-- HEADER -->
 	<header
@@ -188,3 +197,4 @@
 		{@render children?.()}
 	</main>
 </div>
+{/if}
