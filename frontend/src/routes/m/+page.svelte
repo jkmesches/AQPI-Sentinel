@@ -2,6 +2,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { fmtAge } from '$lib/format';
 	import StatusDot from '$lib/components/StatusDot.svelte';
+	import MobileStatusMap from '$lib/components/mobile/MobileStatusMap.svelte';
 
 	let now = $state(Date.now());
 	let tickTimer: ReturnType<typeof setInterval>;
@@ -70,6 +71,11 @@
 			{/if}
 		</div>
 	{/if}
+</section>
+
+<!-- Geographic context: tiny radar map (lazy-loaded MapLibre chunk) -->
+<section class="mb-4">
+	<MobileStatusMap />
 </section>
 
 <!-- Per-stage cards -->
