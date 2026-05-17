@@ -233,6 +233,12 @@ DEFAULT_L4_PROFILE: dict[str, object] = {
     # Coverage floor (percent of pixels with data) below which FROZEN
     # always demotes to QUIET regardless of profile.
     "frozen_min_cov_pct":  5.0,
+    # Skip the polar range-ring artifact detector. Set True for radars
+    # whose image geometry doesn't match the X-band assumptions the
+    # detector was tuned against (CBAND's 1800×1800 vs X-band's
+    # ~700×700, plus different field-of-view + physics). All other Tier
+    # 1 + Tier 2 stats are scale-invariant and apply cleanly.
+    "skip_range_ring":     False,
 }
 
 L4_PROFILES: dict[str, dict[str, object]] = {
@@ -252,6 +258,12 @@ L4_PROFILES: dict[str, dict[str, object]] = {
     # silences "quiet weather" without missing real stuck-feed conditions
     # (which typically lock at much higher coverage).
     "comp_ref":        {"frozen_min_cov_pct": 10.0},
+    # CBAND L4 — image geometry differs from X-band (1800×1800 vs
+    # ~700×700, wider field of view, different physics). Coverage,
+    # extreme, speckle, and frozen detection are scale-invariant and
+    # apply cleanly. The polar range_ring detector was tuned for X-band
+    # geometry and would false-fire on CBAND, so we suppress it here.
+    "CBAND":           {"skip_range_ring": True},
 }
 
 
