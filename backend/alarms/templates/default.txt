@@ -1,12 +1,40 @@
-[SENTINEL {{ severity }}]  {{ stage }}  {{ check_id }}
-Target:     {{ target }}
-Severity:   {{ severity|lower }}{% if alarm.payload.get('promoted_from') %} (promoted from {{ alarm.payload['promoted_from'] }}){% endif %}
-Opened:     {{ opened_at }}
-Step:       {{ step_idx }}{% if policy %}  ({{ policy }}){% endif %}
+[SENTINEL {{ severity_upper }}] {{ stage }}/{{ target or check_id.split('.')[-1] }}
+{{ short_line }}
 
-Message:    {{ message }}
+──────────────────────────────────────────────────────────────────────
+SUMMARY
+──────────────────────────────────────────────────────────────────────
+  Check         {{ check_id }}
+  Target        {{ target or '—' }}
+  Stage         {{ stage }}
+  Severity      {{ severity }}
+  Opened        {{ opened_at_str }}  ({{ opened_age }} ago)
+{% if policy %}  Step          {{ step_idx }} of policy "{{ policy }}"{% endif %}
+{% if what %}
+──────────────────────────────────────────────────────────────────────
+WHAT HAPPENED
+──────────────────────────────────────────────────────────────────────
+  {{ what }}
+{% endif %}
+{% if observed %}
+──────────────────────────────────────────────────────────────────────
+OBSERVED
+──────────────────────────────────────────────────────────────────────
+{% for label, value in observed %}  {{ "%-28s"|format(label) }}{{ value }}
+{% endfor %}{% endif %}
+{% if captured_image_url or verify_urls or dashboard_url %}
+──────────────────────────────────────────────────────────────────────
+VERIFY YOURSELF
+──────────────────────────────────────────────────────────────────────
+{% if dashboard_url %}  Open in dashboard:
+    {{ dashboard_url }}
+{% endif %}{% if captured_image_url %}
+  Captured image:
+    {{ captured_image_url }}
+{% endif %}{% if verify_urls %}
+  Upstream APIs:
+{% for label, url in verify_urls %}    [{{ label }}]
+    {{ url }}
+{% endfor %}{% endif %}{% endif %}
 
-{% if alarm.payload %}Payload (truncated):
-{{ alarm.payload|tojson(indent=2) }}{% endif %}
-
-— Sentinel
+— AQPI Sentinel

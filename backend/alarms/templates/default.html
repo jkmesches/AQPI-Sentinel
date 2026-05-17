@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>[SENTINEL {{ severity_upper }}] {{ stage }}/{{ target or check_id.split('.')[-1] }}</title>
+</head>
+{# Inline CSS only — every email client has its own quirks; tables + inline styles are the only thing that renders consistently. #}
+<body style="margin:0;padding:0;background:#f5f5f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1c1f1c;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f5f5f3;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="max-width:640px;background:#ffffff;border:1px solid #d8d6d0;">
+
+          {# Severity stripe (color follows level) #}
+          {% set color = '#9a6905' if severity == 'warn'
+                       else '#B91C1C' if severity in ('fail','critical')
+                       else '#1d4ed8' %}
+          <tr><td style="background:{{ color }};height:4px;line-height:4px;font-size:1px;">&nbsp;</td></tr>
+
+          {# Header — wordmark + severity badge #}
+          <tr>
+            <td style="padding:16px 24px 12px 24px;border-bottom:1px solid #e8e8e3;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-weight:600;font-size:13px;letter-spacing:0.18em;color:#1E4D2B;">AQPI SENTINEL</td>
+                  <td align="right" style="font-size:11px;text-transform:uppercase;letter-spacing:0.12em;color:{{ color }};font-weight:600;">{{ severity_upper }}</td>
+                </tr>
+              </table>
+              <div style="margin-top:10px;font-size:16px;color:#0d100c;font-weight:600;">{{ stage }} / {{ target or check_id.split('.')[-1] }}</div>
+              <div style="margin-top:4px;font-size:13px;color:#555c50;font-family:ui-monospace,monospace;">{{ short_line }}</div>
+            </td>
+          </tr>
+
+          {# Summary grid #}
+          <tr>
+            <td style="padding:16px 24px;border-bottom:1px solid #e8e8e3;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-size:12px;">
+                <tr><td style="color:#6f7568;text-transform:uppercase;letter-spacing:0.12em;font-size:10px;padding-right:16px;padding-bottom:4px;">Check</td><td style="font-family:ui-monospace,monospace;padding-bottom:4px;">{{ check_id }}</td></tr>
+                <tr><td style="color:#6f7568;text-transform:uppercase;letter-spacing:0.12em;font-size:10px;padding-right:16px;padding-bottom:4px;">Target</td><td style="font-family:ui-monospace,monospace;padding-bottom:4px;">{{ target or '—' }}</td></tr>
+                <tr><td style="color:#6f7568;text-transform:uppercase;letter-spacing:0.12em;font-size:10px;padding-right:16px;padding-bottom:4px;">Opened</td><td style="font-family:ui-monospace,monospace;padding-bottom:4px;">{{ opened_at_str }} <span style="color:#6f7568;">({{ opened_age }} ago)</span></td></tr>
+                {% if policy %}<tr><td style="color:#6f7568;text-transform:uppercase;letter-spacing:0.12em;font-size:10px;padding-right:16px;">Step</td><td style="font-family:ui-monospace,monospace;">{{ step_idx }} · policy "{{ policy }}"</td></tr>{% endif %}
+              </table>
+            </td>
+          </tr>
+
+          {% if what %}
+          <tr>
+            <td style="padding:16px 24px;border-bottom:1px solid #e8e8e3;">
+              <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#6f7568;margin-bottom:6px;">What happened</div>
+              <div style="font-size:13px;line-height:1.55;color:#1c1f1c;">{{ what }}</div>
+            </td>
+          </tr>
+          {% endif %}
+
+          {% if observed %}
+          <tr>
+            <td style="padding:16px 24px;border-bottom:1px solid #e8e8e3;">
+              <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#6f7568;margin-bottom:8px;">Observed</div>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:12px;font-family:ui-monospace,monospace;">
+                {% for label, value in observed %}
+                <tr>
+                  <td style="color:#6f7568;padding:3px 12px 3px 0;vertical-align:top;white-space:nowrap;">{{ label }}</td>
+                  <td style="color:#0d100c;padding:3px 0;vertical-align:top;word-break:break-word;">{{ value }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+            </td>
+          </tr>
+          {% endif %}
+
+          {% if captured_image_url %}
+          <tr>
+            <td style="padding:16px 24px;border-bottom:1px solid #e8e8e3;">
+              <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#6f7568;margin-bottom:8px;">Captured image</div>
+              <a href="{{ captured_image_url }}" style="display:block;border:1px solid #d8d6d0;background:#000;text-align:center;text-decoration:none;">
+                <img src="{{ captured_image_url }}" alt="captured scan" style="display:block;max-width:100%;height:auto;margin:0 auto;">
+              </a>
+              <div style="margin-top:6px;font-size:11px;color:#6f7568;font-family:ui-monospace,monospace;word-break:break-all;">{{ captured_image_url }}</div>
+            </td>
+          </tr>
+          {% endif %}
+
+          {% if dashboard_url or verify_urls %}
+          <tr>
+            <td style="padding:16px 24px;">
+              <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#6f7568;margin-bottom:8px;">Verify yourself</div>
+              {% if dashboard_url %}
+              <div style="margin-bottom:10px;">
+                <a href="{{ dashboard_url }}" style="display:inline-block;padding:8px 14px;background:#1E4D2B;color:#ffffff;text-decoration:none;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;border-radius:2px;">Open in dashboard →</a>
+              </div>
+              {% endif %}
+              {% if verify_urls %}
+              <div style="font-size:11px;color:#555c50;margin-bottom:4px;">Upstream API calls used by this check:</div>
+              <ul style="margin:6px 0 0 0;padding-left:18px;font-size:11px;font-family:ui-monospace,monospace;">
+                {% for label, url in verify_urls %}
+                <li style="margin-bottom:4px;">
+                  <span style="color:#6f7568;">{{ label }}:</span><br>
+                  <a href="{{ url }}" style="color:#1d4ed8;text-decoration:none;word-break:break-all;">{{ url }}</a>
+                </li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+
+          {# Footer #}
+          <tr>
+            <td style="padding:12px 24px;background:#f5f5f3;border-top:1px solid #d8d6d0;font-size:10px;color:#6f7568;letter-spacing:0.04em;">
+              — AQPI Sentinel · monitoring radarca.engr.colostate.edu
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

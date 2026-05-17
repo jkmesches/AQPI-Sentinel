@@ -33,6 +33,7 @@ class Settings:
     admin_email: str                       # bootstrap admin (only used if no users exist)
     admin_password: str
     admin_display_name: str
+    public_url: str                        # dashboard URL embedded in alert emails (empty = omit)
 
 
 def _load() -> Settings:
@@ -58,6 +59,7 @@ def _load() -> Settings:
         admin_email=os.environ.get("SENTINEL_ADMIN_EMAIL", ""),
         admin_password=os.environ.get("SENTINEL_ADMIN_PASSWORD", ""),
         admin_display_name=os.environ.get("SENTINEL_ADMIN_DISPLAY_NAME", ""),
+        public_url=os.environ.get("SENTINEL_PUBLIC_URL", "").rstrip("/"),
     )
 
 
