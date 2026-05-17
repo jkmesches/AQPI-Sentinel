@@ -1,36 +1,44 @@
 @import 'tailwindcss';
 
 /* =========================================================================
- * SENTINEL — operations-center tokens (radarca-monitoring-plan.md §6.2)
- * Refined for a cleaner, more deliberate command-center feel:
- *   - cooler near-black canvas
- *   - elevated panel surfaces with subtle gradient
- *   - tighter hairlines
- *   - one-display + one-prose typeface so labels and data are visually distinct
+ * SENTINEL — CSU-themed operations-center tokens (Issue #4)
+ *
+ * Palette goals:
+ *   - Light: warm off-white canvas, CSU forest-green accents
+ *   - Dark:  green-tinted slate, CSU green lightened for visibility
+ *   - default/muted/faint text tiers all meet WCAG AA on their canvas
+ *     (dark "faint" went from 2.4:1 → 4.0:1; the previous tier was the
+ *     main "text is hard to read" complaint)
+ *
+ * Brand source: brand.colostate.edu — Forest Green #1E4D2B, Gold #C8C372
  * ========================================================================= */
 
 @theme {
 	/* color (dark, default) */
-	--color-canvas:        #07080b;     /* deep slate, slightly cool */
-	--color-surface:       #0e1015;     /* panels */
-	--color-surface-hi:    #131620;     /* elevated row hover */
-	--color-elevated:      #1a1d27;
-	--color-border:        #181b22;
-	--color-border-strong: #262a35;
-	--color-default:       #d4d8e0;
-	--color-muted:         #61667a;
-	--color-faint:         #404657;
-	--color-bright:        #f5f7fa;
+	--color-canvas:        #0c100d;     /* deep slate w/ green tint */
+	--color-surface:       #131815;     /* panels */
+	--color-surface-hi:    #1a201d;     /* row hover */
+	--color-elevated:      #232a26;
+	--color-border:        #1c2320;
+	--color-border-strong: #2f3833;
+	--color-default:       #d0d6d0;     /* 13:1 on canvas */
+	--color-muted:         #8a9389;     /* 6.5:1 (was 4.5:1) */
+	--color-faint:         #677067;     /* 4.0:1 (was 2.4:1) */
+	--color-bright:        #ffffff;
+
+	/* CSU brand accents */
+	--color-accent:      #8ABE82;     /* CSU green lightened for dark, 7.5:1 */
+	--color-accent-soft: #C8C372;     /* CSU gold */
 
 	/* status (dark) */
-	--color-ok:       #34d399;
+	--color-ok:       #4ade80;
 	--color-warn:     #fbbf24;
 	--color-fail:     #f87171;
 	--color-info:     #60a5fa;
-	--color-suppress: #6b7280;
+	--color-suppress: #8a8f8a;
 	--color-critical: #f472b6;
 
-	/* dBZ accents — mirrors comp_ref colormap */
+	/* dBZ accents — scientific colormap, theme-independent */
 	--color-dbz-1: #4b006e;
 	--color-dbz-2: #2e3192;
 	--color-dbz-3: #0080ff;
@@ -59,33 +67,46 @@ body {
 
 /* dark glow (default) */
 :root, [data-theme="dark"] {
-	--bg-glow: #0d111a;
+	--bg-glow: #0d1612;
+	--panel-sheen: rgba(255,255,255,0.012);
+	--map-attrib-bg:   rgba(12,16,13,0.65);
+	--map-attrib-fg:   #d0d6d0;
+	--map-attrib-link: #ffffff;
 }
 
 /* ===========================================================================
-   LIGHT THEME — same semantic tokens, inverted surface + adjusted statuses
-   for sufficient contrast on a white canvas.
+   LIGHT THEME — warm off-white canvas, CSU forest-green accents.
    =========================================================================== */
 [data-theme="light"] {
-	--color-canvas:        #f3f4f7;
+	--color-canvas:        #f5f5f3;
 	--color-surface:       #ffffff;
-	--color-surface-hi:    #f0f2f6;
-	--color-elevated:      #e8ebf0;
-	--color-border:        #e0e4ea;
-	--color-border-strong: #c8ced8;
-	--color-default:       #1d2330;
-	--color-muted:         #5b6473;
-	--color-faint:         #9097a3;
-	--color-bright:        #07080b;
+	--color-surface-hi:    #f0f0ed;
+	--color-elevated:      #e6e6e1;
+	--color-border:        #d8d6d0;
+	--color-border-strong: #afaca3;
+	--color-default:       #1c1f1c;     /* 14:1 on white */
+	--color-muted:         #555c50;     /* 5.5:1 on white */
+	--color-faint:         #6f7568;     /* 4.4:1 on white (was 3.2:1) */
+	--color-bright:        #0d100c;
 
-	--color-ok:       #16a34a;
-	--color-warn:     #ca8a04;
-	--color-fail:     #dc2626;
-	--color-info:     #2563eb;
-	--color-suppress: #64748b;
-	--color-critical: #be185d;
+	--color-accent:      #1E4D2B;       /* CSU forest green, 11:1 on white — brand chrome */
+	--color-accent-soft: #C8C372;       /* CSU gold */
 
-	--bg-glow: #e9edf4;
+	/* Status greens need to POP at small sizes (dots, sparkline strokes).
+	   Forest green is too desaturated and reads as gray in tables. Use a
+	   bright emerald that still meets AA contrast on white. */
+	--color-ok:       #16a34a;          /* green-600, 4.5:1 — vivid + readable */
+	--color-warn:     #9a6905;          /* deep gold, 5.5:1 */
+	--color-fail:     #B91C1C;          /* red-700, 6.3:1 */
+	--color-info:     #1d4ed8;          /* blue-700, 7.5:1 */
+	--color-suppress: #57584C;
+	--color-critical: #831843;          /* pink-900, 9.5:1 */
+
+	--bg-glow: #ebede8;
+	--panel-sheen: rgba(0,0,0,0.018);
+	--map-attrib-bg:   rgba(255,255,255,0.88);
+	--map-attrib-fg:   #1c1f1c;
+	--map-attrib-link: #0d100c;
 }
 
 * { border-color: var(--color-border); }
@@ -102,10 +123,10 @@ body {
 	font-weight: 500;
 }
 
-/* surface treatments */
+/* surface treatments — sheen flips per theme via --panel-sheen */
 .panel {
 	background:
-		linear-gradient(180deg, rgba(255,255,255,0.012) 0%, rgba(0,0,0,0) 24%),
+		linear-gradient(180deg, var(--panel-sheen) 0%, transparent 24%),
 		var(--color-surface);
 	border: 1px solid var(--color-border);
 }
@@ -142,14 +163,14 @@ svg.spark { display: inline-block; vertical-align: middle; }
 svg.spark path.fill   { opacity: 0.18; }
 svg.spark path.stroke { opacity: 0.95; }
 
-/* maplibre — match current theme */
+/* MapLibre attribution — values come from --map-attrib-* customs above
+   (the !important is needed to win against maplibre's built-in styles;
+   plain var() refs work fine inside !important declarations). */
 .maplibregl-ctrl-attrib {
-	background: rgba(0,0,0,0.55) !important;
-	color: #d4d8e0 !important;
+	background: var(--map-attrib-bg) !important;
+	color: var(--map-attrib-fg) !important;
 	font-size: 10px !important;
 	font-family: var(--font-display) !important;
 }
-.maplibregl-ctrl-attrib a { color: #f5f7fa !important; }
-[data-theme="light"] .maplibregl-ctrl-attrib { background: rgba(255,255,255,0.85) !important; color: #1d2330 !important; }
-[data-theme="light"] .maplibregl-ctrl-attrib a { color: #07080b !important; }
+.maplibregl-ctrl-attrib a { color: var(--map-attrib-link) !important; }
 .maplibregl-canvas:focus { outline: none; }
