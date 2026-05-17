@@ -48,6 +48,19 @@ PRIMARY_MOMENT = "Reflectivity"
 # (XSWR's perfect 2-min cadence wants a tight 4 min threshold).
 SILENT_FAIL_S_DEFAULT = 600
 
+# ±10% hysteresis band around silent_fail_s. A radar transitions FROM
+# fresh TO stale only when age exceeds threshold × (1 + HYSTERESIS). It
+# transitions back to fresh only when age drops below threshold × (1 -
+# HYSTERESIS). Within the band, the previous fresh/stale state is held.
+# Prevents flapping when a radar's actual cadence sits right at the
+# threshold boundary (CBAND was the original instigator).
+HYSTERESIS = 0.10
+
+# Per-check fresh/stale state for hysteresis. Module-level so it survives
+# across run() calls; resets on process restart (in which case the first
+# run after restart trips the upper-bound threshold cleanly).
+_LAST_FRESH: dict[str, bool] = {}
+
 # X-band radars publish no imagery for these moments at all (upstream
 # quirk — only CBAND emits RhoHV). Without this list, every X-band
 # radar's `dead_moments` field would always include "RhoHV" on a healthy
@@ -167,7 +180,16 @@ class Layer2RadarReconcile(Check):
         # fresh when we have a non-zero count but can't parse the time
         # (better to false-pass than to false-fail on filename-format
         # drift).
+        #
+        # Hysteresis: when the newest scan's age sits between
+        # threshold × (1 ± HYSTERESIS), we hold the previous verdict.
+        # Outside the band we transition. This stops flapping at the
+        # boundary — important for radars (CBAND) whose cadence is
+        # naturally variable.
         now = utcnow()
+        upper = self.silent_fail_s * (1 + HYSTERESIS)
+        lower = self.silent_fail_s * (1 - HYSTERESIS)
+        prev_fresh = _LAST_FRESH.get(self.id, True)
         if primary_err or primary_n is None:
             fresh = False
         elif primary_n == 0:
@@ -175,7 +197,14 @@ class Layer2RadarReconcile(Check):
         elif primary_ts is None:
             fresh = True
         else:
-            fresh = (now - primary_ts).total_seconds() <= self.silent_fail_s
+            age_s = (now - primary_ts).total_seconds()
+            if prev_fresh:
+                # currently fresh: stale only once age exceeds upper bound
+                fresh = age_s <= upper
+            else:
+                # currently stale: fresh only once age drops below lower bound
+                fresh = age_s <= lower
+        _LAST_FRESH[self.id] = fresh
 
         # Verdict
         if primary_err:
@@ -235,6 +264,7 @@ class Layer2RadarReconcile(Check):
                     ),
                     "fresh": fresh,
                     "silent_fail_s": self.silent_fail_s,
+                    "silent_fail_band": [int(lower), int(upper)],
                 },
                 "moments": moments,
                 "moment_newest_ts": {
