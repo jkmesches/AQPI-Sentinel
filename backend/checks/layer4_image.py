@@ -170,12 +170,21 @@ class Layer4ImageCheck(Check):
         extreme_threshold  = float(prof["extreme_threshold"])
         skip_frozen        = bool(prof["skip_frozen"])
         frozen_min_cov_pct = float(prof["frozen_min_cov_pct"])
+        skip_range_ring    = bool(prof.get("skip_range_ring", False))
 
         # Offload CPU work to a thread so the asyncio loop stays responsive.
         t1 = await asyncio.to_thread(tier1_stats, png_bytes)
         t2 = await asyncio.to_thread(
             tier2_heuristics, png_bytes, self.kind, extreme_threshold
         )
+
+        # Per-radar opt-out of range-ring detection. CBAND's image geometry
+        # (1800×1800, wider FOV, different physics) doesn't match the
+        # detector's X-band tuning, so we mark it N/A rather than report
+        # spurious RING_PEAKs. All other Tier-2 detectors are
+        # scale-invariant and apply unchanged.
+        if skip_range_ring:
+            t2["range_ring"] = {"verdict": "N/A", "skipped_by_profile": True}
 
         # Demote SATURATED to OK_LOW_COV on sparse scenes: when only a few
         # percent of pixels are active, "40% of them are in one color bin"
@@ -246,10 +255,12 @@ class Layer4ImageCheck(Check):
 
 
 # --------------------------------------------------------------------------
-# Register: 5 X-band radars (skip CBAND for now — different image geometry)
-# and 3 mosaic products that produce real (non-placeholder) imagery.
+# Register: 5 X-band radars + CBAND, plus 3 mosaic products that produce
+# real (non-placeholder) imagery. CBAND uses kind="xband" because it
+# shares the X-band fetch endpoint (/api/xbandRadarImages/), but its L4
+# profile skips the polar range-ring detector (see config.L4_PROFILES).
 # --------------------------------------------------------------------------
-for r in ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY"):
+for r in ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY", "CBAND"):
     register(Layer4ImageCheck(kind="xband", identifier=r))
 
 for p in ("comp_ref", "comp_now", "water_depth"):
