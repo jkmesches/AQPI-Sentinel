@@ -23,6 +23,7 @@ from .routes import checks as checks_routes
 from .routes import users as users_routes
 from .routes import debug as debug_routes
 from .routes import history as history_routes
+from .routes import push as push_routes
 from .routes import radars as radars_routes
 from .routes import silences as silences_routes
 from .routes import status as status_routes
@@ -71,6 +72,32 @@ async def lifespan(app: FastAPI):
     async def _push_alarm(event_type, payload):
         await ws.broadcast({"type": event_type, "alarm": payload})
     engine.add_listener(_push_alarm)
+
+    # alarm events → mobile PWA Web Push subscriptions. Only on
+    # alarm_open (treats severity at-open; later promotions don't
+    # re-page). Failures are non-fatal — push is a best-effort channel.
+    from .. import push as _push
+    async def _web_push(event_type, payload):
+        if event_type != "alarm_open":
+            return
+        try:
+            sev = (payload.get("severity") or "warn").lower()
+            stage = payload.get("stage") or ""
+            target = payload.get("target") or ""
+            check = payload.get("check_id") or ""
+            msg = (payload.get("message") or "").split("\n")[0][:140]
+            title = f"[{sev.upper()}] {stage}/{target or check.split('.')[-1]}"
+            body = msg or f"{check} fired"
+            await _push.dispatch_push(store.pool, {
+                "title": title,
+                "body":  body,
+                "tag":   f"{check}|{target}",
+                "url":   "/m/alarms",
+            })
+        except Exception:
+            log.exception("web-push dispatch failed for alarm %s", payload.get("id"))
+    engine.add_listener(_web_push)
+
     await engine.start()
 
     net = NetworkMonitor()
@@ -174,6 +201,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_routes.router)
     app.include_router(users_routes.router)
     app.include_router(users_routes.public_router)
+    app.include_router(push_routes.router)
     app.include_router(ws_router)
 
     @app.get("/")

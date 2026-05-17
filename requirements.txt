@@ -36,3 +36,6 @@ jinja2>=3.1
 aiosmtplib>=3.0
 argon2-cffi>=23.1
 itsdangerous>=2.2
+# Web Push (mobile PWA notifications). Synchronous; we call via
+# asyncio.to_thread from the alarm engine listener.
+pywebpush>=2.0
