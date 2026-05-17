@@ -1,7 +1,33 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import MobileNav from '$lib/components/mobile/MobileNav.svelte';
 	let { children }: { children: any } = $props();
+
+	// Register the service worker on /m/* page load. Scope is explicitly
+	// /m/ so the desktop pages aren't claimed by the PWA shell. Doing this
+	// in the layout (vs. root) keeps install prompts scoped to mobile.
+	onMount(() => {
+		if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+		if (!window.isSecureContext) return; // SW needs HTTPS (or localhost)
+		navigator.serviceWorker
+			.register('/sw.js', { scope: '/m/' })
+			.catch((e) => console.warn('SW registration failed:', e));
+	});
 </script>
+
+<svelte:head>
+	<!-- PWA install — manifest, theme color, and iOS-specific tags. -->
+	<link rel="manifest" href="/manifest.webmanifest" />
+	<meta name="theme-color" content="#1E4D2B" />
+	<!-- iOS Safari is the primary target. apple-touch-icon is required for
+	     a polished Add-to-Home-Screen experience; the capable + status-bar
+	     tags are what make the installed PWA launch full-screen. -->
+	<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+	<meta name="apple-mobile-web-app-title" content="AQPI Sent" />
+</svelte:head>
 
 <div class="mob-shell">
 	<header class="mob-header">

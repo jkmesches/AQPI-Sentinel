@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
 
@@ -10,6 +11,17 @@
 	}
 
 	function setMode(m: ThemeMode) { theme.mode = m; }
+
+	// "Already installed" detection: standalone display-mode in any
+	// browser, or iOS's non-standard navigator.standalone.
+	let installed = $state(false);
+	let isIos = $state(false);
+	onMount(() => {
+		if (typeof window === 'undefined') return;
+		installed = window.matchMedia('(display-mode: standalone)').matches
+			|| (navigator as any).standalone === true;
+		isIos = /iPhone|iPod/i.test(navigator.userAgent);
+	});
 </script>
 
 <section class="mb-5">
@@ -56,6 +68,24 @@
 		{/each}
 	</div>
 </section>
+
+{#if !installed}
+	<section class="mb-5">
+		<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">install</div>
+		<div class="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-3 text-[12px] text-[var(--color-default)] leading-relaxed">
+			{#if isIos}
+				Add Sentinel to your home screen for full-screen launch and
+				push notifications:<br />
+				<span class="text-[var(--color-muted)]">tap</span> <span class="text-[var(--color-bright)]">Share</span>
+				<span class="text-[var(--color-muted)]">→</span>
+				<span class="text-[var(--color-bright)]">Add to Home Screen</span>.
+			{:else}
+				Add Sentinel to your home screen via your browser's menu for
+				full-screen launch and push notifications.
+			{/if}
+		</div>
+	</section>
+{/if}
 
 <section class="mb-5">
 	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">view</div>
