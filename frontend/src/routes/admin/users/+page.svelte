@@ -19,8 +19,14 @@
 	let newEmail = $state('');
 	let newRole = $state<'admin' | 'user'>('user');
 	let newDisplay = $state('');
+	let newSendEmail = $state(true);
 	let busy = $state(false);
-	let lastResetLink = $state<string | null>(null);
+	let lastResult = $state<{
+		email: string;
+		link: string;
+		emailStatus: 'sent' | 'failed' | 'no_smtp' | null;
+		emailError: string | null;
+	} | null>(null);
 
 	async function load() {
 		loading = true;
@@ -39,17 +45,27 @@
 	async function invite(e: Event) {
 		e.preventDefault();
 		busy = true;
-		lastResetLink = null;
+		lastResult = null;
+		const targetEmail = newEmail.trim();
 		try {
 			const r = await fetch('/api/admin/users', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				
-				body: JSON.stringify({ email: newEmail.trim(), role: newRole, display_name: newDisplay || null })
+				body: JSON.stringify({
+					email: targetEmail,
+					role: newRole,
+					display_name: newDisplay || null,
+					send_email: newSendEmail,
+				})
 			});
 			const j = await r.json();
 			if (!r.ok) throw new Error(j?.detail ?? `HTTP ${r.status}`);
-			lastResetLink = `${location.origin}${j.reset_url}`;
+			lastResult = {
+				email: targetEmail,
+				link: `${location.origin}${j.reset_url}`,
+				emailStatus: j.email_status ?? null,
+				emailError: j.email_error ?? null,
+			};
 			newEmail = '';
 			newDisplay = '';
 			newRole = 'user';
@@ -94,13 +110,27 @@
 	}
 
 	async function reissueReset(u: UserRow) {
+		const sendEmail = confirm(
+			`Issue a password-reset link for ${u.email}?\n\n` +
+			`OK = email the link to them (if SMTP is configured)\n` +
+			`Cancel = just generate the link, don't email`
+		);
+		// confirm() returns true/false — but "Cancel" should still issue the
+		// link; we use it only to choose whether to email it.
 		try {
 			const r = await fetch(`/api/admin/users/${u.id}/reset`, {
-				method: 'POST'
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ send_email: sendEmail }),
 			});
 			const j = await r.json();
 			if (!r.ok) throw new Error(j?.detail ?? `HTTP ${r.status}`);
-			lastResetLink = `${location.origin}${j.reset_url}`;
+			lastResult = {
+				email: u.email,
+				link: `${location.origin}${j.reset_url}`,
+				emailStatus: j.email_status ?? null,
+				emailError: j.email_error ?? null,
+			};
 		} catch (e) {
 			alert(`reset failed: ${(e as Error).message}`);
 		}
@@ -137,11 +167,26 @@
 		<div class="mb-4 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-3 py-2 text-[12px] text-[var(--color-fail)]">{error}</div>
 	{/if}
 
-	{#if lastResetLink}
-		<div class="mb-4 border border-[var(--color-ok)]/40 bg-[var(--color-ok)]/10 px-3 py-2 text-[12px]">
-			<div class="text-[var(--color-ok)] mb-1 uppercase tracking-wider text-[10px]">share this link with the user</div>
-			<div class="num text-[var(--color-bright)] break-all">{lastResetLink}</div>
-			<div class="text-[10px] text-[var(--color-muted)] mt-1">Expires in 72 hours. They'll set their password from there.</div>
+	{#if lastResult}
+		{@const r = lastResult}
+		<div class="mb-4 border {r.emailStatus === 'sent'
+			? 'border-[var(--color-ok)]/40 bg-[var(--color-ok)]/10'
+			: r.emailStatus === 'failed'
+				? 'border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10'
+				: 'border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10'} px-3 py-2 text-[12px]">
+			{#if r.emailStatus === 'sent'}
+				<div class="text-[var(--color-ok)] mb-1 uppercase tracking-wider text-[10px]">invite email sent to {r.email}</div>
+				<div class="text-[10px] text-[var(--color-muted)]">Link below is a backup in case they don't receive the email. Expires in 72h.</div>
+			{:else if r.emailStatus === 'failed'}
+				<div class="text-[var(--color-fail)] mb-1 uppercase tracking-wider text-[10px]">email send failed — copy the link instead</div>
+				<div class="text-[10px] text-[var(--color-muted)] mb-1">{r.emailError ?? 'unknown error'}</div>
+			{:else if r.emailStatus === 'no_smtp'}
+				<div class="text-[var(--color-warn)] mb-1 uppercase tracking-wider text-[10px]">SMTP not configured — share this link manually</div>
+				<div class="text-[10px] text-[var(--color-muted)] mb-1">Set it up at <a href="/admin/email" class="underline">Email / SMTP</a> so future invites can be emailed automatically.</div>
+			{:else}
+				<div class="text-[var(--color-bright)] mb-1 uppercase tracking-wider text-[10px]">share this link with {r.email}</div>
+			{/if}
+			<div class="num text-[var(--color-bright)] break-all">{r.link}</div>
 		</div>
 	{/if}
 
@@ -214,13 +259,18 @@
 
 			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">display name</label>
 			<input bind:value={newDisplay} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
+
+			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">send email</label>
+			<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
+				<input type="checkbox" bind:checked={newSendEmail} />
+				Email the reset link to the user (requires <a href="/admin/email" class="underline">SMTP</a>)
+			</label>
 		</div>
 		<div class="mt-4">
 			<button type="submit" disabled={busy}
 				class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50">
-				{busy ? 'inviting…' : 'invite + generate reset link'}
+				{busy ? 'inviting…' : (newSendEmail ? 'invite + send email' : 'invite + generate link')}
 			</button>
-			<span class="ml-3 text-[10px] text-[var(--color-faint)]">No email is sent; copy the link to the user yourself.</span>
 		</div>
 	</form>
 </div>

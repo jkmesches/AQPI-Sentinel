@@ -56,6 +56,16 @@ async def lifespan(app: FastAPI):
     app.state.ws = ws
 
     alerts_cfg = await load_config_from_db_or_yaml(store.pool)
+    # Canonical SMTP comes from settings.smtp (managed by /admin/email). Adapt
+    # onto alerts_cfg.smtp so the existing EmailSink interface keeps working.
+    from ..auth.email import load_smtp_settings, to_alerts_smtp_dict
+    from ..alarms.models import SmtpConfig as _SmtpConfig
+    settings_smtp = await load_smtp_settings(store.pool)
+    if settings_smtp is not None:
+        try:
+            alerts_cfg.smtp = _SmtpConfig.model_validate(to_alerts_smtp_dict(settings_smtp))
+        except Exception:
+            log.exception("settings.smtp present but invalid; falling back to alerts.yaml smtp")
     engine = AlarmEngine(store, alerts_cfg)
     # alarm events → all WS clients
     async def _push_alarm(event_type, payload):

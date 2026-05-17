@@ -20,7 +20,59 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ... import auth as A
+from ...auth.email import load_smtp_settings, send_transactional
 from .auth import require_admin, current_user
+
+
+def _public_url(request: Request) -> str:
+    """Best-effort reconstruction of the user-facing origin. Honors the
+    ``X-Forwarded-*`` headers Traefik / Caddy / nginx set, falling back to
+    the request URL when none are present."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
+    return f"{proto.split(',')[0].strip()}://{host.split(',')[0].strip()}"
+
+
+async def _send_invite_or_reset(
+    *, pool, kind: str, request: Request, recipient: str,
+    display_name: str | None, inviter_email: str, token: str,
+) -> tuple[str | None, str | None]:
+    """Send an invite (kind='invite') or reset (kind='reset') email.
+
+    Returns ``(status, error)`` where status is one of
+    ``"sent" | "failed" | "no_smtp"`` and error is set only on ``"failed"``.
+    Callers always return the reset_url too so the admin can copy/paste
+    when SMTP isn't configured or the send fails.
+    """
+    smtp = await load_smtp_settings(pool)
+    if smtp is None:
+        return "no_smtp", None
+    base = _public_url(request)
+    link = f"{base}/reset/{token}"
+    greeting = display_name.strip() if (display_name and display_name.strip()) else recipient
+    if kind == "invite":
+        subject = "You've been invited to Sentinel"
+        body = (
+            f"Hi {greeting},\n\n"
+            f"{inviter_email} has invited you to Sentinel — the CSU-CHILL radar "
+            f"monitoring dashboard.\n\n"
+            f"Set your password to get started:\n{link}\n\n"
+            f"This link expires in 72 hours.\n\n"
+            f"— AQPI Sentinel\n"
+        )
+    else:
+        subject = "Sentinel: password reset link"
+        body = (
+            f"Hi {greeting},\n\n"
+            f"{inviter_email} has issued a password reset for your Sentinel "
+            f"account.\n\n"
+            f"Set a new password here:\n{link}\n\n"
+            f"This link expires in 72 hours. If you didn't expect this, you can "
+            f"ignore the email.\n\n"
+            f"— AQPI Sentinel\n"
+        )
+    ok, err = await send_transactional(pool, to=recipient, subject=subject, body=body)
+    return ("sent", None) if ok else ("failed", err)
 
 log = logging.getLogger(__name__)
 
@@ -83,9 +135,23 @@ async def create_user(
     )
     user_id = row["id"]
     token = await _issue_reset_token(pool, user_id, hours=72)
+
+    # Send the invite email when SMTP is configured and the caller didn't
+    # explicitly opt out. The reset_url is always returned so the admin can
+    # copy it manually if delivery fails or SMTP isn't set up yet.
+    send_email = bool(body.get("send_email", True))
+    email_status: str | None = None
+    email_error: str | None = None
+    if send_email:
+        email_status, email_error = await _send_invite_or_reset(
+            pool=pool, kind="invite", request=request, recipient=email,
+            display_name=display_name, inviter_email=me["email"], token=token,
+        )
+
     await A.audit(pool, user_email=me["email"], action="user.create",
                   target=f"user:{user_id}",
-                  payload={"email": email, "role": role})
+                  payload={"email": email, "role": role,
+                           "email_status": email_status, "email_error": email_error})
     return {
         "ok": True,
         "id": user_id,
@@ -93,6 +159,8 @@ async def create_user(
         "reset_token": token,
         "reset_url": f"/reset/{token}",
         "expires_hours": 72,
+        "email_status": email_status,
+        "email_error": email_error,
     }
 
 
@@ -147,14 +215,36 @@ async def patch_user(
 async def admin_issue_reset(
     user_id: int, request: Request,
     me: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(default={}),
 ):
     pool = request.app.state.store.pool
-    if not await pool.fetchval("SELECT 1 FROM users WHERE id = $1", user_id):
+    row = await pool.fetchrow(
+        "SELECT email, display_name FROM users WHERE id = $1", user_id,
+    )
+    if row is None:
         raise HTTPException(404, "no such user")
     token = await _issue_reset_token(pool, user_id, hours=72)
+
+    send_email = bool((body or {}).get("send_email", True))
+    email_status: str | None = None
+    email_error: str | None = None
+    if send_email:
+        email_status, email_error = await _send_invite_or_reset(
+            pool=pool, kind="reset", request=request, recipient=row["email"],
+            display_name=row["display_name"], inviter_email=me["email"], token=token,
+        )
+
     await A.audit(pool, user_email=me["email"], action="user.reset_issued",
-                  target=f"user:{user_id}")
-    return {"ok": True, "reset_token": token, "reset_url": f"/reset/{token}", "expires_hours": 72}
+                  target=f"user:{user_id}",
+                  payload={"email_status": email_status, "email_error": email_error})
+    return {
+        "ok": True,
+        "reset_token": token,
+        "reset_url": f"/reset/{token}",
+        "expires_hours": 72,
+        "email_status": email_status,
+        "email_error": email_error,
+    }
 
 
 @router.delete("/{user_id}")

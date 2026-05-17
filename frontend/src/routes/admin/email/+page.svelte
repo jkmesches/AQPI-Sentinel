@@ -8,13 +8,15 @@
 		username: string;
 		password: string;       // mask sentinel `•••••` round-trips unchanged
 		from_addr: string;
+		from_name: string;
 		use_tls: boolean;
 		use_starttls: boolean;
 	}
 
 	let v = $state<SmtpValue>({
 		host: '', port: 587, username: '', password: '',
-		from_addr: '', use_tls: false, use_starttls: true
+		from_addr: '', from_name: 'AQPI Sentinel',
+		use_tls: false, use_starttls: true
 	});
 	let updatedAt = $state<string | null>(null);
 	let updatedBy = $state<string | null>(null);
@@ -118,6 +120,9 @@
 
 			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">password</label>
 			<input bind:value={v.password} type="password" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" placeholder={updatedAt ? '(unchanged)' : ''} />
+
+			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">from name</label>
+			<input bind:value={v.from_name} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="AQPI Sentinel" />
 
 			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">from address</label>
 			<input bind:value={v.from_addr} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="sentinel@example.com" />
