@@ -297,9 +297,15 @@ Full schema and routing semantics: [`docs/radarca-implementation-plan.md`](docs/
 
 | File | What's inside |
 |---|---|
-| `radarca-public-characterization.md` | Full reverse-engineering of radarca: every API endpoint, every product, image extents, JS mappings, response semantics. Read this first if you've never seen radarca's backend. |
-| `radarca-monitoring-plan.md` | Pre-implementation strategy: what each layer monitors, recommended cadences, alarm logic, scoping decisions. |
-| `radarca-implementation-plan.md` | The system design: architecture, stack, data model, API, frontend, phasing, extensibility, alerting subsystem, auth/RBAC, history, Layer 4 Tier 1–5. The map for everything else. |
+| `ARCHITECTURE.md` | One-page system map + check lifecycle walkthrough + "why does X look like that" rationale. **Start here if you're new to the codebase.** |
+| `MAINTENANCE.md` | Operational runbook: restart/redeploy procedures, log locations, backup/restore commands, common-failure recipes, the `?diag=` bisect harness, gotchas. **Start here when something's broken.** |
+| `radarca-public-characterization.md` | Full reverse-engineering of radarca: every API endpoint, every product, image extents, JS mappings, response semantics. Read this when you need to know what an upstream URL does. |
+| `radarca-monitoring-plan.md` | Pre-implementation strategy: what each layer monitors, recommended cadences, alarm logic, scoping decisions. Historical context. |
+| `radarca-implementation-plan.md` | The original system design: architecture, stack, data model, API, frontend, phasing, extensibility, alerting subsystem, auth/RBAC, history, Layer 4 Tier 1–5. Useful for understanding planning intent vs. shipped reality. |
+
+For interactive API exploration, also hit:
+- `http://<host>:8000/docs` — Swagger UI for every endpoint
+- `http://<host>:8000/redoc` — alternative API browser
 
 ---
 

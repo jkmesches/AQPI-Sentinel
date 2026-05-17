@@ -58,16 +58,28 @@ function readToken(): string | null {
 }
 
 /**
- * Install a global fetch interceptor that:
- *   1. Rewrites `/api/...` URLs to `${API_BASE}/api/...` so the browser
- *      reaches the backend regardless of how it found the frontend.
+ * === LOAD-BEARING. DO NOT REMOVE THE CALL TO THIS FUNCTION. ===
+ *
+ * Called once at app startup from +layout.svelte. Without this:
+ *   * Cross-origin /api/* fetches in prod go to the WRONG host (the
+ *     frontend container instead of the backend). Side panels stay
+ *     empty; "NetworkError" / "operation was aborted" in the console.
+ *   * Bearer-token auth header never gets attached → /api/auth/me
+ *     stays 401, login appears to work but state doesn't survive.
+ *
+ * What it does:
+ *   1. Rewrites `/api/...` URLs to `${API_BASE}/api/...` so the
+ *      browser reaches the backend regardless of how it found the
+ *      frontend (raw compose vs reverse proxy vs dev with Vite
+ *      proxy).
  *   2. Attaches `Authorization: Bearer <token>` from localStorage to
  *      every `/api/*` request, if a token is stored.
  *
- * Idempotent. No-op for non-API URLs. Catches only `fetch()` — for
- * `<img src>`, `window.open`, and MapLibre source URLs we use the
- * explicit `url(...)` / `wsUrl(...)` helpers, which is fine because
- * those endpoints (image proxy, scan PNGs) don't require auth.
+ * Idempotent (guarded by __sentinelFetchPatched). No-op for non-API
+ * URLs. Catches only `fetch()` — for `<img src>`, `window.open`, and
+ * MapLibre source URLs we use the explicit `url(...)` / `wsUrl(...)`
+ * helpers, which is fine because those endpoints (image proxy, scan
+ * PNGs) don't require auth.
  */
 export function installFetchPrefix() {
 	if (typeof window === 'undefined') return;

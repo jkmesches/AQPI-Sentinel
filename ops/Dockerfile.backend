@@ -28,8 +28,15 @@ RUN apt-get update \
 WORKDIR /app
 
 # Python deps first so layer caches when only app code changes.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Prefer the pinned lock file (deterministic builds); fall back to the
+# loose requirements.txt for dev convenience. Regenerate the lock with
+# `pip freeze` after editing requirements.txt — see top of that file.
+COPY requirements.txt requirements.lock.txt* ./
+RUN if [ -f requirements.lock.txt ]; then \
+        pip install --no-cache-dir -r requirements.lock.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 # Playwright + chromium browser, into a shared path so the non-root
 # user can read them. `install-deps` apt-installs chromium's runtime

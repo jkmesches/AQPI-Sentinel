@@ -220,13 +220,20 @@ class SentinelState {
 		summary: string;
 	}) {
 		if (!this.rollup) return;
-		// Dedupe on STATUS ONLY. The summary string from L1 product checks
-		// includes time-varying age (`age=+3m45s` → `age=+3m48s`) so every
-		// run reports a slightly different summary even though the status
-		// is the same. If we deduped on summary too, ~30 events/min would
-		// each force a full mergeRun rebuild for purely cosmetic age-string
-		// drift. The 5s polling refresh picks up updated summaries on its
-		// own cadence; for live updates we only care about status flips.
+		// === Load-bearing: dedupe on STATUS ONLY. ===
+		//
+		// The summary string from L1 product checks includes time-varying
+		// age (`age=+3m45s` → `age=+3m48s`) so every run reports a
+		// slightly different summary even though the status is the same.
+		// If we deduped on summary too, ~30 events/min would each force a
+		// full rollup rebuild + reactive cascade for purely cosmetic
+		// age-string drift. The 5s polling refresh picks up updated
+		// summaries on its own cadence; for live updates we only care
+		// about status flips.
+		//
+		// Combined with the backend's transition-only WS broadcast
+		// (backend/api/app.py:_maybe_broadcast) this should mean almost
+		// zero WS work on a healthy idle dashboard.
 		const stageList = this.rollup.stages[run.stage];
 		if (stageList) {
 			const existing = stageList.find((r) => r.check_id === run.check_id);

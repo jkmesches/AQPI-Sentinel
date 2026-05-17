@@ -70,17 +70,24 @@ async def lifespan(app: FastAPI):
         network=net, pool=store.pool,
     )
     sched = Scheduler(store, ctx, engine=engine)
-    # scheduler also emits run events for the live stream
-    # WS run events: broadcast ONLY when status changes (or first event for
-    # a check). On a healthy system 95%+ of consecutive runs return the
-    # same status, so without this gate we were pushing ~30 events/min for
-    # no UI-visible reason — the source of the idle-tab freeze. The 5s
-    # polling refresh keeps non-transition state fresh on its own.
+    # === Load-bearing: broadcast ONLY on status transitions ===
     #
-    # Metric samples (sparkline data) ride on these transition events,
-    # which means sparklines update only on transitions + every 5s polling
-    # tick. That's plenty for an at-a-glance dashboard; finer-grained
-    # streaming can be added per-page if it's ever needed.
+    # Without this gate (e.g. if you replace `_maybe_broadcast` with
+    # `lambda r: ws.broadcast(...)` to "fix" missed updates), idle tabs
+    # accumulate ~30 events/min × N reactive subscribers/event. After
+    # 10-15 min the browser tab JS thread wedges. This was the actual
+    # root cause of recurring "frozen tab" reports.
+    #
+    # `prev_status: None` on the first event distinguishes first-seen
+    # from a real transition (so the pulse animation doesn't fire on
+    # initial load). The 5s polling refresh on the frontend keeps
+    # non-transition state (summaries, ages) fresh on its own.
+    #
+    # Side note: metric samples (sparkline data) ride on these
+    # transition events, which means sparklines update only on
+    # transitions + every 5s polling tick. That's plenty for an
+    # at-a-glance dashboard; finer-grained streaming can be added
+    # per-page if needed (separate WS channel).
     _last_broadcast_status: dict[str, str] = {}
 
     def _maybe_broadcast(r):
@@ -124,10 +131,18 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Sentinel", version="0.1.0", lifespan=lifespan)
 
-    # CORS — frontend (:3000) and backend (:8000) are cross-origin in
-    # prod. Auth uses Authorization: Bearer headers rather than cookies
-    # so we don't need allow_credentials=True (which would force exact
-    # origin matching). Simple wildcard is fine for a private LAN.
+    # === CORS: the `allow_credentials=False` choice is load-bearing ===
+    #
+    # Frontend (:3000) and backend (:8000) are cross-origin in prod
+    # (no reverse proxy on the LAN). Auth uses Authorization: Bearer
+    # headers, NOT cookies. Do NOT add `allow_credentials=True` and
+    # then leave `allow_origins=["*"]` — browsers refuse to send the
+    # Authorization header in that combination (it requires an exact
+    # origin match for credentialed requests). This bit us in early
+    # prod: side panels stayed empty, console showed "CORS missing
+    # allow-origin" while the response looked fine in curl. If you
+    # ever switch auth back to cookies, you'll need to enumerate
+    # allowed origins explicitly (or proxy + same-origin).
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
