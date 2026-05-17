@@ -51,13 +51,12 @@ AFFECTED_PRODUCTS = (
 
 
 def worst_of(*verdicts: str) -> str:
-    # Mirrors backend.checks.helpers._STATUS_RANK exactly. Earlier versions
-    # treated skip as rank=0 (= pass), which diverged from the live engine
-    # and made reprocessed forecast-product rows show "pass" while a fresh
-    # run of the same data shows "skip" (because parity is always skip
-    # for forecast products with non-timestamped filenames).
-    rank = {"pass": 0, "skip": 1, "warn": 2, "fail": 3, "error": 4}
-    cur = "pass"
+    # Mirrors backend.checks.helpers._STATUS_RANK exactly. Skip ranks
+    # BELOW pass — an aggregate with some passing + some skipped
+    # sub-checks rolls up to pass (forecasts intentionally skip
+    # step_count + parity; the overall should still be green).
+    rank = {"skip": 0, "pass": 1, "warn": 2, "fail": 3, "error": 4}
+    cur = "skip"
     for v in verdicts:
         if rank.get(v, 0) > rank[cur]:
             cur = v
@@ -156,8 +155,12 @@ async def main(dry_run: bool) -> None:
     counts = Counter()
     updates: list[tuple[int, str, str, dict]] = []
     for r in rows:
-        if r["status"] in ("skip", "error"):
-            counts["preserved_skip_error"] += 1
+        # Only preserve "error" (transport failure — nothing to recompute).
+        # "skip" can come from worst_of rollup when sub-checks include skip,
+        # which IS recomputable — and is exactly what we want to flip after
+        # the rank change (skip < pass means a mix now rolls up to pass).
+        if r["status"] == "error":
+            counts["preserved_error"] += 1
             continue
         raw_payload = r["payload"]
         if isinstance(raw_payload, str):

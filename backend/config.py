@@ -176,7 +176,10 @@ STATUS_TO_RADAR = {"EBAY": "XEBY", "CBand": "CBAND"}
 #   XSCW  median 120s, max 480s  → 720s   (mostly 2-min, occasional 8-min)
 #   XSCR  median 120s, max 180s  → 300s   (mostly 2-min, occasional 3-min)
 #   XSWR  median 120s, max 120s  → 240s   (perfect 2-min cadence)
-#   CBAND median 240s, max 300s  → 480s   (variable 2-5 min)
+#   CBAND median 240s, max 300s  → 600s   (variable; bumped from 480s
+#                                            after operator-observed
+#                                            bouncing — 10 min is more
+#                                            comfortable for this radar)
 #   XSCV  (down at calibration)  → 600s   (X-band default)
 #
 # Default for any radar not listed: 600s.
@@ -186,7 +189,7 @@ RADAR_SILENT_FAIL_S = {
     "XSCW":  720,
     "XSCR":  300,
     "XSWR":  240,
-    "CBAND": 480,
+    "CBAND": 600,
 }
 
 # Moment name → productPrefix mapping (the JS bundle's `j` object + L's CBAND
