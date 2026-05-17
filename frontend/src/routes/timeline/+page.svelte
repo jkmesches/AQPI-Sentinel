@@ -63,6 +63,13 @@
 	let live          = $state(false);
 	let liveTimer: ReturnType<typeof setInterval> | undefined;
 
+	// asc = oldest on the left, newest on the right (the original layout).
+	// desc = newest on the left, oldest on the right. Persisted per browser.
+	// The API returns buckets newest-first, so asc applies a reverse before
+	// rendering; desc passes them through unchanged. See `orderedBuckets`.
+	type SortOrder = 'asc' | 'desc';
+	let sortOrder = $state<SortOrder>('asc');
+
 	const cfg     = $derived(BUCKETS.find((b) => b.key === bucket)!);
 	const tabCfg  = $derived(TABS.find((t) => t.key === tab)!);
 
@@ -156,8 +163,20 @@
 	// thousands of cells and lock up the tab. They can now click "Load older"
 	// to grow the table on demand.
 
+	const orderedBuckets = $derived(
+		sortOrder === 'asc' ? [...buckets].reverse() : [...buckets]
+	);
+
+	$effect(() => {
+		try { localStorage.setItem('sentinel.timeline.sort', sortOrder); } catch { /* */ }
+	});
+
 	let visHandler: (() => void) | undefined;
 	onMount(() => {
+		try {
+			const s = localStorage.getItem('sentinel.timeline.sort');
+			if (s === 'asc' || s === 'desc') sortOrder = s;
+		} catch { /* */ }
 		loadInitial();
 		liveTimer = setInterval(tickLive, 30_000);
 		visHandler = () => {
@@ -339,8 +358,38 @@
 		const mm = d.getUTCMinutes().toString().padStart(2, '0');
 		const mo = (d.getUTCMonth() + 1).toString().padStart(2, '0');
 		const da = d.getUTCDate().toString().padStart(2, '0');
-		if (bucket === '1d') return { primary: `${mo}/${da}`, secondary: `${d.getUTCFullYear()}` };
+		// Coarse grains: dates are more meaningful than wall-clock hour.
+		if (bucket === '1d' || bucket === '6h') {
+			return { primary: `${mo}/${da}`, secondary: `${d.getUTCFullYear()}` };
+		}
+		// 1h grain: show date at midnight (anchors the day), HH:MM otherwise.
+		if (bucket === '1h' && hh === '00' && mm === '00') {
+			return { primary: `${mo}/${da}`, secondary: `${d.getUTCFullYear()}` };
+		}
 		return { primary: `${hh}:${mm}`, secondary: `${mo}/${da}` };
+	}
+
+	// Picks WHICH columns get a full text label vs. a minor tick. Cadence is
+	// chosen per-grain so labels stay readable (no overlap) regardless of how
+	// many buckets are loaded. Without this, grains >=1h render every column
+	// with a label, and at the ~10-12px column width they collide into mush.
+	// Edges (first/last bucket) are NOT force-labelled — they tend to crowd
+	// the nearest cadence label, and the cell-level tooltip plus the cadence
+	// label within a few cells gives enough orientation.
+	function isMajorTick(iso: string, _bi: number, _total: number): boolean {
+		const d = new Date(iso);
+		const mins = d.getUTCMinutes();
+		const hrs = d.getUTCHours();
+		const dow = d.getUTCDay();
+		switch (bucket) {
+			case '1m':  return mins === 0 || mins === 30;       // every 30 min
+			case '5m':  return mins === 0;                      // every hour
+			case '15m': return mins === 0 && hrs % 2 === 0;     // every 2 hours
+			case '1h':  return hrs % 12 === 0;                  // every 12 hours
+			case '6h':  return hrs === 0 && dow % 2 === 0;      // every other midnight
+			case '1d':  return dow === 1;                       // every Monday
+		}
+		return false;
 	}
 	function relativeAge(iso: string): string {
 		const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -403,6 +452,26 @@
 			</div>
 		</div>
 
+		<div class="flex items-center gap-1">
+			<span class="text-[var(--color-muted)] uppercase tracking-wider">order</span>
+			<div class="flex border border-[var(--color-border-strong)]">
+				<button
+					class="px-2 py-0.5 text-[11px] num {sortOrder === 'asc'
+						? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
+						: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
+					title="Oldest on the left, newest on the right"
+					onclick={() => (sortOrder = 'asc')}
+				>old→new</button>
+				<button
+					class="px-2 py-0.5 text-[11px] num {sortOrder === 'desc'
+						? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
+						: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
+					title="Newest on the left, oldest on the right"
+					onclick={() => (sortOrder = 'desc')}
+				>new→old</button>
+			</div>
+		</div>
+
 		<label class="flex items-center gap-1 text-[var(--color-muted)] uppercase tracking-wider">
 			<input type="checkbox" bind:checked={live} class="accent-[var(--color-ok)]" />
 			<span>live (30s)</span>
@@ -429,11 +498,10 @@
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">no data in this window.</div>
 		{:else}
 			<!--
-			  Pivoted layout: rows = checks, columns = time buckets
-			  (oldest on the left, newest on the right). Horizontal text
-			  everywhere — no rotation, alignment is trivially correct.
+			  Pivoted layout: rows = checks, columns = time buckets.
+			  Direction (asc=oldest→newest left-to-right, desc=newest→oldest)
+			  is user-controlled via the sort toggle in the header.
 			-->
-			{@const orderedBuckets = [...buckets].reverse()}
 			<div
 				class="timeline-grid grid"
 				style="grid-template-columns: {LABEL_COL_W}px repeat({orderedBuckets.length}, {bodyColW}px); width: max-content;"
@@ -443,29 +511,38 @@
 					class="sticky left-0 top-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
 					style="height:{TIME_HDR_H}px;"
 				>
-					check · time →
+					check · {sortOrder === 'asc' ? 'time →' : '← time'}
 				</div>
 
-				<!-- TIME HEADER ROW (sticky top). The cells themselves are only
-				     bodyColW wide, so we let the text overflow horizontally
-				     anchored to the left edge — labels run into the empty
-				     space of the next non-labelled cells and stay readable. -->
+				<!-- TIME HEADER ROW (sticky top). Only "major" buckets render a
+				     text label; the rest stay blank so labels never overlap.
+				     Per-grain cadence picked by isMajorTick().
+
+				     NOTE on class: these are NOT .tl-cell — they need
+				     overflow: visible so labels can extend past their narrow
+				     (~10-16px) cell into adjacent cells. .tl-cell carries
+				     `contain: paint` (see <style> block) which forces a
+				     clipping region, truncating every label to 2-3 chars at
+				     coarse grains. Header cells are O(n_buckets) which is
+				     small — opting them out of the contain optimization
+				     costs nothing measurable. -->
 				{#each orderedBuckets as b, bi}
 					{@const ts = fmtRowTs(b.ts)}
-					{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
-					{@const showLabel = onTheHour || bi === 0 || bi === orderedBuckets.length - 1}
+					{@const major = isMajorTick(b.ts, bi, orderedBuckets.length)}
+					{@const isLast = bi === orderedBuckets.length - 1}
+					<!-- Labelled cells need to paint AFTER neighbours so their
+					     overflowing label isn't clipped by the next cell's
+					     opaque background. Bump z-index on major cells. -->
 					<div
-						class="tl-cell sticky top-0 z-20 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num text-[var(--color-faint)]"
-						style="height:{TIME_HDR_H}px; position: sticky; overflow: visible;{onTheHour ? ' color: var(--color-bright); box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
+						class="tl-header relative sticky top-0 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num {major ? 'z-[25]' : 'z-20'}"
+						style="height:{TIME_HDR_H}px;{major ? ' box-shadow: inset 1px 0 0 var(--color-border-strong);' : ''}"
 						title={`${b.ts} · ${relativeAge(b.ts)}`}
 					>
-						{#if showLabel}
+						{#if major}
 							<span
-								class="absolute bottom-1 whitespace-nowrap {onTheHour ? 'text-[var(--color-bright)]' : 'text-[var(--color-default)]'}"
-								style="{bi === orderedBuckets.length - 1 ? 'right:2px;' : 'left:2px;'}"
+								class="absolute bottom-1 whitespace-nowrap font-medium text-[var(--color-bright)] tracking-tight"
+								style="{isLast ? 'right:4px;' : 'left:4px;'} background: var(--color-canvas); padding: 0 3px;"
 							>{ts.primary}</span>
-						{:else}
-							<span class="absolute inset-x-0 bottom-0.5 text-center opacity-30">·</span>
 						{/if}
 					</div>
 				{/each}
