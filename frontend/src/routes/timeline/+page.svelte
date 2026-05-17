@@ -395,6 +395,163 @@
 		const s = (Date.now() - new Date(iso).getTime()) / 1000;
 		return s < 0 ? 'in future' : `${fmtAge(s)} ago`;
 	}
+	// Upstream base URL for synthesizing clickable verification links. The
+	// frontend doesn't have SETTINGS.base; this is the only externally-known
+	// host the checks scrape from. If you ever swap upstream, update here.
+	const UPSTREAM = 'https://radarca.engr.colostate.edu';
+
+	interface VerifyContext {
+		urls: { label: string; url: string }[];
+		rows: { label: string; observed: string; threshold: string; verdict?: string }[];
+		recipe?: string[];
+	}
+
+	// Build a "verify yourself" block for a single run. Goal: surface the
+	// exact upstream URLs the check hit, plus the thresholds vs. observed
+	// values that drove its verdict — enough info that a maintainer can
+	// curl the URLs themselves and reproduce our reasoning, not just take
+	// our word for it.
+	function verifyContext(run: CheckRun): VerifyContext {
+		const p = (run.payload ?? {}) as Record<string, any>;
+		const urls: VerifyContext['urls'] = [];
+		const rows: VerifyContext['rows'] = [];
+		const recipe: string[] = [];
+
+		// L0 — site / TLS / origin
+		if (run.check_id === 'layer0.website.public') {
+			urls.push({ label: 'GET /public', url: `${UPSTREAM}/public` });
+			if (p.http != null) rows.push({ label: 'HTTP status', observed: String(p.http), threshold: '200' });
+			if (p.bytes != null) rows.push({ label: 'body size', observed: `${p.bytes} B`, threshold: '≥ 50,000 B' });
+			recipe.push('Open the URL in a browser; confirm 200 + a populated dashboard page.');
+		}
+		if (run.check_id === 'layer0.website.root_notfound') {
+			urls.push({ label: 'GET /', url: `${UPSTREAM}/` });
+			if (p.http != null) rows.push({ label: 'HTTP status', observed: String(p.http), threshold: '200 (yes, even for not-found)' });
+			recipe.push('Open the URL; confirm the Next.js not-found body text appears even though HTTP is 200.');
+		}
+		if (run.check_id === 'layer0.origin.alive') {
+			urls.push({ label: 'GET /api/radar-status/ (no-cache)', url: `${UPSTREAM}/api/radar-status/` });
+			if (p.http != null) rows.push({ label: 'HTTP status', observed: String(p.http), threshold: '200' });
+			if (p.elapsed_ms != null) rows.push({ label: 'latency', observed: `${p.elapsed_ms} ms`, threshold: '— (informational)' });
+			recipe.push('Curl with --no-cache; expect JSON listing radar declarations.');
+		}
+		if (run.check_id === 'layer0.tls.cert') {
+			if (p.expires_in_days != null) {
+				rows.push({ label: 'days until expiry', observed: String(p.expires_in_days), threshold: '> 30 (else WARN)' });
+			}
+			recipe.push('openssl s_client -connect radarca.engr.colostate.edu:443 | openssl x509 -noout -dates');
+		}
+
+		// L1 — product
+		if (run.check_id.startsWith('layer1.product.')) {
+			const cfg_details = p.details_file || `${run.check_id.split('.').pop()}/details.json`;
+			urls.push({ label: 'GET /api/productDetail', url: `${UPSTREAM}/api/productDetail?file=${encodeURIComponent(cfg_details)}` });
+			if (p.image_source) {
+				urls.push({ label: 'GET /api/imageData (latest scan)', url: `${UPSTREAM}/api/imageData?file=${encodeURIComponent(p.image_source)}` });
+			}
+			if (p.last_ts) {
+				const ageS = (Date.now() - new Date(p.last_ts).getTime()) / 1000;
+				rows.push({ label: 'newest scan age', observed: fmtAge(ageS), threshold: 'depends per product (see config.PRODUCTS.max_freshness_s)' });
+			}
+			if (p.n_steps != null) {
+				rows.push({ label: 'step count', observed: String(p.n_steps), threshold: 'within ±4 of expected_steps (None ⇒ skip)' });
+			}
+			if (p.image_bytes != null) {
+				rows.push({ label: 'image size', observed: `${p.image_bytes.toLocaleString()} B`, threshold: '≥ min_png_bytes per product' });
+			}
+			if (p.sub_status) {
+				const sub = Object.entries(p.sub_status).map(([k, v]) => `${k}=${v}`).join(', ');
+				rows.push({ label: 'sub-check verdicts', observed: sub, threshold: 'all = pass' });
+			}
+			recipe.push('Open the productDetail URL — confirm `steps[]` array and recent timestamps.');
+			recipe.push('Open the imageData URL — confirm a valid PNG renders.');
+		}
+
+		// L2 — radar reconciliation
+		if (run.check_id.startsWith('layer2.radar.')) {
+			const folder = p.folder;
+			urls.push({ label: 'GET /api/radar-status/', url: `${UPSTREAM}/api/radar-status/` });
+			if (folder) {
+				urls.push({ label: 'GET /api/xbandRadarImages/ (Reflectivity)',
+					url: `${UPSTREAM}/api/xbandRadarImages/?radarFolder=${folder}&productPrefix=CorrReflectivity` });
+			}
+			if (p.declared != null) {
+				rows.push({ label: 'declared (upstream)', observed: String(p.declared), threshold: 'UP for healthy' });
+			}
+			if (p.observed?.primary != null) {
+				rows.push({ label: 'images in window', observed: String(p.observed.primary), threshold: '> 0' });
+			}
+			if (p.observed?.primary_age_s != null) {
+				rows.push({
+					label: 'newest scan age',
+					observed: `${p.observed.primary_age_s} s`,
+					threshold: `≤ ${p.observed.silent_fail_s ?? '?'} s (per-radar SILENT_FAIL_S)`,
+					verdict: p.observed.fresh === false ? 'STALE → GHOST_UP/CONFIRMED_DOWN path' : 'fresh',
+				});
+			}
+			if (p.verdict) {
+				rows.push({ label: 'verdict', observed: p.verdict, threshold: '(declared, fresh) → verdict matrix' });
+			}
+			recipe.push('Open the radar-status URL; find this radar\'s entry and confirm the `status` field.');
+			recipe.push('Open the xbandRadarImages URL; check the last filename\'s embedded timestamp.');
+			recipe.push('If declared=UP and the newest filename is older than the threshold above, GHOST_UP is correct.');
+		}
+
+		// L3 — overlay parity
+		if (run.check_id.startsWith('layer3.')) {
+			urls.push({ label: 'GET /public (rendered HTML)', url: `${UPSTREAM}/public` });
+			urls.push({ label: 'GET /api/productDetail (default product)',
+				url: `${UPSTREAM}/api/productDetail?file=total_precip%2Fdetails_in.json` });
+			if (p.overlay_ts) rows.push({ label: 'UI overlay timestamp', observed: String(p.overlay_ts), threshold: '— (compared to API)' });
+			if (p.api_ts) rows.push({ label: 'API step[0] timestamp', observed: String(p.api_ts), threshold: '— (compared to UI)' });
+			if (p.verdict) rows.push({ label: 'verdict', observed: p.verdict, threshold: 'MATCH for pass' });
+			recipe.push('Load /public in a browser; note the timestamp shown in the overlay header.');
+			recipe.push('Open the productDetail URL; compare to `steps[0]` timestamp.');
+		}
+
+		// L4 — image QC
+		if (run.check_id.startsWith('layer4.')) {
+			const t1 = p.tier1 ?? {};
+			const t2 = p.tier2 ?? {};
+			if (p.source) {
+				urls.push({ label: 'GET /api/imageData (scan analysed)',
+					url: `${UPSTREAM}/api/imageData?file=${encodeURIComponent(p.source)}` });
+			}
+			if (p.profile) {
+				const prof = p.profile;
+				rows.push({ label: 'profile applied', observed: JSON.stringify(prof), threshold: 'from config.L4_PROFILES' });
+			}
+			if (t1.coverage_pct != null) {
+				rows.push({ label: 'pixel coverage', observed: `${t1.coverage_pct}%`,
+					threshold: `< ${p.profile?.frozen_min_cov_pct ?? 5}% suppresses FROZEN as quiet-scene` });
+			}
+			if (t2.extreme) {
+				rows.push({
+					label: 'extreme fraction',
+					observed: String(t2.extreme.fraction ?? '—'),
+					threshold: `> ${p.profile?.extreme_threshold ?? 0.40} ⇒ SATURATED`,
+					verdict: t2.extreme.verdict,
+				});
+			}
+			if (t2.speckle) {
+				rows.push({ label: 'speckle ratio', observed: String(t2.speckle.ratio ?? '—'),
+					threshold: '> 0.35 ⇒ SPECKLE', verdict: t2.speckle.verdict });
+			}
+			if (t2.range_ring && t2.range_ring.verdict !== 'N/A') {
+				rows.push({ label: 'range-ring score', observed: String(t2.range_ring.score ?? '—'),
+					threshold: '> 0.80 × median ⇒ RING_PEAK', verdict: t2.range_ring.verdict });
+			}
+			if (t2.frozen) {
+				rows.push({ label: 'frame identical to prior', observed: t2.frozen.matched_prev ? 'yes' : 'no',
+					threshold: 'matched + coverage above floor + !skip_frozen ⇒ FROZEN', verdict: t2.frozen.verdict });
+			}
+			recipe.push('Open the imageData URL; the captured PNG renders in the panel above for visual comparison.');
+			recipe.push('Compare the observed values above to the thresholds; the rightmost verdict column shows what each Tier-2 detector concluded.');
+		}
+
+		return { urls, rows, recipe };
+	}
+
 	function checkBlurb(c: CheckMeta): string {
 		if (c.id.startsWith('layer0.tls.'))         return 'Verifies the public TLS certificate is valid and not near expiry.';
 		if (c.id.startsWith('layer0.origin.'))      return 'Probes the origin server directly (bypassing the edge cache) to confirm it is alive.';
@@ -685,6 +842,7 @@
 			{#each detailRuns as run (run.id)}
 				{@const dur = (new Date(run.finished_at).getTime() - new Date(run.started_at).getTime())}
 				{@const explain = explainRun(run)}
+				{@const v = verifyContext(run)}
 				<div class="mt-2 border border-[var(--color-border)] bg-[var(--color-canvas)] p-3">
 					<!-- Run header line -->
 					<div class="flex items-center gap-2 text-[11px]">
@@ -743,6 +901,64 @@
 								source: {src}
 							</div>
 						</div>
+					{/if}
+
+					<!-- Verify yourself: upstream URLs + thresholds vs observed.
+					     Gives the operator the raw materials to re-derive our
+					     verdict by hand without trusting Sentinel's reasoning.
+					     (`v` is declared at the top of the each-block.) -->
+					{#if v.urls.length || v.rows.length}
+						<details class="mt-3 border-t border-[var(--color-border)] pt-2 text-[11px]" open>
+							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[10px]">verify yourself</summary>
+
+							{#if v.rows.length}
+								<div class="mt-2 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">thresholds vs observed</div>
+								<table class="mt-1 w-full text-[11px]">
+									<thead class="text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
+										<tr>
+											<th class="text-left font-normal pb-0.5 pr-2">field</th>
+											<th class="text-left font-normal pb-0.5 pr-2">observed</th>
+											<th class="text-left font-normal pb-0.5 pr-2">threshold / rule</th>
+											<th class="text-left font-normal pb-0.5">verdict</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each v.rows as r}
+											<tr class="border-t border-[var(--color-border)]">
+												<td class="py-1 pr-2 text-[var(--color-muted)]">{r.label}</td>
+												<td class="py-1 pr-2 num text-[var(--color-bright)] break-all">{r.observed}</td>
+												<td class="py-1 pr-2 text-[var(--color-default)] num">{r.threshold}</td>
+												<td class="py-1 num text-[var(--color-default)]">{r.verdict ?? ''}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							{/if}
+
+							{#if v.urls.length}
+								<div class="mt-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">upstream calls (click to open)</div>
+								<ul class="mt-1 space-y-1 text-[11px] num">
+									{#each v.urls as u}
+										<li class="flex items-start gap-2">
+											<span class="text-[var(--color-faint)] shrink-0">·</span>
+											<div class="min-w-0 flex-1">
+												<div class="text-[var(--color-muted)] text-[10px] uppercase tracking-wider">{u.label}</div>
+												<a class="text-[var(--color-info)] hover:underline break-all" href={u.url} target="_blank" rel="noreferrer">{u.url}</a>
+											</div>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+
+							{#if v.recipe?.length}
+								<div class="mt-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">how to replicate</div>
+								<ol class="mt-1 list-decimal space-y-0.5 pl-5 text-[11px] text-[var(--color-default)] leading-snug">
+									{#each v.recipe as step}
+										<li>{step}</li>
+									{/each}
+								</ol>
+							{/if}
+						</details>
 					{/if}
 
 					<!-- Raw summary (already shown above, but useful in raw form) -->
