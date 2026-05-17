@@ -71,8 +71,8 @@
 	>
 		<div class="flex items-baseline gap-3">
 			<span
-				class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-bright)]"
-			>SENTINEL</span>
+				class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]"
+			>AQPI SENTINEL</span>
 			<span class="text-[var(--color-faint)] text-[11px]">·</span>
 			<span class="text-[11px] text-[var(--color-muted)] num">radarca.engr.colostate.edu</span>
 		</div>

@@ -85,7 +85,9 @@
 					<span class="num text-[10.5px] text-[var(--color-muted)]">
 						{latest ? `${latest|0}/h` : ''}
 						{#if imgQc}
-							<span class="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style="background:{({pass:'#34d399',warn:'#fbbf24',fail:'#f87171',skip:'#404657'} as Record<string,string>)[imgQc] ?? '#404657'}"></span>
+							<span class="ml-1 inline-block align-middle">
+								<StatusDot status={imgQc} size={6} />
+							</span>
 						{/if}
 					</span>
 				</li>

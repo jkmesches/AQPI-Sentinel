@@ -182,14 +182,22 @@
 		return { west: r.lon - dLon, east: r.lon + dLon, south: r.lat - dLat, north: r.lat + dLat };
 	}
 
-	const verdictColor = (status: string) =>
-		({
-			pass: '#34d399',
-			warn: '#fbbf24',
-			fail: '#f87171',
-			error: '#f87171',
-			skip: '#6b7280'
-		})[status] ?? '#6b7280';
+	// Theme-keyed status colors. MapLibre paint expressions can't read CSS
+	// custom properties, so we keep two parallel tables and pick the right
+	// one based on theme.resolved. Keep these in sync with app.css's status
+	// tokens for each mode (Issue #4 redesign).
+	const VERDICT_DARK: Record<string, string> = {
+		pass: '#4ade80', warn: '#fbbf24', fail: '#f87171',
+		error: '#f87171', skip: '#8a9389'
+	};
+	const VERDICT_LIGHT: Record<string, string> = {
+		pass: '#16a34a', warn: '#9a6905', fail: '#B91C1C',
+		error: '#B91C1C', skip: '#57584C'
+	};
+	const verdictColor = $derived.by(() => {
+		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		return (status: string) => table[status] ?? table.skip;
+	});
 
 	const radarStatus = $derived.by(() => {
 		const out: Record<string, string> = {};
@@ -748,7 +756,7 @@
 			paint: {
 				'circle-radius': ['case', ['get', 'active'], 5.5, 4],
 				'circle-color': ['get', 'color'],
-				'circle-stroke-color': t === 'light' ? '#ffffff' : '#07080b',
+				'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',  /* --color-canvas per mode */
 				'circle-stroke-width': 1
 			}
 		});
@@ -764,8 +772,8 @@
 				'text-font': ['Stadia Regular']
 			},
 			paint: {
-				'text-color': t === 'light' ? '#1d2330' : '#d4d8e0',
-				'text-halo-color': t === 'light' ? '#ffffff' : '#07080b',
+				'text-color': t === 'light' ? '#1c1f1c' : '#d0d6d0',  /* --color-default per mode */
+				'text-halo-color': t === 'light' ? '#ffffff' : '#0c100d',  /* --color-canvas per mode */
 				'text-halo-width': 1.2
 			}
 		});
