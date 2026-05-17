@@ -211,6 +211,21 @@ CREATE TABLE IF NOT EXISTS admin_audit (
 CREATE INDEX IF NOT EXISTS idx_audit_user   ON admin_audit(user_email, at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON admin_audit(action, at DESC);
 
+-- Web Push subscriptions for the mobile PWA. One row per (user, device).
+-- The endpoint URL is the unique identifier; iOS, Android, and desktop
+-- browsers all produce different endpoints even for the same logical user.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint     TEXT NOT NULL UNIQUE,
+  p256dh       TEXT NOT NULL,
+  auth         TEXT NOT NULL,
+  user_agent   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
 -- Generic settings key→JSON store. Used for SMTP config, alert routing
 -- snapshot, future runtime knobs. Read on demand; write via admin API.
 CREATE TABLE IF NOT EXISTS settings (
