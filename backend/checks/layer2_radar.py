@@ -29,6 +29,7 @@ from datetime import datetime
 
 from ..config import (
     RADAR_FOLDER,
+    RADAR_SILENT_FAIL_S,
     SETTINGS,
     STATUS_TO_RADAR,
     X_MOMENTS,
@@ -40,12 +41,12 @@ from .helpers import parse_filename_ts
 
 PRIMARY_MOMENT = "Reflectivity"
 
-# How recently we must see an image for the radar to count as "currently
-# emitting." Without this gate, a radar that stopped scanning would still
-# appear HEALTHY until the upstream's ~1 h rolling window emptied — a
-# ~60 min detection lag for radar outages. With the gate, lag drops to
-# roughly SILENT_FAIL_S + cadence (~10 + 2 = ~12 min worst case).
-SILENT_FAIL_S = 600
+# Default GHOST_UP detection threshold (used when a radar isn't listed in
+# RADAR_SILENT_FAIL_S). Per-radar overrides exist because different radars
+# have legitimately different scan cadences; a one-size threshold either
+# false-fires on the slower ones (CBAND ~5 min) or lags on the faster ones
+# (XSWR's perfect 2-min cadence wants a tight 4 min threshold).
+SILENT_FAIL_S_DEFAULT = 600
 
 # X-band radars publish no imagery for these moments at all (upstream
 # quirk — only CBAND emits RhoHV). Without this list, every X-band
@@ -83,6 +84,7 @@ class Layer2RadarReconcile(Check):
         self.folder = RADAR_FOLDER[radar_id]
         self.id = f"layer2.radar.{radar_id}"
         self.target = radar_id
+        self.silent_fail_s = RADAR_SILENT_FAIL_S.get(radar_id, SILENT_FAIL_S_DEFAULT)
 
     async def _declared(self, ctx) -> str | None:
         """Look up this radar's status from the shared /api/radar-status/ row.
@@ -157,12 +159,14 @@ class Layer2RadarReconcile(Check):
         primary_err = primary_n is None
         primary_ts = moment_newest.get(PRIMARY_MOMENT)
 
-        # "Fresh" = at least one image AND its timestamp is within the
-        # SILENT_FAIL_S window. Without this, a stale 1 h window would
-        # masquerade as a healthy radar. Tolerant of missing/unparseable
-        # filename timestamps: treat as fresh when we have a non-zero
-        # count but can't parse the time (better to false-pass than to
-        # false-fail on filename-format drift).
+        # "Fresh" = at least one image AND its timestamp is within this
+        # radar's silent_fail_s window (per-radar threshold; see config
+        # RADAR_SILENT_FAIL_S for the values + rationale). Without this
+        # gate, a stale 1 h window would masquerade as a healthy radar.
+        # Tolerant of missing/unparseable filename timestamps: treat as
+        # fresh when we have a non-zero count but can't parse the time
+        # (better to false-pass than to false-fail on filename-format
+        # drift).
         now = utcnow()
         if primary_err or primary_n is None:
             fresh = False
@@ -171,7 +175,7 @@ class Layer2RadarReconcile(Check):
         elif primary_ts is None:
             fresh = True
         else:
-            fresh = (now - primary_ts).total_seconds() <= SILENT_FAIL_S
+            fresh = (now - primary_ts).total_seconds() <= self.silent_fail_s
 
         # Verdict
         if primary_err:
@@ -230,7 +234,7 @@ class Layer2RadarReconcile(Check):
                         int((now - primary_ts).total_seconds()) if primary_ts else None
                     ),
                     "fresh": fresh,
-                    "silent_fail_s": SILENT_FAIL_S,
+                    "silent_fail_s": self.silent_fail_s,
                 },
                 "moments": moments,
                 "moment_newest_ts": {
