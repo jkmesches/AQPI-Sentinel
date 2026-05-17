@@ -51,7 +51,12 @@ AFFECTED_PRODUCTS = (
 
 
 def worst_of(*verdicts: str) -> str:
-    rank = {"pass": 0, "skip": 0, "warn": 1, "error": 2, "fail": 2}
+    # Mirrors backend.checks.helpers._STATUS_RANK exactly. Earlier versions
+    # treated skip as rank=0 (= pass), which diverged from the live engine
+    # and made reprocessed forecast-product rows show "pass" while a fresh
+    # run of the same data shows "skip" (because parity is always skip
+    # for forecast products with non-timestamped filenames).
+    rank = {"pass": 0, "skip": 1, "warn": 2, "fail": 3, "error": 4}
     cur = "pass"
     for v in verdicts:
         if rank.get(v, 0) > rank[cur]:
@@ -107,10 +112,15 @@ def recompute(payload: dict, product_id: str) -> tuple[dict, str, str] | None:
         sub["G_image_size"] = "pass" if image_bytes >= cfg["min_png_bytes"] else "warn"
 
     # E_step_count — re-verdict against the new expected_steps.
+    # `expected_steps: None` means skip (forecast horizons drift).
     n = payload.get("n_steps")
     if n is not None and "E_step_count" in sub:
-        delta = abs(n - cfg["expected_steps"])
-        sub["E_step_count"] = "pass" if delta <= STEP_COUNT_TOL else "warn"
+        expected = cfg.get("expected_steps")
+        if expected is None:
+            sub["E_step_count"] = "skip"
+        else:
+            delta = abs(n - expected)
+            sub["E_step_count"] = "pass" if delta <= STEP_COUNT_TOL else "warn"
 
     # Overall status from the (possibly updated) sub-status verdicts.
     new_status = worst_of(*sub.values()) if sub else "pass"

@@ -97,30 +97,33 @@ PRODUCTS = {
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": -3000, "min_png_bytes": 5_000,
                                "unit": "dBZ"},
-    # Forecast products legitimately produce sub-5KB PNGs when no precip is
-    # predicted (most of a clear day), so `min_png_bytes` is lowered to 1500
-    # — enough to detect a truly-corrupt zero-byte / placeholder response
-    # but not flag the "clear sky" image as suspiciously small.
+    # Forecast products: two non-obvious calibrations.
+    # 1. `min_png_bytes` lowered to 1500 — these products legitimately
+    #    produce sub-5KB PNGs when no precip is predicted (most of a clear
+    #    day). 1500 catches a truly-corrupt zero-byte response without
+    #    flagging the clear-sky case.
+    # 2. `expected_steps: None` disables E_step_count entirely — the
+    #    upstream model adjusts its forecast horizon hour-to-hour
+    #    (observed range: 19-130 steps in a single week for fcst_temp).
+    #    No fixed tolerance makes sense; the check is skipped per-row.
     "fcst_total_precip":      {"details": "total_precip/details_in.json",
                                "image_dir": "total_precip/images/",
-                               "cadence_s": 3600, "expected_steps": 74,
+                               "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True},
     "fcst_total_precip_cum":  {"details": "total_precip_cumulative/details_in.json",
                                "image_dir": "total_precip_cumulative/images/",
-                               "cadence_s": 3600, "expected_steps": 74,
+                               "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True},
     "fcst_precip_rate":       {"details": "precip_rate/details_in.json",
                                "image_dir": "precip_rate/images/",
-                               "cadence_s": 900, "expected_steps": 72,
+                               "cadence_s": 900, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in/h", "unit_subdir": True},
-    # Temperature model extended its forecast horizon — currently publishes
-    # ~129 hourly steps (was 75 when this config was first written).
     "fcst_temp":              {"details": "temperature/details_F.json",
                                "image_dir": "temperature/images/",
-                               "cadence_s": 3600, "expected_steps": 130,
+                               "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 5_000,
                                "unit": "F", "unit_subdir": True},
     "water_level":            {"details": "water_level/details.json",
@@ -214,6 +217,14 @@ L4_PROFILES: dict[str, dict[str, object]] = {
     # Nowcast composite — blank when no precip, identical frames between
     # ~2-min model runs are expected.
     "comp_now":        {"extreme_threshold": 0.60, "skip_frozen": True},
+    # Mosaic composite reflectivity is the only L4 mosaic product where
+    # FROZEN is meaningful (it doesn't skip frozen). Raise the low-coverage
+    # threshold from 5% (default) to 10% — a 7-day audit showed 97 FROZEN
+    # warns concentrated in a single calm 6-hour window where coverage was
+    # 5-9% and the field was legitimately static. Lifting the threshold
+    # silences "quiet weather" without missing real stuck-feed conditions
+    # (which typically lock at much higher coverage).
+    "comp_ref":        {"frozen_min_cov_pct": 10.0},
 }
 
 

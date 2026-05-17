@@ -4,14 +4,19 @@ One Check per radar (XSCV / XSCW / XSCR / XSWR / XEBY / CBAND). Each one:
 
   1. Fetches ``/api/radar-status/`` and looks up its radar's declared status.
   2. Fetches ``/api/xbandRadarImages/`` for the radar's primary moment
-     (Reflectivity → CorrReflectivity) over the last hour.
+     (Reflectivity → CorrReflectivity) over the last hour. The endpoint
+     returns up to ~1 h of filenames in chronological order; we use the
+     last entry's embedded timestamp to decide whether the radar is
+     CURRENTLY emitting vs. just has stale frames still in the window.
   3. Also probes every other moment (Velocity, RhoHV, etc.) for the
      moment-availability matrix — exposed in the payload.
-  4. Reconciles declared × observed → one of:
-        HEALTHY            (declared UP, images flowing)
-        CONFIRMED_DOWN     (declared DOWN, no images)
-        GHOST_UP           (declared UP, no images in last hour)
-        STUCK_DOWN_FLAG    (declared DOWN, images flowing)
+  4. Reconciles declared × observed-freshness → one of:
+        HEALTHY            (declared UP, fresh images flowing)
+        CONFIRMED_DOWN     (declared DOWN, no fresh images)
+        GHOST_UP           (declared UP, no fresh images in last
+                            SILENT_FAIL_S seconds — silent failure)
+        STUCK_DOWN_FLAG    (declared DOWN, fresh images flowing →
+                            declaration is stuck)
         OBSERVED_API_ERROR
 
 Yes, this means each cycle makes 6 redundant ``/api/radar-status/`` calls —
@@ -20,6 +25,7 @@ self-contained per-radar checks is worth the marginal redundancy. If load
 ever matters we can add a 30-s memo to the HTTP client.
 """
 from __future__ import annotations
+from datetime import datetime
 
 from ..config import (
     RADAR_FOLDER,
@@ -30,9 +36,30 @@ from ..config import (
 )
 from ..registry import register
 from .base import Check, CheckResult, utcnow
+from .helpers import parse_filename_ts
 
 PRIMARY_MOMENT = "Reflectivity"
-SILENT_FAIL_S = 600   # 10 min of silence with declared=UP = ghost
+
+# How recently we must see an image for the radar to count as "currently
+# emitting." Without this gate, a radar that stopped scanning would still
+# appear HEALTHY until the upstream's ~1 h rolling window emptied — a
+# ~60 min detection lag for radar outages. With the gate, lag drops to
+# roughly SILENT_FAIL_S + cadence (~10 + 2 = ~12 min worst case).
+SILENT_FAIL_S = 600
+
+# X-band radars publish no imagery for these moments at all (upstream
+# quirk — only CBAND emits RhoHV). Without this list, every X-band
+# radar's `dead_moments` field would always include "RhoHV" on a healthy
+# run, which would false-trip any future alert that fired on dead_moments.
+# Empty set means "all moments expected."
+EXPECTED_ABSENT_MOMENTS: dict[str, set[str]] = {
+    "XEBY":  {"RhoHV"},
+    "XSCV":  {"RhoHV"},
+    "XSCW":  {"RhoHV"},
+    "XSCR":  {"RhoHV"},
+    "XSWR":  {"RhoHV"},
+    "CBAND": set(),
+}
 
 
 # Verdict → CheckResult.status mapping
@@ -71,17 +98,37 @@ class Layer2RadarReconcile(Check):
                    for row in rows}
         return mapping.get(self.radar_id)
 
-    async def _moment_count(self, ctx, prefix: str) -> int | None:
+    async def _moment_data(
+        self, ctx, prefix: str,
+    ) -> tuple[int | None, datetime | None]:
+        """Return (count, newest_filename_ts).
+
+        Both are None on transport error. count=0 + newest=None when the
+        list is empty. The upstream returns chronologically-sorted PNG
+        filenames; we parse the timestamp out of the last entry to gate
+        on recency, not just presence.
+        """
         try:
             r = await ctx.http.get(
                 f"{SETTINGS.base}/api/xbandRadarImages/",
                 params={"radarFolder": self.folder, "productPrefix": prefix},
             )
             if r.status_code != 200:
-                return None
-            return len(r.json().get("images", []) or [])
+                return None, None
+            images = r.json().get("images", []) or []
         except Exception:
-            return None
+            return None, None
+        if not images:
+            return 0, None
+        # Filenames come oldest→newest. Walk from the end so the first
+        # parseable one is the newest emitted scan.
+        newest_ts: datetime | None = None
+        for name in reversed(images):
+            ts = parse_filename_ts(name if isinstance(name, str) else "")
+            if ts is not None:
+                newest_ts = ts
+                break
+        return len(images), newest_ts
 
     async def run(self, ctx) -> CheckResult:
         t0 = utcnow()
@@ -96,42 +143,73 @@ class Layer2RadarReconcile(Check):
                          "declared": None},
             )
 
-        # Per-moment counts. Primary moment is reused for the verdict.
+        # Per-moment counts + newest-filename-ts. Primary moment drives
+        # the verdict; the rest populate the moments matrix.
         moments: dict[str, int | None] = {}
+        moment_newest: dict[str, datetime | None] = {}
         for m in X_MOMENTS:
             prefix = moment_to_prefix(self.radar_id, m)
-            moments[m] = await self._moment_count(ctx, prefix)
+            n, ts = await self._moment_data(ctx, prefix)
+            moments[m] = n
+            moment_newest[m] = ts
 
         primary_n = moments.get(PRIMARY_MOMENT)
         primary_err = primary_n is None
+        primary_ts = moment_newest.get(PRIMARY_MOMENT)
+
+        # "Fresh" = at least one image AND its timestamp is within the
+        # SILENT_FAIL_S window. Without this, a stale 1 h window would
+        # masquerade as a healthy radar. Tolerant of missing/unparseable
+        # filename timestamps: treat as fresh when we have a non-zero
+        # count but can't parse the time (better to false-pass than to
+        # false-fail on filename-format drift).
+        now = utcnow()
+        if primary_err or primary_n is None:
+            fresh = False
+        elif primary_n == 0:
+            fresh = False
+        elif primary_ts is None:
+            fresh = True
+        else:
+            fresh = (now - primary_ts).total_seconds() <= SILENT_FAIL_S
 
         # Verdict
         if primary_err:
             verdict = "OBSERVED_API_ERROR"
-        elif declared == "UP" and primary_n > 0:
+        elif declared == "UP" and fresh:
             verdict = "HEALTHY"
-        elif declared == "UP" and primary_n == 0:
+        elif declared == "UP":            # not fresh — count=0 OR last image too old
             verdict = "GHOST_UP"
-        elif declared == "DOWN" and primary_n == 0:
+        elif declared == "DOWN" and not fresh:
             verdict = "CONFIRMED_DOWN"
-        elif declared == "DOWN" and primary_n > 0:
+        elif declared == "DOWN" and fresh:
             verdict = "STUCK_DOWN_FLAG"
         else:
             verdict = "OBSERVED_API_ERROR"
 
-        # Per-moment partial-failure detection (only meaningful when UP and
-        # primary is flowing).
+        # Per-moment partial-failure detection. Only meaningful when the
+        # radar is HEALTHY. EXPECTED_ABSENT_MOMENTS filters out moments
+        # this radar never publishes anyway (e.g. RhoHV on X-band).
+        expected_absent = EXPECTED_ABSENT_MOMENTS.get(self.radar_id, set())
         dead_moments = [
             m for m, n in moments.items()
-            if n == 0 and m != PRIMARY_MOMENT and verdict == "HEALTHY"
+            if n == 0
+            and m != PRIMARY_MOMENT
+            and m not in expected_absent
+            and verdict == "HEALTHY"
         ]
 
         metrics: dict[str, float] = {}
         for m, n in moments.items():
             if n is not None:
                 metrics[f"images_{m.replace(' ', '_')}"] = float(n)
+        if primary_ts is not None:
+            metrics["primary_age_s"] = float((now - primary_ts).total_seconds())
 
         summary = f"declared={declared}  obs={primary_n}  → {verdict}"
+        if primary_ts is not None and primary_n and primary_n > 0:
+            age_s = int((now - primary_ts).total_seconds())
+            summary += f"  last={age_s}s"
         if dead_moments:
             summary += f"  dead_moments={dead_moments}"
 
@@ -144,9 +222,23 @@ class Layer2RadarReconcile(Check):
                 "radar": self.radar_id,
                 "folder": self.folder,
                 "declared": declared,
-                "observed": {"primary": primary_n, "primary_moment": PRIMARY_MOMENT},
+                "observed": {
+                    "primary": primary_n,
+                    "primary_moment": PRIMARY_MOMENT,
+                    "primary_newest_ts": primary_ts.isoformat() if primary_ts else None,
+                    "primary_age_s": (
+                        int((now - primary_ts).total_seconds()) if primary_ts else None
+                    ),
+                    "fresh": fresh,
+                    "silent_fail_s": SILENT_FAIL_S,
+                },
                 "moments": moments,
+                "moment_newest_ts": {
+                    m: (ts.isoformat() if ts else None)
+                    for m, ts in moment_newest.items()
+                },
                 "dead_moments": dead_moments,
+                "expected_absent_moments": sorted(expected_absent),
                 "verdict": verdict,
             },
             metrics=metrics,

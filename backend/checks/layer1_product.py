@@ -102,6 +102,14 @@ class Layer1ProductCheck(Check):
         metrics["age_s"] = float(age_s)
 
         # --- C. freshness ---
+        # NOTE on negative max_freshness_s: nowcast/forecast products publish
+        # FUTURE-dated steps (e.g. comp_now's latest_ts is ~50 min ahead of
+        # wall-clock, water_depth's is ~hours ahead). For those, age_s is
+        # NEGATIVE and `max_freshness_s` is set NEGATIVE too — the check
+        # then verifies "the future-most timestamp is at least N seconds
+        # ahead." If a forecast product regresses to delivering past
+        # timestamps, age_s flips positive and the check correctly fails.
+        # See config.PRODUCTS for the per-product values.
         sub["C_freshness"] = "pass" if age_s <= cfg["max_freshness_s"] else "fail"
 
         # --- D. cadence ---
@@ -117,10 +125,18 @@ class Layer1ProductCheck(Check):
             )
 
         # --- E. step count ---
-        expected = cfg["expected_steps"]
-        delta = abs(n - expected)
-        metrics["step_count_delta"] = float(delta)
-        sub["E_step_count"] = "pass" if delta <= STEP_COUNT_TOL else "warn"
+        # `expected_steps: None` means "don't check" — for forecast products
+        # whose horizon legitimately drifts hour-to-hour (e.g. fcst_temp
+        # has been observed publishing 19, 74, 75, 125, 130 steps in the
+        # same week as the upstream model adjusts). The ±4 tolerance is
+        # meaningless when the variance is in the tens.
+        expected = cfg.get("expected_steps")
+        if expected is None:
+            sub["E_step_count"] = "skip"
+        else:
+            delta = abs(n - expected)
+            metrics["step_count_delta"] = float(delta)
+            sub["E_step_count"] = "pass" if delta <= STEP_COUNT_TOL else "warn"
 
         # --- F. latest image exists + G. size + H. hash ---
         img_url = f"{SETTINGS.base}/api/imageData"
