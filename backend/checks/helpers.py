@@ -16,9 +16,16 @@ from .base import Status
 
 # Higher rank = worse. Used to fold per-sub-check statuses into a single
 # overall status (worst-of).
+#
+# Note on `pass` vs `skip`: pass outranks skip so that an aggregate with
+# *some* passing sub-checks + some skipped sub-checks rolls up to pass,
+# not skip. Skip is reserved for "we didn't actually assess anything" —
+# without that, forecast products (which intentionally skip step-count
+# and parity checks because those fields aren't meaningful for them)
+# would always show gray even though every applicable sub-check is fine.
 _STATUS_RANK: dict[Status, int] = {
-    "pass":  0,
-    "skip":  1,
+    "skip":  0,
+    "pass":  1,
     "warn":  2,
     "fail":  3,
     "error": 4,
