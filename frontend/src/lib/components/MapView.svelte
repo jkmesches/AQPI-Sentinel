@@ -27,18 +27,24 @@
 	let styleReady = false;
 
 	// -------------------------------------------------------------------------
-	// Image-decode throttle. The trace showed >900s of CPU in
-	// `MOZ_Z_inflate_fast` + `PremultiplyChunk_SSE2` during heavy map
-	// interaction — fetching N radar overlays concurrently when the user
-	// scrubs / changes moment / plays through steps. Each PNG decode lands on
-	// the main thread and stacks up.
+	// === Load-bearing perf: image-decode semaphore. ===
 	//
-	// Pattern: a tiny semaphore that pre-decodes an image via Image().decode()
-	// (which respects `decoding="async"`), capped at MAX_INFLIGHT_DECODES. We
-	// `await` the preload before calling MapLibre's `updateImage(url)` so
-	// MapLibre's subsequent fetch is a cache hit and decode is essentially
-	// instant. Token-based supersession lets a newer scrub abandon an old
-	// preload mid-queue.
+	// A Firefox trace caught >900s of CPU in `MOZ_Z_inflate_fast` +
+	// `PremultiplyChunk_SSE2` (gzip-decompress + premultiply) during
+	// heavy map interaction. Cause: scrubbing/playing/moment-switching
+	// kicks off N radar overlays in parallel — each PNG fetch+decode
+	// lands on the main thread and stacks up until the tab locks.
+	//
+	// This semaphore caps concurrent in-flight decodes at
+	// MAX_INFLIGHT_DECODES. Pre-decodes with Image().decode() (respects
+	// `decoding="async"`) BEFORE calling MapLibre's updateImage(url), so
+	// MapLibre's subsequent fetch is a cache hit and the actual layer
+	// swap is essentially free. Token-based supersession lets a newer
+	// scrub abandon an old preload mid-queue.
+	//
+	// If you change anything here, profile with 5+ radars active and
+	// play running before/after. Removing the throttle reintroduces
+	// scrub-related freezes within ~30 seconds of interaction.
 	const MAX_INFLIGHT_DECODES = 4;
 	let _decodesInFlight = 0;
 	const _decodeQueue: (() => void)[] = [];

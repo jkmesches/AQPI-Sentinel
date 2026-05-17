@@ -1,3 +1,18 @@
+# Loose, human-edited top-level dependencies (the "what we use" list).
+# DEV uses this directly: `pip install -r requirements.txt` from a venv.
+#
+# For PROD (Docker build) we use `requirements.lock.txt` instead, which
+# pins every transitive dependency to an exact version. Regenerate the
+# lock file with:
+#
+#     .venv/bin/pip freeze | grep -vE '^(pip|setuptools|wheel)==' \
+#       | sort > requirements.lock.txt
+#
+# after adding/removing anything here. Without the lock file an
+# unattended `docker compose build` weeks/months later could silently
+# pull in a major version bump (FastAPI, Pydantic, Svelte etc.) and
+# break things.
+
 # --- validation_tests/ (existing scripts) ---
 requests>=2.31
 Pillow>=10.2
