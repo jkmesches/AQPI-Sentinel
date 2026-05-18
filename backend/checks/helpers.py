@@ -63,10 +63,19 @@ _FILENAME_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"_(\d{8}-\d{4})\.png$"),                "%Y%m%d-%H%M"),
 )
 
+# Forecast products (`fcst_*`) name their PNGs by HRRR step index, not by
+# timestamp — `C_hrrr_accum_step5.png`, `C_hrrr_temp_step0.png`, etc.
+# parse_filename_step_idx pulls the integer for step-index parity checks
+# (Layer 3B fold-in inside layer1_product). The two parsers are
+# mutually exclusive in practice — observed products encode a time,
+# forecast products encode a step index.
+_FILENAME_STEP_RX = re.compile(r"_step(\d+)\.png$")
+
 
 def parse_filename_ts(name: str) -> datetime | None:
     """Pull the timestamp encoded in a product PNG filename, or None if the
-    filename doesn't carry one (e.g. forecast step-indexed names)."""
+    filename doesn't carry one (e.g. forecast step-indexed names — try
+    parse_filename_step_idx for those)."""
     for rx, fmt in _FILENAME_PATTERNS:
         m = rx.search(name)
         if m:
@@ -75,6 +84,19 @@ def parse_filename_ts(name: str) -> datetime | None:
             except ValueError:
                 pass
     return None
+
+
+def parse_filename_step_idx(name: str) -> int | None:
+    """For forecast products: pull the integer step index from
+    `..._step<N>.png`. None when the filename doesn't carry one (observed
+    products with timestamp names go through parse_filename_ts instead)."""
+    m = _FILENAME_STEP_RX.search(name)
+    if m is None:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
 
 
 # --------------------------------------------------------------------------
