@@ -57,6 +57,19 @@ def _is_local_dns_error(e: BaseException) -> bool:
     return False
 
 
+def _summary_looks_like_dns(summary: str | None) -> bool:
+    """Companion to _is_local_dns_error for check evaluators that catch the
+    transport exception internally and return a CheckResult with the formatted
+    message in the summary string (layer1_product / layer3_overlay / layer4_*).
+    Without this, those checks fire status=error on DNS flakes and bypass the
+    scheduler-level catch-block demotion.
+    """
+    if not summary:
+        return False
+    s = summary.lower()
+    return any(m in s for m in _DNS_ERROR_MARKERS)
+
+
 class Scheduler:
     def __init__(self, store: Store, ctx: CheckContext, engine=None):
         self.store = store
@@ -79,6 +92,35 @@ class Scheduler:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         log.info("scheduler stopped")
+
+    def _maybe_downgrade_for_dns_summary(self, check: Check, result: CheckResult) -> CheckResult:
+        """If a check evaluator caught its own transport error and packed the
+        DNS marker into result.summary, demote the row to skip + reason=
+        local_dns_error so the timeline doesn't paint it red as if it were an
+        upstream outage. Mirrors the catch-block demote in _loop. The network
+        control check is exempt — it must surface real DNS state.
+        """
+        if result.status not in ("fail", "error"):
+            return result
+        if check.id.startswith("layer0.net."):
+            return result
+        if not _summary_looks_like_dns(result.summary):
+            return result
+        log.info("check %s demoted on DNS marker in summary: %s",
+                 check.id, result.summary)
+        return CheckResult(
+            check_id=result.check_id, target=result.target, stage=result.stage,
+            status="skip",
+            started_at=result.started_at, finished_at=result.finished_at,
+            summary=f"local DNS unavailable: {result.summary}",
+            payload={
+                **(result.payload or {}),
+                "reason":          "local_dns_error",
+                "original_status": result.status,
+                "original_summary": result.summary,
+            },
+            metrics=result.metrics,
+        )
 
     def _maybe_downgrade_for_network(self, check: Check, result: CheckResult) -> CheckResult:
         net = getattr(self.ctx, "network", None)
@@ -150,6 +192,12 @@ class Scheduler:
             #
             # Exempt the control check itself (it MUST surface offline as
             # fail) and the synthetic L4 'reason' skips (already skip).
+            # Same DNS-flake suppression as the exception catch above, but
+            # applied to results whose check evaluator caught the transport
+            # error internally and returned status=error with the DNS marker
+            # in summary. Without this, layer1_product / layer3_overlay /
+            # layer4_image rows still painted red on local DNS hiccups.
+            result = self._maybe_downgrade_for_dns_summary(check, result)
             result = self._maybe_downgrade_for_network(check, result)
 
             try:
