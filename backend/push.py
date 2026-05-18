@@ -89,7 +89,16 @@ async def get_vapid(pool) -> dict[str, str]:
 
 
 def _send_one(subscription: dict, payload: dict, vapid: dict) -> tuple[bool, str | None, int | None]:
-    """Synchronous single-subscription send (called via to_thread)."""
+    """Synchronous single-subscription send (called via to_thread).
+
+    Note on the VAPID private key: pywebpush detects a literal PEM by
+    looking for "------BEGIN " in the string and routes that to
+    py_vapid.Vapid.from_pem, which (in 1.9.4) is broken — it strips
+    the PEM armor and then calls from_raw on the base64 body, but
+    from_raw expects a base64url-encoded RAW 32-byte private value,
+    not a PKCS8 body. The fix is to pass the raw value directly so
+    pywebpush routes it to from_raw.
+    """
     try:
         resp = webpush(
             subscription_info={
@@ -97,7 +106,7 @@ def _send_one(subscription: dict, payload: dict, vapid: dict) -> tuple[bool, str
                 "keys": {"p256dh": subscription["p256dh"], "auth": subscription["auth"]},
             },
             data=json.dumps(payload),
-            vapid_private_key=vapid["private_pem"],
+            vapid_private_key=vapid["private_raw_b64"],
             vapid_claims={"sub": _vapid_subject()},
             ttl=300,
         )
