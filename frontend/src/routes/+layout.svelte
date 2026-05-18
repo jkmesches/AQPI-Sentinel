@@ -200,5 +200,36 @@
 	<main class="flex-1 overflow-hidden">
 		{@render children?.()}
 	</main>
+
+	<!-- Tasteful attribution footer. Muted single-line strip across the
+	     bottom; doesn't shout, but it's there. Links open in a new tab. -->
+	<footer
+		class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
+	>
+		<span>
+			Built by
+			<a
+				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				href="https://github.com/jkmesches"
+				target="_blank"
+				rel="noopener"
+			>Joseph Mesches</a>
+		</span>
+		<span class="flex items-center gap-3">
+			<a
+				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				href="https://github.com/jkmesches/SentinelProject"
+				target="_blank"
+				rel="noopener"
+			>github · source</a>
+			<span class="text-[var(--color-faint)]">·</span>
+			<a
+				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				href="https://radarca.engr.colostate.edu"
+				target="_blank"
+				rel="noopener"
+			>radarca · CSU</a>
+		</span>
+	</footer>
 </div>
 {/if}
