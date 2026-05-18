@@ -168,8 +168,19 @@ async def history_timeline(
 
     now = datetime.now(timezone.utc)
     until_dt = _parse_iso(until, now)
-    # Snap `until` down to the bucket boundary so pages line up cleanly.
-    snapped_epoch = (int(until_dt.timestamp()) // bucket_s) * bucket_s
+    # Snap `until` UP to the next bucket boundary so the partial in-flight
+    # bucket containing wall-clock-now is INCLUDED in the grid. Previously
+    # we snapped DOWN, which truncated 0..(bucket_s) seconds of fresh data
+    # — visible at fine grains (5 m → no truncation when wall-clock hits a
+    # 5-min mark) but up to 14 min of fresh data dropped at 15 m grain.
+    # Failures within that window appeared on the 5 m view and vanished
+    # on a switch to 15 m. The dense-bucket loop below already tolerates
+    # an in-flight bucket — empty cells are normal during a partial fill.
+    epoch = int(until_dt.timestamp())
+    if epoch % bucket_s == 0:
+        snapped_epoch = epoch
+    else:
+        snapped_epoch = ((epoch // bucket_s) + 1) * bucket_s
     until_snapped = datetime.fromtimestamp(snapped_epoch, tz=timezone.utc)
     span_s = bucket_s * limit
     if span_s > _MAX_SPAN_S:
