@@ -41,6 +41,9 @@ _env = Environment(
 _UPSTREAM = SETTINGS.base.rstrip("/")
 
 
+from ...stages import stage_descriptor as _stage_descriptor, stage_tech as _stage_tech
+
+
 def _fmt_age(seconds: float) -> str:
     """Compact relative age: 47s · 12m · 1h23m · 6d12h."""
     s = int(seconds)
@@ -270,7 +273,9 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
     return {
         "check_id":            check_id,
         "target":              target,
-        "stage":               stage,
+        "stage":               stage,                 # canonical ID (L0…L4-T1T2)
+        "stage_descriptor":    _stage_descriptor(stage),  # what humans see
+        "stage_tech":          _stage_tech(stage),    # short code for footer
         "severity":            severity,
         "severity_upper":      severity.upper(),
         "opened_at_str":       _opened_str(alarm.get("opened_at")),
@@ -290,9 +295,9 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
 
 def _subject(ctx: dict) -> str:
     """Compact, scannable subject. Example:
-       [SENTINEL WARN] L2/CBAND · GHOST_UP — newest scan 612s old (limit 480s)"""
+       [SENTINEL WARN] Radar Scans/CBAND — newest scan 612s old (limit 480s)"""
     sev = ctx["severity_upper"]
-    stage = ctx["stage"]
+    stage = ctx["stage_descriptor"]
     target = ctx["target"] or ctx["check_id"].split(".")[-1]
     short = ctx["short_line"]
     head = f"[SENTINEL {sev}] {stage}/{target}"

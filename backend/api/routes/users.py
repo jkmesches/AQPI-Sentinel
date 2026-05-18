@@ -106,7 +106,20 @@ async def list_users(
         "SELECT id, email, role, display_name, created_at, last_login_at, disabled_at "
         "FROM users ORDER BY id ASC",
     )
-    return [_ser(dict(r)) for r in rows]
+    # Bulk-fetch group memberships so each user row carries its groups.
+    memberships = await pool.fetch(
+        "SELECT gm.user_id, g.id, g.name FROM group_members gm "
+        "JOIN groups g ON g.id = gm.group_id ORDER BY g.name"
+    )
+    by_user: dict[int, list[dict]] = {}
+    for m in memberships:
+        by_user.setdefault(m["user_id"], []).append({"id": m["id"], "name": m["name"]})
+    out = []
+    for r in rows:
+        d = _ser(dict(r))
+        d["groups"] = by_user.get(r["id"], [])
+        out.append(d)
+    return out
 
 
 @router.post("")
@@ -134,6 +147,16 @@ async def create_user(
         email, role, display_name,
     )
     user_id = row["id"]
+    # Optional initial group memberships — plan calls for "select group(s)
+    # when adding a user" (/admin/users requirement). Empty/missing list
+    # means "no groups yet"; admin can still add later.
+    group_ids = body.get("group_ids") or []
+    if isinstance(group_ids, list) and group_ids:
+        await pool.executemany(
+            "INSERT INTO group_members (group_id, user_id, added_by) VALUES ($1, $2, $3) "
+            "ON CONFLICT DO NOTHING",
+            [(int(gid), user_id, me["email"]) for gid in group_ids],
+        )
     token = await _issue_reset_token(pool, user_id, hours=72)
 
     # Send the invite email when SMTP is configured and the caller didn't
@@ -200,14 +223,35 @@ async def patch_user(
             await A.destroy_all_sessions_for_user(pool, user_id)
         else:
             fields.append(("disabled_at", None))
-    if not fields:
+    # Group membership replacement — only fired when `group_ids` is
+    # present in the body so PATCH on other fields doesn't accidentally
+    # blank out memberships.
+    group_change = None
+    if "group_ids" in body:
+        gids = body["group_ids"] or []
+        if not isinstance(gids, list):
+            raise HTTPException(400, "group_ids must be a list")
+        await pool.execute("DELETE FROM group_members WHERE user_id = $1", user_id)
+        if gids:
+            await pool.executemany(
+                "INSERT INTO group_members (group_id, user_id, added_by) VALUES ($1, $2, $3) "
+                "ON CONFLICT DO NOTHING",
+                [(int(g), user_id, me["email"]) for g in gids],
+            )
+        group_change = [int(g) for g in gids]
+
+    if not fields and group_change is None:
         return {"ok": True, "id": user_id, "noop": True}
-    set_clause = ", ".join(f"{name} = ${i + 2}" for i, (name, _) in enumerate(fields))
-    args = [user_id] + [v for _, v in fields]
-    await pool.execute(f"UPDATE users SET {set_clause} WHERE id = $1", *args)
+    if fields:
+        set_clause = ", ".join(f"{name} = ${i + 2}" for i, (name, _) in enumerate(fields))
+        args = [user_id] + [v for _, v in fields]
+        await pool.execute(f"UPDATE users SET {set_clause} WHERE id = $1", *args)
     await A.audit(pool, user_email=me["email"], action="user.patch",
                   target=f"user:{user_id}",
-                  payload={k: v.isoformat() if isinstance(v, datetime) else v for k, v in fields})
+                  payload={
+                      **{k: v.isoformat() if isinstance(v, datetime) else v for k, v in fields},
+                      **({"group_ids": group_change} if group_change is not None else {}),
+                  })
     return {"ok": True, "id": user_id}
 
 

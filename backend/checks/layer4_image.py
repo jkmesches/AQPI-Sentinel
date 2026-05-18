@@ -19,6 +19,7 @@ from typing import Any
 
 from ..archive import save_image as _archive_save
 from ..config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, l4_profile
+from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import worst_of
@@ -165,12 +166,22 @@ class Layer4ImageCheck(Check):
             )
 
         # Per-product QC profile knobs. Forecast products and color-ramp
-        # scalar fields get relaxed thresholds; see config.L4_PROFILES.
+        # scalar fields get relaxed thresholds. Live values come from
+        # backend.thresholds which falls through to config.L4_PROFILES on
+        # a fresh DB so behavior is unchanged before any admin edit.
         prof = l4_profile(self.identifier)
-        extreme_threshold  = float(prof["extreme_threshold"])
-        skip_frozen        = bool(prof["skip_frozen"])
-        frozen_min_cov_pct = float(prof["frozen_min_cov_pct"])
-        skip_range_ring    = bool(prof.get("skip_range_ring", False))
+        extreme_threshold = float(_thresholds.get_l4(
+            self.identifier, "extreme_threshold", prof["extreme_threshold"],
+        ))
+        skip_frozen = bool(_thresholds.get_l4(
+            self.identifier, "skip_frozen", prof["skip_frozen"],
+        ))
+        frozen_min_cov_pct = float(_thresholds.get_l4(
+            self.identifier, "frozen_min_cov_pct", prof["frozen_min_cov_pct"],
+        ))
+        skip_range_ring = bool(_thresholds.get_l4(
+            self.identifier, "skip_range_ring", prof.get("skip_range_ring", False),
+        ))
 
         # Offload CPU work to a thread so the asyncio loop stays responsive.
         t1 = await asyncio.to_thread(tier1_stats, png_bytes)

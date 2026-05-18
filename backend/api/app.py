@@ -40,6 +40,13 @@ async def lifespan(app: FastAPI):
     store = Store(SETTINGS.db_url)
     await store.connect()
 
+    # Bootstrap the threshold registry — seeds from config.py defaults on
+    # first boot, otherwise loads the admin-managed blob. Every check reads
+    # values through backend.thresholds.get_*; init() must complete before
+    # the scheduler starts evaluating.
+    from .. import thresholds as _thresholds
+    await _thresholds.init(store.pool)
+
     # Bootstrap the first admin from env vars on a fresh database. No-op
     # if users already exist.
     if SETTINGS.admin_email and SETTINGS.admin_password:
@@ -102,7 +109,11 @@ async def lifespan(app: FastAPI):
             target = payload.get("target") or ""
             check = payload.get("check_id") or ""
             msg = (payload.get("message") or "").split("\n")[0][:140]
-            title = f"[{sev.upper()}] {stage}/{target or check.split('.')[-1]}"
+            # Push titles surface the descriptor name; canonical stage ID
+            # rides in `data` for downstream click routing/debug.
+            from ..stages import stage_descriptor
+            stage_label = stage_descriptor(stage) if stage else ""
+            title = f"[{sev.upper()}] {stage_label}/{target or check.split('.')[-1]}"
             body = msg or f"{check} fired"
             await _push.dispatch_push(store.pool, {
                 "title": title,

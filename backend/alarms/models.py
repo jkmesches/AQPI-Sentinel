@@ -36,17 +36,30 @@ class Receiver(BaseModel):
     webhook: str | None = None
     console: bool = False
     template: str = "default"
+    # Optional group memberships. At dispatch time the engine looks up each
+    # group's active members (filtered by the group's notification schedule)
+    # and unions their emails into this receiver's email list. Lets ops
+    # define "page everyone in the on-call group" as a single receiver.
+    group_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _at_least_one_channel(self):
-        if not (self.email or self.webhook or self.console):
+        # A group reference also counts as a channel — the engine will
+        # expand it to emails at dispatch time. Validation runs on saved
+        # config, so this catches "receiver with no way to reach anyone"
+        # while letting group-only receivers through.
+        if not (self.email or self.webhook or self.console or self.group_ids):
             raise ValueError(f"receiver {self.name!r} has no channels")
         return self
 
 
 class EscalationStep(BaseModel):
     delay: str = "0m"
-    receivers: list[str]
+    receivers: list[str] = Field(default_factory=list)
+    # Optional direct group references — equivalent to creating a Receiver
+    # whose only channel is group_ids. Lets admins pick "page group on-call"
+    # in a step without making a wrapper receiver.
+    group_ids: list[int] = Field(default_factory=list)
 
     delay_s: int = 0   # computed
 

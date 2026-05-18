@@ -306,12 +306,100 @@ class AlarmEngine:
                     continue
             await self._dispatch(alarm, route, step, step_idx)
 
+    async def _expand_receiver_groups(self, recv, when):
+        """Apply group expansion + schedule gate to a receiver.
+
+        Returns a Receiver clone with emails expanded, or None if the
+        receiver should be skipped (all referenced groups off-duty). When
+        group_ids is empty this is the identity function — direct-email-only
+        receivers behave exactly as before.
+
+        Schedule check uses backend.groups.effective_is_active which walks
+        the parent chain so an inherited downtime/window suppresses the
+        child correctly.
+        """
+        from .. import groups as _groups
+        gids = list(recv.group_ids or [])
+        if not gids:
+            return recv
+        active_emails: list[str] = []
+        any_active = False
+        for gid in gids:
+            try:
+                if not await _groups.effective_is_active(self.store.pool, gid, when):
+                    continue
+                any_active = True
+                rows = await self.store.pool.fetch(
+                    "SELECT u.email FROM group_members gm "
+                    "JOIN users u ON u.id = gm.user_id "
+                    "WHERE gm.group_id = $1 AND u.disabled_at IS NULL "
+                    "  AND u.email IS NOT NULL",
+                    gid,
+                )
+                active_emails.extend(r["email"] for r in rows)
+            except Exception:
+                log.exception("group expansion failed for gid=%s", gid)
+        if not any_active:
+            return None
+        merged = list(dict.fromkeys([*recv.email, *active_emails]))  # dedupe, keep order
+        return recv.model_copy(update={"email": merged})
+
     async def _dispatch(self, alarm, route, step, step_idx):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        # Dedup overlap: if user A is reachable through two different
+        # receivers (direct email + group membership) inside the same
+        # step, send them ONE message, not two. Track emails already
+        # claimed by an earlier receiver in this step and remove them
+        # from later receivers' email lists. Webhook + console don't
+        # have an addressee identity, so they aren't deduped here.
+        emails_seen_this_step: set[str] = set()
+
+        # Synthesize an anonymous receiver per direct-named group so the
+        # rest of the dispatch loop treats it uniformly. The synthetic
+        # receiver carries only group_ids; _expand_receiver_groups does
+        # the schedule check + member expansion.
+        from .models import Receiver as _Receiver
+        synthetic_receivers: list[_Receiver] = []
+        for gid in getattr(step, "group_ids", []) or []:
+            synthetic_receivers.append(_Receiver(
+                name=f"group:{gid}",
+                group_ids=[int(gid)],
+            ))
+
+        all_recvs: list[tuple[str, _Receiver | None]] = []
+        for r in synthetic_receivers:
+            all_recvs.append((r.name, r))
         for receiver_name in step.receivers:
-            recv = self.cfg.receiver(receiver_name)
+            all_recvs.append((receiver_name, None))
+
+        for receiver_name, synth in all_recvs:
+            recv = synth if synth is not None else self.cfg.receiver(receiver_name)
             if recv is None:
                 log.warning("route refs unknown receiver %r", receiver_name)
                 continue
+            # Group expansion + schedule gate. If the receiver references
+            # any groups and ALL of them are inactive (downtime / off-week
+            # / outside time-windows), skip the receiver entirely — the
+            # whole on-call cohort is off duty. Active groups contribute
+            # their members' emails to the dispatch list.
+            recv = await self._expand_receiver_groups(recv, now)
+            if recv is None:
+                log.info("receiver %r skipped: all referenced groups are off-duty",
+                         receiver_name)
+                continue
+            # Drop emails an earlier receiver in this step already covered.
+            if recv.email:
+                fresh = [e for e in recv.email if e.lower() not in emails_seen_this_step]
+                if not fresh and not recv.webhook and not recv.console:
+                    log.info(
+                        "receiver %r skipped: all emails already notified earlier in step",
+                        receiver_name,
+                    )
+                    continue
+                if fresh != recv.email:
+                    recv = recv.model_copy(update={"email": fresh})
+                emails_seen_this_step.update(e.lower() for e in fresh)
             channels = [c for c in ("email", "webhook", "console")
                         if getattr(recv, c, None) or (c == "console" and recv.console)]
             for ch in channels:

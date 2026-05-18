@@ -10,7 +10,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+import asyncio
+from datetime import datetime, timezone
+
 from ... import auth as A
+from ... import thresholds as _thresholds
+from ... import reprocess_engine as _reproc
+from ... import groups as _groups
 from ...alarms.models import AlertsConfig
 from .auth import require_admin
 
@@ -391,3 +397,380 @@ async def list_audit(
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Thresholds — admin-managed knobs for every check evaluator.
+#
+# GET returns the persisted blob + the seed defaults so the UI can show
+# "current vs default" inline without a separate round-trip. PUT validates,
+# writes, and refreshes the in-process cache; the next check tick picks up
+# the new values without a process restart.
+# ---------------------------------------------------------------------------
+
+@router.get("/thresholds")
+async def get_thresholds(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+):
+    pool = request.app.state.store.pool
+    persisted = await _thresholds.fetch_blob(pool)
+    return {
+        "value":      persisted["value"],
+        "defaults":   _thresholds.seed_defaults(),
+        "updated_at": persisted["updated_at"],
+        "updated_by": persisted["updated_by"],
+        "version":    _thresholds.current_version(),
+    }
+
+
+def _validate_thresholds(blob: object) -> dict:
+    """Light structural validation. The UI is the primary line of defense;
+    this just rejects obvious type errors that would corrupt the cache."""
+    if not isinstance(blob, dict):
+        raise HTTPException(400, "thresholds body must be an object")
+    for section in ("products", "radars", "l4", "globals"):
+        if section in blob and not isinstance(blob[section], dict):
+            raise HTTPException(400, f"thresholds.{section} must be an object")
+    # Per-section value sanity. None entries are allowed (= "use default").
+    for pid, p in (blob.get("products") or {}).items():
+        if not isinstance(p, dict):
+            raise HTTPException(400, f"products.{pid} must be an object")
+        for k, v in p.items():
+            if v is None: continue
+            if k in ("max_freshness_s", "min_png_bytes", "expected_steps", "cadence_s"):
+                if not isinstance(v, (int, float)):
+                    raise HTTPException(400, f"products.{pid}.{k} must be a number")
+    for rid, r in (blob.get("radars") or {}).items():
+        if not isinstance(r, dict):
+            raise HTTPException(400, f"radars.{rid} must be an object")
+        if "silent_fail_s" in r and r["silent_fail_s"] is not None:
+            if not isinstance(r["silent_fail_s"], (int, float)) or r["silent_fail_s"] <= 0:
+                raise HTTPException(400, f"radars.{rid}.silent_fail_s must be positive number")
+    for pid, p in (blob.get("l4") or {}).items():
+        if not isinstance(p, dict):
+            raise HTTPException(400, f"l4.{pid} must be an object")
+        for k, v in p.items():
+            if v is None: continue
+            if k in ("extreme_threshold", "frozen_min_cov_pct"):
+                if not isinstance(v, (int, float)):
+                    raise HTTPException(400, f"l4.{pid}.{k} must be a number")
+            elif k in ("skip_frozen", "skip_range_ring"):
+                if not isinstance(v, bool):
+                    raise HTTPException(400, f"l4.{pid}.{k} must be a boolean")
+    g = blob.get("globals") or {}
+    if not isinstance(g, dict):
+        raise HTTPException(400, "globals must be an object")
+    for k, v in g.items():
+        if v is None: continue
+        if not isinstance(v, (int, float)):
+            raise HTTPException(400, f"globals.{k} must be a number")
+    return blob  # type: ignore[return-value]
+
+
+@router.put("/thresholds")
+async def put_thresholds(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    """Persist a full threshold blob. Pass {"value": {...}}; partial updates
+    are NOT supported — the UI sends the full validated blob so a stale
+    section can't silently revert.
+
+    On success the in-process cache is refreshed and the next check tick
+    picks up the new values.
+    """
+    blob = body.get("value")
+    if blob is None:
+        raise HTTPException(400, "missing 'value'")
+    validated = _validate_thresholds(blob)
+    pool = request.app.state.store.pool
+    await _thresholds.save_blob(pool, validated, updated_by=user["email"])
+    await A.audit(
+        pool, user_email=user["email"], action="thresholds.put",
+        target="settings:thresholds",
+        payload={"sections": sorted(validated.keys())},
+    )
+    return {
+        "ok":         True,
+        "updated_at": (await _thresholds.fetch_blob(pool))["updated_at"],
+        "version":    _thresholds.current_version(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Retroactive reprocess — re-classify historical check_runs under current
+# thresholds. Spawned as a background asyncio task; admin polls status by
+# job_id and can request cancellation.
+# ---------------------------------------------------------------------------
+
+def _parse_iso(s: str | None, fallback: datetime) -> datetime:
+    if not s:
+        return fallback
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(400, f"bad ISO datetime: {s!r}")
+
+
+@router.post("/thresholds/reprocess")
+async def start_reprocess(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    """Start a retroactive reprocess job. Returns the job_id immediately;
+    poll /thresholds/reprocess/status?job_id=… for progress."""
+    confirm = body.get("confirm") or ""
+    if confirm != "APPLY":
+        raise HTTPException(400, "confirm phrase 'APPLY' required")
+    now = datetime.now(timezone.utc)
+    since = _parse_iso(body.get("since"), now)
+    until = _parse_iso(body.get("until"), now)
+    if since >= until:
+        raise HTTPException(400, "since must be before until")
+    only_stages = body.get("only_stages")
+    if only_stages and not isinstance(only_stages, list):
+        raise HTTPException(400, "only_stages must be a list of stage IDs")
+
+    pool = request.app.state.store.pool
+    job_id = _reproc.new_job_id()
+    job = _reproc.ReprocessJob(job_id, since, until, only_stages)
+    _reproc._jobs[job_id] = job
+    asyncio.create_task(_reproc.run_reprocess(pool, job))
+    await A.audit(
+        pool, user_email=user["email"], action="thresholds.reprocess",
+        target=f"job:{job_id}",
+        payload={"since": since.isoformat(), "until": until.isoformat(),
+                 "only_stages": only_stages},
+    )
+    return {"job_id": job_id, "state": job.state}
+
+
+@router.get("/thresholds/reprocess/status")
+async def reprocess_status(
+    job_id: str,
+    user: Annotated[dict, Depends(require_admin)],
+):
+    job = _reproc.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "unknown job_id")
+    return job.to_dict()
+
+
+@router.post("/thresholds/reprocess/cancel")
+async def reprocess_cancel(
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    job_id = body.get("job_id")
+    if not job_id:
+        raise HTTPException(400, "missing job_id")
+    job = _reproc.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "unknown job_id")
+    job.cancel_requested = True
+    return {"ok": True, "job_id": job_id, "state": job.state}
+
+
+# ---------------------------------------------------------------------------
+# Groups — bundle users + a notification schedule. Used by alert routing
+# (Group 10) to gate recipient dispatch by time-of-day / weekday / biweekly.
+# Schema in db/schema.sql:groups + group_members; evaluator in backend/groups.py.
+# ---------------------------------------------------------------------------
+
+def _validate_schedule(s: object) -> dict:
+    if s is None or s == {}:
+        return {}
+    if not isinstance(s, dict):
+        raise HTTPException(400, "schedule must be an object")
+    kind = s.get("kind")
+    if kind not in (None, "always", "weekly", "biweekly"):
+        raise HTTPException(400, f"schedule.kind must be always|weekly|biweekly, got {kind!r}")
+    wd = s.get("weekdays")
+    if wd is not None:
+        if not isinstance(wd, list) or not all(isinstance(d, int) and 0 <= d <= 6 for d in wd):
+            raise HTTPException(400, "schedule.weekdays must be a list of ints in [0,6]")
+    tw = s.get("time_windows")
+    if tw is not None:
+        if not isinstance(tw, list):
+            raise HTTPException(400, "schedule.time_windows must be a list")
+        for pair in tw:
+            if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, str) for x in pair)):
+                raise HTTPException(400, "schedule.time_windows entries must be [HH:MM, HH:MM]")
+    if "anchor_date" in s and s["anchor_date"] is not None:
+        if not isinstance(s["anchor_date"], str):
+            raise HTTPException(400, "schedule.anchor_date must be YYYY-MM-DD string")
+    if "downtime" in s and s["downtime"] is not None:
+        if not isinstance(s["downtime"], list):
+            raise HTTPException(400, "schedule.downtime must be a list of {start, end}")
+    return s
+
+
+async def _serialize_group(pool, row: dict) -> dict:
+    """Expand a group row with member emails + parent name for the UI."""
+    sched = row["schedule"] or {}
+    if isinstance(sched, str):
+        sched = json.loads(sched)
+    members = await pool.fetch(
+        "SELECT u.id, u.email, u.display_name FROM group_members gm "
+        "JOIN users u ON u.id = gm.user_id WHERE gm.group_id = $1 "
+        "ORDER BY u.email",
+        row["id"],
+    )
+    parent_name = None
+    if row["parent_group_id"]:
+        p = await pool.fetchrow("SELECT name FROM groups WHERE id = $1", row["parent_group_id"])
+        if p:
+            parent_name = p["name"]
+    return {
+        "id":              row["id"],
+        "name":            row["name"],
+        "description":     row["description"],
+        "parent_group_id": row["parent_group_id"],
+        "parent_name":     parent_name,
+        "schedule":        sched,
+        "members":         [{"id": m["id"], "email": m["email"],
+                              "display_name": m["display_name"]} for m in members],
+        "created_at":      row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at":      row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.get("/groups")
+async def list_groups(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+):
+    pool = request.app.state.store.pool
+    rows = await pool.fetch(
+        "SELECT id, name, description, parent_group_id, schedule, "
+        "       created_at, updated_at FROM groups ORDER BY name"
+    )
+    return [await _serialize_group(pool, dict(r)) for r in rows]
+
+
+@router.post("/groups")
+async def create_group(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    description = body.get("description") or ""
+    parent_id = body.get("parent_group_id")
+    schedule = _validate_schedule(body.get("schedule") or {})
+    pool = request.app.state.store.pool
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO groups (name, description, parent_group_id, schedule, created_by) "
+            "VALUES ($1, $2, $3, $4, $5) "
+            "RETURNING id, name, description, parent_group_id, schedule, created_at, updated_at",
+            name, description, parent_id, schedule, user["email"],
+        )
+    except Exception as e:
+        raise HTTPException(400, f"create failed: {e}")
+    member_ids = body.get("member_ids") or []
+    if isinstance(member_ids, list) and member_ids:
+        await pool.executemany(
+            "INSERT INTO group_members (group_id, user_id, added_by) VALUES ($1, $2, $3) "
+            "ON CONFLICT DO NOTHING",
+            [(row["id"], int(uid), user["email"]) for uid in member_ids],
+        )
+    await A.audit(pool, user_email=user["email"], action="groups.create",
+                  target=f"group:{row['id']}", payload={"name": name})
+    return await _serialize_group(pool, dict(row))
+
+
+@router.put("/groups/{gid}")
+async def update_group(
+    gid: int, request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(...),
+):
+    pool = request.app.state.store.pool
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    parent_id = body.get("parent_group_id")
+    if parent_id == gid:
+        raise HTTPException(400, "group cannot inherit from itself")
+    schedule = _validate_schedule(body.get("schedule") or {})
+    description = body.get("description") or ""
+    row = await pool.fetchrow(
+        "UPDATE groups SET name = $1, description = $2, parent_group_id = $3, "
+        "  schedule = $4, updated_at = now() "
+        "WHERE id = $5 "
+        "RETURNING id, name, description, parent_group_id, schedule, created_at, updated_at",
+        name, description, parent_id, schedule, gid,
+    )
+    if row is None:
+        raise HTTPException(404, "group not found")
+    # Replace member set if supplied. Absent => leave membership alone.
+    if "member_ids" in body and isinstance(body["member_ids"], list):
+        await pool.execute("DELETE FROM group_members WHERE group_id = $1", gid)
+        if body["member_ids"]:
+            await pool.executemany(
+                "INSERT INTO group_members (group_id, user_id, added_by) VALUES ($1, $2, $3) "
+                "ON CONFLICT DO NOTHING",
+                [(gid, int(uid), user["email"]) for uid in body["member_ids"]],
+            )
+    await A.audit(pool, user_email=user["email"], action="groups.update",
+                  target=f"group:{gid}", payload={"name": name})
+    return await _serialize_group(pool, dict(row))
+
+
+@router.delete("/groups/{gid}")
+async def delete_group(
+    gid: int, request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+):
+    pool = request.app.state.store.pool
+    res = await pool.execute("DELETE FROM groups WHERE id = $1", gid)
+    if res == "DELETE 0":
+        raise HTTPException(404, "group not found")
+    await A.audit(pool, user_email=user["email"], action="groups.delete",
+                  target=f"group:{gid}", payload={})
+    return {"ok": True, "id": gid}
+
+
+@router.post("/groups/{gid}/preview")
+async def preview_schedule(
+    gid: int, request: Request,
+    user: Annotated[dict, Depends(require_admin)],
+    body: dict = Body(default={}),
+):
+    """Return the next N on-windows (default 5) from a given start time
+    (default = now) using the schedule in the request body — letting the
+    admin UI preview a draft before saving. If `body.schedule` is missing,
+    uses the persisted schedule for `gid`.
+    """
+    pool = request.app.state.store.pool
+    schedule = body.get("schedule")
+    if schedule is None:
+        row = await pool.fetchrow("SELECT schedule FROM groups WHERE id = $1", gid)
+        if row is None:
+            raise HTTPException(404, "group not found")
+        schedule = row["schedule"] or {}
+        if isinstance(schedule, str):
+            schedule = json.loads(schedule)
+    _validate_schedule(schedule)
+    from datetime import datetime as _dt, timezone as _tz
+    start = _dt.now(_tz.utc)
+    if body.get("start"):
+        try:
+            start = _dt.fromisoformat(str(body["start"]).replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(400, "bad start datetime")
+    count = int(body.get("count") or 5)
+    windows = _groups.next_on_windows(schedule, start, count=count)
+    return {
+        "windows": [
+            {"start": s.isoformat(), "end": e.isoformat()}
+            for (s, e) in windows
+        ],
+        "active_now": _groups.is_active_at(schedule, start),
+    }

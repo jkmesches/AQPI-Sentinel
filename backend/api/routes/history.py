@@ -35,6 +35,16 @@ def _parse_iso(s: str | None, default: datetime) -> datetime:
         raise HTTPException(400, f"bad ISO datetime: {s!r}")
 
 
+def _csv_list(s: str | None) -> list[str] | None:
+    """Filter params accept either a single value (`stage=L2`) or a comma-
+    separated list (`stage=L1,L2,L4-T1T2`). Returns the canonical list, or
+    None if nothing was supplied (caller drops the filter)."""
+    if not s:
+        return None
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    return parts or None
+
+
 def _ser_alarm(a: dict) -> dict:
     return {
         "id":            a["id"],
@@ -67,6 +77,7 @@ async def history_alarms(
     request: Request,
     since: str | None = None, until: str | None = None,
     stage: str | None = None, target: str | None = None,
+    check_id: str | None = None,
     severity: str | None = None, limit: int = 500,
 ):
     now = datetime.now(timezone.utc)
@@ -75,12 +86,20 @@ async def history_alarms(
     pool = request.app.state.store.pool
     where = ["opened_at >= $1", "opened_at <= $2"]
     args: list = [since_dt, until_dt]
-    if stage:
-        args.append(stage); where.append(f"stage = ${len(args)}")
-    if target:
-        args.append(target); where.append(f"target = ${len(args)}")
-    if severity:
-        args.append(severity); where.append(f"severity = ${len(args)}")
+    # All three of stage/target/severity accept a comma-separated list so the
+    # history page's multi-select chips can serialize directly. Single value
+    # remains valid for back-compat / curl users.
+    stages = _csv_list(stage)
+    if stages:
+        args.append(stages); where.append(f"stage = ANY(${len(args)}::text[])")
+    targets = _csv_list(target)
+    if targets:
+        args.append(targets); where.append(f"target = ANY(${len(args)}::text[])")
+    if check_id:
+        args.append(check_id); where.append(f"check_id = ${len(args)}")
+    sevs = _csv_list(severity)
+    if sevs:
+        args.append(sevs); where.append(f"severity = ANY(${len(args)}::text[])")
     args.append(limit)
     sql = (
         "SELECT * FROM alarms WHERE " + " AND ".join(where)
@@ -95,6 +114,7 @@ async def history_checks(
     request: Request,
     since: str | None = None, until: str | None = None,
     stage: str | None = None, target: str | None = None,
+    check_id: str | None = None,
     status: str | None = None, limit: int = 1000,
 ):
     now = datetime.now(timezone.utc)
@@ -103,12 +123,17 @@ async def history_checks(
     pool = request.app.state.store.pool
     where = ["finished_at >= $1", "finished_at <= $2"]
     args: list = [since_dt, until_dt]
-    if stage:
-        args.append(stage); where.append(f"stage = ${len(args)}")
-    if target:
-        args.append(target); where.append(f"target = ${len(args)}")
-    if status:
-        args.append(status); where.append(f"status = ${len(args)}")
+    stages = _csv_list(stage)
+    if stages:
+        args.append(stages); where.append(f"stage = ANY(${len(args)}::text[])")
+    targets = _csv_list(target)
+    if targets:
+        args.append(targets); where.append(f"target = ANY(${len(args)}::text[])")
+    if check_id:
+        args.append(check_id); where.append(f"check_id = ${len(args)}")
+    statuses = _csv_list(status)
+    if statuses:
+        args.append(statuses); where.append(f"status = ANY(${len(args)}::text[])")
     args.append(limit)
     sql = (
         "SELECT id, check_id, target, stage, status, started_at, finished_at, summary "
@@ -219,6 +244,104 @@ async def history_timeline(
     }
 
 
+@router.get("/report.csv")
+async def history_report_csv(
+    request: Request,
+    since: str | None = None, until: str | None = None,
+    bucket: str = "5m",
+    stage: str | None = None, target: str | None = None,
+    check_id: str | None = None,
+):
+    """Long-format bucketed CSV report. One row per (time_bucket × check × target),
+    with the worst status seen in that bucket plus the run count.
+
+    Used by the Timeline page's Export Report dialog. The bucketing logic
+    mirrors /api/history/timeline so the CSV matches what's on screen.
+    """
+    if bucket not in _BUCKETS_S:
+        raise HTTPException(400, f"bucket must be one of {sorted(_BUCKETS_S)}")
+    bucket_s = _BUCKETS_S[bucket]
+    now = datetime.now(timezone.utc)
+    since_dt = _parse_iso(since, now - timedelta(hours=1))
+    until_dt = _parse_iso(until, now)
+    # Snap to bucket boundaries so the report aligns with the on-screen grid.
+    until_snapped = datetime.fromtimestamp(
+        (int(until_dt.timestamp()) // bucket_s) * bucket_s, tz=timezone.utc,
+    )
+    since_snapped = datetime.fromtimestamp(
+        (int(since_dt.timestamp()) // bucket_s) * bucket_s, tz=timezone.utc,
+    )
+    span_s = int((until_snapped - since_snapped).total_seconds())
+    if span_s <= 0:
+        raise HTTPException(400, "since must be before until")
+    if span_s > _MAX_SPAN_S:
+        raise HTTPException(400, "requested span exceeds server cap (90 days)")
+
+    pool = request.app.state.store.pool
+    where = ["finished_at >= $2", "finished_at < $3"]
+    args: list = [bucket_s, since_snapped, until_snapped]
+    stages = _csv_list(stage)
+    if stages:
+        args.append(stages); where.append(f"stage = ANY(${len(args)}::text[])")
+    targets = _csv_list(target)
+    if targets:
+        args.append(targets); where.append(f"target = ANY(${len(args)}::text[])")
+    ids = _csv_list(check_id)
+    if ids:
+        args.append(ids); where.append(f"check_id = ANY(${len(args)}::text[])")
+
+    sql = (
+        "SELECT "
+        "  to_timestamp(floor(extract(epoch from finished_at) / $1) * $1) "
+        "    AT TIME ZONE 'UTC' AS bucket_ts, "
+        "  check_id, target, stage, "
+        "  MAX(CASE status "
+        "        WHEN 'fail'  THEN 4 "
+        "        WHEN 'error' THEN 4 "
+        "        WHEN 'warn'  THEN 3 "
+        "        WHEN 'pass'  THEN 2 "
+        "        WHEN 'skip'  THEN 1 "
+        "        ELSE 0 END) AS worst_rank, "
+        "  bool_or(status = 'fail')  AS has_fail, "
+        "  bool_or(status = 'error') AS has_error, "
+        "  COUNT(*) AS n "
+        "FROM check_runs "
+        "WHERE " + " AND ".join(where) + " "
+        "GROUP BY bucket_ts, check_id, target, stage "
+        "ORDER BY bucket_ts ASC, stage, check_id, target"
+    )
+    rows = await pool.fetch(sql, *args)
+    rank_to_status = {3: "warn", 2: "pass", 1: "skip", 0: "unknown"}
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["bucket_ts", "stage", "check_id", "target", "status", "n_runs"])
+    for r in rows:
+        bts = r["bucket_ts"]
+        if bts.tzinfo is None:
+            bts = bts.replace(tzinfo=timezone.utc)
+        rank = r["worst_rank"] or 0
+        status = (
+            ("fail" if r["has_fail"] else "error") if rank == 4
+            else rank_to_status[rank]
+        )
+        w.writerow([
+            bts.isoformat(),
+            r["stage"],
+            r["check_id"],
+            r["target"] or "",
+            status,
+            int(r["n"]),
+        ])
+
+    fname = f"sentinel-report-{bucket}-{since_snapped.strftime('%Y%m%dT%H%M')}-{until_snapped.strftime('%Y%m%dT%H%M')}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"content-disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/runs")
 async def history_runs(
     request: Request,
@@ -266,11 +389,26 @@ async def history_export_csv(
     request: Request, type: str = "alarms",
     since: str | None = None, until: str | None = None,
     stage: str | None = None, target: str | None = None,
+    check_id: str | None = None,
+    severity: str | None = None, status: str | None = None,
 ):
+    """CSV download that honors every filter the corresponding table view does.
+    Severity is only meaningful for alarms, status only for checks; the other
+    is silently ignored for the chosen `type`."""
     if type not in ("alarms", "checks"):
         raise HTTPException(400, "type must be alarms|checks")
-    fn = history_alarms if type == "alarms" else history_checks
-    rows = await fn(request, since=since, until=until, stage=stage, target=target, limit=10000)
+    if type == "alarms":
+        rows = await history_alarms(
+            request, since=since, until=until,
+            stage=stage, target=target, check_id=check_id,
+            severity=severity, limit=10000,
+        )
+    else:
+        rows = await history_checks(
+            request, since=since, until=until,
+            stage=stage, target=target, check_id=check_id,
+            status=status, limit=10000,
+        )
     buf = io.StringIO()
     if not rows:
         return Response(content="", media_type="text/csv")
