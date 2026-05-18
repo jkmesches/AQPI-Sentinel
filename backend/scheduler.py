@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import socket
 
 from .checks.base import Check, CheckResult, utcnow
 from .checks.transports import CheckContext
@@ -17,6 +18,43 @@ from .db.store import Store
 from .registry import CHECKS
 
 log = logging.getLogger(__name__)
+
+
+# Substrings + errno markers that indicate the failure is local DNS /
+# name-resolution flake, not an upstream-side problem. Matched against
+# `str(exception).lower()`. EAI errno values:
+#   -2 (EAI_NONAME) — "Name or service not known"
+#   -3 (EAI_AGAIN)  — "Temporary failure in name resolution"
+#   -5 (EAI_NODATA) — "No address associated with hostname"
+_DNS_ERROR_MARKERS = (
+    "gaierror",
+    "[errno -2]",
+    "[errno -3]",
+    "[errno -5]",
+    "name or service not known",
+    "no address associated with hostname",
+    "temporary failure in name resolution",
+)
+
+
+def _is_local_dns_error(e: BaseException) -> bool:
+    """Heuristic: does this exception look like our DNS resolver failed?
+
+    True → demote to skip (local infra), False → keep as error (real
+    upstream problem). Walks __cause__/__context__ since httpx wraps
+    the underlying socket.gaierror.
+    """
+    cur: BaseException | None = e
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, socket.gaierror):
+            return True
+        msg = str(cur).lower()
+        if any(m in msg for m in _DNS_ERROR_MARKERS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 class Scheduler:
@@ -75,14 +113,35 @@ class Scheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 — we want to swallow everything
-                log.exception("check %s raised", check.id)
-                result = CheckResult(
-                    check_id=check.id, target=check.target, stage=check.stage,
-                    status="error",
-                    started_at=t0, finished_at=utcnow(),
-                    summary=f"{type(e).__name__}: {e}",
-                    payload={"exception": type(e).__name__, "message": str(e)},
-                )
+                # Local DNS / name-resolution flakes shouldn't fire alarms.
+                # If the failure looks like our resolver, demote to skip
+                # so the timeline stays clean and the operator doesn't
+                # get paged on a transient blip on our side. The network
+                # control check itself is exempt — it MUST surface real
+                # offline state.
+                if _is_local_dns_error(e) and not check.id.startswith("layer0.net."):
+                    log.info("check %s skipped on local DNS flake: %s: %s",
+                             check.id, type(e).__name__, e)
+                    result = CheckResult(
+                        check_id=check.id, target=check.target, stage=check.stage,
+                        status="skip",
+                        started_at=t0, finished_at=utcnow(),
+                        summary=f"local DNS unavailable: {type(e).__name__}: {e}",
+                        payload={
+                            "reason":    "local_dns_error",
+                            "exception": type(e).__name__,
+                            "message":   str(e),
+                        },
+                    )
+                else:
+                    log.exception("check %s raised", check.id)
+                    result = CheckResult(
+                        check_id=check.id, target=check.target, stage=check.stage,
+                        status="error",
+                        started_at=t0, finished_at=utcnow(),
+                        summary=f"{type(e).__name__}: {e}",
+                        payload={"exception": type(e).__name__, "message": str(e)},
+                    )
 
             # Local-network blame shield: if our own internet is down (per the
             # NetworkMonitor) and the check came back fail/error, demote to
