@@ -27,6 +27,17 @@
 		<span class="mob-label">Status</span>
 	</a>
 
+	<a href="/m/timeline" class="mob-tab {activeClass('/m/timeline')}" aria-label="Timeline">
+		<svg viewBox="0 0 24 24" class="mob-icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+			<line x1="6" y1="4" x2="6" y2="20" />
+			<circle cx="6" cy="8" r="2" fill="currentColor" stroke="none" />
+			<circle cx="6" cy="14" r="2" fill="currentColor" stroke="none" />
+			<line x1="10" y1="8" x2="20" y2="8" />
+			<line x1="10" y1="14" x2="18" y2="14" />
+		</svg>
+		<span class="mob-label">Timeline</span>
+	</a>
+
 	<a href="/m/alarms" class="mob-tab {activeClass('/m/alarms')}" aria-label="Alarms">
 		<span class="relative">
 			<svg viewBox="0 0 24 24" class="mob-icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

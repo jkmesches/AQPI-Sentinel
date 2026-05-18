@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { sentinel } from '$lib/stores/state.svelte';
-	import { fmtAge } from '$lib/format';
+	import { fmtAge, stageLabel, prettyCheckLabel } from '$lib/format';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import MobileStatusMap from '$lib/components/mobile/MobileStatusMap.svelte';
+	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
 
 	let now = $state(Date.now());
 	let tickTimer: ReturnType<typeof setInterval>;
@@ -30,6 +31,14 @@
 
 	function rowsToShow(rows: any[], stageKey: string): any[] {
 		return expanded[stageKey] ? rows : rows.filter((r) => r.status !== 'pass' && r.status !== 'skip');
+	}
+
+	// Tap-to-drill-down: opens the full-screen mobile detail sheet.
+	let detailOpen = $state(false);
+	let detailRow = $state<any>(null);
+	function openDetail(r: any) {
+		detailRow = r;
+		detailOpen = true;
 	}
 </script>
 
@@ -91,7 +100,7 @@
 			style="-webkit-tap-highlight-color: transparent;"
 		>
 			<StatusDot status={stageStatus} size={9} />
-			<span class="text-[14px] font-semibold tracking-[0.12em] text-[var(--color-bright)]">{stage}</span>
+			<span class="text-[14px] font-semibold tracking-[0.12em] text-[var(--color-bright)]" title={stage}>{stageLabel(stage)}</span>
 			<span class="num text-[12px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
 			{#if c.warn}<span class="num text-[12px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
 			{#if c.fail + c.error}<span class="num text-[12px] text-[var(--color-fail)]">{c.fail + c.error} F</span>{/if}
@@ -103,18 +112,28 @@
 		{#if visible.length > 0}
 			<ul class="divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">
 				{#each visible as r (r.check_id + '|' + r.target)}
-					<li class="flex items-start gap-3 px-3 py-2.5 text-[13px]">
-						<StatusDot status={r.status} size={7} />
-						<div class="min-w-0 flex-1">
-							<div class="num truncate text-[13px] text-[var(--color-default)]">
-								{r.target || r.check_id}
-							</div>
-							{#if r.summary}
-								<div class="num mt-0.5 truncate text-[11px] text-[var(--color-muted)]">
-									{r.summary}
+					<li>
+						<button
+							type="button"
+							onclick={() => openDetail(r)}
+							class="flex w-full items-start gap-3 px-3 py-2.5 text-left text-[13px] active:bg-[var(--color-elevated)]/60"
+							style="-webkit-tap-highlight-color: transparent;"
+						>
+							<StatusDot status={r.status} size={7} />
+							<div class="min-w-0 flex-1">
+								<div class="num truncate text-[13px] text-[var(--color-default)]">
+									{r.target || r.check_id}
 								</div>
-							{/if}
-						</div>
+								{#if r.summary}
+									<div class="num mt-0.5 truncate text-[11px] text-[var(--color-muted)]">
+										{r.summary}
+									</div>
+								{/if}
+							</div>
+							<svg viewBox="0 0 24 24" width="14" height="14" class="mt-1 shrink-0 text-[var(--color-faint)]" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="9 6 15 12 9 18" />
+							</svg>
+						</button>
 					</li>
 				{/each}
 			</ul>
@@ -132,3 +151,37 @@
 		{/if}
 	</section>
 {/each}
+
+<MobileDrillDown
+	bind:open={detailOpen}
+	title={detailRow ? prettyCheckLabel(detailRow.check_id ?? '', detailRow.target ?? '') : ''}
+	subtitle={detailRow?.check_id ?? ''}
+	stage={detailRow?.stage ?? ''}
+	status={detailRow?.status ?? ''}
+>
+	{#if detailRow}
+		<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-[12px] num">
+			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+			<dd class="text-[var(--color-default)]">{detailRow.target || '—'}</dd>
+			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Status</dt>
+			<dd class="text-[var(--color-bright)]">{detailRow.status}</dd>
+		</dl>
+
+		{#if detailRow.summary}
+			<section class="mt-4">
+				<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Summary</div>
+				<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{detailRow.summary}</pre>
+			</section>
+		{/if}
+
+		<div class="mt-5 flex flex-col gap-2">
+			<a
+				href={`/history?check_id=${encodeURIComponent(detailRow.check_id ?? '')}&target=${encodeURIComponent(detailRow.target ?? '')}&stage=${encodeURIComponent(detailRow.stage ?? '')}`}
+				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				style="-webkit-tap-highlight-color: transparent;"
+			>
+				Open in History
+			</a>
+		</div>
+	{/if}
+</MobileDrillDown>

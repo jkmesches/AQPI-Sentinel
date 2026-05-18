@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 
+	interface GroupRef { id: number; name: string; }
 	interface UserRow {
 		id: number;
 		email: string;
@@ -10,9 +11,11 @@
 		created_at: string | null;
 		last_login_at: string | null;
 		disabled_at: string | null;
+		groups?: GroupRef[];
 	}
 
 	let rows = $state<UserRow[]>([]);
+	let allGroups = $state<GroupRef[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -20,7 +23,41 @@
 	let newRole = $state<'admin' | 'user'>('user');
 	let newDisplay = $state('');
 	let newSendEmail = $state(true);
+	let newGroupIds = $state<number[]>([]);
 	let busy = $state(false);
+
+	// Per-row inline group editor state. Keyed by user id.
+	let editingGroupsFor = $state<number | null>(null);
+	let groupDraft = $state<number[]>([]);
+
+	function toggleNewGroup(gid: number) {
+		newGroupIds = newGroupIds.includes(gid)
+			? newGroupIds.filter((x) => x !== gid)
+			: [...newGroupIds, gid];
+	}
+	function toggleDraftGroup(gid: number) {
+		groupDraft = groupDraft.includes(gid)
+			? groupDraft.filter((x) => x !== gid)
+			: [...groupDraft, gid];
+	}
+	function startEditGroups(u: UserRow) {
+		editingGroupsFor = u.id;
+		groupDraft = (u.groups ?? []).map((g) => g.id);
+	}
+	async function saveGroupsFor(u: UserRow) {
+		try {
+			const r = await fetch(`/api/admin/users/${u.id}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ group_ids: groupDraft })
+			});
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			editingGroupsFor = null;
+			await load();
+		} catch (e) {
+			alert(`update groups failed: ${(e as Error).message}`);
+		}
+	}
 	let lastResult = $state<{
 		email: string;
 		link: string;
@@ -32,9 +69,16 @@
 		loading = true;
 		error = null;
 		try {
-			const r = await fetch('/api/admin/users');
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			rows = await r.json();
+			const [ur, gr] = await Promise.all([
+				fetch('/api/admin/users'),
+				fetch('/api/admin/groups')
+			]);
+			if (!ur.ok) throw new Error(`users HTTP ${ur.status}`);
+			rows = await ur.json();
+			if (gr.ok) {
+				const groups = await gr.json();
+				allGroups = groups.map((g: any) => ({ id: g.id, name: g.name }));
+			}
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
@@ -56,6 +100,7 @@
 					role: newRole,
 					display_name: newDisplay || null,
 					send_email: newSendEmail,
+					group_ids: newGroupIds,
 				})
 			});
 			const j = await r.json();
@@ -69,6 +114,7 @@
 			newEmail = '';
 			newDisplay = '';
 			newRole = 'user';
+			newGroupIds = [];
 			await load();
 		} catch (e) {
 			alert(`invite failed: ${(e as Error).message}`);
@@ -199,6 +245,7 @@
 					<th class="px-2 py-1 text-left">email</th>
 					<th class="px-2 py-1 text-left">role</th>
 					<th class="px-2 py-1 text-left">display name</th>
+					<th class="px-2 py-1 text-left">groups</th>
 					<th class="px-2 py-1 text-left">last login</th>
 					<th class="px-2 py-1 text-left">status</th>
 					<th class="px-2 py-1"></th>
@@ -223,6 +270,37 @@
 							</select>
 						</td>
 						<td class="px-2 py-1 text-[var(--color-default)]">{u.display_name ?? '—'}</td>
+						<td class="px-2 py-1 text-[11px]">
+							{#if editingGroupsFor === u.id}
+								<div class="flex flex-wrap gap-1 items-center">
+									{#each allGroups as g}
+										{@const checked = groupDraft.includes(g.id)}
+										<button
+											type="button"
+											onclick={() => toggleDraftGroup(g.id)}
+											class="rounded-sm border px-1.5 py-0.5 text-[10px] num {checked
+												? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+												: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+										>
+											{g.name}
+										</button>
+									{/each}
+									<button class="text-[10px] uppercase tracking-wider text-[var(--color-ok)] ml-1" onclick={() => saveGroupsFor(u)}>save</button>
+									<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]" onclick={() => (editingGroupsFor = null)}>cancel</button>
+								</div>
+							{:else}
+								<div class="flex flex-wrap gap-1 items-center">
+									{#each u.groups ?? [] as g}
+										<span class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-1.5 py-0.5 text-[10px] num text-[var(--color-bright)]">{g.name}</span>
+									{:else}
+										<span class="text-[var(--color-faint)] italic">none</span>
+									{/each}
+									{#if allGroups.length > 0}
+										<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] underline" onclick={() => startEditGroups(u)}>edit</button>
+									{/if}
+								</div>
+							{/if}
+						</td>
 						<td class="px-2 py-1 num text-[var(--color-muted)]">{fmt(u.last_login_at)}</td>
 						<td class="px-2 py-1 text-[10px] uppercase tracking-wider">
 							{u.disabled_at
@@ -259,6 +337,26 @@
 
 			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">display name</label>
 			<input bind:value={newDisplay} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
+
+			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">groups</label>
+			{#if allGroups.length === 0}
+				<span class="text-[11px] text-[var(--color-faint)] italic">No groups defined yet. Create some at <a href="/admin/groups" class="underline">/admin/groups</a> to assign new users to them.</span>
+			{:else}
+				<div class="flex flex-wrap gap-1">
+					{#each allGroups as g}
+						{@const checked = newGroupIds.includes(g.id)}
+						<button
+							type="button"
+							onclick={() => toggleNewGroup(g.id)}
+							class="rounded-sm border px-2 py-0.5 text-[11px] num {checked
+								? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+								: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+						>
+							{g.name}
+						</button>
+					{/each}
+				</div>
+			{/if}
 
 			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">send email</label>
 			<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">

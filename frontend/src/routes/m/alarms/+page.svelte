@@ -2,6 +2,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { api } from '$lib/api';
+	import { stageLabel } from '$lib/format';
 	import { onMount, onDestroy } from 'svelte';
 
 	let now = $state(Date.now());
@@ -79,7 +80,7 @@
 					<div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em]">
 						<span class="font-semibold">{a.severity}</span>
 						<span class="text-[var(--color-faint)]">·</span>
-						<span class="num text-[var(--color-muted)]">{a.stage}</span>
+						<span class="num text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 						<span class="text-[var(--color-faint)]">·</span>
 						<span class="num text-[var(--color-muted)]">{ageOf(a.opened_at)}</span>
 						{#if a.suppressed_by}

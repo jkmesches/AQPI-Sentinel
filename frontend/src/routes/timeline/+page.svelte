@@ -1,8 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket } from '$lib/api';
-	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText } from '$lib/format';
+	import {
+		prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText,
+		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
+	} from '$lib/format';
 	import LazyImage from '$lib/components/LazyImage.svelte';
+	import PieStatus from '$lib/components/PieStatus.svelte';
+	import ReportExportModal from '$lib/components/ReportExportModal.svelte';
+	import { sentinel } from '$lib/stores/state.svelte';
 	import { url as apiUrl } from '$lib/origin';
 
 	type Bucket = '1m' | '5m' | '15m' | '1h' | '6h' | '1d';
@@ -18,6 +24,13 @@
 	// so the table doesn't grow unbounded as the user scrolls — a 4-figure
 	// row count combined with ~15 cells/row tips browsers into freeze.
 	const MAX_BUCKETS = 300;
+
+	// Seconds per bucket — used to size the time window when deeplinking from
+	// a clicked cell to the History page. Mirror of the backend table in
+	// backend/api/routes/history.py:_BUCKETS_S.
+	const BUCKET_SECONDS: Record<string, number> = {
+		'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '6h': 21600, '1d': 86400
+	};
 
 	const STAGE_ORDER = ['L0', 'L1', 'L2', 'L3', 'L4-T1T2'];
 
@@ -60,7 +73,9 @@
 	let loading       = $state(false);
 	let loadingMore   = $state(false);
 	let error         = $state<string | null>(null);
-	let live          = $state(false);
+	// live = true by default; persisted per-browser so a user's explicit
+	// opt-out survives reloads.
+	let live          = $state(true);
 	let liveTimer: ReturnType<typeof setInterval> | undefined;
 
 	// asc = oldest on the left, newest on the right (the original layout).
@@ -73,6 +88,69 @@
 	const cfg     = $derived(BUCKETS.find((b) => b.key === bucket)!);
 	const tabCfg  = $derived(TABS.find((t) => t.key === tab)!);
 
+	// Per-tab status proportions for the pie icons on the tab buttons.
+	// Computed from sentinel.rollup so the donut reflects current state,
+	// not whatever the historical timeline view is rendering.
+	type StatusCounts = { pass: number; warn: number; fail: number; error: number; skip: number };
+	function emptyCounts(): StatusCounts {
+		return { pass: 0, warn: 0, fail: 0, error: 0, skip: 0 };
+	}
+	// --- Export Report modal state ---
+	let exportOpen = $state(false);
+
+	// Defaults pulled from the on-screen state when the modal opens. `buckets`
+	// is loaded oldest-last-most-recent so we read both ends for the time
+	// window. datetime-local wants "YYYY-MM-DDTHH:MM" with no seconds/zone.
+	function isoToLocal(iso: string): string {
+		return iso.slice(0, 16);
+	}
+	const exportDefaults = $derived.by(() => {
+		const visibleTargets = flatColumns.map((c) => c.target).filter((t) => !!t);
+		const tsList = buckets.map((b) => b.ts).sort();
+		const earliest = tsList[0] ?? new Date(Date.now() - 3_600_000).toISOString();
+		const latest   = tsList[tsList.length - 1] ?? new Date().toISOString();
+		return {
+			since: isoToLocal(earliest),
+			until: isoToLocal(latest),
+			bucket: bucket as string,
+			stages: [...tabCfg.stages],
+			targets: [...new Set(visibleTargets)]
+		};
+	});
+	const exportTargetOptions = $derived.by(() => {
+		const seen = new Set<string>();
+		const out: { value: string; label: string; hint?: string }[] = [];
+		for (const [stageId, list] of Object.entries(sentinel.rollup?.stages ?? {})) {
+			for (const r of list as any[]) {
+				if (!r.target || seen.has(r.target)) continue;
+				seen.add(r.target);
+				out.push({ value: r.target, label: r.target, hint: stageLabel(stageId) });
+			}
+		}
+		out.sort((a, b) => a.label.localeCompare(b.label));
+		return out;
+	});
+
+	const tabCounts = $derived.by<Record<string, StatusCounts>>(() => {
+		const out: Record<string, StatusCounts> = {};
+		for (const t of TABS) {
+			const c = emptyCounts();
+			for (const s of t.stages) {
+				for (const r of sentinel.rollup?.stages?.[s] ?? []) {
+					const st = (r.status ?? 'skip') as keyof StatusCounts;
+					if (st in c) c[st] += 1;
+					else c.skip += 1;
+				}
+			}
+			out[t.key] = c;
+		}
+		return out;
+	});
+
+	// `subgroups` is populated for L1 only (Products tab) so the grid
+	// renders a category sub-header before each cohort — same four
+	// categories the home page uses (Radar Data / Atmospheric Forecast /
+	// CoSMoS / NWM / Other). For other stages we keep a single flat list.
 	const groupedColumns = $derived.by(() => {
 		const byStage = new Map<string, CheckMeta[]>();
 		for (const c of columns) {
@@ -80,11 +158,20 @@
 			if (!byStage.has(c.stage)) byStage.set(c.stage, []);
 			byStage.get(c.stage)!.push(c);
 		}
-		const out: { stage: string; cols: CheckMeta[] }[] = [];
+		const out: { stage: string; cols: CheckMeta[]; subgroups?: { label: string; cols: CheckMeta[] }[] }[] = [];
 		for (const s of tabCfg.stages) {
 			const cols = byStage.get(s);
-			if (cols?.length) {
-				cols.sort((a, b) => a.id.localeCompare(b.id));
+			if (!cols?.length) continue;
+			cols.sort((a, b) => a.id.localeCompare(b.id));
+			if (s === 'L1') {
+				const byCat: Record<string, CheckMeta[]> = {};
+				for (const cat of PRODUCT_CATEGORY_ORDER) byCat[cat] = [];
+				for (const c of cols) byCat[productCategory(c.target)].push(c);
+				const subgroups = PRODUCT_CATEGORY_ORDER
+					.map((cat) => ({ label: PRODUCT_CATEGORY_LABEL[cat], cols: byCat[cat] }))
+					.filter((sg) => sg.cols.length > 0);
+				out.push({ stage: s, cols, subgroups });
+			} else {
 				out.push({ stage: s, cols });
 			}
 		}
@@ -170,12 +257,18 @@
 	$effect(() => {
 		try { localStorage.setItem('sentinel.timeline.sort', sortOrder); } catch { /* */ }
 	});
+	$effect(() => {
+		try { localStorage.setItem('sentinel.timeline.live', live ? '1' : '0'); } catch { /* */ }
+	});
 
 	let visHandler: (() => void) | undefined;
 	onMount(() => {
 		try {
 			const s = localStorage.getItem('sentinel.timeline.sort');
 			if (s === 'asc' || s === 'desc') sortOrder = s;
+			const l = localStorage.getItem('sentinel.timeline.live');
+			if (l === '0') live = false;
+			else if (l === '1') live = true;
 		} catch { /* */ }
 		loadInitial();
 		liveTimer = setInterval(tickLive, 30_000);
@@ -572,12 +665,17 @@
 	<!-- TABS -->
 	<nav class="flex items-end gap-1 border-b border-[var(--color-border)] px-4 pt-2 text-[12px]">
 		{#each TABS as t}
+			{@const c = tabCounts[t.key]}
+			{@const total = c.pass + c.warn + c.fail + c.error + c.skip}
+			{@const bad = c.fail + c.error}
 			<button
-				class="px-3 py-1.5 uppercase tracking-wider {tab === t.key
+				class="flex items-center gap-1.5 px-3 py-1.5 uppercase tracking-wider {tab === t.key
 					? 'text-[var(--color-bright)] border-b-2 border-[var(--color-bright)] -mb-px'
 					: 'text-[var(--color-muted)] hover:text-[var(--color-default)] border-b-2 border-transparent -mb-px'}"
 				onclick={() => (tab = t.key)}
+				title={`${t.label}: ${c.pass} pass · ${c.warn} warn · ${bad} fail/error · ${c.skip} skip (${total} total). ${t.desc}`}
 			>
+				<PieStatus counts={c} size={16} />
 				{t.label}
 			</button>
 		{/each}
@@ -634,6 +732,15 @@
 			<span>live (30s)</span>
 		</label>
 
+		<button
+			type="button"
+			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+			onclick={() => (exportOpen = true)}
+			title="Open the export dialog: pick a time range, resolution, stages, and targets — download as CSV. Defaults to what's on the screen right now."
+		>
+			⤓ Export report
+		</button>
+
 		<div class="flex items-center gap-2 ml-auto">
 			{#each ['pass', 'warn', 'fail', 'skip', 'unknown'] as s}
 				<span class="flex items-center gap-1 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">
@@ -685,21 +792,27 @@
 				     costs nothing measurable. -->
 				{#each orderedBuckets as b, bi}
 					{@const ts = fmtRowTs(b.ts)}
-					{@const major = isMajorTick(b.ts, bi, orderedBuckets.length)}
 					{@const isLast = bi === orderedBuckets.length - 1}
+					<!-- "Most recent" = the newest bucket regardless of sort
+					     direction (rightmost in asc, leftmost in desc).
+					     Always labelled + bold so the eye anchors on "now". -->
+					{@const isNewest = sortOrder === 'asc' ? isLast : bi === 0}
+					{@const major = isNewest || isMajorTick(b.ts, bi, orderedBuckets.length)}
 					<!-- Labelled cells need to paint AFTER neighbours so their
 					     overflowing label isn't clipped by the next cell's
-					     opaque background. Bump z-index on major cells. -->
+					     opaque background. Bump z-index on major cells; bump
+					     further on the newest cell so its bold label always
+					     wins paint order. -->
 					<div
-						class="tl-header relative sticky top-0 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num {major ? 'z-[25]' : 'z-20'}"
+						class="tl-header relative sticky top-0 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num {isNewest ? 'z-[27]' : major ? 'z-[25]' : 'z-20'}"
 						style="height:{TIME_HDR_H}px;{major ? ' box-shadow: inset 1px 0 0 var(--color-border-strong);' : ''}"
-						title={`${b.ts} · ${relativeAge(b.ts)}`}
+						title={`${b.ts} · ${relativeAge(b.ts)}${isNewest ? ' · most recent' : ''}`}
 					>
 						{#if major}
 							<span
-								class="absolute bottom-1 whitespace-nowrap font-medium text-[var(--color-bright)] tracking-tight"
+								class="absolute bottom-1 whitespace-nowrap tracking-tight {isNewest ? 'font-bold text-[var(--color-bright)] text-[11px]' : 'font-medium text-[var(--color-bright)]'}"
 								style="{isLast ? 'right:4px;' : 'left:4px;'} background: var(--color-canvas); padding: 0 3px;"
-							>{ts.primary}</span>
+							>{ts.primary}{isNewest ? ' • now' : ''}</span>
 						{/if}
 					</div>
 				{/each}
@@ -719,12 +832,79 @@
 						style="height:{STAGE_ROW_H}px; grid-column: span {orderedBuckets.length};"
 					></div>
 
+					<!-- Subgroups: surfaced for L1 (Products) to mirror the home
+					     page's Radar Data / Atmospheric Forecast / CoSMoS / NWM
+					     grouping. Each subgroup gets a slim header row before
+					     its checks. -->
+					{#if g.subgroups}
+						{#each g.subgroups as sg}
+							<div
+								class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
+								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px;"
+							>
+								<span>{sg.label}</span>
+								<span class="ml-2 text-[var(--color-faint)] num">({sg.cols.length})</span>
+							</div>
+							<div
+								class="tl-cell border-b border-[var(--color-border)] bg-[var(--color-canvas)]/60"
+								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px; grid-column: span {orderedBuckets.length};"
+							></div>
+							{#each sg.cols as col}
+								<div
+									class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] text-[var(--color-bright)] num"
+									style="height:{ROW_H}px;"
+									title={[
+										`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
+										``,
+										`Check ID:  ${col.id}`,
+										`Target:    ${col.target}`,
+										`Cadence:   every ${col.cadence_s}s`,
+										`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
+										``,
+										`Cell colors: green = pass · yellow = warn · red = fail/error · gray = no data / skipped.`,
+										`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
+									].join('\n')}
+								>
+									<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
+								</div>
+								{#each orderedBuckets as b}
+									{@const cell = b.cells[cellKey(col)]}
+									{@const st = cell?.status ?? 'unknown'}
+									{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
+									<button
+										type="button"
+										class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
+										style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
+										onclick={() => openDetail(b, col)}
+										title={cell
+											? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cell.n} run${cell.n === 1 ? '' : 's'} · ${fmtRowTs(b.ts).primary} UTC`
+											: `${prettyCheckLabel(col.id, col.target)} · no data · ${fmtRowTs(b.ts).primary} UTC`}
+									>
+										<span
+											class="block"
+											style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{STATUS_BG[st]}; border-radius:2px;"
+										></span>
+									</button>
+								{/each}
+							{/each}
+						{/each}
+					{:else}
 					<!-- Per-check rows in this stage -->
 					{#each g.cols as col}
 						<div
 							class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] text-[var(--color-bright)] num"
 							style="height:{ROW_H}px;"
-							title="{col.id} · target={col.target} · every {col.cadence_s}s"
+							title={[
+								`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
+								``,
+								`Check ID:  ${col.id}`,
+								`Target:    ${col.target}`,
+								`Cadence:   every ${col.cadence_s}s`,
+								`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
+								``,
+								`Cell colors: green = pass · yellow = warn · red = fail/error · gray = no data / skipped.`,
+								`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
+							].join('\n')}
 						>
 							<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
 						</div>
@@ -748,6 +928,7 @@
 							</button>
 						{/each}
 					{/each}
+					{/if}
 				{/each}
 			</div>
 
@@ -782,8 +963,8 @@
 			<!-- HEADER -->
 			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0">
-					<div class="label text-[var(--color-faint)]">
-						{stageLabel(detail.col.stage)} · {detail.col.stage}
+					<div class="label text-[var(--color-faint)]" title={`Internal stage: ${detail.col.stage}`}>
+						{stageLabel(detail.col.stage)}
 					</div>
 					<div class="text-[14px] text-[var(--color-bright)] num truncate">
 						{prettyCheckLabel(detail.col.id, detail.col.target)}
@@ -980,16 +1161,39 @@
 			{/each}
 
 			<div class="mt-4 flex gap-2">
-				<a
-					class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
-					href={`/history?stage=${encodeURIComponent(detail.col.stage)}&target=${encodeURIComponent(detail.col.target)}`}
-				>
-					open in history
-				</a>
+				{#snippet historyLink()}
+					{@const baseTs = new Date(detail.ts).getTime()}
+					{@const bucketSec = BUCKET_SECONDS[bucket] ?? 60}
+					{@const bucketMs = bucketSec * 1000}
+					{@const sinceIso = new Date(baseTs - bucketMs).toISOString()}
+					{@const untilIso = new Date(baseTs + bucketMs * 2).toISOString()}
+					{@const href = `/history?tab=checks&check_id=${encodeURIComponent(detail.col.id)}` +
+						`&target=${encodeURIComponent(detail.col.target)}` +
+						`&stage=${encodeURIComponent(detail.col.stage)}` +
+						`&since=${encodeURIComponent(sinceIso)}&until=${encodeURIComponent(untilIso)}`}
+					<a
+						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+						{href}
+						title="Open this exact check in the History page with stage + target + check_id + a ±1-bucket time window pre-filled."
+					>
+						open in history
+					</a>
+				{/snippet}
+				{@render historyLink()}
 			</div>
 		</div>
 	{/if}
 </div>
+
+<ReportExportModal
+	bind:open={exportOpen}
+	defaultSince={exportDefaults.since}
+	defaultUntil={exportDefaults.until}
+	defaultBucket={exportDefaults.bucket}
+	defaultStages={exportDefaults.stages}
+	defaultTargets={exportDefaults.targets}
+	targetOptions={exportTargetOptions}
+/>
 
 <style>
 	.timeline-grid {

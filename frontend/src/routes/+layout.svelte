@@ -8,7 +8,7 @@
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import NavLink from '$lib/components/NavLink.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-	import { fmtAge } from '$lib/format';
+	import { fmtAge, stageLabel } from '$lib/format';
 	import { diag } from '$lib/diag';
 	import { installFetchPrefix } from '$lib/origin';
 
@@ -170,9 +170,9 @@
 	>
 		{#each Object.entries(counts) as [stage, c]}
 			{@const s = c.fail || c.error ? 'fail' : c.warn ? 'warn' : 'pass'}
-			<div class="flex items-center gap-2 text-[11px]">
+			<div class="flex items-center gap-2 text-[11px]" title={`Internal stage: ${stage}`}>
 				<StatusDot status={s} size={7} />
-				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stage}</span>
+				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stageLabel(stage)}</span>
 				<span class="num text-[10.5px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
 				{#if c.warn}<span class="num text-[10.5px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
 				{#if c.fail + c.error}<span class="num text-[10.5px] text-[var(--color-fail)]">{c.fail + c.error} F</span>{/if}

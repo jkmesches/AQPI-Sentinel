@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { severityChip } from '$lib/format';
+	import MultiSelectChips from '$lib/components/MultiSelectChips.svelte';
+	import HistoryDetailModal from '$lib/components/HistoryDetailModal.svelte';
+	import { severityChip, stageLabel } from '$lib/format';
+	import { sentinel } from '$lib/stores/state.svelte';
 	import { url as apiUrl } from '$lib/origin';
+	import { page } from '$app/state';
 
 	type Tab = 'alarms' | 'checks';
 
@@ -12,32 +16,87 @@
 	let tab = $state<Tab>('alarms');
 	let since = $state(aWeekAgo.toISOString().slice(0, 16)); // datetime-local format
 	let until = $state(now.toISOString().slice(0, 16));
-	let stage = $state('');
-	let target = $state('');
-	let severity = $state('');
-	let status = $state('');
+	let stages = $state<string[]>([]);
+	let targets = $state<string[]>([]);
+	let checkId = $state('');           // optional deeplink narrowing
+	let severities = $state<string[]>([]);
+	let statuses = $state<string[]>([]);
 	let rows = $state<any[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+
+	// Detail modal state — populated when the user clicks a row.
+	let detailOpen = $state(false);
+	let detailRow  = $state<any>(null);
+	function openDetail(r: any) {
+		detailRow = r;
+		detailOpen = true;
+	}
+
+	// Stage options mirror the canonical descriptor map. Labels stay sortable
+	// alphabetically; hints surface the technical code so power users can
+	// still recognize "L4" without expanding the chip.
+	const STAGE_OPTIONS = [
+		{ value: 'L0',      label: 'Connectivity',     hint: 'L0' },
+		{ value: 'L1',      label: 'Product Freshness', hint: 'L1' },
+		{ value: 'L2',      label: 'Radar Scans',      hint: 'L2' },
+		{ value: 'L3',      label: 'Map Overlays',     hint: 'L3' },
+		{ value: 'L4-T1T2', label: 'Image Quality',    hint: 'L4' }
+	];
+	const SEVERITY_OPTIONS = [
+		{ value: 'info',     label: 'Info' },
+		{ value: 'warn',     label: 'Warn' },
+		{ value: 'critical', label: 'Critical' }
+	];
+	const STATUS_OPTIONS = [
+		{ value: 'pass',  label: 'Pass' },
+		{ value: 'warn',  label: 'Warn' },
+		{ value: 'fail',  label: 'Fail' },
+		{ value: 'error', label: 'Error' },
+		{ value: 'skip',  label: 'Skip' }
+	];
+
+	// Targets pulled from current rollup so the picker knows about every
+	// radar + product currently in the registry. The "add custom…" option
+	// in MultiSelectChips lets users filter by older targets too.
+	const targetOptions = $derived.by(() => {
+		const seen = new Set<string>();
+		const out: { value: string; label: string; hint?: string }[] = [];
+		for (const [stageId, list] of Object.entries(sentinel.rollup?.stages ?? {})) {
+			for (const r of list as any[]) {
+				if (!r.target || seen.has(r.target)) continue;
+				seen.add(r.target);
+				out.push({ value: r.target, label: r.target, hint: stageLabel(stageId) });
+			}
+		}
+		out.sort((a, b) => a.label.localeCompare(b.label));
+		return out;
+	});
 
 	function localToIso(s: string): string {
 		// datetime-local has no zone; treat as UTC for query
 		return new Date(s + 'Z').toISOString();
 	}
 
+	function buildParams(): URLSearchParams {
+		const params = new URLSearchParams({
+			since: localToIso(since),
+			until: localToIso(until)
+		});
+		if (stages.length)  params.set('stage',    stages.join(','));
+		if (targets.length) params.set('target',   targets.join(','));
+		if (checkId)        params.set('check_id', checkId);
+		if (tab === 'alarms' && severities.length) params.set('severity', severities.join(','));
+		if (tab === 'checks' && statuses.length)   params.set('status',   statuses.join(','));
+		return params;
+	}
+
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			const params = new URLSearchParams({
-				since: localToIso(since),
-				until: localToIso(until),
-				limit: '500'
-			});
-			if (stage) params.set('stage', stage);
-			if (target) params.set('target', target);
-			if (tab === 'alarms' && severity) params.set('severity', severity);
-			if (tab === 'checks' && status) params.set('status', status);
+			const params = buildParams();
+			params.set('limit', '500');
 			const r = await fetch(`/api/history/${tab}?${params}`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			rows = await r.json();
@@ -50,17 +109,43 @@
 	}
 
 	function exportCsv() {
-		const params = new URLSearchParams({
-			type: tab,
-			since: localToIso(since),
-			until: localToIso(until)
-		});
-		if (stage) params.set('stage', stage);
-		if (target) params.set('target', target);
+		const params = buildParams();
+		params.set('type', tab);
 		window.open(apiUrl(`/api/history/export.csv?${params}`), '_blank');
 	}
 
-	onMount(load);
+	function clearCheckId() {
+		checkId = '';
+		load();
+	}
+
+	// Deeplink prefill from query params. Timeline → "Open in History" passes
+	// stage/target/check_id and an optional since/until window narrowed to the
+	// clicked cell, so the user lands on rows relevant to what they clicked.
+	function applyDeeplink() {
+		const q = page.url.searchParams;
+		const ds = q.get('stage');
+		if (ds) stages = ds.split(',').filter(Boolean);
+		const dt = q.get('target');
+		if (dt) targets = dt.split(',').filter(Boolean);
+		const dc = q.get('check_id');
+		if (dc) checkId = dc;
+		const dsince = q.get('since');
+		if (dsince) {
+			try { since = new Date(dsince).toISOString().slice(0, 16); } catch { /* */ }
+		}
+		const duntil = q.get('until');
+		if (duntil) {
+			try { until = new Date(duntil).toISOString().slice(0, 16); } catch { /* */ }
+		}
+		const dtab = q.get('tab');
+		if (dtab === 'alarms' || dtab === 'checks') tab = dtab;
+	}
+
+	onMount(() => {
+		applyDeeplink();
+		load();
+	});
 </script>
 
 <div class="flex h-full flex-col">
@@ -83,54 +168,47 @@
 			/>
 		</div>
 
-		<div class="flex items-center gap-1">
-			<span class="text-[var(--color-muted)] uppercase tracking-wider">stage</span>
-			<input
-				type="text"
-				placeholder="L0|L1|L2|L3|L4-T1T2"
-				bind:value={stage}
-				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)] w-28"
-			/>
-		</div>
+		<MultiSelectChips
+			label="stage"
+			options={STAGE_OPTIONS}
+			bind:selected={stages}
+		/>
+		<MultiSelectChips
+			label="target"
+			options={targetOptions}
+			bind:selected={targets}
+			allowCustom={true}
+			placeholder="XSCV / custom…"
+		/>
 
-		<div class="flex items-center gap-1">
-			<span class="text-[var(--color-muted)] uppercase tracking-wider">target</span>
-			<input
-				type="text"
-				placeholder="XSCV"
-				bind:value={target}
-				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)] w-28"
-			/>
-		</div>
+		{#if checkId}
+			<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-info)]/60 bg-[var(--color-info)]/10 px-1.5 py-0.5 text-[10px] num text-[var(--color-info)]">
+				check_id: {checkId}
+				<button
+					type="button"
+					class="text-[var(--color-info)] hover:text-[var(--color-fail)]"
+					aria-label="clear check_id filter"
+					onclick={clearCheckId}
+				>
+					×
+				</button>
+			</span>
+		{/if}
 
 		{#if tab === 'alarms'}
-			<div class="flex items-center gap-1">
-				<span class="text-[var(--color-muted)] uppercase tracking-wider">severity</span>
-				<select
-					bind:value={severity}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)]"
-				>
-					<option value="">any</option>
-					<option value="info">info</option>
-					<option value="warn">warn</option>
-					<option value="critical">critical</option>
-				</select>
-			</div>
+			<MultiSelectChips
+				label="severity"
+				options={SEVERITY_OPTIONS}
+				bind:selected={severities}
+				width="w-32"
+			/>
 		{:else}
-			<div class="flex items-center gap-1">
-				<span class="text-[var(--color-muted)] uppercase tracking-wider">status</span>
-				<select
-					bind:value={status}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)]"
-				>
-					<option value="">any</option>
-					<option value="pass">pass</option>
-					<option value="warn">warn</option>
-					<option value="fail">fail</option>
-					<option value="error">error</option>
-					<option value="skip">skip</option>
-				</select>
-			</div>
+			<MultiSelectChips
+				label="status"
+				options={STATUS_OPTIONS}
+				bind:selected={statuses}
+				width="w-32"
+			/>
 		{/if}
 
 		<button
@@ -195,9 +273,13 @@
 				</thead>
 				<tbody>
 					{#each rows as a}
-						<tr class="border-b border-[var(--color-border)] hover:bg-[var(--color-elevated)]/40">
+						<tr
+							class="border-b border-[var(--color-border)] hover:bg-[var(--color-elevated)]/40 cursor-pointer"
+							onclick={() => openDetail(a)}
+							title="Click for details"
+						>
 							<td class="px-3 py-1"><span class={severityChip(a.severity)}>{a.severity}</span></td>
-							<td class="px-3 py-1 text-[var(--color-muted)]">{a.stage}</td>
+							<td class="px-3 py-1 text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</td>
 							<td class="px-3 py-1 num text-[var(--color-bright)]">#{a.id}</td>
 							<td class="px-3 py-1 num"><span class="text-[var(--color-default)]">{a.target}</span><span class="text-[var(--color-muted)]">  ({a.check_id})</span></td>
 							<td class="px-3 py-1 num text-[var(--color-muted)]">{a.opened_at?.slice(0, 19)}</td>
@@ -221,9 +303,13 @@
 				</thead>
 				<tbody>
 					{#each rows as r}
-						<tr class="border-b border-[var(--color-border)] hover:bg-[var(--color-elevated)]/40">
+						<tr
+							class="border-b border-[var(--color-border)] hover:bg-[var(--color-elevated)]/40 cursor-pointer"
+							onclick={() => openDetail(r)}
+							title="Click for details"
+						>
 							<td class="px-3 py-1"><StatusBadge status={r.status} /></td>
-							<td class="px-3 py-1 text-[var(--color-muted)]">{r.stage}</td>
+							<td class="px-3 py-1 text-[var(--color-muted)]" title={r.stage}>{stageLabel(r.stage)}</td>
 							<td class="px-3 py-1 num text-[var(--color-default)]">{r.target}</td>
 							<td class="px-3 py-1 num text-[var(--color-muted)]">{r.check_id}</td>
 							<td class="px-3 py-1 num text-[var(--color-muted)]">{r.finished_at?.slice(0, 19)}</td>
@@ -235,3 +321,5 @@
 		{/if}
 	</div>
 </div>
+
+<HistoryDetailModal bind:open={detailOpen} bind:row={detailRow} {tab} />
