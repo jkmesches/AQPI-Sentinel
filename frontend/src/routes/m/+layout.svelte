@@ -1,18 +1,28 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import MobileNav from '$lib/components/mobile/MobileNav.svelte';
 	let { children }: { children: any } = $props();
+
+	// Live UTC clock in the header. 1 Hz is plenty for a seconds readout
+	// and the timer is harmless across visibility changes; the page is
+	// already polling /api/status separately so we don't suspend this
+	// when the tab is hidden — the clock just keeps ticking.
+	let now = $state(new Date());
+	let clockTimer: ReturnType<typeof setInterval>;
+	const utcClock = $derived(now.toISOString().slice(11, 19));
 
 	// Register the service worker on /m/* page load. Scope is explicitly
 	// /m/ so the desktop pages aren't claimed by the PWA shell. Doing this
 	// in the layout (vs. root) keeps install prompts scoped to mobile.
 	onMount(() => {
+		clockTimer = setInterval(() => (now = new Date()), 1000);
 		if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 		if (!window.isSecureContext) return; // SW needs HTTPS (or localhost)
 		navigator.serviceWorker
 			.register('/sw.js', { scope: '/m/' })
 			.catch((e) => console.warn('SW registration failed:', e));
 	});
+	onDestroy(() => { if (clockTimer) clearInterval(clockTimer); });
 </script>
 
 <svelte:head>
@@ -33,6 +43,9 @@
 	<header class="mob-header">
 		<span class="text-[14px] font-semibold tracking-[0.20em] text-[var(--color-accent)]">
 			AQPI SENTINEL
+		</span>
+		<span class="num text-[13px] tracking-wide text-[var(--color-bright)] ml-auto" title="Current UTC time">
+			{utcClock}<span class="ml-1 text-[10px] text-[var(--color-muted)]">UTC</span>
 		</span>
 	</header>
 
@@ -57,7 +70,7 @@
 		z-index: 20;
 		display: flex;
 		align-items: center;
-		justify-content: center;
+		gap: 12px;
 		padding: 12px 16px;
 		padding-top: calc(12px + env(safe-area-inset-top, 0));
 		background: var(--color-surface);
