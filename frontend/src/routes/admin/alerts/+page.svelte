@@ -76,9 +76,28 @@
 
 	// pending email being typed (per-receiver index)
 	let pendingEmail = $state<Record<number, string>>({});
-	// pending custom matcher key/value being typed (per-route index)
-	let pendingMatcherKey = $state<Record<number, string>>({});
-	let pendingMatcherVal = $state<Record<number, string>>({});
+	// pending custom matcher key/value being typed (per-route index).
+	// Key is a dropdown of common alarm fields (severity / suppressed_by /
+	// message); choosing "__custom" reveals a text input for the rare case
+	// of matching a field outside the standard set. Value defaults to a
+	// dropdown when the chosen key has known values (severity), otherwise
+	// a free-text input. Review feedback 2026-05-18.
+	let pendingMatcherKey      = $state<Record<number, string>>({});
+	let pendingMatcherKeyOther = $state<Record<number, string>>({});  // when key === '__custom'
+	let pendingMatcherVal      = $state<Record<number, string>>({});
+
+	// Custom matcher keys not already covered by the common dropdowns
+	// (stage / status_at_open / check_id / target).
+	const CUSTOM_KEY_OPTIONS = [
+		{ value: 'severity',       label: 'severity',       hint: 'info / warn / critical' },
+		{ value: 'suppressed_by',  label: 'suppressed_by',  hint: 'silence id that suppressed the alarm' },
+		{ value: 'message',        label: 'message',        hint: 'exact match against the alarm message string' }
+	];
+	// Per-key known values (for the value dropdown). Anything not listed
+	// falls back to a free-text input.
+	const CUSTOM_KEY_VALUES: Record<string, string[]> = {
+		severity: ['info', 'warn', 'critical']
+	};
 
 	async function load() {
 		loading = true;
@@ -406,12 +425,16 @@
 		routes[i].match = m;
 	}
 	function addCustomMatcher(i: number) {
-		const k = (pendingMatcherKey[i] ?? '').trim();
+		const picked = (pendingMatcherKey[i] ?? '').trim();
+		const k = picked === '__custom'
+			? (pendingMatcherKeyOther[i] ?? '').trim()
+			: picked;
 		const v = (pendingMatcherVal[i] ?? '').trim();
 		if (!k || !v) return;
 		setMatch(i, k, v);
-		pendingMatcherKey[i] = '';
-		pendingMatcherVal[i] = '';
+		pendingMatcherKey[i]      = '';
+		pendingMatcherKeyOther[i] = '';
+		pendingMatcherVal[i]      = '';
 	}
 	function delCustomMatcher(i: number, key: string) {
 		setMatch(i, key, '');
@@ -785,6 +808,11 @@
 						{r.showAdvanced ? '▾' : '▸'} custom matchers ({customMatchers(r).length})
 					</button>
 					{#if r.showAdvanced}
+						{@const pickedKey = pendingMatcherKey[i] ?? ''}
+						{@const effKey    = pickedKey === '__custom'
+							? (pendingMatcherKeyOther[i] ?? '').trim()
+							: pickedKey}
+						{@const valueOpts = CUSTOM_KEY_VALUES[effKey] ?? []}
 						<div class="mt-2 pl-4 border-l border-[var(--color-border)] space-y-1 text-[12px]">
 							{#each customMatchers(r) as [k, v]}
 								<div class="flex items-center gap-2 text-[11px] num text-[var(--color-default)]">
@@ -794,14 +822,57 @@
 									<button onclick={() => delCustomMatcher(i, k)} class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[12px] leading-none">×</button>
 								</div>
 							{/each}
-							<div class="flex items-center gap-2">
-								<input bind:value={pendingMatcherKey[i]} placeholder="key"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-32" />
+							<div class="flex items-center gap-2 flex-wrap">
+								<!-- Key dropdown. "Custom..." reveals a text input
+								     for the rare case the user wants to match a
+								     field outside the named options. -->
+								<select
+									value={pickedKey}
+									onchange={(e) => (pendingMatcherKey[i] = (e.target as HTMLSelectElement).value)}
+									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
+								>
+									<option value="">key…</option>
+									{#each CUSTOM_KEY_OPTIONS as opt}
+										<option value={opt.value} title={opt.hint}>{opt.label}</option>
+									{/each}
+									<option value="__custom">Custom key…</option>
+								</select>
+								{#if pickedKey === '__custom'}
+									<input
+										bind:value={pendingMatcherKeyOther[i]}
+										placeholder="field name"
+										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-32"
+									/>
+								{/if}
 								<span class="text-[var(--color-faint)]">=</span>
-								<input bind:value={pendingMatcherVal[i]} placeholder="value"
-									onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addCustomMatcher(i); } }}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
-								<button onclick={() => addCustomMatcher(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add matcher</button>
+								{#if valueOpts.length > 0}
+									<select
+										value={pendingMatcherVal[i] ?? ''}
+										onchange={(e) => (pendingMatcherVal[i] = (e.target as HTMLSelectElement).value)}
+										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
+									>
+										<option value="">value…</option>
+										{#each valueOpts as v}
+											<option value={v}>{v}</option>
+										{/each}
+									</select>
+								{:else}
+									<input
+										bind:value={pendingMatcherVal[i]}
+										placeholder={pickedKey ? 'value' : 'pick a key first'}
+										disabled={!pickedKey || (pickedKey === '__custom' && !(pendingMatcherKeyOther[i] ?? '').trim())}
+										onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addCustomMatcher(i); } }}
+										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40 disabled:opacity-50"
+									/>
+								{/if}
+								<button
+									type="button"
+									onclick={() => addCustomMatcher(i)}
+									disabled={!effKey || !(pendingMatcherVal[i] ?? '').trim()}
+									class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] disabled:opacity-40 disabled:cursor-not-allowed"
+								>
+									+ add matcher
+								</button>
 							</div>
 						</div>
 					{/if}
