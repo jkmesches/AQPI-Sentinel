@@ -51,6 +51,37 @@
 
 	<main class="mob-main">
 		{@render children?.()}
+
+		<!-- Mobile attribution footer. Sits inside mob-main so it scrolls
+		     with the content rather than fixing above the bottom nav.
+		     Slightly more vertical breathing room than the desktop variant
+		     to keep tap targets at ≥44px. -->
+		<footer class="mt-6 border-t border-[var(--color-border)] pt-3 text-center text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			<div>
+				Built by
+				<a
+					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
+					href="https://github.com/jkmesches"
+					target="_blank"
+					rel="noopener"
+				>Joseph Mesches</a>
+			</div>
+			<div class="mt-1 flex items-center justify-center gap-3">
+				<a
+					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
+					href="https://github.com/jkmesches/SentinelProject"
+					target="_blank"
+					rel="noopener"
+				>github · source</a>
+				<span>·</span>
+				<a
+					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
+					href="https://radarca.engr.colostate.edu"
+					target="_blank"
+					rel="noopener"
+				>radarca · CSU</a>
+			</div>
+		</footer>
 	</main>
 
 	<MobileNav />
