@@ -76,11 +76,27 @@ async def lifespan(app: FastAPI):
     # alarm events → mobile PWA Web Push subscriptions. Only on
     # alarm_open (treats severity at-open; later promotions don't
     # re-page). Failures are non-fatal — push is a best-effort channel.
+    #
+    # IMPORTANT: respects active silences. The engine's escalation
+    # tick checks silences before dispatching email/console/webhook,
+    # but listeners attached via add_listener fire INDEPENDENTLY of
+    # that path (alarm_open events come from engine.evaluate, which
+    # doesn't know about silences). Without this check, a "silence
+    # everything" rule would still let push notifications through.
     from .. import push as _push
+    from ..alarms import silences as _silences
+
     async def _web_push(event_type, payload):
         if event_type != "alarm_open":
             return
         try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            active = await store.list_active_silences(now)
+            if _silences.find_active_silence(active, payload, now):
+                log.info("push suppressed by active silence: %s/%s",
+                         payload.get("check_id"), payload.get("target"))
+                return
             sev = (payload.get("severity") or "warn").lower()
             stage = payload.get("stage") or ""
             target = payload.get("target") or ""
