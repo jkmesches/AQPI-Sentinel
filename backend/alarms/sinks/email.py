@@ -101,6 +101,7 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
     apl = alarm.get("payload") or {}
     rpl = apl.get("result_payload") if isinstance(apl, dict) else {}
     rpl = rpl if isinstance(rpl, dict) else {}
+    status_at_open = (apl.get("status_at_open") if isinstance(apl, dict) else "") or ""
 
     observed: list[tuple[str, str]] = []
     verify_urls: list[tuple[str, str]] = []
@@ -221,6 +222,36 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
             observed.append(("profile applied", ", ".join(f"{k}={v}" for k, v in prof.items())))
         what = ("Image-quality heuristics tripped on the latest scan — see the "
                 "captured image link below to inspect it directly.")
+
+    # -------- Transport-error override ----------------------------------
+    # If the check raised an exception (status=error), the per-check-
+    # family `what` above is wrong — no heuristic actually ran, the
+    # check died trying to talk to the upstream. Override with a
+    # transport-level explanation that names the exception class and
+    # message so the operator can see at a glance whether this is a
+    # DNS blip, an upstream outage, or our infrastructure.
+    if status_at_open == "error":
+        exc_name = rpl.get("exception") or "Exception"
+        exc_msg = rpl.get("message") or alarm.get("message") or ""
+        what = (
+            f"The check failed before reaching the upstream data — "
+            f"{exc_name}: {exc_msg}. No checks against the response "
+            f"ran for this cycle. Most common causes: a transient DNS "
+            f"hiccup or local-network blip, or an upstream service "
+            f"outage. If the issue persists across consecutive cycles "
+            f"and the URLs below are reachable from your browser, "
+            f"escalate to upstream."
+        )
+        # Observed values from the per-check branch are meaningless on
+        # an error — clear them so the email doesn't dangle a
+        # partially-filled threshold table.
+        observed = []
+        # Replace any per-check URL suggestions with a small fixed set
+        # the operator can quickly probe to localize the fault.
+        verify_urls = [
+            ("upstream reachability (radar-status)", f"{_UPSTREAM}/api/radar-status/"),
+            ("upstream root", _UPSTREAM),
+        ]
 
     # -------- Dashboard link --------------------------------------------
     dashboard_url = None
