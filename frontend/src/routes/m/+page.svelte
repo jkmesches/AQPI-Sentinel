@@ -2,6 +2,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { fmtAge, stageLabel, prettyCheckLabel } from '$lib/format';
 	import { productCategory, PRODUCT_CATEGORY_LABEL, PRODUCT_CATEGORY_ORDER } from '$lib/format';
+	import { goto } from '$app/navigation';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import MobileStatusMap from '$lib/components/mobile/MobileStatusMap.svelte';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
@@ -176,13 +177,20 @@
 		{/if}
 
 		<div class="mt-5 flex flex-col gap-2">
-			<a
-				href={`/m/timeline?check_id=${encodeURIComponent(detailRow.check_id ?? '')}&target=${encodeURIComponent(detailRow.target ?? '')}&stage=${encodeURIComponent(detailRow.stage ?? '')}`}
+			<button
+				type="button"
+				onclick={async () => {
+					const url = `/m/timeline?check_id=${encodeURIComponent(detailRow.check_id ?? '')}` +
+						`&target=${encodeURIComponent(detailRow.target ?? '')}` +
+						`&stage=${encodeURIComponent(detailRow.stage ?? '')}`;
+					detailOpen = false;
+					await goto(url);
+				}}
 				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>
 				Open in History
-			</a>
+			</button>
 		</div>
 	{/if}
 </MobileDrillDown>

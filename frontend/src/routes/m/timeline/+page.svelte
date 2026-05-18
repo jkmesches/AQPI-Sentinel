@@ -14,6 +14,7 @@
 	 */
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { url as apiUrl } from '$lib/origin';
@@ -271,13 +272,20 @@
 			</section>
 		{/if}
 		<div class="mt-5 flex flex-col gap-2">
-			<a
-				href={`/m/timeline?check_id=${encodeURIComponent(detailEvent.check_id)}&target=${encodeURIComponent(detailEvent.target)}&stage=${encodeURIComponent(detailEvent.stage)}`}
+			<button
+				type="button"
+				onclick={async () => {
+					const url = `/m/timeline?check_id=${encodeURIComponent(detailEvent.check_id)}` +
+						`&target=${encodeURIComponent(detailEvent.target)}` +
+						`&stage=${encodeURIComponent(detailEvent.stage)}`;
+					detailOpen = false;
+					await goto(url);
+				}}
 				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>
 				Open in History
-			</a>
+			</button>
 		</div>
 	{/if}
 </MobileDrillDown>
