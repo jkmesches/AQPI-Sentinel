@@ -17,7 +17,10 @@
 
 <nav
 	class="fixed inset-x-0 bottom-0 z-30 flex border-t border-[var(--color-border)] bg-[var(--color-surface)]"
-	style="padding-bottom: env(safe-area-inset-bottom, 0);"
+	style="
+		padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+		padding-top: 6px;
+	"
 >
 	<a href="/m" class="mob-tab {activeClass('/m')}" aria-label="Status">
 		<svg viewBox="0 0 24 24" class="mob-icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -66,13 +69,13 @@
 <style>
 	.mob-tab {
 		flex: 1;
-		min-height: 56px;
+		min-height: 48px;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		gap: 2px;
-		padding: 6px 4px;
+		padding: 4px 4px;
 		font-size: 10px;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;

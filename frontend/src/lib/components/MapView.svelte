@@ -106,7 +106,8 @@
 		| 'fcst_total_precip_cum'
 		| 'fcst_precip_rate'
 		| 'fcst_temp';
-	let composite = $state<Composite>('none');
+	// Default to Reflectivity composite — most useful at-a-glance view.
+	let composite = $state<Composite>('comp_ref');
 	let nexradEnabled = $state(false);
 	let overlayOpacity = $state(0.8);
 
@@ -978,6 +979,26 @@
 		refreshRadarOverlays();
 	}
 
+	// Compute a default bearing so the northernmost X-band/CBAND radar sits
+	// at the top-left of the viewport and the southernmost at the bottom-
+	// right (rotated diagonal). Asked-for 2026-05-18 ("KSCW top-left, KSCR
+	// bottom-right; programmatic"). Returns 0 if we can't find two radars.
+	function defaultBearingFromRadars(rs: RadarMeta[]): number {
+		const xb = rs.filter((r) => r.kind === 'xband' || r.kind === 'cband');
+		if (xb.length < 2) return 0;
+		const north = xb.reduce((a, b) => (a.lat > b.lat ? a : b));
+		const south = xb.reduce((a, b) => (a.lat < b.lat ? a : b));
+		const midLat = ((north.lat + south.lat) / 2) * Math.PI / 180;
+		const east = (north.lon - south.lon) * Math.cos(midLat);
+		const ang = Math.atan2(east, north.lat - south.lat) * 180 / Math.PI;
+		// `ang` is the bearing (deg, clockwise from north) of the
+		// south→north vector. We want that vector to align with the screen
+		// diagonal pointing top-left (screen angle = 315° = -45°).
+		// MapLibre bearing rotates the camera clockwise; setting it to
+		// (real_bearing - screen_target) achieves the alignment.
+		return ang - (-45);
+	}
+
 	onMount(async () => {
 		try {
 			const saved = localStorage.getItem(PANEL_KEY);
@@ -989,6 +1010,7 @@
 			style: styleUrl(),
 			center: [-122.6, 37.95],
 			zoom: 7.2,
+			bearing: defaultBearingFromRadars(radars),
 			attributionControl: { compact: true },
 			// Bound MapLibre's tile cache. Default is undefined → grows
 			// effectively unbounded. We don't pan, so a small cap suffices.

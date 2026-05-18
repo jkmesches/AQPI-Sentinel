@@ -13,6 +13,7 @@
 	 *  and link to it via "switch to desktop" from /m/more.
 	 */
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { url as apiUrl } from '$lib/origin';
@@ -51,14 +52,35 @@
 		return out;
 	});
 
-	// Load the past 24h of alarm history. Each row spawns one or two
-	// timeline events (open, and close if closed_at present).
+	// Deeplink filters — drilldowns from /m and from this page itself pass
+	// check_id / target / stage via the URL to narrow the timeline to a
+	// single thread. Without those params the page shows the global 24-h
+	// view as before.
+	const filterCheckId = $derived(page.url.searchParams.get('check_id') ?? '');
+	const filterTarget  = $derived(page.url.searchParams.get('target')   ?? '');
+	const filterStage   = $derived(page.url.searchParams.get('stage')    ?? '');
+	const hasFilter     = $derived(!!(filterCheckId || filterTarget || filterStage));
+
+	// Re-fetch whenever filters change. Includes the broad reset (no filter)
+	// so navigating back via "× clear" reloads the global view.
+	$effect(() => {
+		void filterCheckId; void filterTarget; void filterStage;
+		load();
+	});
+
+	// Load alarm history. Filters narrow the window to last 7 days so the
+	// user can scroll back further than the broad 24h view.
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			const since = new Date(Date.now() - 86400_000).toISOString();
-			const r = await fetch(apiUrl(`/api/history/alarms?since=${encodeURIComponent(since)}&limit=200`), {
+			const windowMs = hasFilter ? 7 * 86400_000 : 86400_000;
+			const since = new Date(Date.now() - windowMs).toISOString();
+			const qs = new URLSearchParams({ since, limit: '200' });
+			if (filterCheckId) qs.set('check_id', filterCheckId);
+			if (filterTarget)  qs.set('target',   filterTarget);
+			if (filterStage)   qs.set('stage',    filterStage);
+			const r = await fetch(apiUrl(`/api/history/alarms?${qs}`), {
 				headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {}
 			});
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -89,8 +111,9 @@
 		}
 	}
 
+	// load() is also driven by the filter $effect above, which fires on
+	// first run — so onMount only needs the relative-time ticker.
 	onMount(() => {
-		load();
 		tickTimer = setInterval(() => (now = Date.now()), 30_000);
 	});
 	onDestroy(() => { if (tickTimer) clearInterval(tickTimer); });
@@ -144,10 +167,20 @@
 		<div>
 			<h1 class="text-[16px] font-semibold tracking-wide text-[var(--color-bright)]">Timeline</h1>
 			<div class="text-[11px] text-[var(--color-muted)]">
-				{totalCounts.pass} pass · {totalCounts.warn} warn · {totalCounts.fail + totalCounts.error} fail · last 24h
+				{totalCounts.pass} pass · {totalCounts.warn} warn · {totalCounts.fail + totalCounts.error} fail · last {hasFilter ? '7 days' : '24h'}
 			</div>
 		</div>
 	</header>
+
+	{#if hasFilter}
+		<div class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-3 py-2 text-[11px]">
+			<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">filtered:</span>
+			{#if filterStage}<span class="num text-[var(--color-bright)]" title={filterStage}>{stageLabel(filterStage)}</span>{/if}
+			{#if filterTarget}<span class="num text-[var(--color-bright)]">{filterTarget}</span>{/if}
+			{#if filterCheckId}<span class="num text-[var(--color-faint)] truncate max-w-[50%]" title={filterCheckId}>{filterCheckId}</span>{/if}
+			<a href="/m/timeline" class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-info)] active:text-[var(--color-bright)]">× clear</a>
+		</div>
+	{/if}
 
 	{#if error}
 		<div class="mb-3 rounded-sm border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-3 py-2 text-[12px] text-[var(--color-fail)]">{error}</div>
@@ -157,7 +190,11 @@
 		<div class="text-[12px] text-[var(--color-muted)]">loading…</div>
 	{:else if events.length === 0}
 		<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-6 text-center text-[12px] text-[var(--color-muted)]">
-			Nothing in the last 24 h. Everything's been quiet.
+			{#if hasFilter}
+				No matching alarms in the last 7 days.
+			{:else}
+				Nothing in the last 24 h. Everything's been quiet.
+			{/if}
 		</div>
 	{:else}
 		{#each grouped as g}
@@ -208,7 +245,7 @@
 	{/if}
 
 	<!-- Bottom-nav clearance so the last row isn't covered. -->
-	<div style="height: calc(56px + env(safe-area-inset-bottom, 0px));"></div>
+	<div style="height: calc(72px + env(safe-area-inset-bottom, 0px));"></div>
 </div>
 
 <MobileDrillDown
@@ -235,7 +272,7 @@
 		{/if}
 		<div class="mt-5 flex flex-col gap-2">
 			<a
-				href={`/history?check_id=${encodeURIComponent(detailEvent.check_id)}&target=${encodeURIComponent(detailEvent.target)}&stage=${encodeURIComponent(detailEvent.stage)}&tab=alarms`}
+				href={`/m/timeline?check_id=${encodeURIComponent(detailEvent.check_id)}&target=${encodeURIComponent(detailEvent.target)}&stage=${encodeURIComponent(detailEvent.stage)}`}
 				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>

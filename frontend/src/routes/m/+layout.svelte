@@ -65,7 +65,11 @@
 	}
 	.mob-main {
 		flex: 1;
-		padding: 12px 12px calc(72px + env(safe-area-inset-bottom, 0));
+		/* Bottom padding clears the nav (mob-tab min-height 48px + 6px top
+		   pad + 14px bottom pad = 68px chrome) plus the iOS home-bar safe
+		   area. Bumped from 72px after iPhone 15 testing — the nav was
+		   overlapping the home indicator gesture zone. */
+		padding: 12px 12px calc(86px + env(safe-area-inset-bottom, 0));
 		overflow-y: auto;
 	}
 </style>
