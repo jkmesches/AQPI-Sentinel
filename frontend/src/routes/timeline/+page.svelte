@@ -809,23 +809,23 @@
 						title={`${b.ts} · ${relativeAge(b.ts)}${isNewest ? ' · most recent' : ''}`}
 					>
 						{#if major}
-							<!-- Time label, identical placement for every major cell
-							     (including the newest one) so adjacent labels don't
-							     overlap at fine grains. The "NOW" indicator is a
-							     separate badge anchored to the top of the cell —
-							     vertically stacked above the time, so even when
-							     two major cells sit side-by-side the bold newest
-							     label and its neighbour don't collide. -->
+							<!-- Inline time + (newest-only) NOW pill, single line so
+							     the header's 32 px height has no vertical clipping.
+							     Background colour matches the canvas so the label
+							     covers any vertical rule lines from neighbouring
+							     cells beneath. -->
 							<span
-								class="absolute bottom-1 whitespace-nowrap tracking-tight text-[var(--color-bright)] {isNewest ? 'font-bold' : 'font-medium'}"
+								class="absolute bottom-1 whitespace-nowrap inline-flex items-center gap-1 tracking-tight text-[var(--color-bright)] {isNewest ? 'font-bold' : 'font-medium'}"
 								style="{isLast ? 'right:4px;' : 'left:4px;'} background: var(--color-canvas); padding: 0 3px;"
-							>{ts.primary}</span>
-						{/if}
-						{#if isNewest}
-							<span
-								class="absolute top-0.5 whitespace-nowrap text-[8.5px] font-semibold uppercase tracking-[0.18em] text-[var(--color-ok)]"
-								style="{isLast ? 'right:4px;' : 'left:4px;'} background: var(--color-canvas); padding: 0 3px; border: 1px solid var(--color-ok); border-radius: 2px;"
-							>NOW</span>
+							>
+								<span>{ts.primary}</span>
+								{#if isNewest}
+									<span
+										class="text-[8.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ok)]"
+										style="border: 1px solid var(--color-ok); border-radius: 2px; padding: 0 3px; line-height: 1.1;"
+									>NOW</span>
+								{/if}
+							</span>
 						{/if}
 					</div>
 				{/each}
