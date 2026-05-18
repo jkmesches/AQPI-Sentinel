@@ -1,4 +1,4 @@
-[SENTINEL {{ severity_upper }}] {{ stage }}/{{ target or check_id.split('.')[-1] }}
+[SENTINEL {{ severity_upper }}] {{ stage_descriptor }}/{{ target or check_id.split('.')[-1] }}
 {{ short_line }}
 
 ──────────────────────────────────────────────────────────────────────
@@ -6,7 +6,7 @@ SUMMARY
 ──────────────────────────────────────────────────────────────────────
   Check         {{ check_id }}
   Target        {{ target or '—' }}
-  Stage         {{ stage }}
+  Stage         {{ stage_descriptor }} ({{ stage_tech }})
   Severity      {{ severity }}
   Opened        {{ opened_at_str }}  ({{ opened_age }} ago)
 {% if policy %}  Step          {{ step_idx }} of policy "{{ policy }}"{% endif %}
@@ -37,4 +37,4 @@ VERIFY YOURSELF
     {{ url }}
 {% endfor %}{% endif %}{% endif %}
 
-— AQPI Sentinel
+— AQPI Sentinel · technical stage: {{ stage }}

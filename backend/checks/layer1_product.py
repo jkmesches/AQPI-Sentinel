@@ -15,6 +15,7 @@ import statistics
 from typing import Any
 
 from ..config import PRODUCTS, SETTINGS, image_path
+from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import (
@@ -25,11 +26,11 @@ from .helpers import (
 )
 
 
-# Tolerance on step-count drift (the 1-h rolling window legitimately
-# gains/loses a couple steps as it slides).
-STEP_COUNT_TOL = 4
-# Cadence tolerance: ±10% of expected median Δt
-CADENCE_TOL = 0.10
+# Default tolerances. Live values come from backend.thresholds.get_global,
+# which falls through to these on a fresh DB. Keeping the constants here as
+# documentation of the previous behavior.
+DEFAULT_STEP_COUNT_TOL = 4
+DEFAULT_CADENCE_TOL    = 0.10
 
 
 class Layer1ProductCheck(Check):
@@ -110,18 +111,24 @@ class Layer1ProductCheck(Check):
         # ahead." If a forecast product regresses to delivering past
         # timestamps, age_s flips positive and the check correctly fails.
         # See config.PRODUCTS for the per-product values.
-        sub["C_freshness"] = "pass" if age_s <= cfg["max_freshness_s"] else "fail"
+        max_fresh = _thresholds.get_product(
+            self.product_id, "max_freshness_s", cfg.get("max_freshness_s"),
+        )
+        sub["C_freshness"] = "pass" if age_s <= max_fresh else "fail"
 
         # --- D. cadence ---
-        scan_cad = cfg.get("cadence_s")
+        scan_cad = _thresholds.get_product(
+            self.product_id, "cadence_s", cfg.get("cadence_s"),
+        )
         if scan_cad is None or n < 2:
             sub["D_cadence"] = "pass"
         else:
             diffs = [(ts_list[i + 1] - ts_list[i]).total_seconds() for i in range(n - 1)]
             med = statistics.median(diffs)
             metrics["median_dt_s"] = float(med)
+            cad_tol = float(_thresholds.get_global("cadence_tol", DEFAULT_CADENCE_TOL))
             sub["D_cadence"] = (
-                "pass" if abs(med - scan_cad) <= scan_cad * CADENCE_TOL else "warn"
+                "pass" if abs(med - scan_cad) <= scan_cad * cad_tol else "warn"
             )
 
         # --- E. step count ---
@@ -130,13 +137,16 @@ class Layer1ProductCheck(Check):
         # has been observed publishing 19, 74, 75, 125, 130 steps in the
         # same week as the upstream model adjusts). The ±4 tolerance is
         # meaningless when the variance is in the tens.
-        expected = cfg.get("expected_steps")
+        expected = _thresholds.get_product(
+            self.product_id, "expected_steps", cfg.get("expected_steps"),
+        )
         if expected is None:
             sub["E_step_count"] = "skip"
         else:
             delta = abs(n - expected)
             metrics["step_count_delta"] = float(delta)
-            sub["E_step_count"] = "pass" if delta <= STEP_COUNT_TOL else "warn"
+            step_tol = int(_thresholds.get_global("step_count_tol", DEFAULT_STEP_COUNT_TOL))
+            sub["E_step_count"] = "pass" if delta <= step_tol else "warn"
 
         # --- F. latest image exists + G. size + H. hash ---
         img_url = f"{SETTINGS.base}/api/imageData"
@@ -159,7 +169,10 @@ class Layer1ProductCheck(Check):
             size = len(ir.content)
             payload["image_bytes"] = size
             metrics["image_bytes"] = float(size)
-            sub["G_image_size"] = "pass" if size >= cfg["min_png_bytes"] else "warn"
+            min_bytes = _thresholds.get_product(
+                self.product_id, "min_png_bytes", cfg.get("min_png_bytes", 0),
+            )
+            sub["G_image_size"] = "pass" if size >= min_bytes else "warn"
             payload["image_sha256"] = hashlib.sha256(ir.content).hexdigest()
             sub["H_image_hash"] = "pass"
 

@@ -27,6 +27,7 @@ ever matters we can add a 30-s memo to the HTTP client.
 from __future__ import annotations
 from datetime import datetime
 
+from .. import thresholds as _thresholds
 from ..config import (
     RADAR_FOLDER,
     RADAR_SILENT_FAIL_S,
@@ -97,6 +98,9 @@ class Layer2RadarReconcile(Check):
         self.folder = RADAR_FOLDER[radar_id]
         self.id = f"layer2.radar.{radar_id}"
         self.target = radar_id
+        # silent_fail_s is read fresh on every run() so admin edits take
+        # effect without restart. Cached self.silent_fail_s retained as a
+        # last-resort static default if the threshold module isn't ready.
         self.silent_fail_s = RADAR_SILENT_FAIL_S.get(radar_id, SILENT_FAIL_S_DEFAULT)
 
     async def _declared(self, ctx) -> str | None:
@@ -187,8 +191,15 @@ class Layer2RadarReconcile(Check):
         # boundary — important for radars (CBAND) whose cadence is
         # naturally variable.
         now = utcnow()
-        upper = self.silent_fail_s * (1 + HYSTERESIS)
-        lower = self.silent_fail_s * (1 - HYSTERESIS)
+        # Read live values so admin edits to silent_fail_s / hysteresis take
+        # effect on the next tick. Defaults preserve current behavior if the
+        # thresholds module hasn't initialized yet (won't happen post-boot).
+        silent_fail_s = float(_thresholds.get_radar(
+            self.radar_id, "silent_fail_s", self.silent_fail_s,
+        ))
+        hyst = float(_thresholds.get_global("hysteresis", HYSTERESIS))
+        upper = silent_fail_s * (1 + hyst)
+        lower = silent_fail_s * (1 - hyst)
         prev_fresh = _LAST_FRESH.get(self.id, True)
         if primary_err or primary_n is None:
             fresh = False

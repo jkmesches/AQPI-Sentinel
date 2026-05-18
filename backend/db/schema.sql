@@ -214,17 +214,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_action ON admin_audit(action, at DESC);
 -- Web Push subscriptions for the mobile PWA. One row per (user, device).
 -- The endpoint URL is the unique identifier; iOS, Android, and desktop
 -- browsers all produce different endpoints even for the same logical user.
+--
+-- `routing_config` is a per-device filter blob (see backend/push.py) with:
+--   severity_floor:    "info" | "warn" | "critical"
+--   product_patterns:  string[]  glob-style match against check_id / target
+--   schedule:          group-schedule shape (see backend/groups.py) — when
+--                      the device is on-duty
+-- Empty object = "match everything" (current behavior pre-Group 11).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  id           BIGSERIAL PRIMARY KEY,
-  user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  endpoint     TEXT NOT NULL UNIQUE,
-  p256dh       TEXT NOT NULL,
-  auth         TEXT NOT NULL,
-  user_agent   TEXT,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_used_at TIMESTAMPTZ
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint       TEXT NOT NULL UNIQUE,
+  p256dh         TEXT NOT NULL,
+  auth           TEXT NOT NULL,
+  user_agent     TEXT,
+  label          TEXT,                                 -- user-friendly device name (iPhone, etc.)
+  routing_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at   TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+-- Make the upgrade safe: existing deployments need the new columns.
+ALTER TABLE push_subscriptions
+  ADD COLUMN IF NOT EXISTS label TEXT,
+  ADD COLUMN IF NOT EXISTS routing_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- Generic settings key→JSON store. Used for SMTP config, alert routing
 -- snapshot, future runtime knobs. Read on demand; write via admin API.
@@ -234,3 +247,38 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by   TEXT
 );
+
+-- =========================================================================
+-- GROUPS (Issue plan: /admin/groups)
+-- =========================================================================
+--
+-- A group bundles users + a notification schedule. Schedules can be weekly
+-- (active days/hours), biweekly with an anchor date, or always-on; downtime
+-- windows can be layered on top. Inheritance: child group can name a
+-- parent_group_id and the effective schedule is the union of both. Used
+-- by the alert-routing recipient flow to determine whether to dispatch
+-- given a wall-clock time.
+--
+-- See backend/groups.py for the schedule shape + evaluator. JSON is opaque
+-- here so future schedule features (rotations, holidays, on-call swaps)
+-- don't require migrations.
+CREATE TABLE IF NOT EXISTS groups (
+  id              BIGSERIAL PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,
+  description     TEXT NOT NULL DEFAULT '',
+  parent_group_id BIGINT REFERENCES groups(id) ON DELETE SET NULL,
+  schedule        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_group_id);
+
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id  BIGINT NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+  added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  added_by TEXT,
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);

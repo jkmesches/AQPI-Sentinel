@@ -59,6 +59,41 @@ async def create_silence(
     return {"ok": True, "id": body["id"]}
 
 
+@router.put("/{sid}")
+async def update_silence(
+    sid: str, request: Request,
+    user: Annotated[dict, Depends(require_user)],
+    body: dict = Body(...),
+):
+    """Update an existing silence. Matchers, window, reason are all
+    replaceable; the id is fixed by the URL. Backend storage uses
+    INSERT ... ON CONFLICT UPDATE so this is implemented as an upsert
+    (mirrors create_silence). 404 if the id doesn't already exist —
+    callers that want create-or-update should use POST.
+    """
+    required = {"matchers", "starts", "ends"}
+    missing = required - set(body)
+    if missing:
+        raise HTTPException(400, f"missing fields: {sorted(missing)}")
+    pool = request.app.state.store.pool
+    existing = await pool.fetchval("SELECT 1 FROM silences WHERE id = $1", sid)
+    if existing is None:
+        raise HTTPException(404, f"silence {sid!r} not found")
+    await request.app.state.store.create_silence(
+        sid=sid,
+        matchers=body["matchers"],
+        starts=datetime.fromisoformat(body["starts"]),
+        ends=datetime.fromisoformat(body["ends"]),
+        reason=body.get("reason"),
+        created_by=user["email"],
+    )
+    await A.audit(pool, user_email=user["email"], action="silence.update",
+                  target=f"silence:{sid}",
+                  payload={"matchers": body["matchers"], "reason": body.get("reason"),
+                           "starts": body["starts"], "ends": body["ends"]})
+    return {"ok": True, "id": sid}
+
+
 @router.delete("/{sid}")
 async def delete_silence(
     sid: str, request: Request,

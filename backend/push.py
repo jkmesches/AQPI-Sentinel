@@ -119,20 +119,97 @@ def _send_one(subscription: dict, payload: dict, vapid: dict) -> tuple[bool, str
         return False, f"{type(e).__name__}: {e}", None
 
 
+_SEVERITY_RANK = {"info": 0, "warn": 1, "critical": 2}
+
+
+def _subscription_matches(routing: dict, payload: dict) -> bool:
+    """Per-device filter check.
+
+    routing keys:
+      severity_floor:    e.g. "warn" — drop notifications below this rank
+      product_patterns:  list[str] — glob-style match against check_id or
+                         target. Empty/missing = match anything.
+
+    Schedule gating is handled separately via backend.groups.is_active_at
+    (see dispatch_push) because schedule lookup is wall-clock aware.
+    """
+    import fnmatch
+    floor = (routing.get("severity_floor") or "").lower()
+    if floor:
+        floor_rank = _SEVERITY_RANK.get(floor, 0)
+        sev = (payload.get("severity") or payload.get("title", "")).lower()
+        # Normalize "[WARN] Foo" → "warn" if needed.
+        for k in _SEVERITY_RANK:
+            if k in sev:
+                sev = k
+                break
+        sev_rank = _SEVERITY_RANK.get(sev, 0)
+        if sev_rank < floor_rank:
+            return False
+
+    patterns = routing.get("product_patterns") or []
+    if patterns:
+        haystack = " ".join([
+            str(payload.get("tag") or ""),
+            str(payload.get("title") or ""),
+            str(payload.get("body") or ""),
+        ]).lower()
+        matched = any(fnmatch.fnmatch(haystack, f"*{p.lower()}*") for p in patterns)
+        if not matched:
+            return False
+    return True
+
+
 async def dispatch_push(pool, payload: dict) -> dict[str, int]:
     """Fan-out a single push payload to every active subscription.
 
-    Returns a count dict for logging: {sent, failed, expired}.
-    Expired (404/410) subscriptions are deleted from the table so
-    the next dispatch doesn't retry them.
+    Each subscription is filtered by its own routing_config:
+      - severity_floor drops notifications below the chosen rank
+      - product_patterns require at least one glob match against the payload
+      - schedule (group-schedule shape) gates by wall-clock; off-duty = skip
+
+    delay_s is honored by deferring the send through asyncio.create_task —
+    in-process only, lost across restarts. Acceptable for the common
+    "snooze me for 5 min" case; durable scheduling can be added later.
+
+    Returns a count dict for logging: {sent, failed, expired, filtered, deferred}.
     """
+    from . import groups as _groups
+    from datetime import datetime, timezone
     vapid = await get_vapid(pool)
     rows = await pool.fetch(
-        "SELECT id, endpoint, p256dh, auth FROM push_subscriptions"
+        "SELECT id, endpoint, p256dh, auth, routing_config FROM push_subscriptions"
     )
-    sent = failed = expired = 0
+    sent = failed = expired = filtered = deferred = 0
     expired_ids: list[int] = []
+    now = datetime.now(timezone.utc)
     for row in rows:
+        routing = row["routing_config"] or {}
+        if isinstance(routing, str):
+            routing = json.loads(routing)
+        if not isinstance(routing, dict):
+            routing = {}
+
+        # Filter: severity floor + product patterns.
+        if not _subscription_matches(routing, payload):
+            filtered += 1
+            continue
+
+        # Schedule gate.
+        schedule = routing.get("schedule") or {}
+        if schedule and not _groups.is_active_at(schedule, now):
+            filtered += 1
+            continue
+
+        # Optional delay. Defer via background task; if the device falls
+        # off the subscription list before the delay elapses, the send
+        # quietly fails when the row is gone.
+        delay_s = routing.get("delay_s") or 0
+        if isinstance(delay_s, (int, float)) and delay_s > 0:
+            deferred += 1
+            asyncio.create_task(_send_delayed(pool, dict(row), payload, vapid, float(delay_s)))
+            continue
+
         ok, err, status = await asyncio.to_thread(_send_one, dict(row), payload, vapid)
         if ok:
             sent += 1
@@ -153,4 +230,31 @@ async def dispatch_push(pool, payload: dict) -> dict[str, int]:
             "WHERE id = ANY($1)",
             [r["id"] for r in rows if r["id"] not in expired_ids],
         )
-    return {"sent": sent, "failed": failed, "expired": expired}
+    return {"sent": sent, "failed": failed, "expired": expired,
+            "filtered": filtered, "deferred": deferred}
+
+
+async def _send_delayed(pool, subscription: dict, payload: dict, vapid: dict, delay_s: float) -> None:
+    """Sleep `delay_s` then attempt to send. Re-checks the row still exists
+    so a deleted subscription doesn't get a delayed phantom notification."""
+    try:
+        await asyncio.sleep(delay_s)
+        row = await pool.fetchrow(
+            "SELECT id FROM push_subscriptions WHERE id = $1", subscription["id"]
+        )
+        if row is None:
+            return
+        ok, err, status = await asyncio.to_thread(_send_one, subscription, payload, vapid)
+        if ok:
+            await pool.execute(
+                "UPDATE push_subscriptions SET last_used_at = now() WHERE id = $1",
+                subscription["id"],
+            )
+        elif status in (404, 410):
+            await pool.execute(
+                "DELETE FROM push_subscriptions WHERE id = $1", subscription["id"]
+            )
+        elif err:
+            log.warning("delayed push to %s failed: %s", subscription["endpoint"][:60], err)
+    except Exception:
+        log.exception("delayed push send raised")
