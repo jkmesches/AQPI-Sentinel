@@ -22,6 +22,7 @@ from .helpers import (
     derive_check_cadence,
     parse_api_ts,
     parse_filename_ts,
+    parse_filename_step_idx,
     worst_of,
 )
 
@@ -177,38 +178,88 @@ class Layer1ProductCheck(Check):
             sub["H_image_hash"] = "pass"
 
         # --- L3B parity (fold-in) ---
+        #
+        # Two parity modes depending on what the filename encodes:
+        #
+        #  * Observed products (radar QPE, composite, water_*) encode a
+        #    timestamp — compared against the manifest's `timestamp`
+        #    field via parse_filename_ts (±60 s tolerance).
+        #
+        #  * Forecast products (`fcst_*`) name their PNGs by HRRR step
+        #    index (`C_hrrr_<prod>_step<N>.png`). Filename has no clock
+        #    time, but it DOES claim "I am step N of the manifest". We
+        #    verify by comparing the parsed index against the row's
+        #    position. Catches serving-order bugs where the upstream
+        #    might rotate or mis-route a forecast frame.
+        #
+        # Each step ends up in exactly one bucket (ts-parity / step-
+        # parity / unparseable). Mode is selected per-row by which
+        # parser hits — the two are mutually exclusive in practice.
         matched = unparseable = mismatches = 0
+        ts_checked = step_checked = 0
         first_mismatch = None
-        for s in steps:
-            f_ts = parse_filename_ts(s["imageName"])
-            a_ts = parse_api_ts(s["timestamp"])
-            if f_ts is None:
-                unparseable += 1
+        for idx, s in enumerate(steps):
+            name = s["imageName"]
+            f_ts = parse_filename_ts(name)
+            if f_ts is not None:
+                ts_checked += 1
+                a_ts = parse_api_ts(s["timestamp"])
+                if abs((a_ts - f_ts).total_seconds()) <= 60:
+                    matched += 1
+                else:
+                    mismatches += 1
+                    if first_mismatch is None:
+                        first_mismatch = {
+                            "mode": "timestamp",
+                            "imageName": name,
+                            "filename_ts": f_ts.isoformat(),
+                            "api_ts": a_ts.isoformat(),
+                        }
                 continue
-            if abs((a_ts - f_ts).total_seconds()) <= 60:
-                matched += 1
-            else:
-                mismatches += 1
-                if first_mismatch is None:
-                    first_mismatch = {
-                        "imageName": s["imageName"],
-                        "filename_ts": f_ts.isoformat(),
-                        "api_ts": a_ts.isoformat(),
-                    }
+            f_idx = parse_filename_step_idx(name)
+            if f_idx is not None:
+                step_checked += 1
+                if f_idx == idx:
+                    matched += 1
+                else:
+                    mismatches += 1
+                    if first_mismatch is None:
+                        first_mismatch = {
+                            "mode": "step_index",
+                            "imageName": name,
+                            "filename_step": f_idx,
+                            "manifest_pos":  idx,
+                        }
+                continue
+            unparseable += 1
 
-        if unparseable == n:
-            parity_verdict = "skip"           # filename encodes no time (forecasts)
+        if matched + mismatches == 0:
+            parity_verdict = "skip"           # nothing parseable to compare
         elif mismatches:
-            parity_verdict = "fail"
-        elif matched == 0:
             parity_verdict = "fail"
         else:
             parity_verdict = "pass"
 
+        # Mode descriptor for the drilldown. Forecast rows previously
+        # rendered "unparseable=N" with no further explanation — surface
+        # the actual mode + counts so a maintainer can read it cold.
+        if step_checked and not ts_checked:
+            parity_mode = "step_index"
+        elif ts_checked and not step_checked:
+            parity_mode = "timestamp"
+        elif ts_checked or step_checked:
+            parity_mode = "mixed"
+        else:
+            parity_mode = "none"
+
         payload["parity"] = {
-            "verdict": parity_verdict,
-            "matched": matched, "unparseable": unparseable,
-            "mismatches": mismatches,
+            "verdict":      parity_verdict,
+            "mode":         parity_mode,
+            "matched":      matched,
+            "mismatches":   mismatches,
+            "unparseable":  unparseable,
+            "ts_checked":   ts_checked,
+            "step_checked": step_checked,
             "first_mismatch": first_mismatch,
         }
 
