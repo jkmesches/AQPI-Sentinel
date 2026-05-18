@@ -2,7 +2,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { api } from '$lib/api';
-	import { stageLabel } from '$lib/format';
+	import { stageLabel, prettyCheckLabel } from '$lib/format';
 	import { onMount, onDestroy } from 'svelte';
 
 	let now = $state(Date.now());
@@ -50,6 +50,20 @@
 			busy[id] = false;
 		}
 	}
+
+	async function unack(id: number) {
+		busy[id] = true;
+		banner = null;
+		try {
+			await api.unack(id);
+			await sentinel.refresh();
+			banner = { kind: 'ok', text: 'acknowledgement removed' };
+		} catch (e) {
+			banner = { kind: 'err', text: (e as Error).message };
+		} finally {
+			busy[id] = false;
+		}
+	}
 </script>
 
 {#if banner}
@@ -87,8 +101,11 @@
 							<span class="ml-auto rounded-sm bg-[var(--color-elevated)] px-1.5 py-0.5 text-[9.5px] text-[var(--color-muted)]">suppressed</span>
 						{/if}
 					</div>
-					<div class="num mt-1.5 text-[13.5px] text-[var(--color-bright)]">
-						{a.check_id}{#if a.target} · <span class="text-[var(--color-default)]">{a.target}</span>{/if}
+					<div class="num mt-1.5 text-[14px] text-[var(--color-bright)]" title={`${a.check_id} · ${a.target}`}>
+						{prettyCheckLabel(a.check_id, a.target)}
+					</div>
+					<div class="num mt-0.5 text-[11px] text-[var(--color-faint)] truncate">
+						{a.check_id}
 					</div>
 					{#if a.message}
 						<div class="mt-1 text-[12px] text-[var(--color-default)]">{a.message}</div>
@@ -97,14 +114,26 @@
 					{#if a.ack?.acked_at}
 						<div class="num mt-2 text-[11px] text-[var(--color-muted)]">
 							✓ acked by {a.ack.acked_by} · {ageOf(a.ack.acked_at)} ago
+							{#if a.ack.note} · {a.ack.note}{/if}
 						</div>
+						{#if auth.user}
+							<button
+								type="button"
+								onclick={() => unack(a.id)}
+								disabled={busy[a.id]}
+								class="mt-2 min-h-[40px] w-full rounded border border-[var(--color-border-strong)] text-[12px] uppercase tracking-wider text-[var(--color-muted)] active:text-[var(--color-bright)] active:bg-[var(--color-elevated)] disabled:opacity-50"
+								style="-webkit-tap-highlight-color: transparent;"
+							>
+								{busy[a.id] ? 'unacking…' : 'unacknowledge'}
+							</button>
+						{/if}
 					{:else if auth.user}
 						<div class="mt-2 flex gap-2">
 							<button
 								type="button"
 								onclick={() => ack(a.id)}
 								disabled={busy[a.id]}
-								class="min-h-[40px] flex-1 rounded border border-[var(--color-border-strong)] bg-[var(--color-surface-hi)] text-[12px] uppercase tracking-wider text-[var(--color-bright)] disabled:opacity-50"
+								class="min-h-[40px] flex-1 rounded border border-[var(--color-ok)]/50 bg-[var(--color-ok)]/10 text-[12px] uppercase tracking-wider text-[var(--color-bright)] disabled:opacity-50"
 								style="-webkit-tap-highlight-color: transparent;"
 							>
 								{busy[a.id] ? 'acking…' : 'acknowledge'}

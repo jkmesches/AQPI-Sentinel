@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { fmtAge, stageLabel, prettyCheckLabel } from '$lib/format';
+	import { productCategory, PRODUCT_CATEGORY_LABEL, PRODUCT_CATEGORY_ORDER } from '$lib/format';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import MobileStatusMap from '$lib/components/mobile/MobileStatusMap.svelte';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
@@ -121,8 +122,8 @@
 						>
 							<StatusDot status={r.status} size={7} />
 							<div class="min-w-0 flex-1">
-								<div class="num truncate text-[13px] text-[var(--color-default)]">
-									{r.target || r.check_id}
+								<div class="num truncate text-[13px] text-[var(--color-default)]" title={`${r.check_id} · ${r.target}`}>
+									{prettyCheckLabel(r.check_id, r.target)}
 								</div>
 								{#if r.summary}
 									<div class="num mt-0.5 truncate text-[11px] text-[var(--color-muted)]">
@@ -176,7 +177,7 @@
 
 		<div class="mt-5 flex flex-col gap-2">
 			<a
-				href={`/history?check_id=${encodeURIComponent(detailRow.check_id ?? '')}&target=${encodeURIComponent(detailRow.target ?? '')}&stage=${encodeURIComponent(detailRow.stage ?? '')}`}
+				href={`/m/timeline?check_id=${encodeURIComponent(detailRow.check_id ?? '')}&target=${encodeURIComponent(detailRow.target ?? '')}&stage=${encodeURIComponent(detailRow.stage ?? '')}`}
 				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>

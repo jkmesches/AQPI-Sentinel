@@ -61,6 +61,7 @@
 	const totalFail = $derived(
 		Object.values(counts).reduce((a, b) => a + b.fail + b.error, 0)
 	);
+	const totalSkip = $derived(Object.values(counts).reduce((a, b) => a + (b.skip ?? 0), 0));
 	const total = $derived(Object.values(counts).reduce((a, b) => a + b.total, 0));
 	const sinceUpdate = $derived(
 		sentinel.lastUpdate ? (now.getTime() - sentinel.lastUpdate.getTime()) / 1000 : null
@@ -109,11 +110,14 @@
 				</div>
 			</div>
 
-			<!-- ratio + WARN/FAIL pill -->
+			<!-- ratio + WARN/FAIL/SKIP pill — every cell of the sub-strip
+			     contributes here so pass + warn + fail + skip = total. Without
+			     skip the math didn't add up (e.g. 36 pass + 1 fail vs 38 total). -->
 			<div class="flex items-center gap-3 num">
 				<span class="text-[var(--color-ok)]">{totalPass}</span>
 				{#if totalWarn}<span class="text-[var(--color-warn)]">{totalWarn} W</span>{/if}
 				{#if totalFail}<span class="text-[var(--color-fail)]">{totalFail} F</span>{/if}
+				{#if totalSkip}<span class="text-[var(--color-muted)]">{totalSkip} S</span>{/if}
 				<span class="text-[var(--color-faint)]">/ {total}</span>
 			</div>
 
