@@ -41,6 +41,24 @@
 		return table[status] ?? table.skip;
 	}
 
+	// Per-status icon split. Mirrors desktop MapView (Group 3c): center dot
+	// = worst-case verdict, halo = staleness mode. Ghost-up (warn) reads as
+	// red-center + yellow-ring so the eye still parses "broken" at a glance
+	// without losing the "we're not sure yet" nuance.
+	function centerColorFor(status: string): string {
+		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		if (status === 'pass') return table.pass;
+		if (status === 'warn' || status === 'fail' || status === 'error') return table.fail;
+		return table.skip;
+	}
+	function haloColorFor(status: string): string {
+		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		if (status === 'pass') return table.pass;
+		if (status === 'warn') return table.warn;
+		if (status === 'fail' || status === 'error') return table.fail;
+		return table.skip;
+	}
+
 	function strokeFor(): string {
 		// Match the cell-stroke logic in desktop MapView (visible against
 		// either basemap palette).
@@ -48,15 +66,21 @@
 	}
 
 	function geo() {
-		const features = radars.map((r) => ({
-			type: 'Feature' as const,
-			geometry: { type: 'Point' as const, coordinates: [r.lon, r.lat] },
-			properties: {
-				id: r.id,
-				name: r.name,
-				color: colorFor(statusByRadar[r.id] ?? 'skip')
-			}
-		}));
+		const features = radars.map((r) => {
+			const status = statusByRadar[r.id] ?? 'skip';
+			return {
+				type: 'Feature' as const,
+				geometry: { type: 'Point' as const, coordinates: [r.lon, r.lat] },
+				properties: {
+					id: r.id,
+					name: r.name,
+					status,
+					color:        colorFor(status),     // legacy
+					center_color: centerColorFor(status),
+					halo_color:   haloColorFor(status)
+				}
+			};
+		});
 		return { type: 'FeatureCollection' as const, features };
 	}
 
@@ -67,15 +91,29 @@
 			src.setData(geo());
 		} else {
 			map.addSource('radars', { type: 'geojson', data: geo() });
+			// Halo (wider ring) reads staleness mode.
+			map.addLayer({
+				id: 'radar-halo',
+				type: 'circle',
+				source: 'radars',
+				paint: {
+					'circle-radius': 11,
+					'circle-color': ['get', 'halo_color'],
+					'circle-opacity': 0.28,
+					'circle-stroke-color': ['get', 'halo_color'],
+					'circle-stroke-width': 1.6
+				}
+			});
+			// Center dot reads worst-case verdict (red for warn AND fail).
 			map.addLayer({
 				id: 'radar-circles',
 				type: 'circle',
 				source: 'radars',
 				paint: {
-					'circle-radius': 9,
-					'circle-color': ['get', 'color'],
+					'circle-radius': 6,
+					'circle-color': ['get', 'center_color'],
 					'circle-stroke-color': strokeFor(),
-					'circle-stroke-width': 2
+					'circle-stroke-width': 1.5
 				}
 			});
 			map.addLayer({

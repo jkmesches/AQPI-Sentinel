@@ -103,11 +103,16 @@
 		{:else if pushSubscribed}
 			<div class="text-[13px] text-[var(--color-ok)]">✓ Notifications enabled on this device.</div>
 			<div class="mt-1 text-[11px] text-[var(--color-muted)]">You'll get a push when any alarm fires.</div>
+			<a
+				href="/m/push-settings"
+				class="mt-3 inline-flex min-h-[44px] w-full items-center justify-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 text-[12px] uppercase tracking-wider text-[var(--color-accent)]"
+				style="-webkit-tap-highlight-color: transparent;"
+			>customize routing →</a>
 			<button
 				type="button"
 				onclick={toggleDisable}
 				disabled={pushBusy}
-				class="mt-3 min-h-[44px] w-full rounded border border-[var(--color-border-strong)] text-[12px] uppercase tracking-wider text-[var(--color-fail)] disabled:opacity-50"
+				class="mt-2 min-h-[44px] w-full rounded border border-[var(--color-border-strong)] text-[12px] uppercase tracking-wider text-[var(--color-fail)] disabled:opacity-50"
 				style="-webkit-tap-highlight-color: transparent;"
 			>{pushBusy ? 'disabling…' : 'disable notifications'}</button>
 		{:else}

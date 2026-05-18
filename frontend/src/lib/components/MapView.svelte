@@ -91,7 +91,21 @@
 		return wrapped;
 	}
 
-	type Composite = 'none' | 'comp_ref' | 'comp_now' | 'water_depth';
+	// Composite products available on the map. IDs mirror backend/config.py
+	// PRODUCTS table; "none" is the explicit off state. Radar composites
+	// approved 2026-05-18; Atmospheric Forecast composites added on user
+	// request 2026-05-18.
+	type Composite =
+		| 'none'
+		| 'qpe_15min'
+		| 'qpe_1hr'
+		| 'precip_rate_radar'
+		| 'comp_ref'
+		| 'comp_now'
+		| 'fcst_total_precip'
+		| 'fcst_total_precip_cum'
+		| 'fcst_precip_rate'
+		| 'fcst_temp';
 	let composite = $state<Composite>('none');
 	let nexradEnabled = $state(false);
 	let overlayOpacity = $state(0.8);
@@ -168,11 +182,21 @@
 
 	const EXTENT_LARGE = { west: -124.005, east: -121.195, south: 36.5, north: 39.505 };
 	const EXTENT_BAY = { west: -122.6427, east: -121.8509, south: 37.33298, north: 38.34444 };
+	// All radar + forecast composites use the regional X-band extent.
+	// EXTENT_BAY is reserved for hydro products (water_depth,
+	// max_water_depth) which are not surfaced in this picker — they're a
+	// separate product family.
 	const COMP_EXTENT: Record<Composite, typeof EXTENT_LARGE | null> = {
 		none: null,
-		comp_ref: EXTENT_LARGE,
-		comp_now: EXTENT_LARGE,
-		water_depth: EXTENT_BAY
+		qpe_15min:             EXTENT_LARGE,
+		qpe_1hr:               EXTENT_LARGE,
+		precip_rate_radar:     EXTENT_LARGE,
+		comp_ref:              EXTENT_LARGE,
+		comp_now:              EXTENT_LARGE,
+		fcst_total_precip:     EXTENT_LARGE,
+		fcst_total_precip_cum: EXTENT_LARGE,
+		fcst_precip_rate:      EXTENT_LARGE,
+		fcst_temp:             EXTENT_LARGE
 	};
 
 	function radarExtent(r: RadarMeta) {
@@ -197,6 +221,33 @@
 	const verdictColor = $derived.by(() => {
 		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
 		return (status: string) => table[status] ?? table.skip;
+	});
+
+	// Per-status icon split: the center dot conveys the worst-case verdict
+	// at a glance, the surrounding halo conveys the staleness mode.
+	//   pass        → green / green   (UP)
+	//   warn        → red   / yellow  (GHOST UP — data exists but stale)
+	//   fail/error  → red   / red     (DOWN)
+	//   skip        → muted / muted
+	// User spec 2026-05-18: "center icon be red and the inner ring be yellow
+	// for ghost states." This makes "is the radar actually broken?" answerable
+	// from across the room.
+	const radarCenterColor = $derived.by(() => {
+		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		return (status: string) => {
+			if (status === 'pass') return table.pass;
+			if (status === 'warn' || status === 'fail' || status === 'error') return table.fail;
+			return table.skip;
+		};
+	});
+	const radarHaloColor = $derived.by(() => {
+		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		return (status: string) => {
+			if (status === 'pass') return table.pass;
+			if (status === 'warn') return table.warn;
+			if (status === 'fail' || status === 'error') return table.fail;
+			return table.skip;
+		};
 	});
 
 	const radarStatus = $derived.by(() => {
@@ -224,7 +275,11 @@
 						kind: r.kind,
 						status,
 						active,
-						color: verdictColor(status),
+						// Legacy single color (still used by range-fill/range-stroke).
+						color:        verdictColor(status),
+						// Split: dot = worst-case verdict, halo = staleness mode.
+						center_color: radarCenterColor(status),
+						halo_color:   radarHaloColor(status),
 						clickable: r.kind === 'xband' || r.kind === 'cband'
 					}
 				};
@@ -259,6 +314,61 @@
 		(map.getSource('ranges') as maplibregl.GeoJSONSource).setData(rangesGeo());
 	}
 
+	// Synthesize a step list for NEXRAD-only play. Each step ts feeds the
+	// nexradImageUrl TIME param. n0q-t publishes frames on each 5-min mark
+	// but has ~5 min of upstream lag — asking for the current 5-min mark
+	// returns blank/stale on a fresh frame which manifests as a flash
+	// every cycle on playback. We therefore back the latest frame off by
+	// `NEXRAD_LAG_MS` before snapping, and the "live" position (stepIdx ==
+	// last) renders the latest published frame rather than the in-flight
+	// one. Frames are blob-cached in nexradBlobs so the loop is smooth
+	// after the first pass.
+	const NEXRAD_LAG_MS = 6 * 60_000;
+	function synthesizeNexradSteps(): Step[] {
+		const out: Step[] = [];
+		const now = Date.now();
+		// Snap "now - lag" down to the previous 5-min mark to be sure the
+		// requested frame already exists upstream.
+		const latest = now - NEXRAD_LAG_MS;
+		const snapped = latest - (latest % 300_000);
+		const COUNT = 18;     // 18 frames × 5 min = 90 min span
+		for (let i = COUNT - 1; i >= 0; i--) {
+			const d = new Date(snapped - i * 300_000);
+			out.push({
+				i: COUNT - 1 - i,
+				ts: d.toISOString(),
+				imageName: '',
+				day:  d.toUTCString().slice(0, 3).toUpperCase(),
+				date: d.toISOString().slice(0, 10),
+				time: d.toISOString().slice(11, 19)
+			});
+		}
+		return out;
+	}
+
+	// Pick the playback driver radar: first active radar whose upstream
+	// manifest comes back non-empty. Resolves the "selecting All/X-Band
+	// doesn't activate playback" report when the alphabetically-first radar
+	// happens to be the down one with 0 historical scans. Returns
+	// {steps, idx} or null if every active radar is empty.
+	async function loadStepsFromAnyActiveRadar(): Promise<{ steps: Step[]; idx: number } | null> {
+		for (const id of activeRadars) {
+			try {
+				const r = await fetch(
+					`/api/upstream/radar_steps?radar=${id}` +
+					`&moment=${encodeURIComponent(currentMoment)}`
+				);
+				const j = await r.json();
+				const s = (j.steps ?? []) as Step[];
+				if (s.length > 0) {
+					loadActivity(`radar=${id}&moment=${encodeURIComponent(currentMoment)}`);
+					return { steps: s, idx: j.current_idx ?? s.length - 1 };
+				}
+			} catch { /* try next radar */ }
+		}
+		return null;
+	}
+
 	async function loadComposite() {
 		stopPlay();
 		activity = [];
@@ -274,19 +384,21 @@
 			}
 			loadActivity(`product_id=${composite}`);
 		} else if (activeRadars.length > 0) {
-			try {
-				const r = await fetch(
-					`/api/upstream/radar_steps?radar=${activeRadars[0]}` +
-					`&moment=${encodeURIComponent(currentMoment)}`
-				);
-				const j = await r.json();
-				steps = j.steps as Step[];
-				stepIdx = j.current_idx ?? steps.length - 1;
-			} catch {
+			const found = await loadStepsFromAnyActiveRadar();
+			if (found) {
+				steps = found.steps;
+				stepIdx = found.idx;
+			} else {
 				steps = [];
 				stepIdx = -1;
 			}
-			loadActivity(`radar=${activeRadars[0]}&moment=${encodeURIComponent(currentMoment)}`);
+		} else if (nexradEnabled) {
+			// NEXRAD-only mode: no composite, no radars — synthesize the
+			// step list from NEXRAD's 5-min frame cadence so the operator
+			// gets a working playback control instead of a dead scrubber.
+			steps = synthesizeNexradSteps();
+			stepIdx = steps.length - 1;
+			activity = [];
 		} else {
 			steps = [];
 			stepIdx = -1;
@@ -463,6 +575,56 @@
 	const nexradBlobs = new Map<string, string>();
 	let nexradFetchToken = 0;
 
+	// Prefetch every URL the user might scrub to before play starts. With
+	// blobs already in memory, syncNexradTime hits the cache on every tick
+	// and the only work left at frame-time is the GL texture swap (~1 frame).
+	// Without prefetch the first pass through the loop is bottlenecked on
+	// per-frame HTTP latency which the user reads as flicker.
+	let _nexradPrefetchInFlight = false;
+	async function prefetchNexradFrames() {
+		if (_nexradPrefetchInFlight || !nexradEnabled) return;
+		_nexradPrefetchInFlight = true;
+		try {
+			const urls = new Set<string>();
+			for (const s of steps) {
+				const tsForStep = (steps.length > 0 && s === steps[steps.length - 1]) ? null : s.ts;
+				urls.add(nexradImageUrl(tsForStep));
+			}
+			// Cap concurrency to 3 — Iowa Mesonet has been known to throttle
+			// faster than that on a cold cache.
+			const todo = [...urls].filter((u) => !nexradBlobs.has(u));
+			const CONCURRENCY = 3;
+			let i = 0;
+			async function worker() {
+				while (i < todo.length) {
+					const u = todo[i++];
+					try {
+						const r = await fetch(u);
+						if (!r.ok) continue;
+						const blob = await r.blob();
+						if (!nexradBlobs.has(u)) {
+							nexradBlobs.set(u, URL.createObjectURL(blob));
+						}
+					} catch { /* skip; live syncNexradTime will retry */ }
+				}
+			}
+			await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+		} finally {
+			_nexradPrefetchInFlight = false;
+		}
+	}
+
+	// Kick prefetch whenever NEXRAD is enabled with a real step list. Also
+	// re-runs after loadComposite refreshes steps. Cheap to call repeatedly
+	// — the in-flight guard prevents duplicate work.
+	$effect(() => {
+		void nexradEnabled;
+		void steps.length;
+		if (nexradEnabled && steps.length > 0) {
+			untrack(() => { prefetchNexradFrames(); });
+		}
+	});
+
 	async function syncNexradTime() {
 		if (!map || !nexradEnabled) return;
 		const src = map.getSource('nexrad') as maplibregl.ImageSource | undefined;
@@ -624,6 +786,7 @@
 		void composite;
 		void activeRadars.length;       // crossing 0↔N flips manifest source
 		void currentMoment;
+		void nexradEnabled;             // toggling NEXRAD when nothing else is on
 		untrack(() => { loadComposite(); });
 	});
 	$effect(() => {
@@ -646,12 +809,41 @@
 	});
 
 	// ---- bulk-action helpers ------------------------------------------------
+	// Fit the viewport to encompass every currently-active radar's range circle
+	// (lon/lat ± range_m). Skips the no-op cases (empty selection, single radar
+	// already fully on-screen) since they'd just yank the camera around.
+	// User spec 2026-05-18: presets should auto-frame the radars they select
+	// so the operator doesn't have to scroll to find them.
+	function fitToActiveRadars(opts: { animate?: boolean } = {}) {
+		if (!map || !styleReady) return;
+		const ids = new Set(activeRadars);
+		const rs = radars.filter((r) => ids.has(r.id));
+		if (rs.length === 0) return;
+		let west = +Infinity, east = -Infinity, south = +Infinity, north = -Infinity;
+		for (const r of rs) {
+			const e = radarExtent(r);
+			if (e.west  < west)  west  = e.west;
+			if (e.east  > east)  east  = e.east;
+			if (e.south < south) south = e.south;
+			if (e.north > north) north = e.north;
+		}
+		if (!isFinite(west)) return;
+		map.fitBounds(
+			[[west, south], [east, north]],
+			{ padding: 60, duration: opts.animate === false ? 0 : 600, maxZoom: 10 }
+		);
+	}
+
 	function setSelection(ids: string[]) {
 		activeRadars = [...new Set(ids)];     // dedupe, fresh array reference
 		// belt-and-suspenders: call the map updates directly so we don't rely
 		// solely on $effect tracking through the array reassignment.
 		syncBaseSources();
 		refreshRadarOverlays();
+		// Auto-frame on every preset/bulk selection. Empty = user just
+		// cleared, so leave the camera alone; re-fitting to identical
+		// bounds is a visual no-op.
+		if (activeRadars.length > 0) fitToActiveRadars();
 	}
 	function toggleRadar(id: string) {
 		activeRadars = activeRadars.includes(id)
@@ -737,25 +929,29 @@
 			}
 		});
 		map.addSource('radars', { type: 'geojson', data: pointsGeo() });
+		// Halo = staleness mode (yellow for ghost-up, red for hard down).
 		map.addLayer({
 			id: 'radar-halo',
 			type: 'circle',
 			source: 'radars',
 			paint: {
 				'circle-radius': ['case', ['get', 'active'], 14, 11],
-				'circle-color': ['get', 'color'],
+				'circle-color': ['get', 'halo_color'],
 				'circle-opacity': ['case', ['get', 'active'], 0.32, 0.16],
-				'circle-stroke-color': ['get', 'color'],
+				'circle-stroke-color': ['get', 'halo_color'],
 				'circle-stroke-width': ['case', ['get', 'active'], 2, 1.4]
 			}
 		});
+		// Point = worst-case verdict (red for warn AND fail; the halo
+		// distinguishes which). Lets a viewer read "is this radar working?"
+		// in one glance: red center → it's not delivering reliable data.
 		map.addLayer({
 			id: 'radar-point',
 			type: 'circle',
 			source: 'radars',
 			paint: {
 				'circle-radius': ['case', ['get', 'active'], 5.5, 4],
-				'circle-color': ['get', 'color'],
+				'circle-color': ['get', 'center_color'],
 				'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',  /* --color-canvas per mode */
 				'circle-stroke-width': 1
 			}
@@ -858,11 +1054,34 @@
 		if (visHandler) document.removeEventListener('visibilitychange', visHandler);
 	});
 
-	const compOptions: { key: Composite; label: string; short: string }[] = [
-		{ key: 'none',        label: 'Off',                       short: 'Off' },
-		{ key: 'comp_ref',    label: 'X-band Composite',          short: 'Z' },
-		{ key: 'comp_now',    label: 'X-band Nowcast (+30m)',     short: 'Ż' },
-		{ key: 'water_depth', label: 'Water Depth',               short: 'H₂O' }
+	// Composites grouped by upstream source so a 10-item dropdown stays
+	// readable. Order matches the Live page's grouped Products section.
+	const compGroups: { label: string; options: { key: Composite; label: string }[] }[] = [
+		{
+			label: '',  // top-level "Off" — no group heading
+			options: [
+				{ key: 'none', label: 'Off' }
+			]
+		},
+		{
+			label: 'Radar Data',
+			options: [
+				{ key: 'qpe_15min',         label: 'Total Precip · 15 min QPE' },
+				{ key: 'qpe_1hr',           label: 'Total Precip · 1 h QPE' },
+				{ key: 'precip_rate_radar', label: 'Precip Rate' },
+				{ key: 'comp_ref',          label: 'Reflectivity' },
+				{ key: 'comp_now',          label: 'Reflectivity Nowcast' }
+			]
+		},
+		{
+			label: 'Atmospheric Forecast',
+			options: [
+				{ key: 'fcst_total_precip',     label: 'Total Precip' },
+				{ key: 'fcst_total_precip_cum', label: 'Total Precip (cumulative)' },
+				{ key: 'fcst_precip_rate',      label: 'Precip Rate' },
+				{ key: 'fcst_temp',             label: 'Temperature' }
+			]
+		}
 	];
 
 	const statusLabel = (s: string) =>
@@ -916,21 +1135,36 @@
 			</button>
 		</div>
 
-		<!-- Composite — single pill row -->
+		<!-- Composite — dropdown picker (5 products + Off) -->
 		<div class="px-3 py-2">
 			<span class="label">Composite</span>
-			<div class="mt-1 grid grid-cols-4 overflow-hidden rounded-sm border border-[var(--color-border-strong)]">
-				{#each compOptions as opt, i}
-					<button
-						class="px-1 py-1 text-[10.5px] transition-colors {composite === opt.key
-							? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
-							: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/60 hover:text-[var(--color-default)]'} {i > 0 ? 'border-l border-[var(--color-border)]' : ''}"
-						title={opt.label}
-						onclick={() => (composite = opt.key)}
-					>
-						{opt.short}
-					</button>
-				{/each}
+			<div class="mt-1 flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {composite !== 'none'
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+					aria-hidden="true"
+				></span>
+				<select
+					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+					value={composite}
+					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
+					title="Choose the composite overlay to render on the map"
+				>
+					{#each compGroups as g}
+						{#if g.label}
+							<optgroup label={g.label}>
+								{#each g.options as opt}
+									<option value={opt.key}>{opt.label}</option>
+								{/each}
+							</optgroup>
+						{:else}
+							{#each g.options as opt}
+								<option value={opt.key}>{opt.label}</option>
+							{/each}
+						{/if}
+					{/each}
+				</select>
 			</div>
 		</div>
 
@@ -961,19 +1195,24 @@
 					{activeRadars.length}/{selectableRadars.length}
 				</span>
 			</div>
-			<!-- moment tabs inline -->
-			<div class="mt-1 flex gap-px">
+			<!-- moment tabs inline. Selected state uses filled OK-tinted
+			     background + bold text — the previous underline+color-only
+			     treatment was too subtle to read at a glance (2026-05-18). -->
+			<div class="mt-1 flex gap-px rounded-sm border border-[var(--color-border-strong)] overflow-hidden">
 				{#each MOMENTS as m}
 					<button
-						class="num flex-1 py-0.5 text-[10px] transition-colors {currentMoment === m.key
-							? 'border-b border-[var(--color-bright)] text-[var(--color-bright)]'
-							: 'border-b border-transparent text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
-						title={m.full}
+						class="num flex-1 py-1 text-[10.5px] font-medium transition-colors {currentMoment === m.key
+							? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
+							: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'}"
+						title={`${m.full} — currently selected: ${m.key === currentMoment ? 'yes' : 'no'}`}
 						onclick={() => (currentMoment = m.key)}
 					>
 						{m.short}
 					</button>
 				{/each}
+			</div>
+			<div class="mt-1 text-[10px] text-[var(--color-faint)] num text-center">
+				moment: <span class="text-[var(--color-bright)]">{MOMENTS.find((m) => m.key === currentMoment)?.full ?? currentMoment}</span>
 			</div>
 		</div>
 

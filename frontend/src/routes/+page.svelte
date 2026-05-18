@@ -4,7 +4,11 @@
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import MapView from '$lib/components/MapView.svelte';
 	import SectionHeader from '$lib/components/SectionHeader.svelte';
-	import { fmtAge, severityChip, statusText, statusBorder } from '$lib/format';
+	import {
+		fmtAge, severityChip, statusText, statusBorder,
+		stageLabel, prettyCheckLabel,
+		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
+	} from '$lib/format';
 	import { api } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -12,19 +16,40 @@
 	const radarRows = $derived(
 		(sentinel.rollup?.stages?.L2 ?? []).slice().sort((a, b) => a.target.localeCompare(b.target))
 	);
+	// All L1 checks together: products + vector overlays + stream feeds.
+	// They all carry the "Product Freshness" stage descriptor and behave
+	// the same way (an upstream feed with an expected refresh cadence), so
+	// users see them as one category. Previously vectors + streams were
+	// grouped under "Edge" alongside L0 site checks which made the labels
+	// inconsistent — flagged in the 2026-05-18 review.
 	const productRows = $derived(
 		(sentinel.rollup?.stages?.L1 ?? [])
-			.filter((r) => r.check_id.startsWith('layer1.product.'))
 			.slice()
 			.sort((a, b) => a.target.localeCompare(b.target))
 	);
-	const vectorRows = $derived(
-		(sentinel.rollup?.stages?.L1 ?? []).filter((r) => r.check_id.startsWith('layer1.vector.'))
-	);
-	const streamRows = $derived(
-		(sentinel.rollup?.stages?.L1 ?? []).filter((r) => r.check_id.startsWith('layer1.stream.'))
-	);
-	const edgeRows = $derived([...(sentinel.rollup?.stages?.L0 ?? []), ...vectorRows, ...streamRows]);
+	// Site = L0 only (origin liveness, TLS, public page, root-404).
+	// Renamed from "Edge" since it now drops the L1 static feeds.
+	const siteRows = $derived(sentinel.rollup?.stages?.L0 ?? []);
+
+	// Group product rows by category (Radar Data / Atmospheric Forecast /
+	// CoSMoS / NWM / Other). Vectors + stream feeds fall into "Other".
+	// `nwm` stays in the list with an empty row count so the operator
+	// knows it's accounted for upstream even though no products land here.
+	const productGroups = $derived.by(() => {
+		const groups: Record<string, any[]> = {};
+		for (const cat of PRODUCT_CATEGORY_ORDER) groups[cat] = [];
+		for (const r of productRows) {
+			// Category is purely target-keyed now. The mapping in format.ts
+			// covers layer1.product.* (radar/forecast/cosmos), plus
+			// layer1.vector.* + layer1.stream.* targets that source from
+			// NWM (flowlines, watersheds, stream, stream_csv). Anything
+			// unknown still falls to "other".
+			groups[productCategory(r.target)].push(r);
+		}
+		return PRODUCT_CATEGORY_ORDER
+			.map((cat) => ({ category: cat, label: PRODUCT_CATEGORY_LABEL[cat], rows: groups[cat] }))
+			.filter((g) => g.category !== 'other' || g.rows.length > 0);
+	});
 	const l4XbandByRadar = $derived.by(() => {
 		const out: Record<string, string> = {};
 		for (const r of sentinel.rollup?.stages?.['L4-T1T2'] ?? []) {
@@ -67,7 +92,7 @@
 <div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
 	<!-- LEFT RAIL: RADARS + IMAGE QC ------------------------------------------------- -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right="L2" />
+		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={stageLabel('L2')} />
 		<ul class="divide-y divide-[var(--color-border)]">
 			{#each radarRows as r}
 				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
@@ -94,12 +119,12 @@
 			{/each}
 		</ul>
 
-		<SectionHeader title="Edge" right="L0  +  static" />
+		<SectionHeader title="Site" right={stageLabel('L0')} />
 		<ul class="divide-y divide-[var(--color-border)]">
-			{#each edgeRows as r}
+			{#each siteRows as r}
 				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="text-[var(--color-default)] num">{r.target}</span>
+					<span class="text-[var(--color-default)] num" title={r.check_id}>{prettyCheckLabel(r.check_id, r.target)}</span>
 					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{r.summary}</span>
 				</li>
 			{/each}
@@ -122,25 +147,41 @@
 
 	<!-- RIGHT RAIL: PRODUCTS --------------------------------------------------------- -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right="L1" />
-		<ul class="divide-y divide-[var(--color-border)] overflow-y-auto">
-			{#each productRows as r}
-				{@const spark = sentinel.metrics[`${r.check_id}|age_s`] ?? []}
-				{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
-				<li class="row-hover grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
-					<StatusDot status={r.status} size={8} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="num truncate text-[var(--color-bright)]">{r.target}</span>
-					<span class="num text-[10.5px] {statusText(r.status)}">
-						{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
+		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={stageLabel('L1')} />
+		<div class="overflow-y-auto">
+			{#each productGroups as g}
+				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
+					<span>{g.label}</span>
+					<span class="num text-[9.5px] text-[var(--color-faint)] ml-auto">
+						{g.rows.length === 0 ? 'not exposed upstream' : `${g.rows.filter((r) => r.status === 'pass').length}/${g.rows.length}`}
 					</span>
-					<span class={statusText(r.status)}>
-						{#if diag.spark}
-							<Sparkline data={spark} width={48} height={14} />
-						{/if}
-					</span>
-				</li>
+				</div>
+				{#if g.rows.length === 0}
+					<div class="px-3 py-1.5 text-[10.5px] text-[var(--color-faint)] italic">
+						no products in this group.
+					</div>
+				{:else}
+					<ul class="divide-y divide-[var(--color-border)]">
+						{#each g.rows as r}
+							{@const spark = sentinel.metrics[`${r.check_id}|age_s`] ?? []}
+							{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
+							<li class="row-hover grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
+								<StatusDot status={r.status} size={8} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
+								<span class="num truncate text-[var(--color-bright)]" title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
+								<span class="num text-[10.5px] {statusText(r.status)}">
+									{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
+								</span>
+								<span class={statusText(r.status)}>
+									{#if diag.spark}
+										<Sparkline data={spark} width={48} height={14} />
+									{/if}
+								</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			{/each}
-		</ul>
+		</div>
 	</aside>
 
 	<!-- BOTTOM: ALARM STREAM --------------------------------------------------------- -->
@@ -170,7 +211,7 @@
 					title={isAcked ? `acked by ${a.ack?.acked_by} at ${a.ack?.acked_at}${a.ack?.note ? ' — ' + a.ack.note : ''}` : ''}
 				>
 					<span class={severityChip(a.severity)}>{a.severity}</span>
-					<span class="num text-[10.5px] text-[var(--color-muted)]">{a.stage}</span>
+					<span class="num text-[10.5px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 					<span class="num text-[var(--color-bright)]">#{a.id}</span>
 					<span class="num text-[var(--color-default)] truncate">{a.target}</span>
 					<span

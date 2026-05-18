@@ -50,9 +50,21 @@
 				</a>
 				<a
 					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
+					href="/admin/groups"
+				>
+					Groups
+				</a>
+				<a
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
 					href="/admin/alerts"
 				>
 					Alert routing
+				</a>
+				<a
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
+					href="/admin/thresholds"
+				>
+					Thresholds
 				</a>
 				<a
 					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"

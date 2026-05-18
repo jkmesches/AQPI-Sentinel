@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { stageLabel, stageTechCode } from '$lib/format';
 
 	// ---- shape mirrors backend/alarms/models.py:AlertsConfig ---------------
 	interface Receiver {
@@ -8,10 +9,13 @@
 		webhook: string;
 		console: boolean;
 		template: string;
+		group_ids: number[];   // links to /admin/groups; expanded at dispatch time
 	}
+	interface GroupRef { id: number; name: string; description?: string; }
 	interface EscalationStep {
 		delay: string;
 		receivers: string[];
+		group_ids: number[];   // direct group references — paged in parallel to receivers
 	}
 	interface EscalationPolicy {
 		name: string;
@@ -90,12 +94,14 @@
 				webhook: x.webhook ?? '',
 				console: !!x.console,
 				template: x.template ?? 'default',
+				group_ids: Array.isArray(x.group_ids) ? [...x.group_ids] : [],
 			}));
 			policies = (v.escalation_policies ?? []).map((p: any): EscalationPolicy => ({
 				name: p.name ?? '',
 				steps: (p.steps ?? []).map((s: any) => ({
 					delay: s.delay ?? '0m',
 					receivers: Array.isArray(s.receivers) ? [...s.receivers] : [],
+					group_ids: Array.isArray(s.group_ids) ? [...s.group_ids] : [],
 				})),
 			}));
 			routes = (v.routes ?? []).map((r: any): Route => {
@@ -182,12 +188,14 @@
 				webhook: r.webhook.trim() || null,
 				console: !!r.console,
 				template: r.template || 'default',
+				group_ids: [...r.group_ids],
 			})),
 			escalation_policies: policies.map((p) => ({
 				name: p.name,
 				steps: p.steps.map((s) => ({
 					delay: s.delay || '0m',
 					receivers: [...s.receivers],
+					group_ids: [...(s.group_ids ?? [])],
 				})),
 			})),
 			routes: routes.map((r) => {
@@ -223,7 +231,7 @@
 			seenP.add(p.name);
 			if (p.steps.length === 0) return `Plan "${p.name}" has no steps.`;
 			for (const [j, s] of p.steps.entries()) {
-				if (!s.receivers.length) return `Plan "${p.name}" step ${j + 1} has no recipients selected.`;
+				if (!s.receivers.length && !(s.group_ids ?? []).length) return `Plan "${p.name}" step ${j + 1} has no recipients or groups selected.`;
 				for (const rn of s.receivers) {
 					if (!seenR.has(rn)) return `Plan "${p.name}" step ${j + 1} references unknown recipient "${rn}".`;
 				}
@@ -264,7 +272,75 @@
 
 	// ---- recipients --------------------------------------------------------
 	function addReceiver() {
-		receivers.push({ name: '', email: [], webhook: '', console: false, template: 'default' });
+		receivers.push({ name: '', email: [], webhook: '', console: false, template: 'default', group_ids: [] });
+		// Open editor on the new row.
+		editingReceiverIdx = receivers.length - 1;
+	}
+
+	// --- Group registry (loaded once for the receiver editor) ----------------
+	let groupOptions = $state<GroupRef[]>([]);
+	async function loadGroups() {
+		try {
+			const r = await fetch('/api/admin/groups');
+			if (r.ok) {
+				const arr = await r.json();
+				groupOptions = arr.map((g: any) => ({ id: g.id, name: g.name, description: g.description }));
+			}
+		} catch { /* groups optional */ }
+	}
+
+	// --- Check/target registry (drives routing-rule dropdowns) ---------------
+	// Routing rules now offer dropdowns for check_id + target instead of
+	// free-text — laypeople couldn't reliably type "layer2.radar.XSCV".
+	// Values come from /api/checks (the registry) which lists every
+	// registered check + its target.
+	let checkOptions  = $state<{ id: string; target: string; stage: string }[]>([]);
+	const checkIds    = $derived([...new Set(checkOptions.map((c) => c.id))].sort());
+	const targets     = $derived([...new Set(checkOptions.map((c) => c.target).filter((t) => !!t))].sort());
+	async function loadCheckRegistry() {
+		try {
+			const r = await fetch('/api/checks');
+			if (r.ok) {
+				const arr = await r.json();
+				checkOptions = arr.map((c: any) => ({ id: c.id, target: c.target ?? '', stage: c.stage ?? '' }));
+			}
+		} catch { /* fall back to free-text */ }
+	}
+
+	// --- Receiver editor modal state ---
+	let editingReceiverIdx = $state<number | null>(null);
+	let editorPendingEmail = $state('');
+
+	function openEditor(i: number) { editingReceiverIdx = i; editorPendingEmail = ''; }
+	function closeEditor() { editingReceiverIdx = null; }
+	function editorAddEmail() {
+		const idx = editingReceiverIdx;
+		if (idx == null) return;
+		const e = editorPendingEmail.trim();
+		if (!e) return;
+		receivers[idx].email = [...receivers[idx].email, e];
+		editorPendingEmail = '';
+	}
+	function editorDelEmail(j: number) {
+		const idx = editingReceiverIdx;
+		if (idx == null) return;
+		receivers[idx].email = receivers[idx].email.filter((_, k) => k !== j);
+	}
+	function editorToggleGroup(gid: number) {
+		const idx = editingReceiverIdx;
+		if (idx == null) return;
+		const cur = receivers[idx].group_ids;
+		receivers[idx].group_ids = cur.includes(gid)
+			? cur.filter((x) => x !== gid)
+			: [...cur, gid];
+	}
+	function recipientSummary(r: Receiver): string {
+		const parts: string[] = [];
+		if (r.email.length) parts.push(`${r.email.length} email${r.email.length === 1 ? '' : 's'}`);
+		if (r.group_ids.length) parts.push(`${r.group_ids.length} group${r.group_ids.length === 1 ? '' : 's'}`);
+		if (r.webhook) parts.push('webhook');
+		if (r.console) parts.push('console');
+		return parts.length ? parts.join(' · ') : '— no channels —';
 	}
 	function delReceiver(i: number) {
 		const name = receivers[i].name;
@@ -288,7 +364,7 @@
 
 	// ---- plans -------------------------------------------------------------
 	function addPolicy() {
-		policies.push({ name: '', steps: [{ delay: '0m', receivers: [] }] });
+		policies.push({ name: '', steps: [{ delay: '0m', receivers: [], group_ids: [] }] });
 	}
 	function delPolicy(i: number) {
 		const name = policies[i].name;
@@ -300,7 +376,7 @@
 		}
 	}
 	function addStep(i: number) {
-		policies[i].steps.push({ delay: '5m', receivers: [] });
+		policies[i].steps.push({ delay: '5m', receivers: [], group_ids: [] });
 	}
 	function delStep(i: number, j: number) {
 		policies[i].steps.splice(j, 1);
@@ -370,7 +446,7 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => { load(); loadGroups(); loadCheckRegistry(); });
 </script>
 
 <div class="p-6 max-w-5xl">
@@ -419,62 +495,142 @@
 
 		{#if receivers.length === 0}
 			<div class="text-[12px] text-[var(--color-faint)] italic mb-3">No recipients yet.</div>
+		{:else}
+			<table class="w-full text-[11.5px] mb-3">
+				<thead class="text-[var(--color-muted)]">
+					<tr class="border-b border-[var(--color-border)]">
+						<th class="px-2 py-1 text-left">name</th>
+						<th class="px-2 py-1 text-left">channels</th>
+						<th class="px-2 py-1 text-left">groups</th>
+						<th class="px-2 py-1 text-left">template</th>
+						<th class="px-2 py-1"></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each receivers as r, i (i)}
+						<tr class="border-b border-[var(--color-border)] {!r.name ? 'bg-[var(--color-warn)]/5' : ''}">
+							<td class="px-2 py-1 num text-[var(--color-bright)]">{r.name || '— unnamed —'}</td>
+							<td class="px-2 py-1 text-[var(--color-default)]">{recipientSummary(r)}</td>
+							<td class="px-2 py-1">
+								{#if r.group_ids.length === 0}
+									<span class="text-[10.5px] text-[var(--color-faint)] italic">none</span>
+								{:else}
+									<div class="flex flex-wrap gap-1">
+										{#each r.group_ids as gid}
+											{@const g = groupOptions.find((x) => x.id === gid)}
+											<span class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-1.5 py-0.5 text-[10px] num text-[var(--color-bright)]">{g?.name ?? `#${gid}`}</span>
+										{/each}
+									</div>
+								{/if}
+							</td>
+							<td class="px-2 py-1 num text-[var(--color-muted)]">{r.template || 'default'}</td>
+							<td class="px-2 py-1 text-right whitespace-nowrap">
+								<button onclick={() => openEditor(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2">edit</button>
+								<button onclick={() => delReceiver(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete</button>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
 		{/if}
-
-		{#each receivers as r, i (i)}
-			<div class="border border-[var(--color-border)] bg-[var(--color-canvas)] p-4 mb-3">
-				<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">name</label>
-					<input bind:value={r.name} placeholder="oncall-primary"
-						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
-
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] self-start pt-1">email</label>
-					<div>
-						{#if r.email.length}
-							<div class="flex flex-wrap gap-1 mb-1">
-								{#each r.email as e, j}
-									<span class="flex items-center gap-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]">
-										{e}
-										<button onclick={() => delEmail(i, j)} class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[12px] leading-none">×</button>
-									</span>
-								{/each}
-							</div>
-						{/if}
-						<div class="flex items-center gap-2">
-							<input
-								bind:value={pendingEmail[i]}
-								placeholder="you@example.com"
-								type="email"
-								onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addEmail(i); } }}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72"
-							/>
-							<button onclick={() => addEmail(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add</button>
-						</div>
-					</div>
-
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">webhook</label>
-					<input bind:value={r.webhook} placeholder="https://discord.com/api/webhooks/…"
-						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-full" />
-
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">console log</label>
-					<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
-						<input type="checkbox" bind:checked={r.console} />
-						Also write to backend log (useful for debugging)
-					</label>
-
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">template</label>
-					<input bind:value={r.template} placeholder="default"
-						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
-				</div>
-
-				<div class="mt-3 flex justify-end">
-					<button onclick={() => delReceiver(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete recipient</button>
-				</div>
-			</div>
-		{/each}
 
 		<button onclick={addReceiver} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add recipient</button>
 	</section>
+
+	<!-- ============== RECIPIENT EDIT MODAL ============== -->
+	{#if editingReceiverIdx !== null}
+		{@const idx = editingReceiverIdx}
+		{@const r = receivers[idx]}
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 overflow-y-auto" role="dialog" aria-modal="true" onclick={closeEditor}>
+			<div class="relative w-full max-w-[640px] rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-2xl" onclick={(e) => e.stopPropagation()}>
+				<header class="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-3">
+					<span class="label tracking-[0.16em] text-[var(--color-bright)]">
+						{r.name ? `EDIT RECIPIENT · ${r.name}` : 'NEW RECIPIENT'}
+					</span>
+					<button class="text-[var(--color-muted)] hover:text-[var(--color-bright)]" aria-label="close" onclick={closeEditor}>×</button>
+				</header>
+				<div class="px-5 py-4 space-y-3 text-[12px]">
+					<label class="flex items-center gap-3">
+						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
+						<input bind:value={r.name} placeholder="oncall-primary"
+							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+					</label>
+
+					<div class="flex items-start gap-3">
+						<span class="w-24 mt-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Email</span>
+						<div class="flex-1">
+							{#if r.email.length}
+								<div class="flex flex-wrap gap-1 mb-1">
+									{#each r.email as e, j}
+										<span class="flex items-center gap-1 border border-[var(--color-border)] bg-[var(--color-elevated)]/40 px-2 py-0.5 text-[11px] num text-[var(--color-bright)]">
+											{e}
+											<button onclick={() => editorDelEmail(j)} class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[12px] leading-none">×</button>
+										</span>
+									{/each}
+								</div>
+							{/if}
+							<div class="flex items-center gap-2">
+								<input bind:value={editorPendingEmail} placeholder="you@example.com" type="email"
+									onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); editorAddEmail(); } }}
+									class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+								<button onclick={editorAddEmail} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="flex items-start gap-3">
+						<span class="w-24 mt-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Groups</span>
+						<div class="flex-1">
+							{#if groupOptions.length === 0}
+								<div class="text-[11px] text-[var(--color-faint)] italic">
+									No groups defined yet. Create some at <a href="/admin/groups" class="underline">/admin/groups</a> — group members are paged automatically based on the group's notification schedule.
+								</div>
+							{:else}
+								<div class="flex flex-wrap gap-1">
+									{#each groupOptions as g}
+										{@const checked = r.group_ids.includes(g.id)}
+										<button type="button" onclick={() => editorToggleGroup(g.id)}
+											title={g.description || ''}
+											class="rounded-sm border px-2 py-0.5 text-[11px] num {checked
+												? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+												: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}">
+											{g.name}
+										</button>
+									{/each}
+								</div>
+								<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+									Selected groups are expanded to their active members at dispatch time, respecting each group's notification schedule. If every selected group is off-duty the recipient is skipped entirely.
+								</div>
+							{/if}
+						</div>
+					</div>
+
+					<label class="flex items-center gap-3">
+						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Webhook</span>
+						<input bind:value={r.webhook} placeholder="https://discord.com/api/webhooks/…"
+							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+					</label>
+
+					<label class="flex items-center gap-3">
+						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Console</span>
+						<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
+							<input type="checkbox" bind:checked={r.console} />
+							Also write to backend log (useful for debugging)
+						</label>
+					</label>
+
+					<label class="flex items-center gap-3">
+						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Template</span>
+						<input bind:value={r.template} placeholder="default"
+							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+					</label>
+				</div>
+				<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[11px]">
+					<button class="border border-[var(--color-border-strong)] px-3 py-1 uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={closeEditor}>done</button>
+				</footer>
+			</div>
+		</div>
+	{/if}
 
 	<!-- ============== ESCALATION PLANS ============== -->
 	<section class="mb-10">
@@ -505,20 +661,44 @@
 								<input bind:value={s.delay} placeholder="0m"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-20" />
 								<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">then notify</span>
-								{#if receivers.length === 0}
-									<span class="text-[10px] italic text-[var(--color-faint)]">add a recipient above first</span>
+								{#if receivers.length === 0 && groupOptions.length === 0}
+									<span class="text-[10px] italic text-[var(--color-faint)]">add a recipient or define a group first</span>
 								{:else}
-									<div class="flex flex-wrap gap-1">
-										{#each receivers as rec}
-											<label class="flex items-center gap-1 text-[11px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
-												<input type="checkbox" checked={s.receivers.includes(rec.name)} onchange={() => toggleStepReceiver(i, j, rec.name)} />
-												<span class="num">{rec.name || '(unnamed)'}</span>
-											</label>
-										{/each}
-									</div>
+									{#if receivers.length > 0}
+										<div class="flex flex-wrap gap-1">
+											{#each receivers as rec}
+												<label class="flex items-center gap-1 text-[11px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
+													<input type="checkbox" checked={s.receivers.includes(rec.name)} onchange={() => toggleStepReceiver(i, j, rec.name)} />
+													<span class="num">{rec.name || '(unnamed)'}</span>
+												</label>
+											{/each}
+										</div>
+									{/if}
 								{/if}
 								<button onclick={() => delStep(i, j)} class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete step</button>
 							</div>
+							{#if groupOptions.length > 0}
+								<div class="mt-2 flex items-center gap-2 flex-wrap">
+									<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">+ groups</span>
+									{#each groupOptions as g}
+										{@const checked = s.group_ids.includes(g.id)}
+										<button
+											type="button"
+											onclick={() => {
+												s.group_ids = checked
+													? s.group_ids.filter((x) => x !== g.id)
+													: [...s.group_ids, g.id];
+											}}
+											class="rounded-sm border px-2 py-0.5 text-[11px] num {checked
+												? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+												: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+										>
+											{g.name}
+										</button>
+									{/each}
+									<span class="text-[10.5px] text-[var(--color-faint)] ml-2">If a person is in BOTH a checked recipient and a checked group, they only get one notification.</span>
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -557,7 +737,7 @@
 							<select value={r.match.stage ?? ''} onchange={(e) => setMatch(i, 'stage', (e.target as HTMLSelectElement).value)}
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 								<option value="">(any)</option>
-								{#each STAGES as s}<option value={s}>{s}</option>{/each}
+								{#each STAGES as s}<option value={s}>{stageLabel(s)} ({stageTechCode(s)})</option>{/each}
 							</select>
 						</label>
 						<label class="flex items-center gap-2">
@@ -570,13 +750,33 @@
 						</label>
 						<label class="flex items-center gap-2">
 							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">check</span>
-							<input value={r.match.check_id ?? ''} oninput={(e) => setMatch(i, 'check_id', (e.target as HTMLInputElement).value)}
-								placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+							{#if checkIds.length > 0}
+								<select value={r.match.check_id ?? ''} onchange={(e) => setMatch(i, 'check_id', (e.target as HTMLSelectElement).value)}
+									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+									<option value="">(any)</option>
+									{#each checkIds as cid}
+										<option value={cid}>{cid}</option>
+									{/each}
+								</select>
+							{:else}
+								<input value={r.match.check_id ?? ''} oninput={(e) => setMatch(i, 'check_id', (e.target as HTMLInputElement).value)}
+									placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+							{/if}
 						</label>
 						<label class="flex items-center gap-2">
 							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">target</span>
-							<input value={r.match.target ?? ''} oninput={(e) => setMatch(i, 'target', (e.target as HTMLInputElement).value)}
-								placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+							{#if targets.length > 0}
+								<select value={r.match.target ?? ''} onchange={(e) => setMatch(i, 'target', (e.target as HTMLSelectElement).value)}
+									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+									<option value="">(any)</option>
+									{#each targets as t}
+										<option value={t}>{t}</option>
+									{/each}
+								</select>
+							{:else}
+								<input value={r.match.target ?? ''} oninput={(e) => setMatch(i, 'target', (e.target as HTMLInputElement).value)}
+									placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+							{/if}
 						</label>
 					</div>
 
