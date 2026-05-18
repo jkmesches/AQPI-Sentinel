@@ -186,18 +186,21 @@ class Layer1ProductCheck(Check):
         #    field via parse_filename_ts (±60 s tolerance).
         #
         #  * Forecast products (`fcst_*`) name their PNGs by HRRR step
-        #    index (`C_hrrr_<prod>_step<N>.png`). Filename has no clock
-        #    time, but it DOES claim "I am step N of the manifest". We
-        #    verify by comparing the parsed index against the row's
-        #    position. Catches serving-order bugs where the upstream
-        #    might rotate or mis-route a forecast frame.
+        #    index (`C_hrrr_<prod>_step<N>.png`). The starting index
+        #    varies by product (fcst_total_precip starts at step0,
+        #    fcst_precip_rate at step1), so position-in-manifest isn't
+        #    a useful comparison. Instead we verify the step indices
+        #    are CONTIGUOUS — every step's parsed index is exactly one
+        #    more than the previous. Catches gaps, duplicates, and
+        #    out-of-order serving from the upstream HRRR pipeline.
         #
-        # Each step ends up in exactly one bucket (ts-parity / step-
-        # parity / unparseable). Mode is selected per-row by which
+        # Each step lands in exactly one bucket (ts-parity, step-
+        # parity, unparseable). Mode is selected per-row by which
         # parser hits — the two are mutually exclusive in practice.
         matched = unparseable = mismatches = 0
         ts_checked = step_checked = 0
         first_mismatch = None
+        prev_step_idx: int | None = None
         for idx, s in enumerate(steps):
             name = s["imageName"]
             f_ts = parse_filename_ts(name)
@@ -219,7 +222,12 @@ class Layer1ProductCheck(Check):
             f_idx = parse_filename_step_idx(name)
             if f_idx is not None:
                 step_checked += 1
-                if f_idx == idx:
+                # First step parsed: nothing to compare to yet. Subsequent
+                # steps must be prev + 1 — gaps / duplicates / out-of-order
+                # all surface as mismatches.
+                if prev_step_idx is None:
+                    matched += 1
+                elif f_idx == prev_step_idx + 1:
                     matched += 1
                 else:
                     mismatches += 1
@@ -228,8 +236,10 @@ class Layer1ProductCheck(Check):
                             "mode": "step_index",
                             "imageName": name,
                             "filename_step": f_idx,
+                            "expected_step": prev_step_idx + 1,
                             "manifest_pos":  idx,
                         }
+                prev_step_idx = f_idx
                 continue
             unparseable += 1
 
