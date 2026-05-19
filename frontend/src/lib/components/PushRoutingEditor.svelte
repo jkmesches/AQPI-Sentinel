@@ -195,8 +195,12 @@
 				class="w-20 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-2 text-[16px] num text-[var(--color-bright)] text-right" />
 			<span class="text-[12px] text-[var(--color-default)]">minutes</span>
 		</div>
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
-			Notifications are deferred by this many minutes. Useful for "snooze me until the alarm has been open for a while."
+		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			Notifications wait this long before delivering. If the alarm
+			<span class="text-[var(--color-bright)]">self-resolves</span>
+			or is <span class="text-[var(--color-bright)]">acknowledged</span>
+			during the wait, the notification is dropped. Useful for
+			"page me only if it hasn't fixed itself in N minutes."
 		</div>
 	</section>
 

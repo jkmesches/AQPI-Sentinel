@@ -263,15 +263,58 @@ async def dispatch_push(pool, payload: dict) -> dict[str, int]:
 
 
 async def _send_delayed(pool, subscription: dict, payload: dict, vapid: dict, delay_s: float) -> None:
-    """Sleep `delay_s` then attempt to send. Re-checks the row still exists
-    so a deleted subscription doesn't get a delayed phantom notification."""
+    """Sleep `delay_s`, then send IFF the alarm is still actionable.
+
+    "Actionable" = the alarm is still open AND has no ack row. This is
+    the smart-delay semantics: the user sets delay_s=600 expecting "page
+    me only if it hasn't resolved itself or been acked in 10 minutes."
+    Without this re-check, a transient flap that closed in 2 minutes
+    would still fire a notification 8 minutes later — the worst kind
+    of noise.
+
+    Also re-checks the subscription row exists so a deleted subscription
+    doesn't get a delayed phantom notification.
+    """
     try:
         await asyncio.sleep(delay_s)
-        row = await pool.fetchrow(
+
+        # Subscription still around?
+        sub_row = await pool.fetchrow(
             "SELECT id FROM push_subscriptions WHERE id = $1", subscription["id"]
         )
-        if row is None:
+        if sub_row is None:
             return
+
+        # Alarm still open AND unacked?
+        # (payload.alarm_id is set by the _web_push listener; older callers
+        # without alarm_id fall through and send unconditionally — this
+        # preserves backward compatibility for any non-alarm push paths.)
+        alarm_id = payload.get("alarm_id")
+        if alarm_id is not None:
+            alarm_row = await pool.fetchrow(
+                """
+                SELECT
+                    a.closed_at,
+                    EXISTS(SELECT 1 FROM alarm_acks WHERE alarm_id = a.id) AS acked
+                FROM alarms a
+                WHERE a.id = $1
+                """,
+                alarm_id,
+            )
+            if alarm_row is None:
+                # Alarm was deleted somehow; safest to drop.
+                log.info("delayed push skipped — alarm %s gone", alarm_id)
+                return
+            if alarm_row["closed_at"] is not None:
+                log.info(
+                    "delayed push skipped — alarm %s self-resolved at %s",
+                    alarm_id, alarm_row["closed_at"].isoformat(),
+                )
+                return
+            if alarm_row["acked"]:
+                log.info("delayed push skipped — alarm %s was acked", alarm_id)
+                return
+
         ok, err, status = await asyncio.to_thread(_send_one, subscription, payload, vapid)
         if ok:
             await pool.execute(
