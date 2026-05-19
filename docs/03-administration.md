@@ -343,11 +343,13 @@ A typical escalation:
 Each step expands its groups, dedupes emails across the resulting
 set, and fires one email per unique address.
 
-> **Auto-promotion.** Alarms opened at `status=fail` start at
-> severity `warn` and auto-promote to `critical` after 30 minutes
-> if still open. A route with `severity floor: critical` only fires
-> once that promotion happens. To page immediately on fail, set
-> the floor on a step-0 step.
+> **Severity model (v0.1.2+).** Alarms opened at `status=warn` get
+> severity `info` (degraded, "attention"). Alarms opened at
+> `status=fail` or `status=error` get severity `warn`
+> (broken, "action") which auto-promotes to `critical` after 30
+> minutes if still open. See
+> [93-severity-audit.md](93-severity-audit.md) for the full
+> per-check classification table.
 
 ### Send test alert
 

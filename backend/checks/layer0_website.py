@@ -84,9 +84,14 @@ class RootNotFoundCheck(Check):
         r = await ctx.http.get(f"{SETTINGS.base}/")
         markers = {m: m in r.text for m in NOTFOUND_MARKERS}
         passed = all(markers.values())
+        # Marker miss = upstream restructured the not-found page. Doesn't
+        # break service for any specific user request; it's an indicator
+        # that the upstream's URL routing or content has drifted away
+        # from what Sentinel was calibrated against. warn rather than
+        # fail per the v0.1.2 severity reshape.
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,
-            status="pass" if passed else "fail",
+            status="pass" if passed else "warn",
             started_at=t0, finished_at=utcnow(),
             summary=f"HTTP {r.status_code} {len(r.content)}B",
             payload={"http": r.status_code, "markers": markers},

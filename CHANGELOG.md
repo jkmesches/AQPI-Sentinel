@@ -28,6 +28,57 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 _Nothing pending._
 
+## [0.1.2] — 2026-05-19
+
+**Severity model reshape.** The status→severity mapping was lossy:
+warn-status (degraded), fail-status (broken), and error-status (check
+crashed) all opened at severity=warn, making `severity_floor` unable
+to distinguish "degraded" from "broken." Reshaped so the three
+routing tiers map onto operational priority.
+
+### Changed
+
+- **Status → severity mapping**:
+  - `warn` → `info` (was `warn`) — "attention required, degraded but not broken"
+  - `fail` → `warn` → `critical` after 30 min — "action required, broken"
+  - `error` → `warn` → `critical` after 30 min (was warn with no promote) — same tier as fail; check itself crashed is also a broken state
+- **`severity_floor` semantics** now align with operational tiers:
+  - `info` = notify on everything
+  - `warn` = notify on broken only (fail / error)
+  - `critical` = notify only on long-running outages (broken > 30 min)
+- **Per-check verdict adjustments** (`docs/93-severity-audit.md`):
+  - `layer0.website.root_notfound`: fail → warn. Marker miss means upstream restructured the not-found page; service still works.
+  - L1 product `parity` sub-check: fail → warn. Upstream HRRR pipeline glitches are data-quality issues, not outages.
+- **Push routing editor copy** in both surfaces now reads with the new vocabulary: "All / Broken only / Long outages" rather than "info+ / warn+ / critical only."
+- **`/admin/alerts` cheat-sheet** rewritten to surface the three tiers (Action / Attention / Informational) directly.
+
+### Added
+
+- **`docs/93-severity-audit.md`** — full per-check classification
+  table. Source of truth for "what tier does this check land in
+  when it trips."
+- **"My devices" link** in the admin sidebar (mirrors the auth-chip
+  link). Users were looking in admin first; the redundancy wins.
+- **Click-friendly match-pattern picker** on `/settings/devices`.
+  Ports the mobile editor's chip grid: pre-populated radar +
+  product chips, click to toggle. Products grouped by category
+  (Radar Data / Atmospheric Forecast / CoSMoS / NWM) to match the
+  home page.
+- **Custom pattern fallback** retained as a collapsible
+  `+ add custom pattern` details block in the chip picker.
+
+### Notes for operators
+
+Existing alarm rows keep their `severity` value — the reshape
+applies to **newly-opened** alarms only. Existing routing rules
+that filter on `status` continue to work unchanged.
+
+If you previously set `severity_floor: warn` expecting "all alarms"
+(because pre-v0.1.2 everything opened at warn), you now have
+"broken only" behavior. Switch to `severity_floor: info` for the
+old all-alarms behavior, or keep the new default if you only want
+to be paged on broken states.
+
 ## [0.1.1] — 2026-05-19
 
 Patch release. Comprehensive documentation site, smart-delay push
@@ -240,6 +291,7 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/SentinelProject/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jkmesches/SentinelProject/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/jkmesches/SentinelProject/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jkmesches/SentinelProject/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jkmesches/SentinelProject/releases/tag/v0.1.0
