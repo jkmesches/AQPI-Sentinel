@@ -16,6 +16,10 @@ frontend/.vite/
 # --- Runtime data ---
 data/
 !data/.keep
+# Static frontend assets — committed reference data (watershed
+# outlines, reservoir markers) that ships with the build.
+!frontend/static/data/
+!frontend/static/data/**
 
 # --- Local config / secrets ---
 .env

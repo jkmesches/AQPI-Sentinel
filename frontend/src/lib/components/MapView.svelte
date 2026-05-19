@@ -113,7 +113,11 @@
 		| 'fcst_total_precip'
 		| 'fcst_total_precip_cum'
 		| 'fcst_precip_rate'
-		| 'fcst_temp';
+		| 'fcst_temp'
+		| 'water_depth'
+		| 'water_level'
+		| 'max_water_depth'
+		| 'max_water_level';
 	// Default to Reflectivity composite — most useful at-a-glance view.
 	let composite = $state<Composite>('comp_ref');
 	let nexradEnabled = $state(false);
@@ -122,6 +126,32 @@
 	// Layers panel show/hide — persisted per browser.
 	let panelOpen = $state(true);
 	const PANEL_KEY = 'sentinel-layers-open';
+
+	// Geographic reference layers — watersheds (HUC-8 outlines) + major
+	// flood-relevant reservoirs. Both off by default; persisted across
+	// reloads under the same scheme as the panel-open state.
+	let watershedsOn = $state(false);
+	let reservoirsOn = $state(false);
+	let terrainOn = $state(false);
+	const WATERSHEDS_KEY = 'sentinel-map-watersheds';
+	const RESERVOIRS_KEY = 'sentinel-map-reservoirs';
+	const TERRAIN_KEY = 'sentinel-map-terrain';
+
+	// Lazy-loaded GeoJSON data, fetched the first time a layer is enabled.
+	let watershedsData: GeoJSON.FeatureCollection | null = null;
+	let reservoirsData: GeoJSON.FeatureCollection | null = null;
+	async function loadWatersheds() {
+		if (watershedsData) return watershedsData;
+		const r = await fetch('/data/watersheds-huc8-norcal.geojson');
+		watershedsData = await r.json();
+		return watershedsData;
+	}
+	async function loadReservoirs() {
+		if (reservoirsData) return reservoirsData;
+		const r = await fetch('/data/reservoirs-norcal.json');
+		reservoirsData = await r.json();
+		return reservoirsData;
+	}
 
 	// Per-radar moment chooser — applies to every active overlay.
 	type Moment = 'Reflectivity' | 'Velocity' | 'Differential Reflectivity' | 'PhiDP' | 'RhoHV';
@@ -191,10 +221,10 @@
 
 	const EXTENT_LARGE = { west: -124.005, east: -121.195, south: 36.5, north: 39.505 };
 	const EXTENT_BAY = { west: -122.6427, east: -121.8509, south: 37.33298, north: 38.34444 };
-	// All radar + forecast composites use the regional X-band extent.
-	// EXTENT_BAY is reserved for hydro products (water_depth,
-	// max_water_depth) which are not surfaced in this picker — they're a
-	// separate product family.
+	// Radar + forecast composites use the regional X-band extent.
+	// CoSMoS coastal-storm-modeling products (water_depth, water_level,
+	// max_water_*) cover only the Bay and use EXTENT_BAY — same picker,
+	// the per-composite extent table here routes the right one through.
 	const COMP_EXTENT: Record<Composite, typeof EXTENT_LARGE | null> = {
 		none: null,
 		qpe_15min:             EXTENT_LARGE,
@@ -205,7 +235,11 @@
 		fcst_total_precip:     EXTENT_LARGE,
 		fcst_total_precip_cum: EXTENT_LARGE,
 		fcst_precip_rate:      EXTENT_LARGE,
-		fcst_temp:             EXTENT_LARGE
+		fcst_temp:             EXTENT_LARGE,
+		water_depth:           EXTENT_BAY,
+		water_level:           EXTENT_BAY,
+		max_water_depth:       EXTENT_BAY,
+		max_water_level:       EXTENT_BAY
 	};
 
 	function radarExtent(r: RadarMeta) {
@@ -816,6 +850,26 @@
 		void currentMoment;
 		syncRadarOverlayTime();
 	});
+	// Watershed + reservoir toggles. Persist immediately so a reload
+	// restores the user's choice, and re-run the geography refresh so the
+	// layer appears / disappears without a full re-mount.
+	$effect(() => {
+		void watershedsOn;
+		void reservoirsOn;
+		try {
+			localStorage.setItem(WATERSHEDS_KEY, watershedsOn ? 'on' : 'off');
+			localStorage.setItem(RESERVOIRS_KEY, reservoirsOn ? 'on' : 'off');
+		} catch { /* private mode etc. */ }
+		refreshGeography(theme.resolved);
+	});
+	// Terrain hillshade toggle — same shape as the geography one.
+	$effect(() => {
+		void terrainOn;
+		try {
+			localStorage.setItem(TERRAIN_KEY, terrainOn ? 'on' : 'off');
+		} catch { /* */ }
+		refreshTerrain(theme.resolved);
+	});
 
 	// ---- bulk-action helpers ------------------------------------------------
 	// Fit the viewport to encompass every currently-active radar's range circle
@@ -991,6 +1045,120 @@
 		refreshComposite();
 		refreshNexrad();
 		refreshRadarOverlays();
+		refreshGeography(t);
+		refreshTerrain(t);
+	}
+
+	// Hillshade from AWS Open Data terrarium-format DEM tiles. Inserted
+	// before 'range-fill' (the lowest custom layer), which puts it below
+	// the radar/forecast/CoSMoS composite + NEXRAD raster overlays — so a
+	// water-depth composite renders ON TOP of the terrain shading and
+	// reads as "where would this water actually pool given the
+	// topography." Free public tiles; no API key.
+	function refreshTerrain(t: 'light' | 'dark') {
+		if (!map || !styleReady) return;
+		if (map.getLayer('hillshade-layer')) map.removeLayer('hillshade-layer');
+		if (map.getSource('terrain-dem')) map.removeSource('terrain-dem');
+		if (!terrainOn) return;
+		map.addSource('terrain-dem', {
+			type: 'raster-dem',
+			tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/v2/terrarium/{z}/{x}/{y}.png'],
+			encoding: 'terrarium',
+			tileSize: 256,
+			maxzoom: 15,
+			attribution: 'Terrain: AWS / Mapzen Open Data'
+		});
+		map.addLayer(
+			{
+				id: 'hillshade-layer',
+				type: 'hillshade',
+				source: 'terrain-dem',
+				paint: {
+					'hillshade-exaggeration': 0.55,
+					'hillshade-shadow-color': t === 'light' ? '#3a3a3a' : '#000000',
+					'hillshade-highlight-color': t === 'light' ? '#ffffff' : '#3a3a3a',
+					'hillshade-accent-color': t === 'light' ? '#202020' : '#0a0a0a'
+				}
+			},
+			'range-fill'
+		);
+	}
+
+	// Watershed outlines + reservoir markers. Inserted before the radar
+	// halo layer so radar pins always render on top — these are
+	// reference overlays, not the focus. Theme-aware colors keep them
+	// readable on both basemap styles.
+	async function refreshGeography(t: 'light' | 'dark') {
+		if (!map || !styleReady) return;
+
+		// Watersheds: remove first so toggling off cleans up.
+		if (map.getLayer('watershed-line')) map.removeLayer('watershed-line');
+		if (map.getSource('watersheds')) map.removeSource('watersheds');
+		if (watershedsOn) {
+			const data = await loadWatersheds();
+			// Guard: theme may have swapped while the fetch was in flight.
+			if (!map || !map.isStyleLoaded() || map.getSource('watersheds')) return;
+			map.addSource('watersheds', { type: 'geojson', data });
+			map.addLayer(
+				{
+					id: 'watershed-line',
+					type: 'line',
+					source: 'watersheds',
+					paint: {
+						'line-color': t === 'light' ? '#3f6478' : '#5a8aa0',
+						'line-width': 0.7,
+						'line-opacity': 0.4
+					}
+				},
+				'radar-halo'
+			);
+		}
+
+		// Reservoirs: marker + label. Both removed up-front, re-added if on.
+		for (const lyr of ['reservoir-label', 'reservoir-marker']) {
+			if (map.getLayer(lyr)) map.removeLayer(lyr);
+		}
+		if (map.getSource('reservoirs')) map.removeSource('reservoirs');
+		if (reservoirsOn) {
+			const data = await loadReservoirs();
+			if (!map || !map.isStyleLoaded() || map.getSource('reservoirs')) return;
+			map.addSource('reservoirs', { type: 'geojson', data });
+			map.addLayer(
+				{
+					id: 'reservoir-marker',
+					type: 'circle',
+					source: 'reservoirs',
+					paint: {
+						'circle-radius': 3.5,
+						'circle-color': t === 'light' ? '#1f6d8e' : '#5fa8c4',
+						'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',
+						'circle-stroke-width': 1,
+						'circle-opacity': 0.9
+					}
+				},
+				'radar-halo'
+			);
+			map.addLayer(
+				{
+					id: 'reservoir-label',
+					type: 'symbol',
+					source: 'reservoirs',
+					layout: {
+						'text-field': ['get', 'name'],
+						'text-size': 9.5,
+						'text-offset': [0.6, 0.3],
+						'text-anchor': 'left',
+						'text-font': ['Stadia Regular']
+					},
+					paint: {
+						'text-color': t === 'light' ? '#1f6d8e' : '#9bc4d2',
+						'text-halo-color': t === 'light' ? '#ffffff' : '#0c100d',
+						'text-halo-width': 1
+					}
+				},
+				'radar-halo'
+			);
+		}
 	}
 
 	// Compute a default bearing so the northernmost X-band/CBAND radar sits
@@ -1017,6 +1185,9 @@
 		try {
 			const saved = localStorage.getItem(PANEL_KEY);
 			if (saved === 'closed') panelOpen = false;
+			if (localStorage.getItem(WATERSHEDS_KEY) === 'on') watershedsOn = true;
+			if (localStorage.getItem(RESERVOIRS_KEY) === 'on') reservoirsOn = true;
+			if (localStorage.getItem(TERRAIN_KEY) === 'on') terrainOn = true;
 		} catch { /* */ }
 		radars = await fetch('/api/radars/meta').then((r) => r.json());
 		map = new maplibregl.Map({
@@ -1124,6 +1295,19 @@
 				{ key: 'fcst_precip_rate',      label: 'Precip Rate' },
 				{ key: 'fcst_temp',             label: 'Temperature' }
 			]
+		},
+		{
+			// CoSMoS coastal-storm-modeling outputs. Bay extent only —
+			// these render in a smaller bounding box than the radar /
+			// forecast composites, and the picker handles that via
+			// COMP_EXTENT.
+			label: 'CoSMoS (Bay)',
+			options: [
+				{ key: 'water_depth',     label: 'Water Depth' },
+				{ key: 'water_level',     label: 'Water Level' },
+				{ key: 'max_water_depth', label: 'Max Water Depth' },
+				{ key: 'max_water_level', label: 'Max Water Level' }
+			]
 		}
 	];
 
@@ -1227,6 +1411,65 @@
 			</span>
 			<span class="num text-[9.5px] {nexradEnabled ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{nexradEnabled ? 'ON' : 'OFF'}
+			</span>
+		</button>
+
+		<!-- Geographic reference — flood-relevant context for radar coverage.
+		     Outlines for HUC-8 subbasins and markers for the major NorCal
+		     reservoirs (Shasta, Oroville, Folsom, …). Both off by default;
+		     persisted so a reload restores the user's choice. -->
+		<div class="px-3 pt-2 pb-1">
+			<span class="label">Geography</span>
+		</div>
+		<button
+			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (watershedsOn = !watershedsOn)}
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {watershedsOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Watersheds</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">HUC-8</span>
+			</span>
+			<span class="num text-[9.5px] {watershedsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{watershedsOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+		<button
+			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (reservoirsOn = !reservoirsOn)}
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {reservoirsOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Reservoirs</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">major dams</span>
+			</span>
+			<span class="num text-[9.5px] {reservoirsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{reservoirsOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+		<button
+			class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (terrainOn = !terrainOn)}
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {terrainOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Terrain</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">hillshade</span>
+			</span>
+			<span class="num text-[9.5px] {terrainOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{terrainOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
 
