@@ -100,6 +100,7 @@ nav:
   - Operate:
       - Getting started: 01-getting-started.md
       - Deployment: 02-deployment.md
+      - Administration: 03-administration.md
       - Architecture: ARCHITECTURE.md
       - Maintenance: MAINTENANCE.md
   - Reference:
