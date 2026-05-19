@@ -419,7 +419,7 @@
 					<!-- One-off downtime (specific dates) -->
 					<section>
 						<div class="mb-1 flex items-center justify-between">
-							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">One-off downtime</span>
+							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">One-off downtime (UTC)</span>
 							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addDowntime}>+ add</button>
 						</div>
 						{#if draft.downtime.length === 0}
@@ -441,7 +441,7 @@
 					<!-- Recurring downtime (nightly / weekly / daily blackouts) -->
 					<section>
 						<div class="mb-1 flex items-center justify-between">
-							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Recurring downtime</span>
+							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Recurring downtime (UTC)</span>
 							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addRecurringDowntime}>+ add</button>
 						</div>
 						{#if draft.recurring_downtime.length === 0}

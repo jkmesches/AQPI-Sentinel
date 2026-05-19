@@ -115,12 +115,25 @@ async def lifespan(app: FastAPI):
             stage_label = stage_descriptor(stage) if stage else ""
             title = f"[{sev.upper()}] {stage_label}/{target or check.split('.')[-1]}"
             body = msg or f"{check} fired"
-            await _push.dispatch_push(store.pool, {
-                "title": title,
-                "body":  body,
-                "tag":   f"{check}|{target}",
-                "url":   "/m/alarms",
+            # Embed `stage`, `check_id`, `severity` as first-class fields
+            # so the per-device filter can read them directly instead of
+            # regex'ing the title — the filter uses these to always-pass
+            # L0/canary alarms past pattern allowlists.
+            result = await _push.dispatch_push(store.pool, {
+                "title":    title,
+                "body":     body,
+                "tag":      f"{check}|{target}",
+                "url":      "/m/alarms",
+                "stage":    stage,
+                "check_id": check,
+                "severity": sev,
             })
+            log.info(
+                "web-push %s/%s: sent=%d failed=%d expired=%d filtered=%d deferred=%d",
+                check, target,
+                result["sent"], result["failed"], result["expired"],
+                result["filtered"], result["deferred"],
+            )
         except Exception:
             log.exception("web-push dispatch failed for alarm %s", payload.get("id"))
     engine.add_listener(_web_push)
