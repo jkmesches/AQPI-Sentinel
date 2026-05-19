@@ -284,8 +284,10 @@
 					class="w-24 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)] text-right" />
 				<span class="text-[13px] text-[var(--color-default)]">minutes</span>
 			</div>
-			<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
-				Notifications are held this long before sending. Useful for "wait and see if it resolves on its own".
+			<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+				Notifications wait this long before delivering. If the
+				alarm self-resolves or is acknowledged during the wait,
+				the notification is dropped.
 			</div>
 		</section>
 

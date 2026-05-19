@@ -127,6 +127,11 @@ async def lifespan(app: FastAPI):
                 "stage":    stage,
                 "check_id": check,
                 "severity": sev,
+                # Carried through to _send_delayed so a deferred push
+                # can re-check whether the alarm is still open + unacked
+                # by the time the delay window elapses. Without this
+                # the smart-delay can't decide whether to suppress.
+                "alarm_id": payload.get("id"),
             })
             log.info(
                 "web-push %s/%s: sent=%d failed=%d expired=%d filtered=%d deferred=%d",

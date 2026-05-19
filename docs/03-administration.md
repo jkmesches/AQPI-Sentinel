@@ -506,7 +506,7 @@ Two surfaces:
 | Device label | Friendly name. "iPhone 15", "Office laptop". Defaults to the User-Agent string. |
 | Severity floor | Drop notifications below this level. `info+` / `warn+` / `critical only`. |
 | Match patterns | Substring matchers against the alarm's check_id / target / body. Empty = match everything. Multi-pattern is OR. |
-| Delay | Wait N minutes before delivering. Used for "snooze me until it's been broken for a bit." |
+| Delay | Wait N minutes before delivering. **Smart-delay:** if the alarm self-resolves or is acked during the wait, the notification is dropped. Used for "page me only if it hasn't fixed itself in N minutes." |
 | On-duty schedule | Same shape as group schedules (always / weekly / biweekly + windows + recurring downtime). |
 
 ### L0 + canary always-pass

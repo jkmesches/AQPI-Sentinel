@@ -206,7 +206,7 @@ push subscription in `push_subscriptions.routing_config` carries:
 |---|---|
 | **Severity floor** | Drop notifications below this level (`info+`/`warn+`/`critical only`). |
 | **Match patterns** | Substring patterns (OR-combined) against alarm `check_id`/`target`/`body`. Empty = match everything. |
-| **Delay** | Defer the send by N minutes. Useful for "snooze me until it's been broken a while." |
+| **Delay** | Wait N minutes before delivering. Smart-delay: if the alarm self-resolves or is acked during the wait, the notification is dropped. Useful for "page me only if it hasn't fixed itself in N minutes." |
 | **On-duty schedule** | Same shape as group schedules — only deliver during this window. |
 
 **Always-pass safeguard:** L0 alarms and any check with `.canary` in
