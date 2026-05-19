@@ -1,0 +1,91 @@
+# Build the MkDocs Material documentation site and publish to GitHub
+# Pages.
+#
+# Triggers:
+#   - push to main when docs/, mkdocs.yml, docs-requirements.txt,
+#     or this workflow itself changes → deploy
+#   - pull_request affecting any of the above → build only (catches
+#     broken links and YAML errors before they hit main)
+#   - manual workflow_dispatch → on-demand redeploy
+#
+# Site URL: https://jkmesches.github.io/SentinelProject/
+#
+# One-time setup in the repo settings:
+#   Settings → Pages → Build and deployment → Source: GitHub Actions
+# After the first successful run, the URL above starts serving.
+
+name: docs-publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'docs-requirements.txt'
+      - '.github/workflows/docs-publish.yml'
+      # Homepage + changelog are proxied into the site via snippets,
+      # so rebuild when the source files change too.
+      - 'README.md'
+      - 'CHANGELOG.md'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'docs-requirements.txt'
+      - '.github/workflows/docs-publish.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+  workflow_dispatch:
+
+# Only one deployment in-flight at a time. Newer runs cancel older
+# in-flight ones to avoid races on the gh-pages branch.
+concurrency:
+  group: docs-publish
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history is needed by mkdocs-material's git-revision
+          # info widget (if/when we enable it). Cheap on a small repo.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs-requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r docs-requirements.txt
+
+      - name: Build site
+        # `strict` in mkdocs.yml turns warnings (broken links, missing
+        # nav items) into build errors. Catches doc drift in PRs.
+        run: mkdocs build
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
