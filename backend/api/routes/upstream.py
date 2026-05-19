@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from ...config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
+from ...errors import humanize_error
 
 router = APIRouter(prefix="/api/upstream")
 
@@ -13,22 +14,28 @@ async def latest_product_image(product_id: str, request: Request):
     """Return the latest scan PNG for a product, by id. Used by MapView
     to overlay composite imagery on the map."""
     if product_id not in PRODUCTS:
-        raise HTTPException(404, f"unknown product: {product_id}")
+        raise HTTPException(404, f"Unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    pd = await ctx.http.get(
-        f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-    )
+    try:
+        pd = await ctx.http.get(
+            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
     if pd.status_code != 200:
-        raise HTTPException(502, "productDetail unreachable")
+        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
     steps = pd.json().get("steps") or []
     if not steps:
-        raise HTTPException(404, "no scans")
+        raise HTTPException(404, "No scans available")
     latest = steps[-1]["imageName"]
     file_path = image_path(product_id, latest)
-    ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
+    try:
+        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
+    except Exception as e:
+        raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
     if ir.status_code != 200:
-        raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+        raise HTTPException(502, f"Upstream image returned HTTP {ir.status_code}")
     return Response(
         content=ir.content,
         media_type="image/png",
@@ -39,17 +46,28 @@ async def latest_product_image(product_id: str, request: Request):
 @router.get("/product_steps")
 async def product_steps(product_id: str, request: Request):
     """Return the time-step manifest for a product so the frontend can drive
-    play/step controls on the map. {n, current_idx, steps:[{i,ts,imageName}]}."""
+    play/step controls on the map. {n, current_idx, steps:[{i,ts,imageName}]}.
+
+    Wraps the upstream call so transport errors surface as a clean 502 to the
+    client instead of a 500 with an httpx traceback — the frontend retries
+    on 5xx and a bare 500 is indistinguishable from a code bug in the logs.
+    """
     if product_id not in PRODUCTS:
         raise HTTPException(404, f"unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    pd = await ctx.http.get(
-        f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-    )
+    try:
+        pd = await ctx.http.get(
+            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
     if pd.status_code != 200:
-        raise HTTPException(502, "productDetail unreachable")
-    raw = pd.json().get("steps") or []
+        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
+    try:
+        raw = pd.json().get("steps") or []
+    except Exception:
+        raise HTTPException(502, "Upstream returned malformed JSON")
     out = [
         {"i": i, "ts": s.get("timestamp"), "imageName": s.get("imageName"),
          "day": s.get("day"), "date": s.get("date"), "time": s.get("time")}
@@ -62,26 +80,32 @@ async def product_steps(product_id: str, request: Request):
 async def product_image_by_step(product_id: str, step: int, request: Request):
     """Return the PNG for an arbitrary step (0-indexed; negative wraps from end)."""
     if product_id not in PRODUCTS:
-        raise HTTPException(404, f"unknown product: {product_id}")
+        raise HTTPException(404, f"Unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    pd = await ctx.http.get(
-        f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-    )
+    try:
+        pd = await ctx.http.get(
+            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
     if pd.status_code != 200:
-        raise HTTPException(502, "productDetail unreachable")
+        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
     steps = pd.json().get("steps") or []
     if not steps:
-        raise HTTPException(404, "no scans")
+        raise HTTPException(404, "No scans available")
     if step < 0:
         step = len(steps) + step
     if step < 0 or step >= len(steps):
-        raise HTTPException(400, f"step out of range (0..{len(steps)-1})")
+        raise HTTPException(400, f"Step out of range (0..{len(steps)-1})")
     name = steps[step]["imageName"]
     file_path = image_path(product_id, name)
-    ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
+    try:
+        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
+    except Exception as e:
+        raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
     if ir.status_code != 200:
-        raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+        raise HTTPException(502, f"Upstream image returned HTTP {ir.status_code}")
     return Response(
         content=ir.content, media_type="image/png",
         headers={"cache-control": "no-store",
