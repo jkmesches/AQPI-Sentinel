@@ -1,0 +1,14 @@
+# Pinned dependencies for the MkDocs documentation build.
+#
+# Used by both local previews (`pip install -r docs-requirements.txt &&
+# mkdocs serve`) and the docs-publish GitHub Actions workflow. Bump
+# pins deliberately — Material releases occasionally change defaults
+# in ways that affect rendered output.
+
+mkdocs==1.6.1
+mkdocs-material==9.5.49
+pymdown-extensions==10.12
+# Pygments 2.20.0 broke a pymdownx.highlight code path (passes
+# filename=None to pygments' HtmlFormatter, which then crashes).
+# Pin to a known-good version until pymdownx upstream catches up.
+pygments<2.20

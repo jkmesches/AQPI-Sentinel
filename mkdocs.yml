@@ -1,0 +1,120 @@
+# MkDocs config for the Sentinel documentation site.
+#
+# Builds the `docs/` markdown tree into a static site published to
+# GitHub Pages via .github/workflows/docs-publish.yml. Local preview:
+#
+#   pip install -r docs-requirements.txt
+#   mkdocs serve                    # → http://127.0.0.1:8000
+#
+# The nav: section below is the single source of truth for the
+# documentation taxonomy. As new docs land, add them here so they
+# appear in the side navigation.
+
+site_name: AQPI Sentinel
+site_description: >-
+  Documentation for AQPI Sentinel — radar / product / infrastructure
+  monitoring for the radarca.engr.colostate.edu stack.
+site_url: https://jkmesches.github.io/SentinelProject/
+repo_url: https://github.com/jkmesches/SentinelProject
+repo_name: jkmesches/SentinelProject
+edit_uri: edit/main/docs/
+
+# Renders the docs/ tree. README.md at the repo root stays as the
+# GitHub landing page; the MkDocs site uses docs/index.md (TBD) as
+# its homepage. Until that exists, the README link in the header
+# still gets people to the same intro.
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections        # group nav items by header
+    - navigation.expand          # expand sections by default — small site
+    - navigation.tabs            # top-level tabs (Operate / Develop / Reference)
+    - navigation.top             # back-to-top button
+    - navigation.indexes         # section-index pages
+    - content.code.copy          # copy-button on code blocks
+    - content.action.edit        # "edit this page" link → GitHub
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    # Auto light/dark with a toggle, matching the Sentinel app shell.
+    - media: '(prefers-color-scheme)'
+      toggle: { icon: material/brightness-auto, name: 'Match system' }
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: green
+      accent: green
+      toggle: { icon: material/brightness-7, name: 'Light' }
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: green
+      accent: green
+      toggle: { icon: material/brightness-4, name: 'Dark' }
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+markdown_extensions:
+  - admonition                    # !!! note / warning / tip blocks
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details              # collapsible <details>
+  - pymdownx.highlight:
+      use_pygments: true
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys                 # ++ctrl+k++ keystroke rendering
+  - pymdownx.snippets:
+      # Allow including files from the repo root (README.md, CHANGELOG.md)
+      # via the `--8<-- "filename"` snippet syntax. Without this, MkDocs
+      # can only resolve files under docs/.
+      base_path:
+        - .
+        - docs
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+# Navigation. Each doc lands here as it's written; placeholder pages
+# below will grow as the comprehensive docs effort progresses (see
+# CHANGELOG for the doc roadmap).
+nav:
+  - Home: index.md
+  - Operate:
+      - Architecture: ARCHITECTURE.md
+      - Maintenance: MAINTENANCE.md
+  - Reference:
+      - Changelog: changelog.md
+  - Background:
+      - Implementation plan: radarca-implementation-plan.md
+      - Monitoring plan: radarca-monitoring-plan.md
+      - Public characterization: radarca-public-characterization.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/jkmesches/SentinelProject
+  # Multi-version docs (mike) deferred — add `version: { provider: mike,
+  # default: latest }` here and switch the workflow to `mike deploy`
+  # once we want docs/v0.1/ vs docs/v1.0/ side-by-side.
+
+# Treat broken links as build errors — comprehensive docs need to
+# stay internally consistent.
+strict: true
