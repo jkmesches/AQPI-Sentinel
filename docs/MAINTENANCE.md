@@ -129,18 +129,105 @@ we haven't needed one. Keep `schema.sql` idempotent above all.
 
 ### Reprocess historical data
 
-Two scripts to re-evaluate already-stored runs against new heuristics
-without re-fetching upstream:
+Two ways:
+
+**1. Admin UI (preferred for threshold-driven changes).**
+`/admin/thresholds` → scroll to the *Retroactive reprocess* panel at
+the bottom → set time range, choose stages (L1 / L2 / L4-T1T2), type
+`APPLY`, hit Start. Live progress bar polls at 1 Hz; the job is
+cancellable. Walks `check_runs` in the window, re-classifies each row
+via `_reverdict_l1` / `_reverdict_l2` / `_reverdict_l4` in
+`backend/reprocess_engine.py`. Preserves rows where
+`payload.reason in {local_dns_error, transport_error}` and rows whose
+original status is `skip` / `error` (transport failures don't get
+reclassified as heuristic verdicts).
+
+**2. Standalone CLI scripts** (for one-off historical migrations the
+admin UI doesn't cover — schema reshape, payload migration, etc.):
 ```bash
 .venv/bin/python -m backend.reprocess_l4 --dry-run    # L4 image-QC verdicts
 .venv/bin/python -m backend.reprocess_l4              # apply
 .venv/bin/python -m backend.reprocess_l1_forecasts    # L1 forecast products
+.venv/bin/python -m backend.reprocess_l2_dead_moments # RhoHV/X-band filter
+.venv/bin/python -m backend.reprocess_dns_errors      # demote historical DNS errors
+.venv/bin/python -m backend.tune_silent_fail          # cadence threshold review
 ```
+
+### Edit detection thresholds
+
+`/admin/thresholds` is the canonical place. The page has four sections:
+
+- **Globals** — `hysteresis`, `cadence_tol`, `step_count_tol`,
+  `silent_fail_default`.
+- **Products** — per-product `max_freshness_s`, `min_png_bytes`,
+  `expected_steps`, `cadence_s`. Empty cell = "use default" (placeholder
+  shows the `config.py` value).
+- **Radars** — per-radar `silent_fail_s` for L2 ghost-up detection.
+- **Image QC (L4)** — per-product `extreme_threshold`,
+  `frozen_min_cov_pct`, `skip_frozen`, `skip_range_ring`.
+
+Hit *Review & apply* → diff modal → *Apply*. The in-process cache
+refreshes; the next check tick reads the new values. **No restart
+needed**. To bring historical rows in line with the new thresholds,
+follow with a retroactive reprocess (above).
+
+Direct DB inspection if needed:
+```sql
+SELECT jsonb_pretty(value) FROM settings WHERE key = 'thresholds';
+```
+
+### Define a notification group
+
+`/admin/groups` is master/detail:
+
+- **Name + description** + optional **parent group** (inherits the
+  parent's schedule — the AND of both verdicts).
+- **Schedule kind**: `always` / `weekly` / `biweekly`.
+  - Weekly: pick weekdays (Mon-Sun chip mask) + time windows
+    (multiple pairs allowed; overnight `start > end` wraps midnight).
+  - Biweekly: same + an **anchor date** that fixes the on-week parity.
+    Two adjacent groups created on different weeks have opposite
+    phases; set the anchor explicitly if you need them aligned.
+- **One-off downtime** — specific date ranges (vacations,
+  maintenance windows).
+- **Recurring downtime** — repeats every week. Pick weekdays + a time
+  window. Overnight windows ("22:00 → 06:00") wrap correctly.
+- **Members** — checkbox-add from the full user roster.
+
+*Refresh preview* surfaces the next 5 on-windows from the draft
+schedule via `POST /api/admin/groups/{gid}/preview` so you can
+sanity-check before saving.
+
+Groups feed alert dispatch via `Receiver.group_ids` and
+`EscalationStep.group_ids` (both editable in `/admin/alerts`'s
+recipient + step UIs). Off-duty groups are skipped entirely; if a
+person is reachable through both a group and a direct recipient in
+the same step, they get one notification (per-step email dedup).
+
+### Configure per-device push routing
+
+Each push subscription carries a per-device routing config:
+- **Minimum severity** (info / warn / critical) — drop below-rank
+  notifications.
+- **Match patterns** — substring match against the alarm's
+  `tag` / `title` / `body`. Empty list = receive everything.
+- **Delay before notifying** — minutes; deferred via
+  `asyncio.create_task` in `backend/push.py`. **In-memory only** —
+  backend restart cancels pending delays. Fine for "snooze me 5 min",
+  not durable for hours-long.
+- **On-duty schedule** — same shape as groups schedules. Recurring
+  quiet-hours layer on top.
+
+UI: `/m/push-settings` (mobile native) or `/settings/devices`
+(desktop mirror). Both work on the same backing data; the user can
+configure on a laptop and the iPhone picks it up.
 
 ### Create / disable a user
 
 UI: log in as admin → **Admin → Users** → invite / disable / change
-role / reissue reset link.
+role / reissue reset link. The Users list also surfaces each user's
+group memberships (chip-style); the invite form lets you select
+initial groups when creating a user.
 
 CLI (if locked out):
 ```bash
@@ -228,6 +315,39 @@ SELECT id, email, role, password_hash IS NOT NULL AS has_pw, disabled_at FROM us
 - Otherwise: the password is wrong. `SENTINEL_ADMIN_PASSWORD` env
   vars are ignored once any user exists — they don't reset it.
 
+### "A check just went red with `transport: [Errno -5] No address associated with hostname`"
+
+That's a local DNS resolver flake — our side, not radarca's. The
+scheduler's two-path demote should catch it:
+
+- For raw bubbled exceptions: `scheduler._is_local_dns_error()` walks
+  the cause chain.
+- For in-check-caught errors that surface as `status=error` with a DNS
+  marker in `summary`: `scheduler._maybe_downgrade_for_dns_summary()`
+  matches by substring.
+
+If a row stuck on `status=error` with a DNS marker, the in-check-catch
+demote didn't fire. Verify the summary string contains one of the
+markers in `scheduler._DNS_ERROR_MARKERS` (`gaierror`, `[errno -2]`,
+`[errno -3]`, `[errno -5]`, `name or service not known`, `no address
+associated with hostname`, `temporary failure in name resolution`).
+If your evaluator catches transport exceptions, format the original
+error into the summary so the post-result pass can match it.
+
+Historical rows already painted red can be batch-demoted via
+`/admin/thresholds` → retroactive reprocess, or
+`python -m backend.reprocess_dns_errors`.
+
+### "Failures vanished when I switched timeline grain"
+
+`/api/history/timeline` snaps `until` UP to the next bucket boundary.
+If a row had a fail at wall-clock 23:08 and you're at 15 m grain, that
+falls in the bucket aligned to 23:00–23:15 — which is included.
+If you're seeing failures disappear, check `_BUCKETS_S` in
+`backend/api/routes/history.py` is correct and the snap direction
+in `history_timeline()` is still rounding up, not down. (Was a bug
+prior to 2026-05-18.)
+
 ### "L4 image previews show 'Image no longer available'"
 
 Radarca rotates files out of its ~2h rolling window. For runs older
@@ -283,6 +403,11 @@ which flags are active. The "clear" link in the banner resets.
 | Reverting "weird" CSS `contain` rules | `contain: layout style paint` on timeline cells cuts ~80% of display-list rebuilds. Without it the timeline scrolls slowly. | `frontend/src/routes/timeline/+page.svelte` `<style>` block. Don't remove the comment block above it. |
 | Mutating `sentinel.rollup.stages` in place | Svelte 5 deep-reactivity tracks property writes; on ~30 events/min this re-renders every subscriber. | Use the atomic-replacement pattern in `flushMerge`. The microtask coalescing is what makes the live tab not freeze. |
 | Adding logging to every WS event | Same problem — every event hits ~17 reactive subscribers. | Backend `_maybe_broadcast` only emits run events on status transitions. If you change this, profile the idle tab afterward. |
+| Reading `config.PRODUCTS[…]` directly from a new check | Bypasses the threshold registry → admin edits don't take effect. | Use `backend.thresholds.get_product/get_radar/get_l4/get_global` instead. The getters fall through to `config.py` on a fresh DB so behavior is unchanged. |
+| Returning an evaluator's transport error as `status=error` without a DNS-marker summary | DNS-flake demote can't see the exception (it was caught in-check) AND can't see it in summary. | Format the original exception into the summary string (`f"A_api transport: {e}"`) so `_maybe_downgrade_for_dns_summary` can match it. |
+| Adding a new push/SMS/Slack listener via `engine.add_listener` | Silences gate `engine._process`, NOT listeners. Pages get sent even when silenced. | Fetch `await store.list_active_silences(now)` + call `find_active_silence(payload, now)` before dispatching. |
+| Snapping the timeline `until` DOWN to the bucket boundary | Truncates 0..(bucket_s−1) seconds of fresh data → failures vanish on grain switch. | `/api/history/timeline` rounds UP. The dense-bucket loop tolerates a partial in-flight bucket. |
+| `<a href>` for navigation inside `MobileDrillDown` | Same-route param-only nav doesn't unmount the drilldown — the click silently no-ops. | Use `<button onclick={() => { detailOpen = false; goto(url); }}>` so the drilldown closes explicitly. |
 
 ---
 
@@ -292,17 +417,28 @@ which flags are active. The "clear" link in the banner resets.
 |---|---|
 | Backend code | `backend/` |
 | Check definitions | `backend/checks/layer{0,1,2,3,4}_*.py` |
-| Alarm engine | `backend/alarms/` |
+| Alarm engine | `backend/alarms/` (engine + models + sinks + templates) |
+| Notification group evaluator | `backend/groups.py` |
+| Threshold registry + cache | `backend/thresholds.py` |
+| Stage descriptor map (backend) | `backend/stages.py` |
+| Retroactive reprocess engine | `backend/reprocess_engine.py` |
+| Web Push dispatch + filters | `backend/push.py` |
 | Authentication | `backend/auth/`, `backend/api/routes/auth.py` |
 | API routes | `backend/api/routes/*.py` |
 | Schema | `backend/db/schema.sql` (idempotent; auto-applied) |
 | Image archive helpers | `backend/archive/` |
-| Reprocess scripts | `backend/reprocess_l1_forecasts.py`, `backend/reprocess_l4.py` |
+| One-off reprocess scripts | `backend/reprocess_l1_forecasts.py`, `reprocess_l2_dead_moments.py`, `reprocess_l4.py`, `reprocess_dns_errors.py` |
+| Threshold calibration helper | `backend/tune_silent_fail.py` |
 | Frontend code | `frontend/src/` |
-| Routes (pages) | `frontend/src/routes/` |
+| Routes (desktop pages) | `frontend/src/routes/` |
+| Mobile shell + routes | `frontend/src/routes/m/`, `frontend/src/routes/+layout.svelte` (isMobile gate) |
+| Mobile UA-sniff redirect | `frontend/src/hooks.server.ts` |
+| Stage / product vocabulary | `frontend/src/lib/format.ts` |
 | Auth/state stores | `frontend/src/lib/stores/` |
 | API client + origin helper | `frontend/src/lib/api.ts`, `frontend/src/lib/origin.ts` |
-| Components | `frontend/src/lib/components/` |
+| Shared components | `frontend/src/lib/components/` (MultiSelectChips, PieStatus, MobileDrillDown, HistoryDetailModal, ReportExportModal, SilenceMatcherPicker, PushRoutingEditor, …) |
+| Mobile components | `frontend/src/lib/components/mobile/` |
+| Service worker + manifest | `frontend/static/sw.js`, `frontend/static/manifest.webmanifest` |
 | Docker build files | `ops/Dockerfile.{backend,frontend}` |
 | Production compose | `ops/docker-compose.prod.yml` |
 | Dev compose (Postgres only) | `ops/docker-compose.dev.yml` |
