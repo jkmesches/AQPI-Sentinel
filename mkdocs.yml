@@ -101,8 +101,9 @@ nav:
       - Getting started: 01-getting-started.md
       - Deployment: 02-deployment.md
       - Administration: 03-administration.md
-      - Architecture: ARCHITECTURE.md
       - Maintenance: MAINTENANCE.md
+      - Troubleshooting: 05-troubleshooting.md
+      - Architecture: ARCHITECTURE.md
   - Reference:
       - Changelog: changelog.md
   - Background:
