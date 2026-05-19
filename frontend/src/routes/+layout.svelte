@@ -173,7 +173,13 @@
 		class="flex items-center gap-5 border-b border-[var(--color-border)] px-4 py-1.5"
 	>
 		{#each Object.entries(counts) as [stage, c]}
-			{@const s = c.fail || c.error ? 'fail' : c.warn ? 'warn' : 'pass'}
+			<!-- Fall through to 'skip' (gray) when nothing in the stage
+			     is actually healthy — a category whose rows are all
+			     cascade-demoted shouldn't display green. -->
+			{@const s = c.fail || c.error ? 'fail'
+				: c.warn ? 'warn'
+				: c.pass ? 'pass'
+				: 'skip'}
 			<div class="flex items-center gap-2 text-[11px]" title={`Internal stage: ${stage}`}>
 				<StatusDot status={s} size={7} />
 				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stageLabel(stage)}</span>
