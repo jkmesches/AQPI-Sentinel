@@ -114,9 +114,13 @@ async def login(page, base_url: str, email: str, password: str) -> str:
             "sameSite": "Lax",
         }
     ])
+    # Frontend reads the token from localStorage under the literal key
+    # `sentinel.token` (see frontend/src/lib/origin.ts + auth.svelte.ts).
+    # The dot matters — `sentinel-token` would silently fail and every
+    # admin page would render the "ADMIN ONLY · sign in" stub.
     await page.goto(f"{base_url.rstrip('/')}/login")
     await page.evaluate(
-        "(t) => window.localStorage.setItem('sentinel-token', t)",
+        "(t) => window.localStorage.setItem('sentinel.token', t)",
         token,
     )
     return token
@@ -170,7 +174,13 @@ async def capture(base_url: str, email: str, password: str) -> None:
             # Brief settle so live data finishes rendering.
             await target.wait_for_timeout(800)
             out = OUT_DIR / f"admin-{slug}.png"
-            await target.screenshot(path=str(out), full_page=True)
+            # Full-page for desktop (admin tables can be tall and benefit
+            # from showing the whole layout). For mobile we use the
+            # viewport-only screenshot — mobile timelines and history
+            # lists scroll forever, and a full_page capture of /m/timeline
+            # came in at 1170 × 127,479 px (~11 MB). The viewport
+            # screenshot is what an iPhone user actually sees.
+            await target.screenshot(path=str(out), full_page=not is_mobile)
 
         await browser.close()
 
