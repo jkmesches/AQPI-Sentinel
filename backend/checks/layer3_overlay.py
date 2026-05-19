@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 
 from ..config import PRODUCTS, SETTINGS
+from ..errors import humanize_error
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import parse_api_ts
@@ -54,7 +55,7 @@ class Layer3OverlayCheck(Check):
                 check_id=self.id, target=self.target, stage=self.stage,
                 status="error",
                 started_at=t0, finished_at=utcnow(),
-                summary=f"page load failed: {type(e).__name__}",
+                summary=f"Page load failed: {humanize_error(e)}",
                 payload={"error": str(e)},
             )
         finally:

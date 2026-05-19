@@ -15,6 +15,7 @@ import statistics
 from typing import Any
 
 from ..config import PRODUCTS, SETTINGS, image_path
+from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
@@ -62,7 +63,7 @@ class Layer1ProductCheck(Check):
                 params={"file": cfg["details"]},
             )
         except Exception as e:
-            return _fail_envelope(self, t0, f"A_api transport: {e}", payload, metrics)
+            return _fail_envelope(self, t0, f"Manifest fetch failed: {humanize_error(e)}", payload, metrics)
 
         payload["http"] = r.status_code
         if r.status_code != 200 or not r.headers.get("content-type", "").startswith("application/json"):
@@ -158,7 +159,7 @@ class Layer1ProductCheck(Check):
             sub["F_image_exists"] = "fail"
             payload["image_error"] = str(e)
             return _final(self, t0, sub, payload, metrics,
-                          summary=f"image transport: {e}")
+                          summary=f"Image fetch failed: {humanize_error(e)}")
 
         payload["image_http"] = ir.status_code
         if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/png"):
