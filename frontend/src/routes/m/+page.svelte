@@ -114,7 +114,15 @@
 <!-- Per-stage cards -->
 {#each stages as [stage, rows] (stage)}
 	{@const c = counts[stage] ?? { pass: 0, warn: 0, fail: 0, error: 0, total: 0 }}
-	{@const stageStatus = c.fail || c.error ? 'fail' : c.warn ? 'warn' : 'pass'}
+	<!-- Fall through to 'skip' when there's no positive signal of health.
+	     Previously this defaulted to 'pass' even when every row in the
+	     category was actually skipped (cascade-demoted from an unhealthy
+	     upstream), which painted the category dot green — misleading,
+	     since "no data" is not the same as "everything's fine". -->
+	{@const stageStatus = c.fail || c.error ? 'fail'
+		: c.warn ? 'warn'
+		: c.pass ? 'pass'
+		: 'skip'}
 	{@const visible = rowsToShow(rows, stage)}
 	<section class="mb-3 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
 		<button
