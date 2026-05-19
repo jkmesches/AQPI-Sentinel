@@ -89,6 +89,13 @@
 				<span>·</span>
 				<a
 					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
+					href="/api/docs"
+					target="_blank"
+					rel="noopener"
+				>API</a>
+				<span>·</span>
+				<a
+					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
 					href="https://radarca.engr.colostate.edu"
 					target="_blank"
 					rel="noopener"

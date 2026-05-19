@@ -1,0 +1,48 @@
+PROPRIETARY · ALL RIGHTS RESERVED
+
+Copyright (c) 2026 Joseph Mesches. All rights reserved.
+
+AQPI Sentinel (the "Software") — including all source code, build
+configuration, documentation, schemas, images, designs, and any other
+artifacts in this repository — is the sole and exclusive intellectual
+property of Joseph Mesches.
+
+The Software was created independently by Joseph Mesches without
+obligation, contract, or attribution to any other person or
+institution. In particular, the Software is NOT a work product of, nor
+the intellectual property of:
+
+  - Colorado State University (CSU)
+  - The CSU CHILL National Radar Facility
+  - Dr. V. Chandrasekar or his research group / laboratory
+  - The CSU College of Engineering, CIRA, ECE, or any other CSU
+    department, lab, program, or affiliated organization
+  - The AQPI program or any of its partner institutions
+
+References within the Software to radarca.engr.colostate.edu, the AQPI
+program, CSU CHILL, or related names describe the public monitoring
+target of the Software; they do not denote ownership, sponsorship,
+endorsement, or affiliation.
+
+NO LICENSE IS GRANTED. The Software is made available for public
+viewing only. No right is granted, by implication, estoppel, or
+otherwise, to use, copy, modify, merge, publish, distribute,
+sublicense, sell, deploy, host, fork, or create derivative works of
+the Software, in whole or in part, in any form or by any means.
+
+Use of the Software, in any form, requires the prior, express, written
+permission of Joseph Mesches. To request permission, contact the
+copyright holder directly.
+
+Contributions, if any are accepted, are accepted under a Contributor
+License Agreement assigning copyright in the contribution to Joseph
+Mesches; no implicit license to the contributor's other work is
+created by such acceptance.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR
+ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -26,22 +26,14 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 ```mermaid
 flowchart TB
     upstream["radarca.engr.colostate.edu"]
-    subgraph layers["Five-layer probe stack"]
-        L0["L0 · Connectivity<br/>site / TLS / origin / public dashboard"]
-        L1["L1 · Product Freshness<br/>per-product freshness · image · parity<br/>(timestamp OR step-index contiguity)"]
-        L2["L2 · Radar Scans<br/>per-radar reconciliation + GHOST_UP<br/>detection via newest-filename ts"]
-        L3["L3 · Map Overlays<br/>JS overlay timestamp parity (Playwright)"]
-        L4["L4 · Image Quality<br/>image stats + tier-2 heuristics<br/>(extreme · speckle · ring · frozen)"]
-    end
-    engine["Alarm engine<br/>routes · groups · escalation steps · suppression DAG<br/>acks · silences · per-step dedup"]
+    layers["<b>Five-layer probe stack</b><br/>L0 · Connectivity — site / TLS / origin / public dashboard<br/>L1 · Product Freshness — image · parity · step contiguity<br/>L2 · Radar Scans — per-radar reconciliation · GHOST_UP<br/>L3 · Map Overlays — JS overlay timestamp parity (Playwright)<br/>L4 · Image Quality — image stats · tier-2 heuristics"]
+    engine["<b>Alarm engine</b><br/>routes · groups · escalation steps<br/>suppression DAG · acks · silences · per-step dedup"]
     ws["WebSocket fan-out"]
-    sinks["email · Web Push · webhook · console<br/>(per-device severity floor, patterns,<br/>quiet hours, on-duty schedules)"]
-    dash["SvelteKit dashboard<br/>Live · Timeline · History · Admin · /m/*"]
+    dash["<b>SvelteKit dashboard</b><br/>Live · Timeline · History · Admin · /m/*"]
+    sinks["<b>email · Web Push · webhook · console</b><br/>per-device severity floor, patterns,<br/>quiet hours, on-duty schedules"]
 
-    upstream --> L0 & L1 & L2 & L3 & L4
-    layers --> engine
+    upstream --> layers --> engine --> ws --> dash
     engine --> sinks
-    engine --> ws --> dash
 ```
 
 [Full architecture →](docs/ARCHITECTURE.md)
@@ -126,10 +118,12 @@ One file under `backend/checks/`, a `@register` line at the bottom, optionally a
 | [`docs/06-porting-to-other-upstreams.md`](docs/06-porting-to-other-upstreams.md) | Pointing Sentinel at a non-radarca system |
 | [`docs/radarca-public-characterization.md`](docs/radarca-public-characterization.md) | Reverse-engineering reference for radarca's API |
 
-Interactive API: <http://localhost:8000/docs> (Swagger UI) and `/redoc`.
-
 ## License
 
-Internal CSU/CHILL project. Not currently licensed for redistribution.
+**Proprietary — All rights reserved.** See [`LICENSE`](LICENSE).
 
-Built by [Joseph Mesches](https://github.com/jkmesches) for [Dr. V. Chandrasekar's](https://chill.colostate.edu/) AQPI program at CSU CIRA / ECE.
+AQPI Sentinel is the sole and exclusive intellectual property of Joseph Mesches, created independently and without obligation, contract, or attribution to any other person or institution. It is **not** a work product of, nor the intellectual property of, Colorado State University, the CSU CHILL National Radar Facility, Dr. V. Chandrasekar or his lab, the AQPI program, or any affiliated organization. References to those names describe the public monitoring target, not ownership or sponsorship.
+
+No license is granted to use, copy, modify, distribute, host, or deploy the Software. Use requires the author's prior written permission — essentially closed source.
+
+Built by [Joseph Mesches](https://github.com/jkmesches).

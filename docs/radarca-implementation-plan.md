@@ -49,24 +49,18 @@ Three layers, each independently extensible.
 
 ```mermaid
 flowchart TB
-    registry["REGISTRY<br/>every Check, Sink, FrontendTile registers itself"]
-    pollers["Pollers<br/>(asyncio)"]
-    db[("Database<br/>(SQLite)")]
-    api["API<br/>(HTTP + WebSocket)"]
-    router["Alarm router"]
-    archive[("Image archive<br/>(filesystem)")]
-    frontend["Frontend<br/>(SvelteKit)"]
-    sinks["Sinks<br/>(email, webhook, Slack)"]
+    registry["<b>REGISTRY</b><br/>every Check, Sink, FrontendTile registers itself"]
+    pollers["<b>Pollers · asyncio</b><br/>emit CheckResult on every tick"]
+    db[("<b>Database · SQLite</b><br/>state · history · image_index")]
+    archive[("<b>Image archive</b><br/>content-addressed filesystem")]
+    router["<b>Alarm router</b><br/>matchers + conditions + policies"]
+    sinks["<b>Sinks</b> — email · webhook · Slack"]
+    api["<b>API</b> · HTTP + WebSocket"]
+    frontend["<b>Frontend</b> · SvelteKit"]
 
-    registry --> pollers
-    registry --> db
-    registry --> api
-    pollers -- "results (CheckResult)" --> db
-    pollers -- "alarm events" --> router
-    db -- "state · history" --> api
-    db --> archive
-    api --> frontend
-    router --> sinks
+    registry --> pollers --> db --> archive
+    pollers -- "alarm events" --> router --> sinks
+    db --> api --> frontend
 ```
 
 ### 3.1 The `Check` interface (the extensibility hinge)
@@ -803,25 +797,14 @@ Routes `CheckResult` transitions to people via a configurable rules engine. Insp
 ```mermaid
 flowchart TB
     result["CheckResult"]
-    engine["AlarmEngine<br/>(state machine across runs)<br/>open / update / close"]
-    suppress["Suppression DAG<br/>(§3.4)"]
-    ack["AckStore<br/>← POST /api/alarms/{id}/ack"]
-    router["Router<br/>· matchers + conditions<br/>· policy (steps + delays)<br/>· group_by + repeat_interval"]
-    scheduler["Notification scheduler<br/>(timer wheel)"]
-    email["Email"]
-    webhook["Webhook"]
-    console["Console"]
-    log[("notification_log<br/>(audit, see §4)")]
+    engine["<b>AlarmEngine</b><br/>state machine across runs<br/>open / update / close"]
+    suppress["<b>Suppression DAG</b> (§3.4)<br/>ack inputs: POST /api/alarms/{id}/ack"]
+    router["<b>Router</b><br/>matchers + conditions<br/>policy (steps + delays)<br/>group_by + repeat_interval"]
+    scheduler["<b>Notification scheduler</b> · timer wheel"]
+    sinks["<b>Sinks</b> — Email · Webhook · Console"]
+    log[("<b>notification_log</b><br/>audit, see §4")]
 
-    result --> engine
-    engine --> suppress
-    suppress --> router
-    ack --> router
-    router --> scheduler
-    scheduler --> email & webhook & console
-    email --> log
-    webhook --> log
-    console --> log
+    result --> engine --> suppress --> router --> scheduler --> sinks --> log
 ```
 
 ### 14.2 Config (`config/alerts.yaml`)
@@ -1094,18 +1077,12 @@ Each rule emits a named metric; the verdict is `fault` if any rule trips. Per-ra
 
 ```mermaid
 flowchart TB
-    l1["Layer 1 image-exists<br/>(per product)"]
-    t1["Layer 4 Tier 1<br/>(uses the image)"]
-    t2["Layer 4 Tier 2"]
-    t5e["Layer 4 Tier 5<br/>embedding worker"]
-    t5c["Layer 4 Tier 5<br/>classifier"]
-    baseline[/"Layer 4 Tier 1 baseline<br/>computed nightly<br/>(job, not a check)"/]
-    retrain[/"Layer 4 Tier 5 classifier<br/>retrained nightly<br/>(job, not a check)"/]
+    l1["Layer 1 image-exists (per product)"]
+    downstream["<b>Downstream consumers</b><br/>Layer 4 Tier 1 — uses the image<br/>Layer 4 Tier 2<br/>Layer 4 Tier 5 — embedding worker → classifier"]
+    jobs[/"<b>Nightly jobs (not checks)</b><br/>Layer 4 Tier 1 baseline — recomputed nightly<br/>Layer 4 Tier 5 classifier — retrained nightly"/]
 
-    l1 --> t1 & t2 & t5e
-    t5e --> t5c
-    baseline -.-> t1
-    retrain -.-> t5c
+    l1 --> downstream
+    jobs -.-> downstream
 ```
 
 If a product's image-exists check fails, all Layer 4 tiers for that product are suppressed (DAG, §3.4) — no noise.

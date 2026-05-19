@@ -11,41 +11,11 @@ understanding the codebase well enough to make non-trivial changes.
 ```mermaid
 flowchart TB
     upstream["radarca.engr.colostate.edu<br/>(the system we monitor)"]
+    backend["<b>backend · FastAPI + asyncio</b><br/>Scheduler → Check.run → CheckResult (39 impls)<br/>AlarmEngine — open/close · route · dispatch<br/>Store — asyncpg pool, full Postgres schema<br/>ConnectionManager — WebSocket fan-out (transition-only)<br/>FastAPI routes /api/* — status, alarms, timeline,<br/>history, upstream, auth, admin/*, ws, _debug/stats"]
+    frontend["<b>frontend · SvelteKit + Svelte 5</b><br/>stores/state.svelte.ts — REST poll (5s) + WS push,<br/>dedupe + microtask coalesce<br/>routes/+page.svelte — Live (map + radars + products + alarms)<br/>routes/timeline — state-over-time grid + explainRun<br/>routes/history — filtered alarms + check_runs<br/>routes/admin/* — auth-gated config<br/>routes/m/* — mobile shell<br/>routes/settings/devices — per-device push mirror<br/>lib/origin.ts — API_BASE detection + Bearer header<br/>lib/format.ts — stageLabel · productLabel · productCategory"]
 
-    subgraph backend["backend · FastAPI + asyncio"]
-        direction TB
-        scheduler["Scheduler<br/>(asyncio task per check)"]
-        checkrun["Check.run<br/>(39 implementations)"]
-        result["CheckResult envelope"]
-        engine["AlarmEngine<br/>open/close · route · dispatch"]
-        store[("Store<br/>asyncpg pool")]
-        ws["ConnectionManager<br/>WebSocket fan-out<br/>(transition-only events)"]
-        routes["FastAPI routes<br/>/api/{status, alarms, timeline, history,<br/>upstream, auth, admin/*, ws, _debug/stats}"]
-
-        scheduler --> checkrun --> result --> engine
-        result -. persist .-> store
-        engine -. persist .-> store
-        store --> routes
-        engine --> ws --> routes
-    end
-
-    subgraph frontend["frontend · SvelteKit + Svelte 5"]
-        direction TB
-        state["stores/state.svelte.ts<br/>(rollup, alarms, metrics —<br/>REST poll 5s + WS push,<br/>dedupe + microtask coalesce)"]
-        live["routes/+page.svelte<br/>Live: map + radars + products + alarms"]
-        timeline["routes/timeline/+page.svelte<br/>state-over-time grid + explainRun"]
-        history["routes/history/+page.svelte<br/>filtered alarms + check_runs"]
-        admin["routes/admin/*<br/>users · email · alerts · silences ·<br/>groups · thresholds · audit"]
-        mobile["routes/m/*<br/>Status · Timeline · Alarms ·<br/>push-settings · More"]
-        settings["routes/settings/devices<br/>desktop mirror of per-device push"]
-        origin["lib/origin.ts<br/>API_BASE detection + fetch monkey-patch<br/>(Authorization: Bearer)"]
-        format["lib/format.ts<br/>stageLabel / productLabel / productCategory"]
-
-        state --> live & timeline & history & admin & mobile & settings
-    end
-
-    upstream -- "HTTP probes · image fetches ·<br/>Playwright JS-render" --> scheduler
-    routes -- "HTTP + WebSocket" --> state
+    upstream -- "HTTP probes · image fetches ·<br/>Playwright JS-render" --> backend
+    backend -- "HTTP + WebSocket" --> frontend
 ```
 
 ---
@@ -327,18 +297,12 @@ current thresholds:
 
 ```mermaid
 flowchart TB
-    job["ReprocessJob<br/>in-process state:<br/>n_total · n_evaluated · n_changed ·<br/>n_preserved · cancel_requested"]
-    run["run_reprocess(pool, job)<br/>per row, dispatch by stage"]
-    l1["_reverdict_l1<br/>recompute C_freshness, E_step_count,<br/>G_image_size sub-checks from saved payload"]
-    l2["_reverdict_l2<br/>recompute HEALTHY ↔ GHOST_UP from primary<br/>newest_ts + current silent_fail_s + hysteresis"]
-    l4["_reverdict_l4<br/>lift extreme/frozen tier-2 verdicts under<br/>current extreme_threshold, frozen_min_cov_pct,<br/>skip_frozen, skip_range_ring"]
-    update["batched UPDATEs · CHUNK=200<br/>await sleep(0) every 50 rows<br/>so the API stays responsive"]
+    job["<b>ReprocessJob</b> — in-process state<br/>n_total · n_evaluated · n_changed ·<br/>n_preserved · cancel_requested"]
+    run["<b>run_reprocess(pool, job)</b><br/>walk rows; dispatch per stage"]
+    verdict["<b>Per-row verdict recompute</b><br/>_reverdict_l1 — C_freshness · E_step_count · G_image_size<br/>sub-checks recomputed from saved payload<br/>_reverdict_l2 — HEALTHY ↔ GHOST_UP from primary newest_ts<br/>+ current silent_fail_s + hysteresis<br/>_reverdict_l4 — lift extreme/frozen tier-2 verdicts under<br/>current extreme_threshold · frozen_min_cov_pct ·<br/>skip_frozen · skip_range_ring"]
+    update["<b>Batched UPDATEs · CHUNK=200</b><br/>await sleep(0) every 50 rows<br/>so the API stays responsive"]
 
-    job --> run
-    run --> l1 & l2 & l4
-    l1 --> update
-    l2 --> update
-    l4 --> update
+    job --> run --> verdict --> update
 ```
 
 **Preserves** rows where `payload.reason in {local_dns_error,
