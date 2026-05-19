@@ -103,9 +103,17 @@ nav:
       - Administration: 03-administration.md
       - Maintenance: MAINTENANCE.md
       - Troubleshooting: 05-troubleshooting.md
+      - Porting to other upstreams: 06-porting-to-other-upstreams.md
+  - Develop:
       - Architecture: ARCHITECTURE.md
+      - Adding a check: 13-extending-checks.md
+      - Adding an API endpoint: 14-extending-api.md
+      - Extending the UI: 15-extending-ui.md
+      - Alarm engine: 16-alarm-engine.md
   - Reference:
       - Glossary: 92-glossary.md
+      - Environment variables: 91-env-vars.md
+      - Release process: 99-release-process.md
       - Changelog: changelog.md
   - Background:
       - Implementation plan: radarca-implementation-plan.md
