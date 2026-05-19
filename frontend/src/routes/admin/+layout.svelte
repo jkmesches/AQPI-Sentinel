@@ -72,6 +72,19 @@
 				>
 					Audit log
 				</a>
+				<!-- Per-device push routing lives at /settings/devices because
+				     it's user-scope (each user manages their own devices),
+				     not admin-scope. Mirroring it here for discoverability —
+				     most operators look in the admin sidebar first. -->
+				<div class="mt-2 border-t border-[var(--color-border)] pt-2 px-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-faint)]">
+					my account
+				</div>
+				<a
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
+					href="/settings/devices"
+				>
+					My devices
+				</a>
 			</nav>
 		</aside>
 		<main class="flex-1 overflow-auto">

@@ -14,7 +14,22 @@
 	 *    schedule          — group-schedule shape (weekly/biweekly/downtime)
 	 *                        evaluated by backend/groups.py at dispatch.
 	 */
-	import { stageLabel } from '$lib/format';
+	import { stageLabel, productLabel } from '$lib/format';
+
+	// Hardcoded suggestion lists — mirror the mobile editor at
+	// /m/push-settings/edit. The backend's PRODUCT registry is the
+	// source of truth; keep these in sync (it changes rarely). A
+	// future enhancement is to fetch /api/checks on mount, but the
+	// constant approach matches the mobile UX exactly and avoids the
+	// loading-spinner-while-empty pattern.
+	const RADAR_IDS = ['XSCW', 'XSCV', 'XSCR', 'XSWR', 'XEBY', 'CBAND'];
+	const PRODUCT_IDS = [
+		'qpe_15min', 'qpe_1hr', 'precip_rate_radar',
+		'comp_ref', 'comp_now',
+		'fcst_total_precip', 'fcst_total_precip_cum',
+		'fcst_precip_rate', 'fcst_temp',
+		'water_level', 'water_depth'
+	];
 
 	let {
 		subscription = $bindable<any>(null),
@@ -72,12 +87,17 @@
 	}
 	function addPattern() {
 		const p = pendingPattern.trim();
-		if (!p) return;
+		if (!p || patterns.includes(p)) return;
 		patterns = [...patterns, p];
 		pendingPattern = '';
 	}
 	function removePattern(i: number) {
 		patterns = patterns.filter((_, j) => j !== i);
+	}
+	function togglePattern(p: string) {
+		patterns = patterns.includes(p)
+			? patterns.filter((x) => x !== p)
+			: [...patterns, p];
 	}
 
 	function buildSchedule() {
@@ -158,32 +178,68 @@
 		</div>
 	</section>
 
-	<!-- Product / target patterns -->
+	<!-- Product / target patterns — chip picker mirrors the mobile editor.
+	     Pre-populated lists of known radars + products; click to toggle.
+	     Custom patterns retain a freeform input for advanced cases. -->
 	<section>
-		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Match patterns</div>
-		{#if patterns.length}
-			<div class="flex flex-wrap gap-1 mb-2">
+		<div class="mb-2 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Match patterns</div>
+
+		<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Radars</div>
+		<div class="flex flex-wrap gap-1.5 mb-3">
+			{#each RADAR_IDS as r}
+				{@const sel = patterns.includes(r)}
+				<button type="button" onclick={() => togglePattern(r)}
+					class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
+						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+				>{r}</button>
+			{/each}
+		</div>
+
+		<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Products</div>
+		<div class="flex flex-wrap gap-1.5 mb-3">
+			{#each PRODUCT_IDS as p}
+				{@const sel = patterns.includes(p)}
+				<button type="button" onclick={() => togglePattern(p)}
+					class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
+						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+					title={p}
+				>{productLabel(p)}</button>
+			{/each}
+		</div>
+
+		{#if patterns.some((p) => !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p))}
+			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Custom patterns</div>
+			<div class="flex flex-wrap gap-1.5 mb-3">
 				{#each patterns as p, i}
-					<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1 text-[11.5px] num text-[var(--color-bright)]">
-						{p}
-						<button class="text-[var(--color-muted)] active:text-[var(--color-fail)]" onclick={() => removePattern(i)} aria-label="remove">×</button>
-					</span>
+					{#if !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p)}
+						<span class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1 text-[11.5px] num text-[var(--color-bright)]">
+							{p}
+							<button type="button" class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[14px] leading-none" onclick={() => removePattern(i)} aria-label="remove">×</button>
+						</span>
+					{/if}
 				{/each}
 			</div>
 		{/if}
-		<div class="flex gap-2">
-			<input
-				type="text"
-				bind:value={pendingPattern}
-				onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPattern(); } }}
-				placeholder="XSCV, CBAND, qpe_15min, …"
-				class="flex-1 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-[16px] num text-[var(--color-bright)]"
-			/>
-			<button onclick={addPattern} type="button" class="rounded-md border border-[var(--color-border-strong)] px-3 text-[12px] uppercase tracking-wider text-[var(--color-default)] active:bg-[var(--color-elevated)]">add</button>
-		</div>
+
+		<details class="text-[12px] mb-1">
+			<summary class="cursor-pointer text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add custom pattern</summary>
+			<div class="mt-2 flex items-center gap-2">
+				<input
+					type="text"
+					bind:value={pendingPattern}
+					placeholder="e.g. layer2.radar"
+					onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPattern(); } }}
+					class="flex-1 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-[14px] num text-[var(--color-bright)]"
+				/>
+				<button type="button" onclick={addPattern} class="rounded-md border border-[var(--color-border-strong)] px-3 py-2 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)]">add</button>
+			</div>
+		</details>
+
 		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
-			Notifications whose check ID, target, or title contains at least one pattern are sent. Empty = match everything.<br />
-			<span class="text-[var(--color-bright)]">Always included regardless of patterns:</span> L0 connectivity + canary alarms (origin / website / TLS / stream canary). Patterns only filter product-specific alarms.
+			Selected chips above match notifications whose check ID, target, or title contains them. Empty selection = match everything.<br />
+			<span class="text-[var(--color-bright)]">Always included regardless of selection:</span> L0 connectivity + canary alarms (origin / website / TLS / stream canary).
 		</div>
 	</section>
 
