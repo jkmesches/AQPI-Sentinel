@@ -20,7 +20,18 @@
 	import { url as apiUrl } from '$lib/origin';
 	import { fmtAge, severityChip, stageLabel, prettyCheckLabel } from '$lib/format';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
+	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
+	import { api, type CheckRun } from '$lib/api';
+
+	// Captured-image URL helper — see HistoryDetailModal.capturedImage
+	// for the matching desktop logic. Returns null for any run that
+	// doesn't carry an L4 source key (which is most of them).
+	function capturedImage(run: any): string | null {
+		const src = run?.payload?.source ?? run?.payload?.image_source;
+		if (!src) return null;
+		return apiUrl(`/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`);
+	}
 
 	type Event = {
 		kind: 'open' | 'close';
@@ -146,9 +157,29 @@
 	// Drill-down state.
 	let detailOpen = $state(false);
 	let detailEvent = $state<Event | null>(null);
-	function openDetail(e: Event) {
+	let detailImgRun = $state<CheckRun | null>(null);
+	let detailToken = 0;
+	async function openDetail(e: Event) {
+		const my = ++detailToken;
 		detailEvent = e;
+		detailImgRun = null;
 		detailOpen = true;
+		// Look for a captured image in the surrounding check_runs window —
+		// alarm rows themselves don't carry payloads. Narrow window so we
+		// don't pull tons of rows; one image is enough to render context.
+		try {
+			const t = Date.parse(e.ts);
+			const runs = await api.historyRuns(
+				e.check_id, e.target,
+				new Date(t - 5 * 60_000).toISOString(),
+				new Date(t + 5 * 60_000).toISOString(),
+				20
+			);
+			if (my !== detailToken) return;
+			detailImgRun = runs.find((r) => capturedImage(r)) ?? null;
+		} catch {
+			/* swallow — image is best-effort */
+		}
 	}
 
 	function fmtDay(iso: string): string {
@@ -271,21 +302,59 @@
 				<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{detailEvent.message}</pre>
 			</section>
 		{/if}
-		<div class="mt-5 flex flex-col gap-2">
+
+		<!-- Captured image from a check_run near the alarm event time. Only
+		     populated for L4 image-quality alarms; everything else silently
+		     drops out. -->
+		{#if detailImgRun && capturedImage(detailImgRun)}
+			<section class="mt-4">
+				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+					<span>Captured image</span>
+					<span class="num text-[var(--color-faint)] normal-case">{detailImgRun.finished_at.slice(11,19)}Z</span>
+				</div>
+				<div class="overflow-hidden rounded-sm border border-[var(--color-border)] bg-black">
+					<LazyImage src={capturedImage(detailImgRun) ?? ''} alt="captured radar scan" minHeight={200} />
+				</div>
+			</section>
+		{/if}
+		<!-- Drilldown nav: from a Timeline event the user wants either
+		     the longitudinal pattern (Uptime, focus mode) or the raw runs
+		     forensic view (History, ±1h around the event). The previous
+		     button labelled "Open in History" actually re-loaded Timeline
+		     filtered to this check — same view, same data — which is what
+		     the user was confused by. We drop that self-filter button. -->
+		<div class="mt-5 grid grid-cols-2 gap-2">
 			<button
 				type="button"
 				onclick={async () => {
-					const url = `/m/timeline?check_id=${encodeURIComponent(detailEvent.check_id)}` +
-						`&target=${encodeURIComponent(detailEvent.target)}` +
-						`&stage=${encodeURIComponent(detailEvent.stage)}`;
+					const qs = new URLSearchParams({
+						check_id: detailEvent.check_id,
+						target:   detailEvent.target ?? '',
+						stage:    detailEvent.stage ?? ''
+					});
 					detailOpen = false;
-					await goto(url);
+					await goto(`/m/uptime?${qs}`);
 				}}
-				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
-			>
-				Open in History
-			</button>
+			>Show in Uptime</button>
+			<button
+				type="button"
+				onclick={async () => {
+					const t = Date.parse(detailEvent.ts);
+					const qs = new URLSearchParams({
+						tab:      'checks',
+						check_id: detailEvent.check_id,
+						target:   detailEvent.target ?? '',
+						since:    new Date(t - 3600_000).toISOString(),
+						until:    new Date(t + 3600_000).toISOString()
+					});
+					detailOpen = false;
+					await goto(`/m/history?${qs}`);
+				}}
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				style="-webkit-tap-highlight-color: transparent;"
+			>Show in History</button>
 		</div>
 	{/if}
 </MobileDrillDown>

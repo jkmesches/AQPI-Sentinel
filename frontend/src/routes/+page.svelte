@@ -16,6 +16,15 @@
 	const radarRows = $derived(
 		(sentinel.rollup?.stages?.L2 ?? []).slice().sort((a, b) => a.target.localeCompare(b.target))
 	);
+	// CheckMeta lookup by check_id — used per-row to feed cadence into the
+	// Sparkline so its visible window auto-sizes to each check (radars at
+	// 2-min cadence get a 1-hour window; forecasts at 30-min cadence get
+	// several hours).
+	const checksById = $derived.by(() => {
+		const out: Record<string, { cadence_s: number }> = {};
+		for (const c of sentinel.checks) out[c.id] = c;
+		return out;
+	});
 	// All L1 checks together: products + vector overlays + stream feeds.
 	// They all carry the "Product Freshness" stage descriptor and behave
 	// the same way (an upstream feed with an expected refresh cadence), so
@@ -62,7 +71,7 @@
 		const k = `${checkId}|${metric}`;
 		const arr = sentinel.metrics[k];
 		if (!arr?.length) return null;
-		return arr[arr.length - 1];
+		return arr[arr.length - 1].value;
 	}
 
 	async function ack(id: number) {
@@ -90,35 +99,11 @@
 </script>
 
 <div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
-	<!-- LEFT RAIL: RADARS + IMAGE QC ------------------------------------------------- -->
+	<!-- LEFT RAIL: SITE + RADARS + IMAGE QC ------------------------------------------- -->
+	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
+	     of most cascading failures, so keeping it at eye level makes
+	     "what's actually broken" the first thing the operator sees. -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={stageLabel('L2')} />
-		<ul class="divide-y divide-[var(--color-border)]">
-			{#each radarRows as r}
-				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
-				{@const imgQc = l4XbandByRadar[r.target]}
-				{@const latest = spark[spark.length - 1] ?? 0}
-				<li class="row-hover grid grid-cols-[auto_3.2rem_auto_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
-					<StatusDot status={r.status} size={9} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="num text-[13px] text-[var(--color-bright)] tracking-wide">{r.target}</span>
-					<span class="label {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
-					<span class="ml-2 {statusText(r.status)}">
-						{#if diag.spark}
-							<Sparkline data={spark} width={72} height={16} />
-						{/if}
-					</span>
-					<span class="num text-[10.5px] text-[var(--color-muted)]">
-						{latest ? `${latest|0}/h` : ''}
-						{#if imgQc}
-							<span class="ml-1 inline-block align-middle">
-								<StatusDot status={imgQc} size={6} />
-							</span>
-						{/if}
-					</span>
-				</li>
-			{/each}
-		</ul>
-
 		<SectionHeader title="Site" right={stageLabel('L0')} />
 		<ul class="divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
@@ -126,6 +111,32 @@
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 					<span class="text-[var(--color-default)] num" title={r.check_id}>{prettyCheckLabel(r.check_id, r.target)}</span>
 					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{r.summary}</span>
+				</li>
+			{/each}
+		</ul>
+
+		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={stageLabel('L2')} />
+		<ul class="divide-y divide-[var(--color-border)]">
+			{#each radarRows as r}
+				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
+				{@const imgQc = l4XbandByRadar[r.target]}
+				{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 120}
+				<li class="row-hover grid grid-cols-[auto_3.2rem_auto_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
+					<StatusDot status={r.status} size={9} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
+					<span class="num text-[13px] text-[var(--color-bright)] tracking-wide">{r.target}</span>
+					<span class="label {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
+					<span class="ml-2 {statusText(r.status)}">
+						{#if diag.spark}
+							<Sparkline data={spark} {cadenceS} width={72} height={16} />
+						{/if}
+					</span>
+					<span class="num text-[10.5px] text-[var(--color-muted)]">
+						{#if imgQc}
+							<span class="inline-block align-middle">
+								<StatusDot status={imgQc} size={6} />
+							</span>
+						{/if}
+					</span>
 				</li>
 			{/each}
 		</ul>
@@ -165,6 +176,7 @@
 						{#each g.rows as r}
 							{@const spark = sentinel.metrics[`${r.check_id}|age_s`] ?? []}
 							{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
+							{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 60}
 							<li class="row-hover grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
 								<StatusDot status={r.status} size={8} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 								<span class="num truncate text-[var(--color-bright)]" title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
@@ -173,7 +185,7 @@
 								</span>
 								<span class={statusText(r.status)}>
 									{#if diag.spark}
-										<Sparkline data={spark} width={48} height={14} />
+										<Sparkline data={spark} {cadenceS} width={56} height={14} />
 									{/if}
 								</span>
 							</li>

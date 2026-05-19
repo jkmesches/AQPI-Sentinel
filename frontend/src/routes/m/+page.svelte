@@ -6,6 +6,15 @@
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import MobileStatusMap from '$lib/components/mobile/MobileStatusMap.svelte';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
+	import LazyImage from '$lib/components/LazyImage.svelte';
+	import { api, type CheckRun } from '$lib/api';
+	import { url as apiUrl } from '$lib/origin';
+
+	function capturedImage(run: any): string | null {
+		const src = run?.payload?.source ?? run?.payload?.image_source;
+		if (!src) return null;
+		return apiUrl(`/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`);
+	}
 
 	let now = $state(Date.now());
 	let tickTimer: ReturnType<typeof setInterval>;
@@ -38,9 +47,22 @@
 	// Tap-to-drill-down: opens the full-screen mobile detail sheet.
 	let detailOpen = $state(false);
 	let detailRow = $state<any>(null);
-	function openDetail(r: any) {
+	let detailImgRun = $state<CheckRun | null>(null);
+	let detailToken = 0;
+	async function openDetail(r: any) {
+		const my = ++detailToken;
 		detailRow = r;
+		detailImgRun = null;
 		detailOpen = true;
+		// Pull the most recent run for this check; if it carries an L4
+		// payload.source we render the captured PNG for context.
+		try {
+			const latest = await api.latest(r.check_id);
+			if (my !== detailToken) return;
+			if (latest && capturedImage(latest)) detailImgRun = latest;
+		} catch {
+			/* swallow */
+		}
 	}
 </script>
 
@@ -176,21 +198,67 @@
 			</section>
 		{/if}
 
-		<div class="mt-5 flex flex-col gap-2">
-			<button
-				type="button"
+		<!-- Captured image — populated when the latest run for this check
+		     is an L4 image-quality scan with a payload source. Silently
+		     drops out for non-imagery check types. -->
+		{#if detailImgRun && capturedImage(detailImgRun)}
+			<section class="mt-4">
+				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+					<span>Latest captured image</span>
+					<span class="num text-[var(--color-faint)] normal-case">{detailImgRun.finished_at.slice(11,19)}Z</span>
+				</div>
+				<div class="overflow-hidden rounded-sm border border-[var(--color-border)] bg-black">
+					<LazyImage src={capturedImage(detailImgRun) ?? ''} alt="captured radar scan" minHeight={200} />
+				</div>
+			</section>
+		{/if}
+
+		<!-- Drilldown nav from the Status home view: surface all three
+		     longitudinal lenses. The Status page itself is "now"-only so
+		     there's no self-link to omit. -->
+		<div class="mt-5 grid grid-cols-3 gap-2">
+			<button type="button"
 				onclick={async () => {
-					const url = `/m/timeline?check_id=${encodeURIComponent(detailRow.check_id ?? '')}` +
-						`&target=${encodeURIComponent(detailRow.target ?? '')}` +
-						`&stage=${encodeURIComponent(detailRow.stage ?? '')}`;
+					const qs = new URLSearchParams({
+						check_id: detailRow.check_id ?? '',
+						target:   detailRow.target ?? '',
+						stage:    detailRow.stage ?? ''
+					});
 					detailOpen = false;
-					await goto(url);
+					await goto(`/m/timeline?${qs}`);
 				}}
-				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
-			>
-				Open in History
-			</button>
+			>Timeline</button>
+			<button type="button"
+				onclick={async () => {
+					const qs = new URLSearchParams({
+						check_id: detailRow.check_id ?? '',
+						target:   detailRow.target ?? '',
+						stage:    detailRow.stage ?? ''
+					});
+					detailOpen = false;
+					await goto(`/m/uptime?${qs}`);
+				}}
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				style="-webkit-tap-highlight-color: transparent;"
+			>Uptime</button>
+			<button type="button"
+				onclick={async () => {
+					const now = Date.now();
+					const qs = new URLSearchParams({
+						tab:      'checks',
+						check_id: detailRow.check_id ?? '',
+						target:   detailRow.target ?? '',
+						since:    new Date(now - 24 * 3600_000).toISOString(),
+						until:    new Date(now).toISOString()
+					});
+					detailOpen = false;
+					await goto(`/m/history?${qs}`);
+				}}
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				style="-webkit-tap-highlight-color: transparent;"
+			>History</button>
 		</div>
 	{/if}
 </MobileDrillDown>

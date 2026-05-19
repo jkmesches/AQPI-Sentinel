@@ -63,7 +63,14 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	}
 }
 
-export interface TimelineCell { status: 'pass' | 'warn' | 'fail' | 'error' | 'skip'; n: number }
+export interface TimelineCell {
+	status: 'pass' | 'warn' | 'fail' | 'error' | 'skip';
+	n: number;
+	/** Optional. Present when the bucket's runs were cascade-demoted
+	 *  because an upstream dependency was unhealthy — distinct from an
+	 *  intrinsic skip (e.g. a forecast product skipping a sub-check). */
+	reason?: 'upstream_unhealthy';
+}
 export interface TimelineBucket { ts: string; cells: Record<string, TimelineCell> }
 export interface TimelinePage {
 	bucket: string;

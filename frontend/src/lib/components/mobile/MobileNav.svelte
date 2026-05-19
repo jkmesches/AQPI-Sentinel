@@ -41,6 +41,21 @@
 		<span class="mob-label">Timeline</span>
 	</a>
 
+	<a href="/m/uptime" class="mob-tab {activeClass('/m/uptime')}" aria-label="Uptime">
+		<svg viewBox="0 0 24 24" class="mob-icon" fill="currentColor">
+			<rect x="4"  y="4"  width="5" height="5" rx="1" />
+			<rect x="10" y="4"  width="5" height="5" rx="1" opacity="0.55" />
+			<rect x="16" y="4"  width="4" height="5" rx="1" opacity="0.85" />
+			<rect x="4"  y="10" width="5" height="5" rx="1" opacity="0.85" />
+			<rect x="10" y="10" width="5" height="5" rx="1" />
+			<rect x="16" y="10" width="4" height="5" rx="1" opacity="0.55" />
+			<rect x="4"  y="16" width="5" height="4" rx="1" opacity="0.55" />
+			<rect x="10" y="16" width="5" height="4" rx="1" opacity="0.85" />
+			<rect x="16" y="16" width="4" height="4" rx="1" />
+		</svg>
+		<span class="mob-label">Uptime</span>
+	</a>
+
 	<a href="/m/alarms" class="mob-tab {activeClass('/m/alarms')}" aria-label="Alarms">
 		<span class="relative">
 			<svg viewBox="0 0 24 24" class="mob-icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

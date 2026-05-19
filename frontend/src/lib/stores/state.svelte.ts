@@ -12,8 +12,11 @@ class SentinelState {
 	error      = $state<string | null>(null);
 	loading    = $state(true);
 
-	// Sparkline data: key = `${check_id}|${metric}`, value = oldest→newest values.
-	metrics    = $state<Record<string, number[]>>({});
+	// Sparkline data: key = `${check_id}|${metric}`, value = oldest→newest
+	// `{ts, value}` samples. The Sparkline component plots ts on the X axis
+	// against wall-clock `now`, so equal-value samples at different times
+	// are meaningful — DO NOT dedupe by value on append.
+	metrics    = $state<Record<string, { ts: number; value: number }[]>>({});
 	// Per-check previous status, used to drive one-shot pulse animations.
 	prevStatus = $state<Record<string, string>>({});
 	pulseTick  = $state<Record<string, number>>({});
@@ -109,11 +112,17 @@ class SentinelState {
 			}
 		}
 		for (const { check_id, metric } of wanted) {
-			void api.metric(check_id, metric, 30).then(
+			// 90 samples seeds a 30-minute window even for L1 checks at 30s
+			// cadence with some headroom; L2 at 5-10 min cadence uses fewer.
+			// Sparkline trims to the live window at render time.
+			void api.metric(check_id, metric, 90).then(
 				(pts) => {
 					this.metrics = {
 						...this.metrics,
-						[`${check_id}|${metric}`]: pts.map((p) => p.value).reverse()
+						[`${check_id}|${metric}`]: pts
+							.map((p) => ({ ts: Date.parse(p.ts), value: p.value }))
+							.filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.value))
+							.reverse()
 					};
 				},
 				() => { /* drop quietly; live WS will fill it as runs arrive */ }
@@ -144,24 +153,21 @@ class SentinelState {
 		if (e.type === 'run') {
 			this.mergeRun(e.run);
 			if (e.run.metrics) {
-				// Skip metrics whose value equals the last sample for the
-				// same key — sparklines don't render any differently from
-				// duplicate trailing samples, and avoiding the push prevents
-				// flushMetrics from rebuilding the whole metrics map.
-				let anyChanged = false;
-				for (const [m, v] of Object.entries(e.run.metrics)) {
-					const k = `${e.run.check_id}|${m}`;
-					const arr = this.metrics[k];
-					const last = arr && arr.length ? arr[arr.length - 1] : undefined;
-					if (last !== v) { anyChanged = true; break; }
-				}
-				if (anyChanged) {
-					if (!this.pendingMetrics) this.pendingMetrics = [];
-					this.pendingMetrics.push({ check_id: e.run.check_id, metrics: e.run.metrics });
-					if (!this.metricsScheduled) {
-						this.metricsScheduled = true;
-						queueMicrotask(() => this.flushMetrics());
-					}
+				// Time-based sparkline: always append, even when value is
+				// identical to the previous sample. A flat value at a new
+				// timestamp is meaningful — it extends the trace horizontally
+				// and proves data is still flowing. The previous value-dedupe
+				// optimization would have produced false silences.
+				const ts = Date.parse(e.run.finished_at);
+				if (!this.pendingMetrics) this.pendingMetrics = [];
+				this.pendingMetrics.push({
+					check_id: e.run.check_id,
+					ts: Number.isFinite(ts) ? ts : Date.now(),
+					metrics: e.run.metrics
+				});
+				if (!this.metricsScheduled) {
+					this.metricsScheduled = true;
+					queueMicrotask(() => this.flushMetrics());
 				}
 			}
 			return;
@@ -189,7 +195,7 @@ class SentinelState {
 	// Svelte's reactivity machinery runs once per burst, not per row.
 	private pendingMerge?: Map<string, any>;
 	private mergeScheduled = false;
-	private pendingMetrics?: { check_id: string; metrics: Record<string, number> }[];
+	private pendingMetrics?: { check_id: string; ts: number; metrics: Record<string, number> }[];
 	private metricsScheduled = false;
 
 	private flushMetrics() {
@@ -198,12 +204,15 @@ class SentinelState {
 		this.pendingMetrics = undefined;
 		if (!pending?.length) return;
 		const next = { ...this.metrics };
-		for (const { check_id, metrics } of pending) {
+		for (const { check_id, ts, metrics } of pending) {
 			for (const [m, v] of Object.entries(metrics)) {
 				const k = `${check_id}|${m}`;
 				const arr = (next[k] ?? []).slice();
-				arr.push(v as number);
-				if (arr.length > 30) arr.shift();
+				arr.push({ ts, value: v as number });
+				// Buffer cap: keep more than fits a 30-min window so the
+				// component never starves on window-edge cases. The
+				// component does the real trim at render time.
+				if (arr.length > 240) arr.shift();
 				next[k] = arr;
 			}
 		}
