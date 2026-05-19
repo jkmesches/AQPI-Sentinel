@@ -1,0 +1,106 @@
+# Build + publish Sentinel backend and frontend images to GHCR.
+#
+# Triggers:
+#   - push to main          → publish :latest + :sha-<short>
+#   - push of a vX.Y.Z tag  → publish :vX.Y.Z + :X.Y + :X + :latest
+#   - pull request          → build only (validate the Dockerfile),
+#                             do NOT push
+#
+# After the first run, the resulting packages will appear under
+#   github.com/jkmesches?tab=packages
+# named:
+#   ghcr.io/jkmesches/sentinel-backend
+#   ghcr.io/jkmesches/sentinel-frontend
+#
+# Package visibility defaults to the visibility of the repo (private
+# repo → private package). To allow `docker pull` without auth, flip
+# the package's visibility to public from its package settings page
+# once it first appears.
+#
+# Uses the built-in GITHUB_TOKEN with `packages: write` — no manual
+# secret setup required.
+
+name: docker-publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      # Don't let one image failing tank the other — useful when
+      # iterating on just the backend or just the frontend.
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            dockerfile: ops/Dockerfile.backend
+          - image: frontend
+            dockerfile: ops/Dockerfile.frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Skip on PRs — pushing to a registry is gated to push events
+        # below anyway, but skipping the login keeps fork PRs from
+        # tripping on the missing token.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sentinel-${{ matrix.image }}
+          # Tag policy:
+          #   - main branch → :latest + :sha-<short>
+          #   - semver tag  → :vX.Y.Z + :X.Y + :X
+          #   - everything  → :sha-<short> (always useful for rollback)
+          tags: |
+            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=Sentinel ${{ matrix.image }}
+            org.opencontainers.image.description=AQPI Sentinel ${{ matrix.image }} image
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build (and push on main/tags)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA-native cache. Persists across workflow runs on the same
+          # ref; combined with the multi-stage Dockerfiles, an iteration
+          # that only changes app code re-uses the deps layer.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

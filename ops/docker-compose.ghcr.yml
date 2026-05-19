@@ -1,0 +1,90 @@
+# Sentinel production stack — pulls pre-built images from GHCR instead
+# of building locally. Use this on the prod LXC after the
+# `.github/workflows/docker-publish.yml` job has published images to
+# `ghcr.io/jkmesches/sentinel-{backend,frontend}`.
+#
+# Pin to a specific tag for stability, or use `:latest` to track main:
+#   SENTINEL_TAG=v1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
+#       --env-file ops/.env.prod pull
+#   SENTINEL_TAG=v1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
+#       --env-file ops/.env.prod up -d
+#
+# If the GHCR packages are still private, log in once with a personal
+# access token (read:packages scope is enough):
+#   echo "$GHCR_PAT" | docker login ghcr.io -u <user> --password-stdin
+#
+# This file deliberately mirrors docker-compose.prod.yml so a switch
+# between "build locally" and "pull from GHCR" only changes the file
+# argument — env vars, volumes, network, ports all match.
+
+name: sentinel
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB:       ${POSTGRES_DB:-sentinel}
+    volumes:
+      - sentinel_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sentinel
+
+  backend:
+    image: ghcr.io/jkmesches/sentinel-backend:${SENTINEL_TAG:-latest}
+    container_name: sentinel-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SENTINEL_DB_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentinel}
+      SENTINEL_BASE:   ${SENTINEL_BASE:-https://radarca.engr.colostate.edu}
+      SENTINEL_API_HOST: 0.0.0.0
+      SENTINEL_API_PORT: 8000
+      SENTINEL_LOG_LEVEL: ${SENTINEL_LOG_LEVEL:-INFO}
+      SENTINEL_ARCHIVE_ENABLED: "1"
+      SENTINEL_ARCHIVE_ROOT:    /data/archive
+      SENTINEL_ARCHIVE_RETENTION_DAYS: ${SENTINEL_ARCHIVE_RETENTION_DAYS:-}
+      SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}
+      SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
+      SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
+      SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-}
+    volumes:
+      - sentinel_archive:/data/archive
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - sentinel
+
+  frontend:
+    image: ghcr.io/jkmesches/sentinel-frontend:${SENTINEL_TAG:-latest}
+    container_name: sentinel-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - sentinel
+
+volumes:
+  sentinel_pgdata:
+    name: sentinel_pgdata
+  sentinel_archive:
+    name: sentinel_archive
+
+networks:
+  sentinel:
+    name: sentinel
