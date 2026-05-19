@@ -105,6 +105,7 @@ nav:
       - Troubleshooting: 05-troubleshooting.md
       - Architecture: ARCHITECTURE.md
   - Reference:
+      - Glossary: 92-glossary.md
       - Changelog: changelog.md
   - Background:
       - Implementation plan: radarca-implementation-plan.md
