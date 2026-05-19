@@ -26,7 +26,39 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ## [Unreleased]
 
-_Nothing pending._
+### Added
+
+- **Map: Geographic reference layers.** Two new toggles in the Live
+  map's Layers panel under a new "Geography" section, both persisted
+  per browser:
+  - **Watersheds** — HUC-8 subbasin outlines for NorCal, sourced from
+    the USGS Watershed Boundary Dataset, simplified to ~1 MB and
+    served as a static GeoJSON asset.
+  - **Reservoirs** — fifteen flood-relevant NorCal dams (Shasta,
+    Oroville, Folsom, New Bullards Bar, Don Pedro, Berryessa,
+    Trinity, New Melones, Camanche, New Hogan, Englebright, Indian
+    Valley, Whiskeytown, Black Butte, San Luis) rendered as labeled
+    point markers.
+- **Map: Terrain hillshade toggle.** Third Geography toggle —
+  hillshade from AWS Open Data terrarium-format DEM tiles. Inserted
+  below the dynamic raster overlays so CoSMoS water-depth composites
+  render on top of terrain shading, giving an inundation-vs-topography
+  view. Free tiles; no API key.
+- **Map: CoSMoS composites.** The Composite picker grows a new
+  "CoSMoS (Bay)" group with Water Depth · Water Level · Max Water
+  Depth · Max Water Level. The picker's per-composite extent table
+  already supported the Bay-only extent; just had to surface the four
+  hydro products there.
+
+### Changed
+
+- **Sparkline: hybrid value + flow representation.** The pure
+  count-per-bucket rewrite from 2026-05-19 fixed the outage-spoofing
+  failure mode but homogenized every check's trace under normal
+  operation (all sparklines became the same low-amplitude wave). The
+  bucket loop now plots per-bucket mean of `value` for non-empty
+  buckets, with empty buckets still dropping to baseline. Per-check
+  signal returns; outage-detection behavior preserved.
 
 ## [0.1.2] — 2026-05-19
 

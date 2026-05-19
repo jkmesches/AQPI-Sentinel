@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "_note": "NorCal flood-relevant reservoirs. Coordinates are dam location; storage_af is total reservoir capacity in acre-feet. Curated for radar coverage area, not exhaustive.",
+  "features": [
+    {"type":"Feature","properties":{"name":"Shasta","river":"Sacramento","storage_af":4552000},"geometry":{"type":"Point","coordinates":[-122.4187,40.7187]}},
+    {"type":"Feature","properties":{"name":"Trinity","river":"Trinity","storage_af":2447000},"geometry":{"type":"Point","coordinates":[-122.7647,40.8014]}},
+    {"type":"Feature","properties":{"name":"Oroville","river":"Feather","storage_af":3537577},"geometry":{"type":"Point","coordinates":[-121.4844,39.5386]}},
+    {"type":"Feature","properties":{"name":"New Bullards Bar","river":"Yuba","storage_af":966103},"geometry":{"type":"Point","coordinates":[-121.1431,39.3925]}},
+    {"type":"Feature","properties":{"name":"Folsom","river":"American","storage_af":977000},"geometry":{"type":"Point","coordinates":[-121.1556,38.7081]}},
+    {"type":"Feature","properties":{"name":"New Melones","river":"Stanislaus","storage_af":2400000},"geometry":{"type":"Point","coordinates":[-120.5278,37.9486]}},
+    {"type":"Feature","properties":{"name":"Don Pedro","river":"Tuolumne","storage_af":2030000},"geometry":{"type":"Point","coordinates":[-120.4189,37.7008]}},
+    {"type":"Feature","properties":{"name":"Camanche","river":"Mokelumne","storage_af":417120},"geometry":{"type":"Point","coordinates":[-121.0264,38.2261]}},
+    {"type":"Feature","properties":{"name":"New Hogan","river":"Calaveras","storage_af":317100},"geometry":{"type":"Point","coordinates":[-120.8158,38.1547]}},
+    {"type":"Feature","properties":{"name":"Englebright","river":"Yuba","storage_af":70000},"geometry":{"type":"Point","coordinates":[-121.2667,39.2386]}},
+    {"type":"Feature","properties":{"name":"Indian Valley","river":"Cache","storage_af":300600},"geometry":{"type":"Point","coordinates":[-122.5392,39.0792]}},
+    {"type":"Feature","properties":{"name":"Berryessa","river":"Putah","storage_af":1602000},"geometry":{"type":"Point","coordinates":[-122.1042,38.5119]}},
+    {"type":"Feature","properties":{"name":"Whiskeytown","river":"Clear","storage_af":241100},"geometry":{"type":"Point","coordinates":[-122.5347,40.6094]}},
+    {"type":"Feature","properties":{"name":"Black Butte","river":"Stony","storage_af":143700},"geometry":{"type":"Point","coordinates":[-122.3306,39.8092]}},
+    {"type":"Feature","properties":{"name":"San Luis","river":"Delta-Mendota","storage_af":2041000},"geometry":{"type":"Point","coordinates":[-121.0814,37.0625]}}
+  ]
+}

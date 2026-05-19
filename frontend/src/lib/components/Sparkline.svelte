@@ -1,19 +1,27 @@
 <!--
-  Time-based "data flow" sparkline.
+  Time-based hybrid sparkline.
 
-  Y axis is NOT the raw metric value — it's the COUNT of samples that
-  landed in each time bucket. So the trace is a heartbeat: tall when
-  data is flowing, flat at the baseline when it's not. When an
-  upstream stops, the rightmost buckets sum to 0 and the trace visibly
-  drops to the bottom rather than freezing at the last value — which
-  is what the earlier "plot the value at sample index" version did,
-  and which the operator confused for healthy flow during an upstream
-  outage on 2026-05-19.
+  Y axis carries TWO signals at once:
+
+    1. For non-empty buckets, height is the mean of `value` across the
+       samples that landed in that bucket, normalized against the
+       observed min/max in the visible window. This brings back the
+       per-check shape that pure-count sparklines homogenized away —
+       a radar producing 10 scans/min looks different from one
+       producing 2, a product whose age_s drifts looks different from
+       a fresh one.
+
+    2. For empty buckets (no samples in that interval), the trace
+       drops to the baseline. This preserves the outage-detection
+       behavior the earlier rewrite was for — when an upstream stops,
+       the rightmost buckets visibly flatline instead of freezing at
+       the last value (the failure mode that fooled the operator
+       during the 2026-05-19 outage).
 
   Window length auto-adapts from the check's cadence (windowFromCadence
   in format.ts): ~30 cadence intervals visible, snapped to 30m / h /
   3h / 6h / 12h. The trailing label reads "N/{window}" e.g. "16/h" or
-  "0/6h" so the time scale is always obvious.
+  "0/6h" — N is still the sample count, so flow rate stays legible.
 
   An internal ticker advances `now` every few seconds so older buckets
   drift leftward and eventually fall off, even when no new samples
@@ -70,22 +78,39 @@
 		const baseBucket = Math.max(15_000, (cadenceS ?? 60) * 1000);
 		const nBuckets = Math.max(8, Math.min(48, Math.floor(windowMs / baseBucket)));
 		const bucketMs = windowMs / nBuckets;
+		// Track sums + counts so we can derive per-bucket means. Buckets
+		// that received no samples stay at count=0 and render at baseline.
+		const sums = new Array(nBuckets).fill(0);
 		const counts = new Array(nBuckets).fill(0);
 		const left = now - windowMs;
 		for (const d of data) {
 			if (d.ts < left || d.ts > now) continue;
 			const i = Math.min(nBuckets - 1, Math.floor((d.ts - left) / bucketMs));
-			if (i >= 0) counts[i]++;
+			if (i >= 0) {
+				sums[i] += d.value;
+				counts[i]++;
+			}
 		}
 		const total = counts.reduce((a, b) => a + b, 0);
-		// Y autoscale: peak count drives the top. Floor at 1 so the all-
-		// zero case still draws at the baseline (y = height-1) rather than
-		// collapsing into a div-by-zero.
-		const max = Math.max(1, ...counts);
+		// Per-bucket mean, or null for an empty bucket (renders at baseline).
+		const means: (number | null)[] = sums.map((s, i) => (counts[i] > 0 ? s / counts[i] : null));
+		const nonEmpty = means.filter((v): v is number => v !== null);
+		// Local autoscale: each sparkline's variation gets the full y range,
+		// so a radar producing 2-vs-12 scans/min looks visibly different
+		// from one producing 50-vs-60. Floors prevent div-by-zero when the
+		// metric is constant or the window is entirely empty.
+		const minV = nonEmpty.length > 0 ? Math.min(...nonEmpty) : 0;
+		const maxV = nonEmpty.length > 0 ? Math.max(...nonEmpty) : 1;
+		const span = Math.max(1e-9, maxV - minV);
 		const dx = nBuckets > 1 ? width / (nBuckets - 1) : 0;
-		const pts = counts.map((c, i) => {
+		const pts = means.map((v, i) => {
 			const x = i * dx;
-			const y = height - (c / max) * (height - 2) - 1;
+			// Empty → baseline. Non-empty → linearly scaled within the
+			// observed range so the bucket variation reads as shape.
+			const y =
+				v === null
+					? height - 1
+					: height - ((v - minV) / span) * (height - 2) - 1;
 			return [x, y] as [number, number];
 		});
 		const strokeD = pts
