@@ -99,6 +99,7 @@ nav:
   - Home: index.md
   - Operate:
       - Getting started: 01-getting-started.md
+      - Deployment: 02-deployment.md
       - Architecture: ARCHITECTURE.md
       - Maintenance: MAINTENANCE.md
   - Reference:
