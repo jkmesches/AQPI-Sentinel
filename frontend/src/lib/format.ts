@@ -165,7 +165,14 @@ const L0_TARGET_LABELS: Record<string, string> = {
 	public:                    'Public dashboard page',
 	root_notfound:             'Root URL (404 check)',
 	website_public:            'Public dashboard page',
-	website_root_notfound:     'Root URL (404 check)'
+	website_root_notfound:     'Root URL (404 check)',
+	// Sentinel-* labels surface OUR infrastructure separately from the
+	// monitored upstream. "Sentinel Internet" = can we reach the public
+	// internet at all; "Sentinel DNS" = can our resolver translate
+	// hostnames. Split out 2026-05-19 so radarca outages don't confuse
+	// upstream-side problems with our own.
+	internet:                  'Sentinel Internet',
+	dns:                       'Sentinel DNS'
 };
 const VECTOR_TARGET_LABELS: Record<string, string> = {
 	flowlines:        'Stream flowlines',
@@ -240,6 +247,8 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	if (checkId.startsWith('layer0.origin.'))        return 'Origin reachable';
 	if (checkId.startsWith('layer0.website.public')) return 'Public dashboard page';
 	if (checkId.startsWith('layer0.website.root'))   return 'Root URL (404 check)';
+	if (checkId.startsWith('layer0.net.internet'))   return 'Sentinel Internet';
+	if (checkId.startsWith('layer0.net.dns'))        return 'Sentinel DNS';
 	if (checkId.startsWith('layer0.'))               return L0_TARGET_LABELS[target] ?? titleCase(tDash);
 	if (checkId.startsWith('layer1.product.'))       return productLabel(target);
 	if (checkId.startsWith('layer1.stream.'))        return STREAM_TARGET_LABELS[target] ?? `Stream · ${titleCase(tDash)}`;
@@ -252,6 +261,27 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 }
 function titleCase(s: string): string {
 	return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Pick a sparkline display window from a check's cadence. Targets ~30
+ * cadence intervals visible at once, snapped to a natural unit so the
+ * label reads sensibly. The label is suitable for inline rendering as
+ * "N/{label}" — e.g. "16/h" or "0/6h". Used by Sparkline.svelte so the
+ * window auto-adapts: products at 30s cadence get a 30-min window,
+ * forecast products at 30m cadence get a multi-hour window, etc.
+ */
+export function windowFromCadence(cadenceS: number | undefined | null): { ms: number; label: string } {
+	const c = cadenceS && cadenceS > 0 ? cadenceS : 60;
+	const targetMin = (c * 30) / 60;
+	// Ordered ascending. First entry whose minutes >= target wins.
+	const choices: [number, string][] = [
+		[30, '30m'], [60, 'h'], [120, '2h'], [180, '3h'], [360, '6h'], [720, '12h']
+	];
+	for (const [mins, label] of choices) {
+		if (mins >= targetMin) return { ms: mins * 60_000, label };
+	}
+	return { ms: 720 * 60_000, label: '12h' };
 }
 
 export function severityChip(s: string): string {

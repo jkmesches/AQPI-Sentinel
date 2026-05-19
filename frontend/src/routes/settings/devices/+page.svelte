@@ -54,7 +54,7 @@
 			<div class="px-4 py-3 text-[12px] text-[var(--color-muted)]">loading…</div>
 		{:else if subscriptions.length === 0}
 			<div class="px-4 py-3 text-[12px] text-[var(--color-faint)] italic">
-				No subscribed devices. Enable Web Push on your mobile device first (open Sentinel on iPhone Safari → Add to Home Screen → enable notifications).
+				No subscribed devices. Open Sentinel on a phone and enable push from the More tab — iOS requires installing to home screen first; Android Chrome works without installing.
 			</div>
 		{:else}
 			<ul>

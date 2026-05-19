@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import MobileNav from '$lib/components/mobile/MobileNav.svelte';
+	import { initInstallCapture } from '$lib/platform.svelte';
 	let { children }: { children: any } = $props();
 
 	// Live UTC clock in the header. 1 Hz is plenty for a seconds readout
@@ -16,6 +17,12 @@
 	// in the layout (vs. root) keeps install prompts scoped to mobile.
 	onMount(() => {
 		clockTimer = setInterval(() => (now = new Date()), 1000);
+		// Capture the install prompt at the LAYOUT level. The
+		// `beforeinstallprompt` event fires once per page load before
+		// the user navigates anywhere, so deferring this to /m/more's
+		// onMount would miss the event entirely on Android Chrome after
+		// SvelteKit client-side navigation.
+		initInstallCapture();
 		if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 		if (!window.isSecureContext) return; // SW needs HTTPS (or localhost)
 		navigator.serviceWorker

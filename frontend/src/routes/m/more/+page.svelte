@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
 	import { pushCapable, currentSubscription, enablePush, disablePush } from '$lib/push';
+	import { install, isIos, isAndroid, promptInstall } from '$lib/platform.svelte';
 
 	function viewDesktop() {
 		// 1-year cookie picked up by hooks.server.ts to suppress the
@@ -13,10 +14,24 @@
 
 	function setMode(m: ThemeMode) { theme.mode = m; }
 
-	// "Already installed" detection: standalone display-mode in any
-	// browser, or iOS's non-standard navigator.standalone.
-	let installed = $state(false);
-	let isIos = $state(false);
+	// Platform + install state come from the shared `install` reactive
+	// holder. The /m layout has already wired up beforeinstallprompt /
+	// appinstalled listeners, so by the time this page mounts the holder
+	// reflects the live install + deferred-prompt state.
+	const installed = $derived(install.installed);
+	const promptReady = $derived(install.pwaPromptReady);
+	let iosDev = $state(false);
+	let androidDev = $state(false);
+	let installBusy = $state(false);
+
+	async function installNow() {
+		installBusy = true;
+		try {
+			await promptInstall();
+		} finally {
+			installBusy = false;
+		}
+	}
 
 	// Web Push state
 	let pushSupported = $state(false);
@@ -51,9 +66,8 @@
 
 	onMount(() => {
 		if (typeof window === 'undefined') return;
-		installed = window.matchMedia('(display-mode: standalone)').matches
-			|| (navigator as any).standalone === true;
-		isIos = /iPhone|iPod/i.test(navigator.userAgent);
+		iosDev = isIos();
+		androidDev = isAndroid();
 		refreshPush();
 	});
 </script>
@@ -92,8 +106,8 @@
 		{#if !pushSupported}
 			<div class="text-[12px] text-[var(--color-muted)]">
 				This browser doesn't support Web Push.
-				{#if isIos && !installed}
-					<br /><span class="text-[var(--color-faint)]">iOS only delivers push to PWAs that have been Added to Home Screen — install the app first (see Install above).</span>
+				{#if iosDev && !installed}
+					<br /><span class="text-[var(--color-faint)]">iOS only delivers push to PWAs that have been Added to Home Screen — install the app first (see Install below).</span>
 				{/if}
 			</div>
 		{:else if !auth.user}
@@ -118,8 +132,10 @@
 		{:else}
 			<div class="text-[12px] text-[var(--color-default)] leading-relaxed">
 				Get a push notification on this device when any alarm fires.
-				{#if isIos && !installed}
+				{#if iosDev && !installed}
 					<br /><span class="text-[var(--color-warn)]">iOS requires the app to be installed to home screen first.</span>
+				{:else if androidDev && !installed}
+					<br /><span class="text-[var(--color-faint)]">Works in Chrome without installing — installation just adds a launcher icon.</span>
 				{/if}
 				{#if permission === 'denied'}
 					<br /><span class="text-[var(--color-fail)]">Notification permission was denied — re-enable it in your browser/OS settings, then try again.</span>
@@ -128,7 +144,7 @@
 			<button
 				type="button"
 				onclick={toggleEnable}
-				disabled={pushBusy || (isIos && !installed) || permission === 'denied'}
+				disabled={pushBusy || (iosDev && !installed) || permission === 'denied'}
 				class="mt-3 min-h-[44px] w-full rounded border border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[12px] uppercase tracking-wider text-[var(--color-accent)] disabled:opacity-50"
 				style="-webkit-tap-highlight-color: transparent;"
 			>{pushBusy ? 'enabling…' : 'enable notifications'}</button>
@@ -160,15 +176,41 @@
 	<section class="mb-5">
 		<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">install</div>
 		<div class="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-3 text-[12px] text-[var(--color-default)] leading-relaxed">
-			{#if isIos}
+			{#if iosDev}
+				<!-- iOS Safari has no programmatic install API; the user
+				     must use the system share sheet manually. -->
 				Add Sentinel to your home screen for full-screen launch and
 				push notifications:<br />
-				<span class="text-[var(--color-muted)]">tap</span> <span class="text-[var(--color-bright)]">Share</span>
+				<span class="text-[var(--color-muted)]">tap</span>
+				<span class="text-[var(--color-bright)]">Share</span>
 				<span class="text-[var(--color-muted)]">→</span>
 				<span class="text-[var(--color-bright)]">Add to Home Screen</span>.
+			{:else if promptReady}
+				<!-- Android Chrome / Edge / Samsung Internet — beforeinstallprompt
+				     was captured. Render a real one-tap install button. -->
+				Install Sentinel to your home screen for full-screen launch.
+				<button
+					type="button"
+					onclick={installNow}
+					disabled={installBusy}
+					class="mt-3 min-h-[44px] w-full rounded border border-[var(--color-accent)] bg-[var(--color-accent)]/15 text-[12px] uppercase tracking-wider text-[var(--color-accent)] disabled:opacity-50"
+					style="-webkit-tap-highlight-color: transparent;"
+				>{installBusy ? 'installing…' : 'install app'}</button>
+			{:else if androidDev}
+				<!-- Android browser hasn't fired beforeinstallprompt yet —
+				     either the browser doesn't support PWA install (rare on
+				     Android in 2026) or install criteria aren't met. Point
+				     the user at the Chrome menu as a fallback. -->
+				Open Chrome's menu
+				<span class="num text-[var(--color-bright)]">⋮</span>
+				and tap
+				<span class="text-[var(--color-bright)]">Install app</span> (or
+				<span class="text-[var(--color-bright)]">Add to Home screen</span>).
 			{:else}
-				Add Sentinel to your home screen via your browser's menu for
-				full-screen launch and push notifications.
+				Open your browser's menu and choose
+				<span class="text-[var(--color-bright)]">Install</span> or
+				<span class="text-[var(--color-bright)]">Add to Home Screen</span>
+				for full-screen launch.
 			{/if}
 		</div>
 	</section>

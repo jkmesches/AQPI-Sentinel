@@ -25,6 +25,14 @@
 	// and stays true. Don't use isStyleLoaded(): it flickers to false every
 	// time we call setData on a source, which would race our own mutators.
 	let styleReady = false;
+	// Tracks WebGL context loss — same problem the mobile map handles. On
+	// desktop it's rare (typically only the GPU driver crashing) but the
+	// same `this.style is undefined` traceback can fire, so we guard the
+	// same way.
+	let mapDead = $state(false);
+	function mapAlive(): boolean {
+		return !!(map && !mapDead && (map as any).style);
+	}
 
 	// -------------------------------------------------------------------------
 	// === Load-bearing perf: image-decode semaphore. ===
@@ -885,13 +893,19 @@
 	let _forceBuster = 0;
 	function _bumpForceBuster() { _forceBuster = Math.floor(Date.now() / 30_000); }
 	async function pokeOverlays() {
-		if (!map || !styleReady) return;
-		_bumpForceBuster();
-		if (composite !== 'none' && map.getSource('comp-overlay')) {
-			await renderCompositeFrame();
-		}
-		if (activeRadars.length > 0) {
-			await syncRadarOverlayTime();
+		if (!mapAlive() || !styleReady) return;
+		try {
+			_bumpForceBuster();
+			if (composite !== 'none' && map!.getSource('comp-overlay')) {
+				await renderCompositeFrame();
+			}
+			if (activeRadars.length > 0) {
+				await syncRadarOverlayTime();
+			}
+		} catch {
+			// WebGL context dropped between the alive check and the mutation —
+			// flip the flag so subsequent ticks bail cleanly.
+			mapDead = true;
 		}
 	}
 
@@ -1022,6 +1036,13 @@
 		requestAnimationFrame(() => map?.resize());
 		resizeObs = new ResizeObserver(() => map?.resize());
 		resizeObs.observe(mapDiv);
+
+		// WebGL context loss handler — see mapDead comment above.
+		const canvas = map.getCanvas() as HTMLCanvasElement;
+		canvas.addEventListener('webglcontextlost', (ev: Event) => {
+			ev.preventDefault();
+			mapDead = true;
+		}, false);
 
 		map.on('load', () => {
 			if (!map) return;

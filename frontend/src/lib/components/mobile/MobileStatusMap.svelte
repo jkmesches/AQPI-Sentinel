@@ -40,6 +40,17 @@
 	let radars = $state<RadarMeta[]>([]);
 	let loadError = $state<string | null>(null);
 	let styleReady = $state(false);
+	// iOS Safari freely drops the WebGL context (backgrounding, memory
+	// pressure, leaving the tab too long). After context loss MapLibre's
+	// `map.style` becomes undefined and any subsequent .getLayer() throws
+	// `TypeError: this.style is undefined`. We listen for the canvas event,
+	// flip this flag, and short-circuit every map mutation. A user-visible
+	// banner offers a one-tap reload — MapLibre does not reliably recover
+	// on its own even after `webglcontextrestored`.
+	let mapDead = $state(false);
+	function mapAlive(): boolean {
+		return !!(map && !mapDead && map.style);
+	}
 
 	// --- composite + playback ----------------------------------------------
 	type Composite = 'none' | 'qpe_15min' | 'qpe_1hr' | 'precip_rate_radar'
@@ -116,9 +127,11 @@
 	}
 
 	function refreshRadars() {
-		if (!map || !maplibregl) return;
-		const src = map.getSource('radars');
-		if (src) { src.setData(geo()); return; }
+		if (!mapAlive() || !maplibregl) return;
+		try {
+			const src = map.getSource('radars');
+			if (src) { src.setData(geo()); return; }
+		} catch { mapDead = true; return; }
 		map.addSource('radars', { type: 'geojson', data: geo() });
 		map.addLayer({
 			id: 'radar-halo', type: 'circle', source: 'radars',
@@ -178,31 +191,38 @@
 	}
 
 	async function renderComposite() {
-		if (!map || !styleReady || !maplibregl) return;
-		if (composite === 'none' || stepIdx < 0) {
-			if (map.getLayer('comp-layer')) map.removeLayer('comp-layer');
-			if (map.getSource('comp-src')) map.removeSource('comp-src');
-			return;
-		}
-		const url = compositeImageUrl(stepIdx);
-		const e = EXTENT_LARGE;
-		const coords: [number, number][] = [
-			[e.west, e.north], [e.east, e.north],
-			[e.east, e.south], [e.west, e.south]
-		];
-		const src = map.getSource('comp-src') as any;
-		if (src && typeof src.updateImage === 'function') {
-			src.updateImage({ url, coordinates: coords });
-		} else {
-			if (map.getLayer('comp-layer')) map.removeLayer('comp-layer');
-			if (map.getSource('comp-src')) map.removeSource('comp-src');
-			map.addSource('comp-src', { type: 'image', url, coordinates: coords });
-			// Insert below the radar halo so dots remain visible on top.
-			const beforeId = map.getLayer('radar-halo') ? 'radar-halo' : undefined;
-			map.addLayer({
-				id: 'comp-layer', type: 'raster', source: 'comp-src',
-				paint: { 'raster-opacity': 0.78 }
-			}, beforeId);
+		if (!mapAlive() || !styleReady || !maplibregl) return;
+		try {
+			if (composite === 'none' || stepIdx < 0) {
+				if (map.getLayer('comp-layer')) map.removeLayer('comp-layer');
+				if (map.getSource('comp-src')) map.removeSource('comp-src');
+				return;
+			}
+			const url = compositeImageUrl(stepIdx);
+			const e = EXTENT_LARGE;
+			const coords: [number, number][] = [
+				[e.west, e.north], [e.east, e.north],
+				[e.east, e.south], [e.west, e.south]
+			];
+			const src = map.getSource('comp-src') as any;
+			if (src && typeof src.updateImage === 'function') {
+				src.updateImage({ url, coordinates: coords });
+			} else {
+				if (map.getLayer('comp-layer')) map.removeLayer('comp-layer');
+				if (map.getSource('comp-src')) map.removeSource('comp-src');
+				map.addSource('comp-src', { type: 'image', url, coordinates: coords });
+				// Insert below the radar halo so dots remain visible on top.
+				const beforeId = map.getLayer('radar-halo') ? 'radar-halo' : undefined;
+				map.addLayer({
+					id: 'comp-layer', type: 'raster', source: 'comp-src',
+					paint: { 'raster-opacity': 0.78 }
+				}, beforeId);
+			}
+		} catch (err) {
+			// Style raced to undefined between the alive check and the mutation —
+			// flip the flag so subsequent ticks bail out cleanly.
+			mapDead = true;
+			stopPlay();
 		}
 	}
 
@@ -267,6 +287,15 @@
 				refreshRadars();
 				styleReady = true;
 			});
+			// Capture WebGL context-loss BEFORE MapLibre's internal handlers
+			// run — preventDefault tells the browser we'd accept a restored
+			// context, but in practice MapLibre's style is gone either way.
+			const canvas = map.getCanvas() as HTMLCanvasElement;
+			canvas.addEventListener('webglcontextlost', (ev: Event) => {
+				ev.preventDefault();
+				mapDead = true;
+				stopPlay();
+			}, false);
 		} catch (e) {
 			loadError = (e as Error).message;
 		}
@@ -280,7 +309,7 @@
 	// Re-paint radar dots when L2 status updates.
 	$effect(() => {
 		void statusByRadar;
-		if (map && map.isStyleLoaded()) refreshRadars();
+		if (mapAlive() && map.isStyleLoaded()) refreshRadars();
 	});
 
 	const stepLabel = $derived(
@@ -316,7 +345,22 @@
 	{#if loadError}
 		<div class="px-3 py-4 text-[12px] text-[var(--color-fail)]">map failed: {loadError}</div>
 	{:else}
-		<div bind:this={mapDiv} class="map-canvas"></div>
+		<div class="relative">
+			<div bind:this={mapDiv} class="map-canvas"></div>
+			{#if mapDead}
+				<!-- WebGL context lost — usually because iOS Safari paused the
+				     tab. MapLibre can't recover its style on its own; the
+				     cleanest path is a hard reload of the page. -->
+				<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-center text-[12px]" style="-webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);">
+					<div class="text-[var(--color-bright)]">Map paused (graphics context dropped)</div>
+					<button type="button" onclick={() => location.reload()}
+						class="rounded-md border border-[var(--color-ok)] bg-[var(--color-ok)]/20 px-4 py-2 text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-ok)]/30"
+						style="-webkit-tap-highlight-color: transparent;">
+						Reload map
+					</button>
+				</div>
+			{/if}
+		</div>
 	{/if}
 
 	<!-- Playback strip. Always visible when a composite is on. -->
