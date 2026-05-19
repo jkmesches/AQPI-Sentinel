@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import MobileNav from '$lib/components/mobile/MobileNav.svelte';
 	import { initInstallCapture } from '$lib/platform.svelte';
+	import { version, loadVersion } from '$lib/stores/version.svelte';
 	let { children }: { children: any } = $props();
 
 	// Live UTC clock in the header. 1 Hz is plenty for a seconds readout
@@ -17,6 +18,7 @@
 	// in the layout (vs. root) keeps install prompts scoped to mobile.
 	onMount(() => {
 		clockTimer = setInterval(() => (now = new Date()), 1000);
+		loadVersion();
 		// Capture the install prompt at the LAYOUT level. The
 		// `beforeinstallprompt` event fires once per page load before
 		// the user navigates anywhere, so deferring this to /m/more's
@@ -74,6 +76,10 @@
 				>Joseph Mesches</a>
 			</div>
 			<div class="mt-1 flex items-center justify-center gap-3">
+				{#if version.value}
+					<span class="num">v{version.value}</span>
+					<span>·</span>
+				{/if}
 				<a
 					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
 					href="https://jkmesches.github.io/SentinelProject/"
@@ -98,9 +104,18 @@
 	.mob-shell {
 		display: flex;
 		flex-direction: column;
-		min-height: 100vh;
-		min-height: 100svh;
+		/* FIXED height so .mob-main's `flex: 1 + overflow-y: auto` creates
+		   an INTERNAL scroll container. With `min-height: 100vh`, the shell
+		   would grow with its content and the page would scroll the BODY
+		   instead — which makes `.mob-header { position: sticky }` track
+		   the body scroll and visually "float" as you scrolled.
+		   100svh accounts for iOS Safari's smaller-viewport behavior
+		   (URL bar + bottom toolbar). 100vh fallback for browsers that
+		   don't support svh. */
+		height: 100vh;
+		height: 100svh;
 		background: var(--color-canvas);
+		overflow: hidden;
 	}
 	.mob-header {
 		position: sticky;
