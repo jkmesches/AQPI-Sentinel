@@ -28,6 +28,84 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 _Nothing pending._
 
+## [0.1.1] — 2026-05-19
+
+Patch release. Comprehensive documentation site, smart-delay push
+notifications, and a handful of UX polish fixes that fell out of
+real operation against the live deploy.
+
+### Added
+
+- **MkDocs Material documentation site** at
+  `https://jkmesches.github.io/SentinelProject/`. Thirteen docs
+  organized into Operate (getting-started, deployment,
+  administration, maintenance, troubleshooting, porting), Develop
+  (architecture, extending-checks, extending-api, extending-ui,
+  alarm-engine), and Reference (env-vars, glossary,
+  release-process, changelog). Builds + deploys on every push to
+  `main` via `.github/workflows/docs-publish.yml`.
+- **Screenshot capture script** (`scripts/capture_admin_screenshots.py`)
+  using Playwright. Logs in via the standard auth flow + snapshots
+  every admin page on desktop + the mobile shell. Re-runnable
+  whenever the UI shifts.
+- **Smart-delay push semantics.** `delay_s` now re-checks the alarm
+  state before firing — if the alarm self-resolves or is acked
+  during the wait, the notification is dropped. Was previously
+  unconditional, which paged operators for transient flaps that
+  had already cleared.
+- **Version display in footer** on both desktop and mobile shells.
+  Single source of truth at `backend/_version.py`, exposed via a
+  new `/api/version` endpoint.
+- **Devices link** in the desktop top-right auth chip — surfaces
+  `/settings/devices` (per-device push routing) without users
+  having to type the URL.
+- **CHANGELOG cross-reference** in the docs site Reference section.
+
+### Changed
+
+- **FastAPI auto-docs** moved from `/docs` + `/redoc` to
+  `/api/docs` + `/api/redoc` + `/api/openapi.json`. Routes
+  consistently through the `/api/*` reverse-proxy convention.
+- **Footer link** swapped from `github.com/jkmesches/SentinelProject`
+  (the repo is private — link 404'd for everyone except the owner)
+  to the public documentation site.
+- **Push routing copy** in both editor surfaces (mobile +
+  /settings/devices) updated to reflect smart-delay behavior:
+  *"If the alarm self-resolves or is acknowledged during the wait,
+  the notification is dropped."*
+- **MAINTENANCE doc** gained four new sections: performance tuning,
+  rolling back a release, upgrading between versions, monitoring
+  Sentinel itself, writing a one-shot data migration.
+
+### Fixed
+
+- **Category status colors** on the mobile home page and desktop
+  stage strip fell through to `'pass'` (green) when every row was
+  skip — e.g. all L1 products cascade-demoted from a single L0
+  failure made the L1 dot misleadingly green. Now falls through to
+  `'skip'` (gray) when nothing is actually healthy.
+- **Mobile sticky header** drifted as content scrolled because
+  `.mob-shell` used `min-height: 100vh` instead of fixed
+  height — letting the shell grow past the viewport so the body
+  scrolled instead of `.mob-main`. Now fixed-height with internal
+  scroll; the header tracks correctly.
+- **MkDocs strict-build** would have failed on `pygments 2.20.0`
+  due to a known incompatibility with `pymdownx.highlight`. Pinned
+  `pygments<2.20` in `docs-requirements.txt`.
+- **Screenshot capture** initially landed `[ADMIN ONLY · sign in]`
+  stubs for every admin page because the script wrote the auth
+  token under the wrong localStorage key (`sentinel-token` vs the
+  frontend's `sentinel.token`). Fixed; also switched mobile
+  captures to viewport-only so timeline/history don't produce
+  127-megabyte full-page PNGs.
+
+### Security
+
+- **Force-pushed history rewrite** of commit `48495a5` to remove
+  un-pixelated admin screenshots containing user emails + check
+  identifiers. Pixelated versions replaced them in `9ef56af`. The
+  unreferenced blobs are awaiting GC on GitHub's side.
+
 ## [0.1.0] — 2026-05-19
 
 First tagged release. Sentinel is feature-complete for the
@@ -162,5 +240,6 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/SentinelProject/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jkmesches/SentinelProject/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/jkmesches/SentinelProject/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jkmesches/SentinelProject/releases/tag/v0.1.0
