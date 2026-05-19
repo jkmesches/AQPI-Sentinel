@@ -8,72 +8,44 @@ understanding the codebase well enough to make non-trivial changes.
 
 ## Big picture
 
-```
-                     ┌──────────────────────────────┐
-                     │   radarca.engr.colostate.edu │  (the system we monitor)
-                     └──────────────┬───────────────┘
-                                    │ HTTP probes,
-                                    │ image fetches,
-                                    │ Playwright JS-render
-                                    ▼
-   ┌────────────────────────────────────────────────────────────────────┐
-   │  backend (FastAPI, asyncio)                                        │
-   │                                                                    │
-   │  ┌──────────┐    ┌──────────┐    ┌──────────────┐                  │
-   │  │ Scheduler│───▶│ Check.run│───▶│ CheckResult  │                  │
-   │  │ (asyncio │    │ (any of  │    │ envelope     │                  │
-   │  │  task    │    │  36 imp- │    │              │                  │
-   │  │  per     │    │  lement- │    └──────┬───────┘                  │
-   │  │  check)  │    │  ations) │           │                          │
-   │  └──────────┘    └──────────┘           ▼                          │
-   │       │                          ┌────────────┐                    │
-   │       │                          │ AlarmEngine│                    │
-   │       │                          │ (open/close│                    │
-   │       │                          │  +route +  │                    │
-   │       │                          │  dispatch) │                    │
-   │       ▼                          └─────┬──────┘                    │
-   │  ┌──────────┐                          │                           │
-   │  │  Store   │◀─────────── persist runs ┘ + alarms                  │
-   │  │ (asyncpg │                                                      │
-   │  │  pool)   │       ┌──────────────────┐                           │
-   │  └────┬─────┘       │ ConnectionManager│                           │
-   │       │             │ (WebSocket fan-  │                           │
-   │       │             │  out, transition-│                           │
-   │       │             │  only events)    │                           │
-   │       │             └─────────┬────────┘                           │
-   │       │                       │                                    │
-   │       │           ┌───────────┴────────────┐                       │
-   │       ▼           ▼                        ▼                       │
-   │  ┌──────────────────────────────────────────────┐                  │
-   │  │   FastAPI routes  /api/{status, alarms,      │                  │
-   │  │     timeline, history, upstream, auth,       │                  │
-   │  │     admin/*, ws, _debug/stats}               │                  │
-   │  └────────────────────────┬─────────────────────┘                  │
-   └───────────────────────────┼────────────────────────────────────────┘
-                               │ HTTP + WebSocket
-                               ▼
-   ┌────────────────────────────────────────────────────────────────────┐
-   │  frontend (SvelteKit + Svelte 5)                                   │
-   │                                                                    │
-   │   stores/state.svelte.ts  ◀──── REST poll (5s) + WS push           │
-   │       │  (rollup, alarms, metrics, dedupe & microtask coalesce)    │
-   │       ▼                                                            │
-   │   routes/+page.svelte (Live: map + radars + products + alarms)     │
-   │   routes/timeline/+page.svelte (state-over-time grid + cell        │
-   │     detail panel with explainRun + LazyImage)                      │
-   │   routes/history/+page.svelte (filtered alarms + check_runs        │
-   │     with click-to-drilldown modal)                                 │
-   │   routes/admin/* (auth-gated: users, email, alerts, silences,      │
-   │     groups, thresholds, audit)                                     │
-   │   routes/m/* (mobile shell — Status, Timeline, Alarms,             │
-   │     push-settings, More)                                           │
-   │   routes/settings/devices (desktop mirror of per-device push)      │
-   │                                                                    │
-   │   lib/origin.ts: API_BASE detection + global fetch monkey-patch    │
-   │     (attaches Authorization: Bearer header from localStorage)      │
-   │   lib/format.ts: stageLabel/productLabel/productCategory —         │
-   │     single source of truth for user-facing vocabulary              │
-   └────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    upstream["radarca.engr.colostate.edu<br/>(the system we monitor)"]
+
+    subgraph backend["backend · FastAPI + asyncio"]
+        direction TB
+        scheduler["Scheduler<br/>(asyncio task per check)"]
+        checkrun["Check.run<br/>(39 implementations)"]
+        result["CheckResult envelope"]
+        engine["AlarmEngine<br/>open/close · route · dispatch"]
+        store[("Store<br/>asyncpg pool")]
+        ws["ConnectionManager<br/>WebSocket fan-out<br/>(transition-only events)"]
+        routes["FastAPI routes<br/>/api/{status, alarms, timeline, history,<br/>upstream, auth, admin/*, ws, _debug/stats}"]
+
+        scheduler --> checkrun --> result --> engine
+        result -. persist .-> store
+        engine -. persist .-> store
+        store --> routes
+        engine --> ws --> routes
+    end
+
+    subgraph frontend["frontend · SvelteKit + Svelte 5"]
+        direction TB
+        state["stores/state.svelte.ts<br/>(rollup, alarms, metrics —<br/>REST poll 5s + WS push,<br/>dedupe + microtask coalesce)"]
+        live["routes/+page.svelte<br/>Live: map + radars + products + alarms"]
+        timeline["routes/timeline/+page.svelte<br/>state-over-time grid + explainRun"]
+        history["routes/history/+page.svelte<br/>filtered alarms + check_runs"]
+        admin["routes/admin/*<br/>users · email · alerts · silences ·<br/>groups · thresholds · audit"]
+        mobile["routes/m/*<br/>Status · Timeline · Alarms ·<br/>push-settings · More"]
+        settings["routes/settings/devices<br/>desktop mirror of per-device push"]
+        origin["lib/origin.ts<br/>API_BASE detection + fetch monkey-patch<br/>(Authorization: Bearer)"]
+        format["lib/format.ts<br/>stageLabel / productLabel / productCategory"]
+
+        state --> live & timeline & history & admin & mobile & settings
+    end
+
+    upstream -- "HTTP probes · image fetches ·<br/>Playwright JS-render" --> scheduler
+    routes -- "HTTP + WebSocket" --> state
 ```
 
 ---
@@ -353,23 +325,20 @@ verdicts under the old values. The retroactive reprocess job walks
 `check_runs` in a time window and re-classifies each row under
 current thresholds:
 
-```
-ReprocessJob (in-process state: n_total / n_evaluated / n_changed /
-                                 n_preserved / cancel_requested)
-       │
-       ▼
-run_reprocess(pool, job)
-  ├── per row, call one of:
-  │     _reverdict_l1 → recompute C_freshness, E_step_count,
-  │                     G_image_size sub-checks from saved payload
-  │     _reverdict_l2 → recompute HEALTHY↔GHOST_UP from primary
-  │                     newest_ts + current silent_fail_s + hysteresis
-  │     _reverdict_l4 → lift extreme/frozen tier-2 verdicts under
-  │                     current extreme_threshold / frozen_min_cov_pct
-  │                     / skip_frozen / skip_range_ring
-  │
-  └── batched UPDATEs (CHUNK=200) with await sleep(0) every 50 rows
-      so the API stays responsive during long jobs
+```mermaid
+flowchart TB
+    job["ReprocessJob<br/>in-process state:<br/>n_total · n_evaluated · n_changed ·<br/>n_preserved · cancel_requested"]
+    run["run_reprocess(pool, job)<br/>per row, dispatch by stage"]
+    l1["_reverdict_l1<br/>recompute C_freshness, E_step_count,<br/>G_image_size sub-checks from saved payload"]
+    l2["_reverdict_l2<br/>recompute HEALTHY ↔ GHOST_UP from primary<br/>newest_ts + current silent_fail_s + hysteresis"]
+    l4["_reverdict_l4<br/>lift extreme/frozen tier-2 verdicts under<br/>current extreme_threshold, frozen_min_cov_pct,<br/>skip_frozen, skip_range_ring"]
+    update["batched UPDATEs · CHUNK=200<br/>await sleep(0) every 50 rows<br/>so the API stays responsive"]
+
+    job --> run
+    run --> l1 & l2 & l4
+    l1 --> update
+    l2 --> update
+    l4 --> update
 ```
 
 **Preserves** rows where `payload.reason in {local_dns_error,

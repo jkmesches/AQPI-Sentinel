@@ -19,37 +19,19 @@ and [`04-maintenance.md`](MAINTENANCE.md) (day-2 ops).
 Every later section makes more sense once this picture is in your
 head. When something goes wrong upstream, here's what happens:
 
-```
-        Check tick                               Notification
-            │                                          │
-   ┌────────▼────────┐    ┌──────────┐    ┌────────────▼─────────┐
-   │  check.run()    │───▶│ AlarmEng │───▶│  Route table         │
-   │ → CheckResult   │    │ open     │    │  (match alarm fields)│
-   │   (pass/warn/   │    │ alarm    │    └────────┬─────────────┘
-   │    fail/error)  │    └──────────┘             │
-   └─────────────────┘                             ▼
-                                          ┌─────────────────┐
-                                          │ Policy steps    │
-                                          │ (recipients +   │
-                                          │  per-step delay)│
-                                          └────────┬────────┘
-                                                   │
-                                          ┌────────▼────────────┐
-                                          │ Recipient expansion │
-                                          │ - direct emails     │
-                                          │ - groups → members  │
-                                          │   gated by schedule │
-                                          └────────┬────────────┘
-                                                   │
-                                  ┌────────────────┼─────────────┐
-                                  ▼                ▼             ▼
-                              Email sink      Push sink      Webhook sink
-                                                   │
-                                          (Web Push respects
-                                           per-device routing
-                                           config: severity floor,
-                                           product patterns,
-                                           on-duty schedule, delay)
+```mermaid
+flowchart TB
+    tick["Check tick<br/>check.run() → CheckResult<br/>(pass / warn / fail / error)"]
+    engine["AlarmEngine<br/>open alarm"]
+    route["Route table<br/>(match alarm fields)"]
+    policy["Policy steps<br/>(recipients +<br/>per-step delay)"]
+    expand["Recipient expansion<br/>· direct emails<br/>· groups → members<br/>  gated by schedule"]
+    email["Email sink"]
+    push["Push sink<br/>(per-device routing:<br/>severity floor, patterns,<br/>on-duty schedule, delay)"]
+    webhook["Webhook sink"]
+
+    tick --> engine --> route --> policy --> expand
+    expand --> email & push & webhook
 ```
 
 Vocabulary:

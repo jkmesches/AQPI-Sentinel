@@ -47,31 +47,26 @@ A monitoring system for `radarca.engr.colostate.edu`, deployed in three phases (
 
 Three layers, each independently extensible.
 
-```
-                ┌─────────────────────────────────────────────────────┐
-                │                  REGISTRY                           │
-                │  every Check, Sink, FrontendTile registers itself   │
-                └────────────────────┬────────────────────────────────┘
-                                     │
-        ┌────────────────────────────┼────────────────────────────┐
-        ▼                            ▼                            ▼
-  ┌───────────┐               ┌────────────┐              ┌──────────────┐
-  │  Pollers  │  results →    │  Database  │  state →     │  API (HTTP+  │
-  │ (asyncio) │  (CheckResult)│  (SQLite)  │  history →   │   WebSocket) │
-  └─────┬─────┘               └─────┬──────┘              └───────┬──────┘
-        │                           │                             │
-        │ alarm events              │                             │
-        ▼                           ▼                             ▼
-  ┌───────────┐              ┌──────────────┐             ┌──────────────┐
-  │   Alarm   │              │ Image archive│             │  Frontend    │
-  │  router   │              │ (filesystem) │             │ (SvelteKit)  │
-  └─────┬─────┘              └──────────────┘             └──────────────┘
-        │
-        ▼
-  ┌────────────────┐
-  │ Sinks (email,  │
-  │ webhook, Slack)│
-  └────────────────┘
+```mermaid
+flowchart TB
+    registry["REGISTRY<br/>every Check, Sink, FrontendTile registers itself"]
+    pollers["Pollers<br/>(asyncio)"]
+    db[("Database<br/>(SQLite)")]
+    api["API<br/>(HTTP + WebSocket)"]
+    router["Alarm router"]
+    archive[("Image archive<br/>(filesystem)")]
+    frontend["Frontend<br/>(SvelteKit)"]
+    sinks["Sinks<br/>(email, webhook, Slack)"]
+
+    registry --> pollers
+    registry --> db
+    registry --> api
+    pollers -- "results (CheckResult)" --> db
+    pollers -- "alarm events" --> router
+    db -- "state · history" --> api
+    db --> archive
+    api --> frontend
+    router --> sinks
 ```
 
 ### 3.1 The `Check` interface (the extensibility hinge)
@@ -482,20 +477,15 @@ Numerics always render with `font-variant-numeric: tabular-nums` so columns of n
 
 One page, four panes — no router-driven SPA navigation. Drill-down is an inline expand, not a page change.
 
-```
-┌── HEADER ────────────────────────────────────────────────────────────────────┐
-│ SENTINEL  radarca.engr.colostate.edu  21:34:08 Z  ●●●●●○  5/6 ok  ↻ 47s     │
-├── STAGE STRIP ───────────────────────────────────────────────────────────────┤
-│ L0● website   L1● 9/13 products   L2● 4/6 radars   L3● 9/13 parity   L4●    │
-├──────────────────────────┬───────────────────────────────────────────────────┤
-│ RADARS                   │ PRODUCT MATRIX                                    │
-│  per-radar card with     │  one row per product × A–H badges                 │
-│  status, last-seen-sparkline, moment availability                            │
-├──────────────────────────┴───────────────────────────────────────────────────┤
-│ MAP   leaflet map mirroring radarca, radars colored by reconciliation       │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ ALARM STREAM   chronological, active first, with suppression chain          │
-└──────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 2
+    header["HEADER · SENTINEL · radarca.engr.colostate.edu · 21:34:08 Z · ●●●●●○ 5/6 ok · ↻ 47s"]:2
+    strip["STAGE STRIP · L0● website · L1● 9/13 products · L2● 4/6 radars · L3● 9/13 parity · L4●"]:2
+    radars["RADARS<br/>per-radar card with status, last-seen sparkline, moment availability"]
+    matrix["PRODUCT MATRIX<br/>one row per product × A–H badges"]
+    map["MAP · leaflet mirroring radarca, radars colored by reconciliation"]:2
+    alarms["ALARM STREAM · chronological, active first, with suppression chain"]:2
 ```
 
 Below the fold (scroll): per-radar Layer 4 panel — thumbnail of latest scan + Tier-1 metrics + Tier-2 verdicts.
@@ -810,39 +800,28 @@ Routes `CheckResult` transitions to people via a configurable rules engine. Insp
 
 ### 14.1 Pipeline
 
-```
-CheckResult                 ┌──────────────┐
-   │                        │ AckStore     │ ← POST /api/alarms/{id}/ack
-   ▼                        └──────┬───────┘
-┌──────────────┐                   │
-│ AlarmEngine  │  open/update/close│
-│ (state machine across runs)│      │
-└──────┬───────┘                   │
-       │                            ▼
-       ▼                ┌────────────────────────┐
-┌──────────────┐        │ Router                 │
-│ Suppression  │───────▶│  matchers + conditions │
-│ DAG (§3.4)   │        │  ↓                     │
-└──────────────┘        │  policy (steps + delays)
-                        │  ↓                     │
-                        │  group_by + repeat_int │
-                        └──────────┬─────────────┘
-                                   │
-                                   ▼
-                        ┌──────────────────────┐
-                        │ Notification scheduler│
-                        │ (timer wheel)         │
-                        └──────────┬───────────┘
-                                   │
-                                   ▼
-                  ┌────────────────┴───────────────┐
-                  ▼                ▼                ▼
-            ┌─────────┐      ┌──────────┐    ┌─────────────┐
-            │ Email   │      │ Webhook  │    │ Console     │
-            └────┬────┘      └─────┬────┘    └──────┬──────┘
-                 │                 │                │
-                 ▼                 ▼                ▼
-                          notification_log (audit, see §4)
+```mermaid
+flowchart TB
+    result["CheckResult"]
+    engine["AlarmEngine<br/>(state machine across runs)<br/>open / update / close"]
+    suppress["Suppression DAG<br/>(§3.4)"]
+    ack["AckStore<br/>← POST /api/alarms/{id}/ack"]
+    router["Router<br/>· matchers + conditions<br/>· policy (steps + delays)<br/>· group_by + repeat_interval"]
+    scheduler["Notification scheduler<br/>(timer wheel)"]
+    email["Email"]
+    webhook["Webhook"]
+    console["Console"]
+    log[("notification_log<br/>(audit, see §4)")]
+
+    result --> engine
+    engine --> suppress
+    suppress --> router
+    ack --> router
+    router --> scheduler
+    scheduler --> email & webhook & console
+    email --> log
+    webhook --> log
+    console --> log
 ```
 
 ### 14.2 Config (`config/alerts.yaml`)
@@ -1113,15 +1092,20 @@ Each rule emits a named metric; the verdict is `fault` if any rule trips. Per-ra
 
 ### 15.7 Dependency chain across tiers
 
-```
-Layer 1 image-exists (per product)
-    └─ Layer 4 Tier 1 (uses the image)
-    └─ Layer 4 Tier 2
-    └─ Layer 4 Tier 5 embedding worker
-        └─ Layer 4 Tier 5 classifier
+```mermaid
+flowchart TB
+    l1["Layer 1 image-exists<br/>(per product)"]
+    t1["Layer 4 Tier 1<br/>(uses the image)"]
+    t2["Layer 4 Tier 2"]
+    t5e["Layer 4 Tier 5<br/>embedding worker"]
+    t5c["Layer 4 Tier 5<br/>classifier"]
+    baseline[/"Layer 4 Tier 1 baseline<br/>computed nightly<br/>(job, not a check)"/]
+    retrain[/"Layer 4 Tier 5 classifier<br/>retrained nightly<br/>(job, not a check)"/]
 
-Layer 4 Tier 1 baseline computed nightly (job, not a check)
-Layer 4 Tier 5 classifier retrained nightly (job, not a check)
+    l1 --> t1 & t2 & t5e
+    t5e --> t5c
+    baseline -.-> t1
+    retrain -.-> t5c
 ```
 
 If a product's image-exists check fails, all Layer 4 tiers for that product are suppressed (DAG, §3.4) — no noise.
@@ -1142,20 +1126,16 @@ If a product's image-exists check fails, all Layer 4 tiers for that product are 
 
 A second top-level route, `/history`, replacing the four-pane live dashboard with a four-tab history workspace. Same dark-ops aesthetic; the only new chrome is a sticky time-range scrubber at the top.
 
-```
-┌── HEADER ───────────────────────────────────────────────────────────────────┐
-│ SENTINEL  History         ← 2026-05-08 ── 2026-05-15 →   [⤓ CSV]   ⌕ filter│
-├── TABS ─────────────────────────────────────────────────────────────────────┤
-│ [Alarms]   CheckRuns   Metrics   Images & Labels                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ filter: stage=L4-T2 target=XSCW severity=critical                           │
-│                                                                              │
-│ 21:31  L1  fcst_total_precip   age_s=434115  critical   ACTIVE 9d 23h       │
-│ 00:30  L1  qpe_15min           image 404     warn       cleared 22 min ago  │
-│ ...                                                                          │
-│                                                                              │
-│ [click row → modal: full payload, suppression chain, image artifacts]       │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 1
+    header["HEADER · SENTINEL History · ← 2026-05-08 ── 2026-05-15 → · [⤓ CSV] · ⌕ filter"]
+    tabs["TABS · [Alarms]   CheckRuns   Metrics   Images & Labels"]
+    filter["filter: stage=L4-T2  target=XSCW  severity=critical"]
+    row1["21:31  L1  fcst_total_precip   age_s=434115   critical   ACTIVE 9d 23h"]
+    row2["00:30  L1  qpe_15min           image 404      warn       cleared 22 min ago"]
+    rows3["..."]
+    note["[click row → modal: full payload, suppression chain, image artifacts]"]
 ```
 
 ### 16.3 Tabs
