@@ -15,11 +15,14 @@ transient blips that resolve before the next round of checks runs.
 from __future__ import annotations
 import asyncio
 import logging
+import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from ..errors import humanize_error
 
 log = logging.getLogger(__name__)
 
@@ -42,9 +45,22 @@ class NetworkSnapshot:
 
 
 class NetworkMonitor:
+    # Internet probes: go through IP-routed endpoints so the result reflects
+    # raw outbound TCP/IP reachability. (cloudflare probe is a literal IP
+    # so we can't lose the result to DNS issues — that's tracked separately
+    # in DNS_PROBES below.)
     PROBES: list[tuple[str, str]] = [
         ("google",     "https://www.google.com/generate_204"),
         ("cloudflare", "https://1.1.1.1/cdn-cgi/trace"),
+    ]
+    # DNS probes: (short_label, hostname). The short label is what surfaces
+    # in the check summary so the row stays on one line on a 360-px phone
+    # viewport — `www.google.com www.cloudflare.com one.one.one.one`
+    # wrapped to two lines on the live view.
+    DNS_PROBES: list[tuple[str, str]] = [
+        ("google",     "www.google.com"),
+        ("cloudflare", "www.cloudflare.com"),
+        ("quad-one",   "one.one.one.one"),
     ]
     INTERVAL_S     = 15.0
     PROBE_TIMEOUT  = 4.0
@@ -65,6 +81,13 @@ class NetworkMonitor:
         self.last_probe_at: float = 0.0
         self._consecutive_fail   = 0
         self._results: list[ProbeResult] = []
+
+        # DNS state — tracked in parallel with internet state. Same grace
+        # window so a single transient lookup failure doesn't flip us
+        # "DNS down" prematurely.
+        self.dns_ok: bool = True
+        self._dns_consecutive_fail: int = 0
+        self._dns_results: list[dict[str, Any]] = []
 
     async def start(self) -> None:
         # Run one probe synchronously so the initial state is real, then spawn
@@ -91,6 +114,11 @@ class NetworkMonitor:
                 {"name": r.name, "ok": r.ok, "status": r.status, "ms": r.ms, "error": r.error}
                 for r in self._results
             ],
+            # Surfaced separately so the two control checks (Sentinel
+            # Internet, Sentinel DNS) each read their own slice of state.
+            "dns_ok":                 self.dns_ok,
+            "dns_consecutive_fail":   self._dns_consecutive_fail,
+            "dns_results":            list(self._dns_results),
         }
 
     # -------------------------------------------------------------------
@@ -120,6 +148,44 @@ class NetworkMonitor:
             self._consecutive_fail += 1
             if self._consecutive_fail >= self.GRACE_ROUNDS:
                 self.online = False
+        # DNS probe runs alongside the HTTP probes — same cadence + grace
+        # so the operator sees both signals advance together.
+        await self._probe_dns_once()
+
+    async def _probe_dns_once(self) -> None:
+        loop = asyncio.get_event_loop()
+        out: list[dict[str, Any]] = []
+        for label, host in self.DNS_PROBES:
+            t0 = time.monotonic()
+            try:
+                # AF_INET keeps it deterministic — IPv6-only environments
+                # would need AF_UNSPEC, but the radarca host targets are
+                # IPv4 and we'd rather measure the same code path used
+                # by the L1/L2 checks.
+                await asyncio.wait_for(
+                    loop.getaddrinfo(host, None, family=socket.AF_INET,
+                                     type=socket.SOCK_STREAM),
+                    timeout=self.PROBE_TIMEOUT,
+                )
+                out.append({
+                    "name":  label, "host": host, "ok": True,
+                    "ms":    int((time.monotonic() - t0) * 1000),
+                    "error": None,
+                })
+            except Exception as e:
+                out.append({
+                    "name":  label, "host": host, "ok": False,
+                    "ms":    int((time.monotonic() - t0) * 1000),
+                    "error": humanize_error(e),
+                })
+        self._dns_results = out
+        if any(r["ok"] for r in out):
+            self._dns_consecutive_fail = 0
+            self.dns_ok = True
+        else:
+            self._dns_consecutive_fail += 1
+            if self._dns_consecutive_fail >= self.GRACE_ROUNDS:
+                self.dns_ok = False
 
     async def _one(self, name: str, url: str) -> ProbeResult:
         t0 = time.monotonic()
@@ -134,5 +200,5 @@ class NetworkMonitor:
             return ProbeResult(
                 name=name, ok=False, status=None,
                 ms=int((time.monotonic() - t0) * 1000),
-                error=f"{type(e).__name__}: {e}",
+                error=humanize_error(e),
             )

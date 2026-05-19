@@ -11,10 +11,14 @@ import asyncio
 import logging
 import random
 import socket
+import time
 
+from .alarms import suppression as _sup
+from .check_labels import pretty_check_label
 from .checks.base import Check, CheckResult, utcnow
 from .checks.transports import CheckContext
 from .db.store import Store
+from .errors import humanize_error
 from .registry import CHECKS
 
 log = logging.getLogger(__name__)
@@ -34,6 +38,10 @@ _DNS_ERROR_MARKERS = (
     "name or service not known",
     "no address associated with hostname",
     "temporary failure in name resolution",
+    # Match the friendly form too — backend.errors.humanize_error now
+    # rewrites these exception strings before they reach a summary, and
+    # the summary-side demote relies on string matching.
+    "dns lookup failed",
 )
 
 
@@ -70,6 +78,31 @@ def _summary_looks_like_dns(summary: str | None) -> bool:
     return any(m in s for m in _DNS_ERROR_MARKERS)
 
 
+def _find_unhealthy_ancestor(
+    check_id: str,
+    latest_by_check: dict[str, str],
+    deps: dict[str, list[str]],
+) -> str | None:
+    """BFS over depends_on. Returns the id of the first ancestor whose
+    latest status is fail or error, or None. Used by the cascade-demote
+    pass below so downstream cells skip during an upstream outage instead
+    of all painting themselves red independently."""
+    visited: set[str] = set()
+    frontier = list(deps.get(check_id, []))
+    while frontier:
+        nxt: list[str] = []
+        for dep_id in frontier:
+            if dep_id in visited:
+                continue
+            visited.add(dep_id)
+            st = latest_by_check.get(dep_id)
+            if st in ("fail", "error"):
+                return dep_id
+            nxt.extend(deps.get(dep_id, []))
+        frontier = nxt
+    return None
+
+
 class Scheduler:
     def __init__(self, store: Store, ctx: CheckContext, engine=None):
         self.store = store
@@ -79,12 +112,119 @@ class Scheduler:
         self._stop = asyncio.Event()
         # optional sync callback for live broadcast; set by the app factory.
         self.on_result = None                       # type: ignore[assignment]
+        # In-process latest-status cache used by the cascade-demote pass.
+        # Updated after every check run with the final (possibly demoted)
+        # status — note that's deliberate: a check that itself got demoted
+        # to skip should not then mark its own downstream as cascade-skip
+        # (skip ≠ unhealthy).
+        self._latest_status: dict[str, str] = {}
+        # Pre-built depends_on index. Same shape as AlarmEngine's, but the
+        # scheduler walks it independently because cascade-demote needs to
+        # run BEFORE the engine sees the result.
+        self._depends_on: dict[str, list[str]] = _sup.build_depends_on_index(CHECKS.values())
+        # Transitive deps + topological rank — precomputed once for two
+        # race-condition guards on top of cascade-demote:
+        #
+        # (1) await-upstream gate: before a tick runs, wait briefly if any
+        #     TRANSITIVE upstream check is currently in-flight, so a
+        #     simultaneously-ticking parent's new status is visible to the
+        #     demote pass below.
+        # (2) topological stagger: on cold start, delay each check's first
+        #     tick by `rank * 2s` so the initial wave runs roots-first.
+        #     Without this, every check fires at t=0+jitter and the order
+        #     in which they complete depends on network round-trip times.
+        #
+        # Bound the wait at 10 s (max_wait_s) — if an upstream is genuinely
+        # hung, we don't block forever. Critical timing is measured in
+        # minutes; 10 s is well inside the noise floor.
+        self._transitive_deps: dict[str, set[str]] = {
+            c.id: self._compute_transitive(c.id) for c in CHECKS.values()
+        }
+        self._rank: dict[str, int] = self._compute_ranks()
+        self._running: set[str] = set()
+        self._max_wait_s: float = 10.0
+
+    def _compute_transitive(self, check_id: str) -> set[str]:
+        out: set[str] = set()
+        frontier = list(self._depends_on.get(check_id, []))
+        while frontier:
+            nxt: list[str] = []
+            for d in frontier:
+                if d in out:
+                    continue
+                out.add(d)
+                nxt.extend(self._depends_on.get(d, []))
+            frontier = nxt
+        return out
+
+    def _compute_ranks(self) -> dict[str, int]:
+        """Topological rank — 0 for checks with no deps, otherwise
+        max(parent_rank) + 1. Used to stagger initial-start so the
+        cascade-demote pass has authoritative upstream state on tick 1."""
+        ranks: dict[str, int] = {}
+        def rank(cid: str, on_stack: set[str]) -> int:
+            if cid in ranks:
+                return ranks[cid]
+            if cid in on_stack:
+                return 0  # cycle guard (shouldn't happen but be safe)
+            deps = self._depends_on.get(cid) or []
+            if not deps:
+                ranks[cid] = 0
+                return 0
+            on_stack.add(cid)
+            r = 1 + max((rank(d, on_stack) for d in deps), default=0)
+            on_stack.discard(cid)
+            ranks[cid] = r
+            return r
+        for c in CHECKS.values():
+            rank(c.id, set())
+        return ranks
+
+    async def _await_upstream_settled(self, check: Check) -> None:
+        """Block briefly if any transitive upstream is mid-tick. Bounded
+        by self._max_wait_s so a hung upstream doesn't gum up the pipeline.
+        Returns immediately when there's nothing in flight that we
+        depend on (the common case)."""
+        deps = self._transitive_deps.get(check.id) or set()
+        if not deps:
+            return
+        deadline = time.monotonic() + self._max_wait_s
+        # Poll the in-flight set. asyncio.Event-per-check would be more
+        # elegant but the polling cost is trivial at 36 checks × 5 Hz.
+        while any(d in self._running for d in deps):
+            if time.monotonic() >= deadline:
+                # Cap reached — log once and proceed. Demote pass below
+                # will still apply with whatever upstream status the
+                # cache has at this moment.
+                log.warning(
+                    "check %s proceeding without upstream settle (waited %.1fs)",
+                    check.id, self._max_wait_s,
+                )
+                return
+            await asyncio.sleep(0.2)
 
     async def start(self) -> None:
+        # Seed latest-status from the store so cascade-demote works on
+        # tick 1 after a backend restart — without this, the first wave
+        # of downstream checks would each emit one independent failure
+        # before the cache fills.
+        try:
+            rows = await self.store.latest_per_check_map()
+            for cid, row in rows.items():
+                self._latest_status[cid] = row.get("status") or "skip"
+        except Exception:
+            log.exception("scheduler: latest-status seed failed; cascade-demote starts empty")
+        # Topological-stagger initial-start. Root checks (rank 0) start
+        # immediately; deeper layers wait `rank * 2s` so the first wave
+        # propagates roots → leaves in order.
+        STAGGER_S = 2.0
         for check in CHECKS.values():
-            t = asyncio.create_task(self._loop(check), name=f"check:{check.id}")
+            initial_delay = self._rank.get(check.id, 0) * STAGGER_S
+            t = asyncio.create_task(self._loop(check, initial_delay),
+                                     name=f"check:{check.id}")
             self._tasks.append(t)
-        log.info("scheduler started with %d checks", len(self._tasks))
+        log.info("scheduler started with %d checks (max topological rank %d)",
+                 len(self._tasks), max(self._rank.values(), default=0))
 
     async def stop(self) -> None:
         self._stop.set()
@@ -122,6 +262,51 @@ class Scheduler:
             metrics=result.metrics,
         )
 
+    def _maybe_demote_for_unhealthy_dep(self, check: Check, result: CheckResult) -> CheckResult:
+        """If any depends_on ancestor's current status is unhealthy, demote
+        this fail/error to skip. Avoids painting 37 red downstream cells
+        every time one upstream check goes red. The alarm engine still
+        records `suppressed_by` on the side for the audit trail; this
+        demote just keeps the dashboard honest about what's actually
+        broken vs what's collateral damage.
+
+        Skipped here exactly when:
+          - result is fail/error (skip / pass / warn are untouched)
+          - check has depends_on, and some ancestor's latest status is
+            fail/error per the in-process cache.
+
+        Original status + summary live in payload so the drilldown can
+        still surface the raw observation for forensics.
+        """
+        if result.status not in ("fail", "error"):
+            return result
+        suppressor = _find_unhealthy_ancestor(check.id, self._latest_status, self._depends_on)
+        if not suppressor:
+            return result
+        # Use the friendly upstream name in the user-facing summary so
+        # the message reads naturally ("Origin reachable" not
+        # "layer0.origin.alive"). The raw check_id is still preserved in
+        # payload.suppressed_by for routing / drilldown deeplinks.
+        upstream_check = CHECKS.get(suppressor)
+        upstream_label = pretty_check_label(
+            suppressor, upstream_check.target if upstream_check else "",
+        )
+        log.info("check %s demoted to skip — upstream %s unhealthy", check.id, suppressor)
+        return CheckResult(
+            check_id=result.check_id, target=result.target, stage=result.stage,
+            status="skip",
+            started_at=result.started_at, finished_at=result.finished_at,
+            summary=f"Upstream \"{upstream_label}\" unhealthy",
+            payload={
+                **(result.payload or {}),
+                "reason":           "upstream_unhealthy",
+                "suppressed_by":    suppressor,
+                "original_status":  result.status,
+                "original_summary": result.summary,
+            },
+            metrics=result.metrics,
+        )
+
     def _maybe_downgrade_for_network(self, check: Check, result: CheckResult) -> CheckResult:
         net = getattr(self.ctx, "network", None)
         if net is None or net.online:
@@ -136,7 +321,7 @@ class Scheduler:
             check_id=result.check_id, target=result.target, stage=result.stage,
             status="skip",
             started_at=result.started_at, finished_at=result.finished_at,
-            summary="local network offline — upstream not reachable",
+            summary="Sentinel Internet offline",
             payload={
                 "reason":            "local_network_offline",
                 "original_status":   result.status,
@@ -145,14 +330,19 @@ class Scheduler:
             },
         )
 
-    async def _loop(self, check: Check) -> None:
-        # initial random jitter (0..1 s) to spread the first wave
-        await asyncio.sleep(random.uniform(0, 1.0))
+    async def _loop(self, check: Check, initial_delay_s: float = 0.0) -> None:
+        # Topological-stagger initial delay + small random jitter (0..1 s)
+        # to spread the first wave so 36 checks don't all fire at t=0.
+        await asyncio.sleep(initial_delay_s + random.uniform(0, 1.0))
         while not self._stop.is_set():
+            # Block if any transitive upstream is mid-tick. Bounded.
+            await self._await_upstream_settled(check)
+            self._running.add(check.id)
             t0 = utcnow()
             try:
                 result = await check.run(self.ctx)
             except asyncio.CancelledError:
+                self._running.discard(check.id)
                 raise
             except Exception as e:  # noqa: BLE001 — we want to swallow everything
                 # Local DNS / name-resolution flakes shouldn't fire alarms.
@@ -168,7 +358,7 @@ class Scheduler:
                         check_id=check.id, target=check.target, stage=check.stage,
                         status="skip",
                         started_at=t0, finished_at=utcnow(),
-                        summary=f"local DNS unavailable: {type(e).__name__}: {e}",
+                        summary=f"Local DNS unavailable ({humanize_error(e)})",
                         payload={
                             "reason":    "local_dns_error",
                             "exception": type(e).__name__,
@@ -181,7 +371,7 @@ class Scheduler:
                         check_id=check.id, target=check.target, stage=check.stage,
                         status="error",
                         started_at=t0, finished_at=utcnow(),
-                        summary=f"{type(e).__name__}: {e}",
+                        summary=humanize_error(e),
                         payload={"exception": type(e).__name__, "message": str(e)},
                     )
 
@@ -199,6 +389,18 @@ class Scheduler:
             # layer4_image rows still painted red on local DNS hiccups.
             result = self._maybe_downgrade_for_dns_summary(check, result)
             result = self._maybe_downgrade_for_network(check, result)
+            # Cascade-demote: the await-upstream gate above ensures that
+            # by the time we reach this line, any concurrently-ticking
+            # parent has already updated self._latest_status. So this
+            # demote pass sees authoritative dep state.
+            result = self._maybe_demote_for_unhealthy_dep(check, result)
+
+            # Free the in-flight slot + update the latest-status cache
+            # BEFORE writing to the store / firing the engine, so
+            # downstreams that are waiting on us pick up the new state
+            # the moment we hand control back to the loop.
+            self._latest_status[check.id] = result.status
+            self._running.discard(check.id)
 
             try:
                 await self.store.write_check_run(result)

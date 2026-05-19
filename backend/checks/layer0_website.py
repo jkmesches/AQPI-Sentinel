@@ -9,6 +9,7 @@ import ssl
 from datetime import datetime, timezone
 
 from ..config import SETTINGS
+from ..errors import humanize_error
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 
@@ -29,7 +30,11 @@ class WebsitePublicCheck(Check):
     stage = "L0"
     target = "website"
     cadence_s = 60
-    depends_on: list[str] = []
+    # Depends on the origin being alive — if `/api/radar-status/` doesn't
+    # respond, the SSR pipeline can't be serving public/, so demote this
+    # row to skip and let `layer0.origin.alive` be the single point of
+    # blame for an upstream outage.
+    depends_on: list[str] = ["layer0.origin.alive"]
 
     async def run(self, ctx):
         t0 = utcnow()
@@ -71,7 +76,8 @@ class RootNotFoundCheck(Check):
     stage = "L0"
     target = "root"
     cadence_s = 300
-    depends_on: list[str] = []
+    # Same rationale as WebsitePublicCheck — origin failure cascades here.
+    depends_on: list[str] = ["layer0.origin.alive"]
 
     async def run(self, ctx):
         t0 = utcnow()
@@ -96,7 +102,11 @@ class OriginAliveCheck(Check):
     stage = "L0"
     target = "origin"
     cadence_s = 60
-    depends_on: list[str] = []
+    # Single point of blame for any upstream outage: if our internet or
+    # DNS is broken, origin can't be reached even when it's fine. Sitting
+    # those above origin in the dep tree means a Sentinel-side problem
+    # demotes origin → website → product → radar all the way down.
+    depends_on: list[str] = ["layer0.net.internet", "layer0.net.dns"]
 
     async def run(self, ctx):
         t0 = utcnow()
@@ -128,7 +138,11 @@ class TLSCertCheck(Check):
     stage = "L0"
     target = "tls"
     cadence_s = 3600
-    depends_on: list[str] = []
+    # TLS handshake fails when the origin's TCP listener is down; deduplicate
+    # the resulting cascade by parenting on origin.alive. (Cert-expiry
+    # failures are independent of origin liveness and would still surface
+    # here unblocked, since origin would be passing in that case.)
+    depends_on: list[str] = ["layer0.origin.alive"]
 
     async def run(self, ctx):
         import asyncio
@@ -148,7 +162,7 @@ class TLSCertCheck(Check):
                 check_id=self.id, target=self.target, stage=self.stage,
                 status="fail",
                 started_at=t0, finished_at=utcnow(),
-                summary=f"TLS probe failed: {type(e).__name__}: {e}",
+                summary=f"TLS probe failed: {humanize_error(e)}",
                 payload={"error": str(e)},
             )
         not_after = datetime.strptime(
