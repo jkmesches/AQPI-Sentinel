@@ -76,10 +76,10 @@
 			<div class="mt-1 flex items-center justify-center gap-3">
 				<a
 					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
-					href="https://github.com/jkmesches/SentinelProject"
+					href="https://jkmesches.github.io/SentinelProject/"
 					target="_blank"
 					rel="noopener"
-				>github · source</a>
+				>documentation</a>
 				<span>·</span>
 				<a
 					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"

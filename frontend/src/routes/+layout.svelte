@@ -224,10 +224,10 @@
 		<span class="flex items-center gap-3">
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
-				href="https://github.com/jkmesches/SentinelProject"
+				href="https://jkmesches.github.io/SentinelProject/"
 				target="_blank"
 				rel="noopener"
-			>github · source</a>
+			>documentation</a>
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
