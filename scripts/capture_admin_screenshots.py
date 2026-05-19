@@ -51,26 +51,32 @@ HERE = Path(__file__).resolve().parent
 OUT_DIR = HERE.parent / "docs" / "images"
 
 
-# Each entry: (slug, path, optional wait-for selector). The slug becomes
-# the filename suffix. Add new admin surfaces here as they ship.
-PAGES: list[tuple[str, str, str | None]] = [
-    ("login",        "/login",                              "form input[name='email']"),
-    ("home",         "/",                                   ".panel"),
-    ("users",        "/admin/users",                        None),
-    ("email",        "/admin/email",                        None),
-    ("groups",       "/admin/groups",                       None),
-    ("alerts",       "/admin/alerts",                       None),
-    ("thresholds",   "/admin/thresholds",                   None),
-    ("silences",     "/admin/silences",                     None),
-    ("audit",        "/admin/audit",                        None),
-    ("devices",      "/settings/devices",                   None),
+# Each entry: (slug, path, optional wait-for selector, optional filename).
+# When filename is None the file is written as `admin-{slug}.png`; pass a
+# string to override (used for the public views that don't belong under
+# the admin- prefix — they're linked from the README).
+PAGES: list[tuple[str, str, str | None, str | None]] = [
+    ("login",        "/login",              "form input[name='email']", None),
+    # Public views — referenced by README; keep filenames matching.
+    ("home",         "/",                   ".panel",                   "live-dashboard.png"),
+    ("timeline",     "/timeline",           None,                        "timeline.png"),
+    ("history",      "/history",            None,                        "history.png"),
+    # Admin views.
+    ("users",        "/admin/users",        None, None),
+    ("email",        "/admin/email",        None, None),
+    ("groups",       "/admin/groups",       None, None),
+    ("alerts",       "/admin/alerts",       None, None),
+    ("thresholds",   "/admin/thresholds",   None, None),
+    ("silences",     "/admin/silences",     None, None),
+    ("audit",        "/admin/audit",        None, None),
+    ("devices",      "/settings/devices",   None, None),
     # Mobile shell — viewport switched to phone-sized before capture.
-    ("m-status",     "/m",                                  None),
-    ("m-timeline",   "/m/timeline",                         None),
-    ("m-uptime",     "/m/uptime",                           None),
-    ("m-alarms",     "/m/alarms",                           None),
-    ("m-history",    "/m/history",                          None),
-    ("m-more",       "/m/more",                             None),
+    ("m-status",     "/m",                  None, None),
+    ("m-timeline",   "/m/timeline",         None, None),
+    ("m-uptime",     "/m/uptime",           None, None),
+    ("m-alarms",     "/m/alarms",           None, None),
+    ("m-history",    "/m/history",          None, None),
+    ("m-more",       "/m/more",             None, None),
 ]
 MOBILE_SLUG_PREFIX = "m-"
 
@@ -156,7 +162,7 @@ async def capture(base_url: str, email: str, password: str) -> None:
         m_page = await mobile.new_page()
         await login(m_page, base_url, email, password)
 
-        for slug, path, wait_for in PAGES:
+        for slug, path, wait_for, filename in PAGES:
             is_mobile = slug.startswith(MOBILE_SLUG_PREFIX) or slug == "login"
             target = m_page if is_mobile else page
             url = f"{base_url.rstrip('/')}{path}"
@@ -173,7 +179,7 @@ async def capture(base_url: str, email: str, password: str) -> None:
                     pass
             # Brief settle so live data finishes rendering.
             await target.wait_for_timeout(800)
-            out = OUT_DIR / f"admin-{slug}.png"
+            out = OUT_DIR / (filename or f"admin-{slug}.png")
             # Full-page for desktop (admin tables can be tall and benefit
             # from showing the whole layout). For mobile we use the
             # viewport-only screenshot — mobile timelines and history
