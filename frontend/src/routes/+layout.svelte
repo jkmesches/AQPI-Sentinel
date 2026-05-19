@@ -151,6 +151,13 @@
 					<span class="num text-[var(--color-bright)]" title={`${auth.user.email} · ${auth.user.role}`}>
 						{auth.user.display_name || auth.user.email}
 					</span>
+					<a
+						href="/settings/devices"
+						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+						title="Per-device push notification routing"
+					>
+						devices
+					</a>
 					<button
 						type="button"
 						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]"
