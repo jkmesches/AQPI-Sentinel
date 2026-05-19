@@ -209,9 +209,10 @@ def create_app() -> FastAPI:
     # Mount auto-docs under /api/ so the existing reverse-proxy convention
     # (/api/* → backend, everything else → frontend) routes them correctly.
     # FastAPI's defaults sit at /docs + /redoc which would hit the frontend.
+    from .._version import __version__
     app = FastAPI(
         title="Sentinel",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
@@ -238,6 +239,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
         expose_headers=["x-sentinel-cache"],
     )
+
+    # /api/version — tiny endpoint the frontend footer fetches once.
+    # Keeps the version string single-sourced from backend/_version.py
+    # so we don't drift the FE and BE on release bumps.
+    from fastapi import APIRouter
+    version_router = APIRouter(prefix="/api")
+    @version_router.get("/version")
+    async def _version() -> dict:
+        return {"version": __version__}
+    app.include_router(version_router)
 
     app.include_router(status_routes.router)
     app.include_router(checks_routes.router)

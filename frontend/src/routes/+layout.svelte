@@ -11,6 +11,7 @@
 	import { fmtAge, stageLabel } from '$lib/format';
 	import { diag } from '$lib/diag';
 	import { installFetchPrefix } from '$lib/origin';
+	import { version, loadVersion } from '$lib/stores/version.svelte';
 
 	// Mobile routes (/m/*) supply their own chrome — skip the desktop
 	// header / stage strip / overflow-hidden main when we're under /m.
@@ -27,6 +28,7 @@
 		theme.start();
 		auth.bootstrap();
 		sentinel.start(5000);
+		loadVersion();
 		if (diag.tick) tickTimer = setInterval(() => (now = new Date()), 1000);
 	});
 	onDestroy(() => {
@@ -222,6 +224,10 @@
 			>Joseph Mesches</a>
 		</span>
 		<span class="flex items-center gap-3">
+			{#if version.value}
+				<span class="num text-[var(--color-faint)]">v{version.value}</span>
+				<span class="text-[var(--color-faint)]">·</span>
+			{/if}
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://jkmesches.github.io/SentinelProject/"
