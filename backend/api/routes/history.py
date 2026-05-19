@@ -209,6 +209,12 @@ async def history_timeline(
         "        ELSE 0 END) AS worst_rank, "
         "  bool_or(status = 'fail')  AS has_fail, "
         "  bool_or(status = 'error') AS has_error, "
+        # Surface payload.reason aggregations so the client can render a
+        # small badge on cells whose runs were demoted because an upstream
+        # was unhealthy (vs. an intrinsic skip like a forecast product
+        # skipping its step-count sub-check). We pick the first non-pass
+        # reason seen — 'upstream_unhealthy' wins when it appears.
+        "  bool_or(payload->>'reason' = 'upstream_unhealthy') AS any_upstream, "
         "  COUNT(*) AS n "
         "FROM check_runs "
         "WHERE " + " AND ".join(where) + " "
@@ -242,7 +248,12 @@ async def history_timeline(
         else:
             status = rank_to_status[rank]
         key = f"{r['check_id']}|{r['target']}"
-        buckets[idx]["cells"][key] = {"status": status, "n": int(r["n"])}
+        cell: dict = {"status": status, "n": int(r["n"])}
+        # Only emit `reason` when it's load-bearing — the field is omitted
+        # for vanilla skips so the JSON stays small over the wire.
+        if r.get("any_upstream"):
+            cell["reason"] = "upstream_unhealthy"
+        buckets[idx]["cells"][key] = cell
 
     older_cursor = (until_snapped - timedelta(seconds=span_s)).isoformat()
     return {

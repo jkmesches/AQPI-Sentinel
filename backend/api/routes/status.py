@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 
+from ...registry import CHECKS
+
 router = APIRouter(prefix="/api")
 
 
@@ -25,6 +27,13 @@ def _serialize(row: dict) -> dict:
 async def status(request: Request):
     store = request.app.state.store
     rows = await store.latest_per_check()
+    # Filter out check_runs for check_ids that are no longer in the
+    # registry — e.g. after `layer0.net.control` was split into
+    # `layer0.net.internet` + `layer0.net.dns`, the old id still has the
+    # last successful row in the DB and would otherwise ghost-appear in
+    # the rollup with stale data. Timeline history endpoints keep ALL
+    # rows so the past stays inspectable.
+    rows = [r for r in rows if r["check_id"] in CHECKS]
     by_stage: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         by_stage[r["stage"]].append(_serialize(r))

@@ -84,11 +84,23 @@ class Layer4ImageCheck(Check):
         self.id = f"layer4.{kind}.{identifier}"
         self.target = identifier
         self.identifier = identifier
+        # depends_on lists both the immediate predecessor (L2 / L1) AND
+        # layer0.origin.alive directly. Cascade-demote's BFS would find
+        # origin via the L2/L1 chain on its own — but listing it directly
+        # makes the dependency relationship explicit in the registry, so
+        # introspection tools and the /m/uptime focus-mode pull the right
+        # set of "related" checks without traversing two hops first.
         if kind == "xband":
-            self.depends_on = [f"layer2.radar.{identifier}"]
+            self.depends_on = [
+                f"layer2.radar.{identifier}",
+                "layer0.origin.alive",
+            ]
             self.folder = RADAR_FOLDER[identifier]
         else:
-            self.depends_on = [f"layer1.product.{identifier}"]
+            self.depends_on = [
+                f"layer1.product.{identifier}",
+                "layer0.origin.alive",
+            ]
 
     # ------------------------------------------------------------------
     async def _fetch_image(self, ctx) -> tuple[bytes, str] | tuple[None, str]:
