@@ -21,17 +21,14 @@ head. When something goes wrong upstream, here's what happens:
 
 ```mermaid
 flowchart TB
-    tick["Check tick<br/>check.run() → CheckResult<br/>(pass / warn / fail / error)"]
-    engine["AlarmEngine<br/>open alarm"]
-    route["Route table<br/>(match alarm fields)"]
-    policy["Policy steps<br/>(recipients +<br/>per-step delay)"]
-    expand["Recipient expansion<br/>· direct emails<br/>· groups → members<br/>  gated by schedule"]
-    email["Email sink"]
-    push["Push sink<br/>(per-device routing:<br/>severity floor, patterns,<br/>on-duty schedule, delay)"]
-    webhook["Webhook sink"]
+    tick["<b>Check tick</b><br/>check.run() → CheckResult<br/>(pass / warn / fail / error)"]
+    engine["<b>AlarmEngine</b> — open alarm"]
+    route["<b>Route table</b><br/>match alarm fields"]
+    policy["<b>Policy steps</b><br/>recipients + per-step delay"]
+    expand["<b>Recipient expansion</b><br/>direct emails<br/>groups → members, gated by schedule"]
+    sinks["<b>Sinks</b><br/>Email<br/>Push — per-device routing: severity floor,<br/>patterns, on-duty schedule, delay<br/>Webhook"]
 
-    tick --> engine --> route --> policy --> expand
-    expand --> email & push & webhook
+    tick --> engine --> route --> policy --> expand --> sinks
 ```
 
 Vocabulary:

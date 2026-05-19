@@ -15,18 +15,13 @@ expose.
 ```mermaid
 flowchart TB
     result["CheckResult"]
-    evaluate["Engine.evaluate"]
-    suppress{"suppressed_by?<br/>(depends_on ancestor<br/>unhealthy?)"}
-    openclose["Open / close<br/>alarm row"]
-    row[("Alarm row<br/>stored in DB")]
-    listeners["Listeners fan out:<br/>· _push_alarm (WebSocket → dashboard tabs)<br/>· _web_push (subscribed mobile devices)<br/>· your sink here"]
-    tick["Engine._tick · every TICK_S<br/>──────────────────────────<br/>for each open alarm:<br/>  compute current severity<br/>  skip if suppressed<br/>  skip if silence matches<br/>  check policy's next-step time<br/>  dispatch step to recipients<br/>    └─ expand groups → schedule-gate<br/>       → dedupe emails → fire each sink"]
+    evaluate["<b>Engine.evaluate</b><br/>suppressed_by? (any depends_on ancestor unhealthy?)<br/>if yes → store alarm but skip listener fan-out"]
+    openclose["Open / close alarm row"]
+    row[("Alarm row stored in DB")]
+    listeners["<b>Listeners fan out</b><br/>_push_alarm — WebSocket → dashboard tabs<br/>_web_push — subscribed mobile devices<br/>your sink here — register via engine.add_listener"]
+    tick["<b>Engine._tick · every TICK_S</b><br/>for each open alarm:<br/>compute current severity<br/>skip if suppressed<br/>skip if silence matches<br/>check policy's next-step time<br/>dispatch step to recipients —<br/>expand groups → schedule-gate →<br/>dedupe emails → fire each sink"]
 
-    result --> evaluate --> suppress
-    suppress -- "no" --> openclose --> row
-    suppress -- "yes" --> row
-    openclose --> listeners
-    row --> tick
+    result --> evaluate --> openclose --> row --> listeners --> tick
 ```
 
 The code lives in `backend/alarms/`:

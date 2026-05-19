@@ -244,6 +244,13 @@
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				href="/api/docs"
+				target="_blank"
+				rel="noopener"
+			>API</a>
+			<span class="text-[var(--color-faint)]">·</span>
+			<a
+				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://radarca.engr.colostate.edu"
 				target="_blank"
 				rel="noopener"
