@@ -152,7 +152,10 @@
 				</button>
 			{/each}
 		</div>
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">Notifications below this level are dropped for this device.</div>
+		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			Notifications below this level are dropped for this device.
+			Alarms open at <span class="text-[var(--color-bright)]">warn</span>; they auto-promote to <span class="text-[var(--color-bright)]">critical</span> after 30 min if status is <span class="num">fail</span>.
+		</div>
 	</section>
 
 	<!-- Product / target patterns -->
@@ -178,8 +181,9 @@
 			/>
 			<button onclick={addPattern} type="button" class="rounded-md border border-[var(--color-border-strong)] px-3 text-[12px] uppercase tracking-wider text-[var(--color-default)] active:bg-[var(--color-elevated)]">add</button>
 		</div>
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
-			Only notifications whose check ID, target, or title contains at least one pattern are sent. Empty = match everything.
+		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			Notifications whose check ID, target, or title contains at least one pattern are sent. Empty = match everything.<br />
+			<span class="text-[var(--color-bright)]">Always included regardless of patterns:</span> L0 connectivity + canary alarms (origin / website / TLS / stream canary). Patterns only filter product-specific alarms.
 		</div>
 	</section>
 

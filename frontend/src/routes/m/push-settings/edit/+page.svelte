@@ -336,7 +336,7 @@
 		<section>
 			<label class="flex items-center gap-2 mb-1">
 				<input type="checkbox" bind:checked={rdtEnabled} class="accent-[var(--color-ok)] h-4 w-4" />
-				<span class="text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Quiet hours (recurring)</span>
+				<span class="text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Quiet hours (recurring, UTC)</span>
 			</label>
 			{#if rdtEnabled}
 				<div class="mt-2 flex items-center gap-2 flex-wrap">

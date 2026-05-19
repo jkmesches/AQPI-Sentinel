@@ -414,12 +414,12 @@
 				</p>
 				<div class="flex flex-wrap items-center gap-4 mb-3">
 					<label class="flex items-center gap-2">
-						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">since</span>
+						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">since (UTC)</span>
 						<input type="datetime-local" bind:value={reSince}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
-						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">until</span>
+						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">until (UTC)</span>
 						<input type="datetime-local" bind:value={reUntil}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]" />
 					</label>

@@ -122,6 +122,29 @@ def _send_one(subscription: dict, payload: dict, vapid: dict) -> tuple[bool, str
 _SEVERITY_RANK = {"info": 0, "warn": 1, "critical": 2}
 
 
+def _is_always_included(payload: dict) -> bool:
+    """Infrastructure / connectivity alarms that should bypass pattern
+    filtering. If we don't always-pass these, a user who configures a
+    product-pattern allowlist silently loses the "origin is unreachable"
+    signal — which is exactly the alarm class they most need to see.
+
+    Recognized via the structured `stage` + `check_id` fields the
+    dispatcher embeds in the payload. Fall back to the tag string for
+    legacy payloads that don't carry the new fields.
+    """
+    stage = str(payload.get("stage") or "").lower()
+    if stage.startswith("layer0") or stage == "l0":
+        return True
+    check_id = str(payload.get("check_id") or "").lower()
+    if check_id.startswith("layer0.") or ".canary" in check_id:
+        return True
+    # Legacy fallback — older payloads only had `tag`.
+    tag = str(payload.get("tag") or "").lower()
+    if tag.startswith("layer0.") or ".canary" in tag:
+        return True
+    return False
+
+
 def _subscription_matches(routing: dict, payload: dict) -> bool:
     """Per-device filter check.
 
@@ -129,6 +152,11 @@ def _subscription_matches(routing: dict, payload: dict) -> bool:
       severity_floor:    e.g. "warn" — drop notifications below this rank
       product_patterns:  list[str] — glob-style match against check_id or
                          target. Empty/missing = match anything.
+
+    L0 connectivity + canary alarms always pass `product_patterns` — they
+    are the "infrastructure is broken" signal and you don't want a
+    product allowlist to silently drop them. Severity floor still
+    applies to everything.
 
     Schedule gating is handled separately via backend.groups.is_active_at
     (see dispatch_push) because schedule lookup is wall-clock aware.
@@ -148,7 +176,7 @@ def _subscription_matches(routing: dict, payload: dict) -> bool:
             return False
 
     patterns = routing.get("product_patterns") or []
-    if patterns:
+    if patterns and not _is_always_included(payload):
         haystack = " ".join([
             str(payload.get("tag") or ""),
             str(payload.get("title") or ""),

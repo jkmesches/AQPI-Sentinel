@@ -152,7 +152,7 @@
 	<!-- TIME SCRUBBER + FILTERS -->
 	<header class="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] px-4 py-2 text-[11px]">
 		<div class="flex items-center gap-1">
-			<span class="text-[var(--color-muted)] uppercase tracking-wider">since</span>
+			<span class="text-[var(--color-muted)] uppercase tracking-wider">since (UTC)</span>
 			<input
 				type="datetime-local"
 				bind:value={since}
@@ -160,7 +160,7 @@
 			/>
 		</div>
 		<div class="flex items-center gap-1">
-			<span class="text-[var(--color-muted)] uppercase tracking-wider">until</span>
+			<span class="text-[var(--color-muted)] uppercase tracking-wider">until (UTC)</span>
 			<input
 				type="datetime-local"
 				bind:value={until}

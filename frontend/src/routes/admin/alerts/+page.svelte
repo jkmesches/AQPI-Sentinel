@@ -745,6 +745,35 @@
 			anything.
 		</div>
 
+		<!-- Status vs severity cheat-sheet. Two different vocabularies live
+		     in this UI: the raw check `status` (5 values) that the engine
+		     emits, and the alarm `severity` (3 values) that the alert
+		     system actually routes on. The mapping below is what trips
+		     people up — most notably, `status=error` does NOT mean
+		     "critical" by default; it opens at warn just like the others. -->
+		<div class="border border-[var(--color-border)] bg-[var(--color-elevated)]/30 p-3 mb-4 text-[11px] leading-relaxed">
+			<div class="text-[var(--color-bright)] uppercase tracking-wider text-[10px] mb-1">Status vs severity</div>
+			<div class="text-[var(--color-muted)] mb-2">
+				The <span class="text-[var(--color-bright)] num">status</span> dropdown matches the raw signal a check returned (5 values).
+				The <span class="text-[var(--color-bright)] num">severity floor</span> matches the rolled-up alarm level (3 values).
+				They are not interchangeable.
+			</div>
+			<table class="num text-[10.5px]">
+				<thead>
+					<tr class="text-[var(--color-faint)]"><th class="text-left pr-4 pb-0.5">check status</th><th class="text-left pr-4 pb-0.5">opens at severity</th><th class="text-left pb-0.5">notes</th></tr>
+				</thead>
+				<tbody class="text-[var(--color-default)]">
+					<tr><td class="pr-4">warn</td><td class="pr-4">warn</td><td>degraded</td></tr>
+					<tr><td class="pr-4">fail</td><td class="pr-4">warn → <span class="text-[var(--color-bright)]">critical</span></td><td>auto-promotes after 30 min</td></tr>
+					<tr><td class="pr-4">error</td><td class="pr-4">warn</td><td>check itself crashed (e.g. transport timeout) — stays at warn</td></tr>
+					<tr><td class="pr-4 text-[var(--color-faint)]">pass / skip</td><td class="pr-4 text-[var(--color-faint)]">—</td><td class="text-[var(--color-faint)]">no alarm opens</td></tr>
+				</tbody>
+			</table>
+			<div class="text-[var(--color-muted)] mt-2">
+				If you want to be paged on any unhealthy state, leave <span class="num">status</span> as <span class="num">(any)</span>. Filtering on <span class="num">error</span> alone catches check-crashes but <span class="text-[var(--color-bright)]">not</span> radars that returned a real <span class="num">fail</span>.
+			</div>
+		</div>
+
 		{#if routes.length === 0}
 			<div class="text-[12px] text-[var(--color-faint)] italic mb-3">No rules yet.</div>
 		{/if}
@@ -887,16 +916,22 @@
 					{#if r.showWhen}
 						<div class="mt-2 pl-4 border-l border-[var(--color-border)] grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-[12px] items-center">
 							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">time of day in</label>
-							<input bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+							<div class="flex items-center gap-2">
+								<input bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
+									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+								<span class="text-[10px] text-[var(--color-faint)]">interpreted in the timezone below</span>
+							</div>
 
 							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">time of day not in</label>
 							<input bind:value={r.when.time_of_day_not_in} placeholder="22:00-06:00"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">timezone</label>
-							<input bind:value={r.when.timezone} placeholder="UTC"
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+							<div class="flex items-center gap-2">
+								<input bind:value={r.when.timezone} placeholder="UTC"
+									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+								<span class="text-[10px] text-[var(--color-faint)]">IANA name (e.g. <span class="num">UTC</span>, <span class="num">America/Los_Angeles</span>). Default = UTC.</span>
+							</div>
 
 							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">weekdays only</label>
 							<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
