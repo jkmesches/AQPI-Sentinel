@@ -197,15 +197,16 @@
 			/>
 		</section>
 
-		<!-- Severity floor -->
+		<!-- Severity floor — friendlier wording matches the v0.1.2 reshape.
+		     "Broken only" = fail/error; warn-status (degraded) skipped. -->
 		<section>
-			<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Minimum severity</div>
+			<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Notify me when</div>
 			<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-				{#each [['','any severity'],['info','info+'],['warn','warn+'],['critical','critical only']] as [v, lbl]}
+				{#each [['','Any alarm'],['info','All'],['warn','Broken only'],['critical','Long outages']] as [v, lbl]}
 					<button
 						type="button"
 						onclick={() => (severityFloor = v as any)}
-						class="rounded-md border px-2 py-2.5 text-[12.5px] num uppercase tracking-wider {severityFloor === v
+						class="rounded-md border px-2 py-2.5 text-[12px] uppercase tracking-wider {severityFloor === v
 							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 						style="-webkit-tap-highlight-color: transparent; min-height: 44px;"
@@ -213,6 +214,13 @@
 						{lbl}
 					</button>
 				{/each}
+			</div>
+			<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+				<span class="text-[var(--color-bright)]">Broken only</span> skips warnings about
+				degraded-but-not-broken state (e.g. transient image-quality glitches,
+				upstream pipeline hiccups, near-expiry TLS).
+				<span class="text-[var(--color-bright)]">Long outages</span> waits 30 minutes
+				before paging — anything that fixes itself quickly stays quiet.
 			</div>
 		</section>
 

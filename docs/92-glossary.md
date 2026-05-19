@@ -66,14 +66,20 @@ things:
 | **Status** | Returned by a check; stored on `check_runs.status` | `pass` `warn` `fail` `error` `skip` | The raw signal the check produced. |
 | **Severity** | Computed on `alarms.severity` | `info` `warn` `critical` | The rolled-up alarm level, used for routing + display. |
 
-The mapping (`backend/alarms/router.py`):
+The mapping (`backend/alarms/router.py`, v0.1.2+):
 
-| Status | Initial severity | Notes |
+| Status | Initial severity | Operational tier |
 |---|---|---|
-| `warn` | `warn` | Stays at warn. |
-| `fail` | `warn` → `critical` | Auto-promotes to critical after 30 min if still open. |
-| `error` | `warn` | Check itself crashed (e.g. transport timeout). Stays at warn — same severity-floor on routes applies. |
-| `pass`/`skip` | — | No alarm opens. |
+| `warn` | `info` | Attention — degraded but not broken |
+| `fail` | `warn` → `critical` after 30 min | Action — broken |
+| `error` | `warn` → `critical` after 30 min | Action — check crashed (transport / parse) |
+| `pass`/`skip` | — | No alarm opens |
+
+This aligns `severity_floor` with operational priority:
+
+- `info` (or unset) → notify on everything
+- `warn` → notify on broken (fail / error) only
+- `critical` → notify only on long-running outages (> 30 min open)
 
 **Routing rules can match on either.** The `status` filter sees the
 raw signal (5 values); the `severity floor` filter sees the

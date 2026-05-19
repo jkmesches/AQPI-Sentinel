@@ -247,7 +247,12 @@ class Layer1ProductCheck(Check):
         if matched + mismatches == 0:
             parity_verdict = "skip"           # nothing parseable to compare
         elif mismatches:
-            parity_verdict = "fail"
+            # Upstream HRRR pipeline glitches (duplicate or out-of-order
+            # step files) used to mark this as fail. They're data-quality
+            # issues, not service outages — the product is still serving,
+            # the manifest just has a hiccup. warn matches the v0.1.2
+            # severity reshape ("requires attention", not "broken").
+            parity_verdict = "warn"
         else:
             parity_verdict = "pass"
 

@@ -14,14 +14,15 @@
 	 *    schedule          — group-schedule shape (weekly/biweekly/downtime)
 	 *                        evaluated by backend/groups.py at dispatch.
 	 */
-	import { stageLabel, productLabel } from '$lib/format';
+	import {
+		stageLabel, productLabel, productCategory,
+		PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
+	} from '$lib/format';
 
-	// Hardcoded suggestion lists — mirror the mobile editor at
-	// /m/push-settings/edit. The backend's PRODUCT registry is the
-	// source of truth; keep these in sync (it changes rarely). A
-	// future enhancement is to fetch /api/checks on mount, but the
-	// constant approach matches the mobile UX exactly and avoids the
-	// loading-spinner-while-empty pattern.
+	// Hardcoded suggestion lists — backend PRODUCT registry is source of
+	// truth; keep these in sync. A future enhancement is to fetch
+	// /api/checks on mount; the constants approach matches the mobile UX
+	// and avoids a loading-spinner-while-empty render.
 	const RADAR_IDS = ['XSCW', 'XSCV', 'XSCR', 'XSWR', 'XEBY', 'CBAND'];
 	const PRODUCT_IDS = [
 		'qpe_15min', 'qpe_1hr', 'precip_rate_radar',
@@ -30,6 +31,15 @@
 		'fcst_precip_rate', 'fcst_temp',
 		'water_level', 'water_depth'
 	];
+	// Products grouped by category for the chip-picker UI. Same taxonomy
+	// the home page uses (Radar Data / Atmospheric Forecast / CoSMoS /
+	// NWM / Other). Empty groups are filtered out at render time.
+	const PRODUCTS_BY_CATEGORY = PRODUCT_CATEGORY_ORDER
+		.map((cat) => ({
+			label: PRODUCT_CATEGORY_LABEL[cat],
+			products: PRODUCT_IDS.filter((p) => productCategory(p) === cat),
+		}))
+		.filter((g) => g.products.length > 0);
 
 	let {
 		subscription = $bindable<any>(null),
@@ -159,11 +169,11 @@
 	<section>
 		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Minimum severity</div>
 		<div class="flex gap-1">
-			{#each [['','any'],['info','info+'],['warn','warn+'],['critical','critical only']] as [v, lbl]}
+			{#each [['','any'],['info','All'],['warn','Broken only'],['critical','Long outages only']] as [v, lbl]}
 				<button
 					type="button"
 					onclick={() => (severityFloor = v as any)}
-					class="flex-1 rounded-md border px-2 py-2 text-[12px] num uppercase tracking-wider {severityFloor === v
+					class="flex-1 rounded-md border px-2 py-2 text-[11.5px] uppercase tracking-wider {severityFloor === v
 						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 					style="-webkit-tap-highlight-color: transparent;"
@@ -173,8 +183,9 @@
 			{/each}
 		</div>
 		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
-			Notifications below this level are dropped for this device.
-			Alarms open at <span class="text-[var(--color-bright)]">warn</span>; they auto-promote to <span class="text-[var(--color-bright)]">critical</span> after 30 min if status is <span class="num">fail</span>.
+			<span class="text-[var(--color-bright)]">All</span> = warn-status + fail/error.
+			<span class="text-[var(--color-bright)]">Broken only</span> = fail/error only (skips "degraded" warnings).
+			<span class="text-[var(--color-bright)]">Long outages only</span> = fail/error that stays open past 30 min (auto-promoted to critical).
 		</div>
 	</section>
 
@@ -196,18 +207,20 @@
 			{/each}
 		</div>
 
-		<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Products</div>
-		<div class="flex flex-wrap gap-1.5 mb-3">
-			{#each PRODUCT_IDS as p}
-				{@const sel = patterns.includes(p)}
-				<button type="button" onclick={() => togglePattern(p)}
-					class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
-						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
-						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
-					title={p}
-				>{productLabel(p)}</button>
-			{/each}
-		</div>
+		{#each PRODUCTS_BY_CATEGORY as group}
+			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">{group.label}</div>
+			<div class="flex flex-wrap gap-1.5 mb-3">
+				{#each group.products as p}
+					{@const sel = patterns.includes(p)}
+					<button type="button" onclick={() => togglePattern(p)}
+						class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
+							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
+							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
+						title={p}
+					>{productLabel(p)}</button>
+				{/each}
+			</div>
+		{/each}
 
 		{#if patterns.some((p) => !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p))}
 			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Custom patterns</div>

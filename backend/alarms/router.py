@@ -1,10 +1,28 @@
 """Match an alarm against the route table; resolve its policy + severity.
 
-First-match wins. Severity computation:
-  - status == 'warn'  → 'warn'
-  - status == 'fail'  → 'warn' for first 30 min, then 'critical' (duration promo)
-  - status == 'error' → 'warn'
+First-match wins. Severity model (v0.1.2+):
+
+  status        initial severity                     notes
+  --------      ------------------                   -----
+  warn          info                                 Degraded but not broken
+                                                     ("requires attention")
+  fail          warn → critical after 30 min        Broken
+                                                     ("requires action")
+  error         warn → critical after 30 min        Check itself crashed
+                                                     (transport timeout — usually
+                                                     means upstream is unreachable)
+  pass / skip   no alarm opens                       —
+
+This gives operators three meaningful tiers via severity_floor:
+  - floor=info       → notify on everything (warn-status included)
+  - floor=warn       → notify only on broken (fail/error)
+  - floor=critical   → notify only on long-running outages (>30 min open)
+
 Route ``severity_floor`` raises the severity if the floor is higher.
+
+Prior model (v0.1.1-): warn/fail/error all mapped to severity=warn, making
+severity_floor unable to distinguish "degraded" from "broken." Reshaped in
+v0.1.2 so the routing tier maps cleanly onto operational priority.
 """
 from __future__ import annotations
 import logging
@@ -25,12 +43,19 @@ PROMOTE_AFTER_S = 30 * 60
 
 
 def severity_for_status(status: str) -> str:
+    """Map a check's raw status to the alarm's initial severity.
+
+    The mapping aligns the routing tier with operational priority:
+    warn = "degraded but not broken" → info severity (informational).
+    fail/error = "broken" → warn severity, auto-promoted to critical
+    after PROMOTE_AFTER_S via compute_severity. See module docstring.
+    """
     if status == "warn":
-        return "warn"
+        return "info"     # degraded — informational
     if status == "fail":
-        return "warn"     # promoted by duration in :func:`compute_severity`
+        return "warn"     # broken — promoted to critical at 30 min
     if status == "error":
-        return "warn"
+        return "warn"     # check crashed — same promote path as fail
     return "info"
 
 
@@ -68,9 +93,13 @@ class Router:
     ) -> str:
         sev = severity_for_status(alarm.get("status_at_open", "warn"))
         opened: datetime = alarm["opened_at"]
-        # duration-based promotion: fail → critical after PROMOTE_AFTER_S
+        # Duration-based promotion: long-running fail/error → critical.
+        # Both kinds mean "broken"; if either is still open past
+        # PROMOTE_AFTER_S, it's no longer transient and warrants a
+        # page-tier severity. warn-status alarms stay at info (they're
+        # degraded, not broken — no auto-escalation).
         if (now - opened).total_seconds() >= PROMOTE_AFTER_S and \
-           alarm.get("status_at_open") == "fail":
+           alarm.get("status_at_open") in ("fail", "error"):
             sev = _max_sev("critical", sev)
         # apply floor
         if route and route.severity_floor:

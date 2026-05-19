@@ -745,32 +745,30 @@
 			anything.
 		</div>
 
-		<!-- Status vs severity cheat-sheet. Two different vocabularies live
-		     in this UI: the raw check `status` (5 values) that the engine
-		     emits, and the alarm `severity` (3 values) that the alert
-		     system actually routes on. The mapping below is what trips
-		     people up — most notably, `status=error` does NOT mean
-		     "critical" by default; it opens at warn just like the others. -->
+		<!-- Status vs severity cheat-sheet. The two columns align with
+		     three operational priorities: action / attention / informational.
+		     Reshaped in v0.1.2 so severity_floor cleanly distinguishes
+		     "degraded" from "broken." -->
 		<div class="border border-[var(--color-border)] bg-[var(--color-elevated)]/30 p-3 mb-4 text-[11px] leading-relaxed">
 			<div class="text-[var(--color-bright)] uppercase tracking-wider text-[10px] mb-1">Status vs severity</div>
 			<div class="text-[var(--color-muted)] mb-2">
-				The <span class="text-[var(--color-bright)] num">status</span> dropdown matches the raw signal a check returned (5 values).
+				The <span class="text-[var(--color-bright)] num">status</span> dropdown matches the raw check signal (5 values).
 				The <span class="text-[var(--color-bright)] num">severity floor</span> matches the rolled-up alarm level (3 values).
-				They are not interchangeable.
 			</div>
 			<table class="num text-[10.5px]">
 				<thead>
-					<tr class="text-[var(--color-faint)]"><th class="text-left pr-4 pb-0.5">check status</th><th class="text-left pr-4 pb-0.5">opens at severity</th><th class="text-left pb-0.5">notes</th></tr>
+					<tr class="text-[var(--color-faint)]"><th class="text-left pr-4 pb-0.5">check status</th><th class="text-left pr-4 pb-0.5">opens at severity</th><th class="text-left pb-0.5">priority</th></tr>
 				</thead>
 				<tbody class="text-[var(--color-default)]">
-					<tr><td class="pr-4">warn</td><td class="pr-4">warn</td><td>degraded</td></tr>
-					<tr><td class="pr-4">fail</td><td class="pr-4">warn → <span class="text-[var(--color-bright)]">critical</span></td><td>auto-promotes after 30 min</td></tr>
-					<tr><td class="pr-4">error</td><td class="pr-4">warn</td><td>check itself crashed (e.g. transport timeout) — stays at warn</td></tr>
+					<tr><td class="pr-4">warn</td><td class="pr-4">info</td><td><span class="text-[var(--color-warn)]">requires attention</span> · degraded but not broken</td></tr>
+					<tr><td class="pr-4">fail</td><td class="pr-4">warn → <span class="text-[var(--color-bright)]">critical</span></td><td><span class="text-[var(--color-fail)]">requires action</span> · broken, auto-promotes after 30 min</td></tr>
+					<tr><td class="pr-4">error</td><td class="pr-4">warn → <span class="text-[var(--color-bright)]">critical</span></td><td><span class="text-[var(--color-fail)]">requires action</span> · check crashed (transport / parse) — usually upstream is unreachable</td></tr>
 					<tr><td class="pr-4 text-[var(--color-faint)]">pass / skip</td><td class="pr-4 text-[var(--color-faint)]">—</td><td class="text-[var(--color-faint)]">no alarm opens</td></tr>
 				</tbody>
 			</table>
 			<div class="text-[var(--color-muted)] mt-2">
-				If you want to be paged on any unhealthy state, leave <span class="num">status</span> as <span class="num">(any)</span>. Filtering on <span class="num">error</span> alone catches check-crashes but <span class="text-[var(--color-bright)]">not</span> radars that returned a real <span class="num">fail</span>.
+				Pick a <span class="num">severity floor</span> that matches the tier you want to be paged on:
+				<span class="num">info</span> = everything, <span class="num">warn</span> = broken only (fail / error), <span class="num">critical</span> = long-running outages (broken &gt; 30 min).
 			</div>
 		</div>
 

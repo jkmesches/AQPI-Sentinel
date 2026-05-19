@@ -112,6 +112,7 @@ nav:
       - Alarm engine: 16-alarm-engine.md
   - Reference:
       - Glossary: 92-glossary.md
+      - Severity audit: 93-severity-audit.md
       - Environment variables: 91-env-vars.md
       - Release process: 99-release-process.md
       - Changelog: changelog.md
