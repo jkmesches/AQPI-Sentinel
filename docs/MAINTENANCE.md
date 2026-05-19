@@ -1,13 +1,15 @@
-# Sentinel Maintenance Runbook
+# Maintenance
 
-Operational reference for keeping Sentinel running in production
-(`docker compose -f ops/docker-compose.prod.yml`) and locally
-(`make dev`). The first half is "things you do regularly," the second
-half is "what to look at when something's wrong."
+Day-2 operational reference for a running Sentinel deployment. The
+first half is "things you do regularly," the second half is "what
+to look at when something's wrong."
 
-If you're new to the project, also read [ARCHITECTURE.md](ARCHITECTURE.md)
-first — it walks through how a check flows end-to-end and which files
-own which responsibility.
+**Related docs:**
+
+- [`01-getting-started.md`](01-getting-started.md) — first install.
+- [`02-deployment.md`](02-deployment.md) — every deployment knob.
+- [`03-administration.md`](03-administration.md) — admin-UI surfaces.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how a check flows end-to-end.
 
 ---
 
@@ -110,6 +112,121 @@ curl -s https://<your-domain>/api/_debug/stats | jq .
 Hit this **first** whenever the UI feels stuck — it instantly tells you
 whether the backend is wedged or whether the issue is browser-side.
 
+### Performance tuning
+
+Sentinel runs comfortably on a 2-vCPU / 4 GB host for the radarca
+scale (38 checks, ~30 outbound req/min). Symptoms of under-resourcing
+that show up in `/api/_debug/stats`:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `event_loop_lag_ms` > 100 sustained | Backend CPU-bound. Usually Playwright (L3 overlay check). | Inspect with `py-spy top` against the backend PID. If it's the Playwright Chromium worker, scale to a bigger host or disable L3 in `backend/checks/__init__.py`. |
+| `asyncpg.in_use == max_size` sustained | Pool saturation. | Bump pool max in `backend/db/store.py` (`Store.connect` → `max_size`). Default 10; 20 is fine for the radarca scale. |
+| `httpx.in_flight` consistently > 10 | Upstream slow OR check cadences too tight. | Verify with the per-cadence math in [`02-deployment.md` § Choosing a host](02-deployment.md#1-choosing-a-host). Loosen cadences in `backend/config.py` if needed. |
+| `image_cache.size` at max + sluggish UI | LRU eviction churn — usually fine, but if RAM is tight, lower `_IMAGE_CACHE_MAX` in `backend/api/routes/upstream.py`. | |
+| `scheduler.tasks_running < tasks_total` | A check task crashed and didn't restart. | Restart backend. If it recurs, the check has a bug — check logs for the crash trace. |
+| Frequent `WebSocket context lost` in mobile logs | iOS Safari dropped the WS while the tab was backgrounded — this is normal, the client reconnects. | No fix needed; only worry if it's not reconnecting. |
+
+The **5-minute health drill** when something feels off:
+
+1. `curl /api/_debug/stats | jq` — single source of truth.
+2. `docker logs --since=5m sentinel-backend | grep -iE 'error|warn'` — look for recent exceptions.
+3. `/api/_debug/stats → network_monitor.online + dns_ok` — confirm Sentinel's own connectivity.
+4. `/admin/audit` — last 10 admin actions, in case a config change preceded the issue.
+
+### Rolling back a release
+
+If a deploy breaks things, pin to the previous tag and re-pull:
+
+```bash
+ssh <prod-host>
+cd /srv/sentinel
+
+# What's currently running?
+docker ps --format '{{.Names}}\t{{.Image}}'
+
+# Roll to a known-good version (substitute your last good tag):
+SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod pull
+SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod up -d
+```
+
+Containers swap in seconds. The data volumes (`sentinel_pgdata`,
+`sentinel_archive`) are untouched — they belong to the host, not the
+container — so a rollback is a no-op for state.
+
+**The one rollback caveat:** `schema.sql` is forward-only by design.
+A rollback to a version that doesn't know about a newer column won't
+break (the extra column is harmless), but a rollback that crosses a
+column rename / drop won't work. We haven't had a destructive
+schema change yet; the pattern when one becomes necessary is "add new,
+migrate data, deprecate old in N+1, drop old in N+2" — same as any
+zero-downtime DB migration.
+
+### Upgrading between versions
+
+The version scheme (vMAJOR.MINOR.PATCH — see [`CHANGELOG.md`](changelog.md))
+gives you a quick read on the upgrade risk:
+
+| Bump | Typical upgrade behavior |
+|---|---|
+| **PATCH** (v0.1.0 → v0.1.1) | Bug fix. Pull, restart. Schema additions if any are backward-compatible. Zero-downtime, no config changes. |
+| **MINOR** (v0.1.x → v0.2.0) | New features. Read the [CHANGELOG](changelog.md) for `Added` and `Changed` entries; you may need to flip a setting to take advantage of new behavior, but the old behavior keeps working. |
+| **MAJOR** (v0.x.x → v1.0.0) | Potentially breaking. Read the migration notes in that release's CHANGELOG entry carefully. Test on a staging deploy first. |
+
+**Standard upgrade procedure:**
+
+```bash
+# Read the CHANGELOG between your current version and the target.
+gh release view v0.2.0 --repo jkmesches/SentinelProject
+
+# Pull the new tag.
+SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod pull
+
+# Check what changed in the env example — new variables may have
+# appeared with sensible defaults you might want to override.
+diff ops/.env.prod.example <(curl -fsSL \
+    "https://raw.githubusercontent.com/jkmesches/SentinelProject/v0.2.0/ops/.env.prod.example")
+
+# Apply.
+SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod up -d
+
+# Verify.
+curl -s http://<host>:8000/api/_debug/stats | jq '.scheduler'
+```
+
+If the upgrade fails healthcheck, roll back per the previous section.
+
+### Monitoring Sentinel itself
+
+The system that watches everything else needs its own watcher. The
+risk profile is bounded — Sentinel is mostly stateless other than
+Postgres — but a silently wedged backend is bad.
+
+**Lightweight options:**
+
+- **External heartbeat** — any external monitor (uptimerobot,
+  healthchecks.io, a tiny cron) hits `/api/_debug/stats` every 5
+  minutes. Alert if absent or `event_loop_lag_ms > 1000`.
+- **Postgres uptime** — your DB monitoring (if you have it) pointed
+  at the `sentinel-postgres` container.
+- **A second Sentinel instance** — overkill for most deploys; gives
+  you the full alarm pipeline for free if you're already running
+  more than one.
+
+**What to alarm on, with thresholds:**
+
+| Signal | Threshold | Why |
+|---|---|---|
+| Backend HTTP 5xx rate | > 1% over 5 min | App-layer failure |
+| `event_loop_lag_ms` | > 100ms sustained | Backend overloaded |
+| `scheduler.tasks_running != tasks_total` | sustained > 1 min | A check task died |
+| `asyncpg.in_use == max_size` | sustained > 30s | Pool saturation |
+| Container restart count | > 1/hr | Crash loop |
+
 ### Backups
 
 Replace `<prod-host>` with your host alias. Recipes assume the
@@ -185,6 +302,41 @@ admin UI doesn't cover — schema reshape, payload migration, etc.):
 .venv/bin/python -m backend.reprocess_dns_errors      # demote historical DNS errors
 .venv/bin/python -m backend.tune_silent_fail          # cadence threshold review
 ```
+
+### Writing a one-shot data migration
+
+`scripts/humanize_history.py` and `scripts/cascade_retro.py` are
+working examples of a recurring pattern: rewrite historical
+`check_runs` / `alarms` rows under new logic without affecting live
+behavior. Use them as templates when a future change has the same
+shape ("we changed how we record X; backfill the history").
+
+**The pattern:**
+
+1. **Filter** the rows that need rewriting via a SQL `WHERE` clause
+   that includes a `payload.<marker>_v IS NULL` guard. Without the
+   guard, re-running the script double-processes.
+2. **Compute** the new value for each row in Python, reading the
+   row's existing fields.
+3. **Stash** the original value in `payload.original_<field>` so
+   the drilldown can still show the raw observation.
+4. **Update** the row's user-visible fields, set `payload.<marker>_v
+   = 1`.
+5. **Dry-run mode** (`--dry` flag) prints what would change without
+   touching the DB. Always run dry first.
+6. **Run inside the backend container** so the script picks up the
+   `SENTINEL_DB_URL` env var and any shared backend modules.
+
+```bash
+# Copy script onto the host, then into the running container:
+docker cp scripts/my_migration.py sentinel-backend:/tmp/
+docker exec sentinel-backend python /tmp/my_migration.py --dry   # preview
+docker exec sentinel-backend python /tmp/my_migration.py         # apply
+```
+
+Idempotent re-runs are the bedrock — if your script can't safely
+be re-run, the rollout window during which it's "partially applied"
+is a window where the system is in a state nobody documented.
 
 ### Edit detection thresholds
 
@@ -488,12 +640,16 @@ which flags are active. The "clear" link in the banner resets.
 
 ## Auto-generated API docs
 
-FastAPI emits OpenAPI specs you can browse interactively. Just hit:
+FastAPI emits OpenAPI specs you can browse interactively under the
+`/api/` prefix so they route through the same reverse-proxy rules as
+every other backend endpoint:
 
-- `http://localhost:8000/docs` — Swagger UI
-- `http://localhost:8000/redoc` — alternative renderer
+- `https://<your-host>/api/docs` — Swagger UI
+- `https://<your-host>/api/redoc` — alternative renderer
+- `https://<your-host>/api/openapi.json` — raw spec
 
 Use these instead of grepping `routes/*.py` when you want to know
-what an endpoint accepts. Both are enabled by default; if you ever
-want to gate them behind auth, set `docs_url=None, redoc_url=None`
-in `create_app()` and mount them on protected routes manually.
+what an endpoint accepts. All three are public by default — if you
+ever want to gate them behind auth, set `docs_url=None,
+redoc_url=None, openapi_url=None` in `create_app()` and mount them
+on protected routes manually.
