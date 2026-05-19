@@ -121,10 +121,10 @@
 				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
 				{@const imgQc = l4XbandByRadar[r.target]}
 				{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 120}
-				<li class="row-hover grid grid-cols-[auto_3.2rem_auto_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
+				<li class="row-hover grid grid-cols-[auto_3.2rem_3rem_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
 					<StatusDot status={r.status} size={9} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 					<span class="num text-[13px] text-[var(--color-bright)] tracking-wide">{r.target}</span>
-					<span class="label {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
+					<span class="label text-left {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
 					<span class="ml-2 {statusText(r.status)}">
 						{#if diag.spark}
 							<Sparkline data={spark} {cadenceS} width={72} height={16} />
@@ -177,10 +177,10 @@
 							{@const spark = sentinel.metrics[`${r.check_id}|age_s`] ?? []}
 							{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
 							{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 60}
-							<li class="row-hover grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
+							<li class="row-hover grid grid-cols-[auto_1fr_4.5rem_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
 								<StatusDot status={r.status} size={8} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 								<span class="num truncate text-[var(--color-bright)]" title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
-								<span class="num text-[10.5px] {statusText(r.status)}">
+								<span class="num text-right text-[10.5px] {statusText(r.status)}">
 									{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
 								</span>
 								<span class={statusText(r.status)}>
@@ -225,7 +225,7 @@
 					<span class={severityChip(a.severity)}>{a.severity}</span>
 					<span class="num text-[10.5px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 					<span class="num text-[var(--color-bright)]">#{a.id}</span>
-					<span class="num text-[var(--color-default)] truncate">{a.target}</span>
+					<span class="text-[var(--color-default)] truncate" title={a.target}>{prettyCheckLabel(a.check_id, a.target)}</span>
 					<span
 						class="num text-[10.5px] text-[var(--color-muted)]"
 						title="opened {a.opened_at}"
