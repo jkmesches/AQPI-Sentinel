@@ -603,4 +603,4 @@ OpenAPI is live at `http://localhost:8000/docs` (Swagger UI) and
 | Styling | Tailwind v4 | The `@theme` block in `app.css` defines tokens. |
 | Map | MapLibre GL JS | Stadia Maps for basemap (free tier; domain-allowlisted). |
 | Build / deploy | Docker + docker compose | Two Dockerfiles in `ops/`. |
-| Reverse proxy (optional) | Traefik (or anything) | Frontend at `/`, backend at `/api/*`, WS at `/api/ws`. |
+| Reverse proxy (optional) | Any HTTP-aware proxy | Frontend at `/`, backend at `/api/*`, WS at `/api/ws` — see "Behind a reverse proxy" in `docs/MAINTENANCE.md`. |

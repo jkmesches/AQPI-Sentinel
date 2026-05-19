@@ -31,8 +31,7 @@ _Nothing pending._
 ## [0.1.0] — 2026-05-19
 
 First tagged release. Sentinel is feature-complete for the
-radarca.engr.colostate.edu monitoring scope and currently running in
-production on the `aqpisentinel` LXC.
+radarca.engr.colostate.edu monitoring scope.
 
 ### Added
 

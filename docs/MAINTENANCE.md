@@ -31,32 +31,61 @@ bash scripts/status.sh            # show PIDs + log paths
 
 ### Deploy a code update
 
-1. Edit code locally, test in dev (`make dev`).
-2. Rsync to the remote (note the `.env.prod` exclude — see "Common pitfalls"):
+Sentinel publishes tagged container images to GHCR
+(`ghcr.io/jkmesches/sentinel-{backend,frontend}`) on every push to
+`main` and on every `vX.Y.Z` tag. The recommended deploy path is to
+pull the desired image on the prod host:
+
+1. Land your change on `main` (or cut a release tag). Wait for the
+   `docker-publish` GitHub Actions workflow to complete — it builds
+   both images and pushes them to GHCR.
+2. On the prod host:
    ```bash
-   rsync -avz --delete \
-     --exclude='.git/' --exclude='.venv/' \
-     --exclude='frontend/node_modules/' --exclude='frontend/.svelte-kit/' \
-     --exclude='frontend/build/' \
-     --exclude='data/' --exclude='__pycache__/' --exclude='*.pyc' \
-     --exclude='.env' --exclude='ops/.env.prod' \
-     ./ aqpisentinel:/srv/sentinel/
+   cd /srv/sentinel
+   SENTINEL_TAG=latest docker compose -f ops/docker-compose.ghcr.yml \
+       --env-file ops/.env.prod pull
+   SENTINEL_TAG=latest docker compose -f ops/docker-compose.ghcr.yml \
+       --env-file ops/.env.prod up -d
    ```
-3. Rebuild + restart whatever changed:
-   ```bash
-   ssh aqpisentinel 'cd /srv/sentinel && \
-     docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod \
-     up -d --build backend frontend'
-   ```
-   (Omit a service name to rebuild everything.)
+   Pin `SENTINEL_TAG=v0.1.0` (or any released version) for predictable
+   rollback.
+
+If you'd rather **build locally on the prod host** (e.g. no internet,
+or you want to test an unmerged branch), use the source-build compose
+instead:
+```bash
+cd /srv/sentinel
+docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod \
+    up -d --build backend frontend
+```
+
+This requires the source tree to be on the host. How you get it there
+(`git pull`, `scp`, `rsync`, etc.) is up to you — just make sure
+`ops/.env.prod` is preserved between deploys (it holds the postgres
+password and is gitignored locally).
+
+### Rolling back
+
+Pin to the previous tag and re-pull:
+```bash
+SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod pull
+SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod up -d
+```
+
+Backwards-incompatible schema changes are rare (`schema.sql` is
+idempotent and only ever adds), but if the rolled-back code can't
+read the current schema, restore the matching `pg_dump` snapshot
+(see "Backups" below).
 
 ### View logs
 
-Prod:
+Prod (replace `<prod-host>` with your host alias):
 ```bash
-ssh aqpisentinel 'docker logs -f --tail 100 sentinel-backend'
-ssh aqpisentinel 'docker logs -f --tail 100 sentinel-frontend'
-ssh aqpisentinel 'docker logs -f --tail 100 sentinel-postgres'
+ssh <prod-host> 'docker logs -f --tail 100 sentinel-backend'
+ssh <prod-host> 'docker logs -f --tail 100 sentinel-frontend'
+ssh <prod-host> 'docker logs -f --tail 100 sentinel-postgres'
 ```
 
 Dev: tails are auto-written under `/tmp/sentinel-{be,fe}.log`.
@@ -72,9 +101,10 @@ Dev: tails are auto-written under `/tmp/sentinel-{be,fe}.log`.
 - image cache + network monitor state
 
 ```bash
-curl -s http://10.25.3.148:8000/api/_debug/stats | python3 -m json.tool
-# or via Traefik:
-curl -s https://aqpi.local.shirejoe.com/api/_debug/stats | jq .
+# Direct against the backend port:
+curl -s http://<prod-host>:8000/api/_debug/stats | python3 -m json.tool
+# Or via your reverse proxy:
+curl -s https://<your-domain>/api/_debug/stats | jq .
 ```
 
 Hit this **first** whenever the UI feels stuck — it instantly tells you
@@ -82,32 +112,35 @@ whether the backend is wedged or whether the issue is browser-side.
 
 ### Backups
 
+Replace `<prod-host>` with your host alias. Recipes assume the
+compose project name `sentinel` (the default).
+
 Postgres snapshot:
 ```bash
-ssh aqpisentinel 'docker exec sentinel-postgres pg_dump -U sentinel -d sentinel \
+ssh <prod-host> 'docker exec sentinel-postgres pg_dump -U sentinel -d sentinel \
   | gzip > /tmp/sentinel-db-$(date +%F).sql.gz'
-scp 'aqpisentinel:/tmp/sentinel-db-*.sql.gz' ~/backups/
+scp '<prod-host>:/tmp/sentinel-db-*.sql.gz' ~/backups/
 ```
 
 Image archive (PNGs from L4 captures):
 ```bash
-ssh aqpisentinel 'docker run --rm -v sentinel_archive:/v -v /tmp:/out alpine \
+ssh <prod-host> 'docker run --rm -v sentinel_archive:/v -v /tmp:/out alpine \
   tar czf /out/sentinel-archive-$(date +%F).tar.gz -C /v .'
-scp 'aqpisentinel:/tmp/sentinel-archive-*.tar.gz' ~/backups/
+scp '<prod-host>:/tmp/sentinel-archive-*.tar.gz' ~/backups/
 ```
 
 Restore (warning: clobbers current state):
 ```bash
-ssh aqpisentinel 'cd /srv/sentinel && docker compose -f ops/docker-compose.prod.yml \
+ssh <prod-host> 'cd /srv/sentinel && docker compose -f ops/docker-compose.ghcr.yml \
   --env-file ops/.env.prod stop backend'
 # Postgres:
 gunzip < ~/backups/sentinel-db-YYYY-MM-DD.sql.gz \
-  | ssh aqpisentinel 'docker exec -i sentinel-postgres psql -U sentinel -d sentinel'
+  | ssh <prod-host> 'docker exec -i sentinel-postgres psql -U sentinel -d sentinel'
 # Archive:
-scp ~/backups/sentinel-archive-YYYY-MM-DD.tar.gz aqpisentinel:/tmp/
-ssh aqpisentinel 'docker run --rm -v sentinel_archive:/v -v /tmp:/in alpine \
+scp ~/backups/sentinel-archive-YYYY-MM-DD.tar.gz <prod-host>:/tmp/
+ssh <prod-host> 'docker run --rm -v sentinel_archive:/v -v /tmp:/in alpine \
   tar xzf /in/sentinel-archive-YYYY-MM-DD.tar.gz -C /v'
-ssh aqpisentinel 'cd /srv/sentinel && docker compose -f ops/docker-compose.prod.yml \
+ssh <prod-host> 'cd /srv/sentinel && docker compose -f ops/docker-compose.ghcr.yml \
   --env-file ops/.env.prod start backend'
 ```
 
@@ -231,7 +264,7 @@ initial groups when creating a user.
 
 CLI (if locked out):
 ```bash
-ssh aqpisentinel 'docker exec -it sentinel-postgres psql -U sentinel -d sentinel'
+ssh <prod-host> 'docker exec -it sentinel-postgres psql -U sentinel -d sentinel'
 -- then in psql:
 SELECT id, email, role, disabled_at FROM users;
 -- to re-enable yourself:
@@ -294,11 +327,13 @@ the tab open:
 - **Direct compose deploy**: WebSocket should just work. Check the
   Vite proxy in dev — `vite.config.ts` needs `ws: true` on the
   `/api` proxy entry (already set, but if you reset the config…).
-- **Behind Traefik**: the `/api` router needs to forward WebSocket
-  upgrade headers. Traefik v3 does this transparently if the request
-  arrives with `Connection: Upgrade` + `Upgrade: websocket`; the
-  current LXC route only forwards plain HTTP. Add WS-passthrough to
-  the Traefik service.
+- **Behind a reverse proxy**: the `/api` router must forward the
+  WebSocket upgrade headers (`Connection: Upgrade`, `Upgrade:
+  websocket`). Most modern proxies (Traefik, Caddy, nginx with
+  `proxy_set_header Upgrade $http_upgrade; proxy_set_header
+  Connection $connection_upgrade`) do this when configured; the
+  default plain-HTTP forwarder in some setups does NOT. If the WS
+  fails but the page loads, this is almost always the cause.
 
 The dashboard works WITHOUT WS — it falls back to 5s polling.
 Live pulse animations and instant alarm-fire just get deferred.
@@ -356,20 +391,22 @@ captured PNGs to a local volume** (`sentinel_archive` named volume,
 `data/archive/<sha[:2]>/<sha>.png` on disk), so this only happens
 for runs from before the archive feature shipped.
 
-### "I broke something with `--delete` rsync"
+### "I wiped `ops/.env.prod` somehow"
 
-If you wiped `ops/.env.prod` on the remote (this happened during the
-initial deploy — see git history), the postgres password is lost but
-recoverable from the still-running container:
+If the env file is gone on the prod host but the postgres container
+is still running, the password is recoverable from the running
+container's env:
 ```bash
-ssh aqpisentinel '
+ssh <prod-host> '
   PG_PASS=$(docker exec sentinel-postgres printenv POSTGRES_PASSWORD)
   echo "POSTGRES_PASSWORD=$PG_PASS" > /srv/sentinel/ops/.env.prod
-  # plus the other vars from .env.prod.example
+  # then add the remaining vars from ops/.env.prod.example
 '
 ```
-The fix is to always rsync with `--exclude='ops/.env.prod'`. The
-"Deploy a code update" recipe above does this.
+The recommended deploy path (GHCR pull) doesn't touch the env file
+at all, which is the cleanest way to avoid this class of accident.
+If you're using a source-tree deploy (`rsync`, `scp`, etc.), make
+sure `ops/.env.prod` is excluded from the copy.
 
 ---
 
@@ -396,7 +433,7 @@ which flags are active. The "clear" link in the banner resets.
 
 | What | Why | Where |
 |---|---|---|
-| `--delete` rsync wiped `.env.prod` | Source didn't have one, rsync deleted from dest. | Always add `--exclude='ops/.env.prod'`. |
+| Source-tree deploys can wipe `ops/.env.prod` | rsync/scp with delete-extraneous flags will remove the gitignored env file if the source doesn't have one. | Prefer the GHCR-pull deploy path; if you must copy source, exclude `ops/.env.prod`. See troubleshooting recipe above. |
 | Vite proxy: WS appeared to work but tab slowly leaked memory | Without `ws: true` Vite tangles WS with its HMR socket. | `frontend/vite.config.ts` — keep the `ws: true` flag. |
 | Cross-origin cookies fail on plain HTTP LAN | `SameSite=None` requires `Secure` requires HTTPS. | We use Bearer tokens instead — don't switch back to cookies without putting TLS in front. |
 | `credentials: 'include'` + `allow_origins=['*']` | Browser rejects the response — can't combine wildcard with credentials. | Don't add `credentials: 'include'` to fetch calls. Auth flows through `Authorization: Bearer` from `installFetchPrefix()`. |

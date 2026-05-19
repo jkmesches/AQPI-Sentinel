@@ -38,7 +38,9 @@ This repo holds the entire stack — Postgres schema, Python backend (FastAPI + 
 
 ## Status
 
-Shipped and running 24×7 against live radarca data at `https://aqpi.local.shirejoe.com`.
+Feature-complete (v0.1.0) — 24×7 monitoring of radarca radar
+infrastructure. Tagged container images are published to GHCR; deploy
+target is configurable.
 
 - **38 checks** across 5 stages (L0 / L1 / L2 / L3 / L4-T1T2), self-registered via `@register`.
 - **Postgres 16** schema — 18 tables: check_runs / metric_samples / alarms / alarm_acks / silences / image_archive / image_index / image_observations / users / sessions / password_reset_tokens / admin_audit / push_subscriptions / groups / group_members / settings / + image-stats helpers. Full DDL in `backend/db/schema.sql`, idempotent + auto-applied on startup.
@@ -53,7 +55,7 @@ Shipped and running 24×7 against live radarca data at `https://aqpi.local.shire
 - **Frontend** — CSU-themed dark/light dashboard with descriptor stage names (Connectivity / Product Freshness / Radar Scans / Map Overlays / Image Quality), filled-pie status icons, multi-select chip filters on /history, drill-down modal with reasoning trail + captured L4 image, Export Report CSV from /timeline, programmatic map rotation (northernmost radar pins top-left), 10-product composite dropdown grouped by source, NEXRAD playback with prefetched blob cache (flicker-free).
 - **Mobile site** (`/m/*`) — PWA-installable on iPhone Safari, 4-tab bottom nav (Status · Timeline · Alarms · More), MobileDrillDown with deep verify-yourself surfaces, composite picker + play/scrub on the mobile map, ack/unack on alarms, dedicated `/m/push-settings/edit/[id]` editor for per-device push routing.
 - **Web Push** — per-device routing config: severity floor, product-pattern matching, async delay, on-duty schedule (same shape as groups schedules). Silence-aware. iOS 16.4+ install-before-push respected.
-- **Production deploy** — Docker compose on a home-cluster LXC, fronted by user-owned Traefik with TLS. Backup + restore recipes in `docs/MAINTENANCE.md`. `pg_dump` snapshot + image-archive tarball cover the full state.
+- **Production deploy** — Docker compose pulling pre-built images from GHCR (or building locally from the bundled Dockerfiles). A reverse proxy in front of the stack is optional. Backup + restore recipes in `docs/MAINTENANCE.md`; `pg_dump` snapshot + image-archive tarball cover the full state.
 
 **Roadmap** (deferred and documented in `docs/MAINTENANCE.md` / memory):
 1. L4 Tier 3 — cross-radar consistency check (X-band vs NEXRAD over overlap regions). Next functional slice.
@@ -120,23 +122,31 @@ make pg-stop      # stop the Postgres container
 
 ### Production deploy
 
-Single command after rsync. The full recipe lives in `docs/MAINTENANCE.md` § "Deploy a code update":
+The CI workflow publishes tagged images to GHCR
+(`ghcr.io/jkmesches/sentinel-{backend,frontend}`) on every push to
+`main` and on every `vX.Y.Z` tag. The fastest deploy path is to pull
+those images on the prod host:
 
 ```bash
-rsync -avz --delete \
-  --exclude='.git/' --exclude='.venv/' \
-  --exclude='frontend/node_modules/' --exclude='frontend/.svelte-kit/' \
-  --exclude='frontend/build/' \
-  --exclude='data/' --exclude='__pycache__/' --exclude='*.pyc' \
-  --exclude='.env' --exclude='ops/.env.prod' \
-  ./ aqpisentinel:/srv/sentinel/
+# One-time bootstrap on the host:
+cp ops/.env.prod.example ops/.env.prod    # fill in values
 
-ssh aqpisentinel 'cd /srv/sentinel && \
-  docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod \
-  up -d --build backend frontend'
+# Each deploy:
+SENTINEL_TAG=v0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod pull
+SENTINEL_TAG=v0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod up -d
 ```
 
-The `--exclude='ops/.env.prod'` is **load-bearing** — that file holds the postgres password and is gitignored locally. See "Common pitfalls" in `MAINTENANCE.md`.
+`SENTINEL_TAG=latest` tracks `main`. Pin to a specific `vX.Y.Z` for
+predictable rollback. While the GHCR packages are private, a one-time
+`docker login ghcr.io` with a PAT scoped to `read:packages` is
+required; flipping the packages to public removes that step.
+
+Building locally instead of pulling is still supported — swap the
+compose file for `ops/docker-compose.prod.yml` and add `--build` to
+the `up -d` invocation. The full recipe (including backup, restore,
+and rollback) lives in `docs/MAINTENANCE.md`.
 
 ---
 
@@ -270,7 +280,7 @@ Full design rationale and the cross-cutting architecture (threshold registry, gr
 | Alarms | Config in DB (or `alerts.yaml` fallback), Jinja2 email templates, aiosmtplib for SMTP, pywebpush for Web Push |
 | Auth | argon2id passwords, UUID Bearer tokens in `localStorage`, sessions table |
 | Orchestration | `make` for dev, `docker compose` for prod |
-| Reverse proxy | User-owned Traefik in prod with TLS; direct compose works on plain HTTP LAN |
+| Reverse proxy | Optional — any HTTP-aware proxy works. Direct compose works on plain HTTP LAN. |
 
 ### Live data sources Sentinel reads
 
