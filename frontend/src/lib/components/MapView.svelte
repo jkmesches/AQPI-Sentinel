@@ -15,6 +15,7 @@
 		kind: string;
 		name: string;
 		folder: string | null;
+		elevations: number[] | null;
 	}
 
 	let mapDiv: HTMLDivElement;
@@ -321,6 +322,46 @@
 	const selectableRadars = $derived(
 		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
 	);
+
+	// Hover tooltip for radar pins — name + scan elevations + range.
+	// Created on mouseenter, removed on mouseleave. closeButton off since
+	// it's transient. Reuses the theme-aware .maplibregl-popup-content CSS.
+	let radarHoverPopup: maplibregl.Popup | null = null;
+	function radarHoverHtml(r: RadarMeta): string {
+		const rangeKm = Math.round(r.range_m / 1000);
+		const scans =
+			r.elevations && r.elevations.length
+				? `<div><span class="gauge-muted">scans:</span> ${r.elevations
+						.map((e) => (Number.isInteger(e) ? e.toFixed(1) : String(e)))
+						.join(' ')}°</div>`
+				: '';
+		return `
+			<div class="radar-pop">
+				<div class="radar-pop-title">${r.name} · ${r.id}</div>
+				${scans}
+				<div><span class="gauge-muted">range:</span> ${rangeKm} km</div>
+			</div>`;
+	}
+	function showRadarHover(e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) {
+		if (!map || !e.features || !e.features.length) return;
+		const id = (e.features[0].properties as { id: string }).id;
+		const r = radars.find((x) => x.id === id);
+		if (!r) return;
+		radarHoverPopup?.remove();
+		radarHoverPopup = new maplibregl.Popup({
+			closeButton: false,
+			closeOnClick: false,
+			offset: 12,
+			className: 'radar-hover-popup'
+		})
+			.setLngLat([r.lon, r.lat])
+			.setHTML(radarHoverHtml(r))
+			.addTo(map);
+	}
+	function hideRadarHover() {
+		radarHoverPopup?.remove();
+		radarHoverPopup = null;
+	}
 
 	function pointsGeo() {
 		return {
@@ -1462,6 +1503,11 @@
 				map.on('mouseleave', layer, () => {
 					if (map) map.getCanvas().style.cursor = '';
 				});
+			}
+			// Radar pin hover tooltip (name / scan elevations / range).
+			for (const layer of ['radar-point', 'radar-label']) {
+				map.on('mouseenter', layer, showRadarHover);
+				map.on('mouseleave', layer, hideRadarHover);
 			}
 		});
 

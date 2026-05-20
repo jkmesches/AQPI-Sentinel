@@ -207,6 +207,12 @@ svg.spark path.stroke { opacity: 0.95; }
 .gauge-popup .gauge-muted { color: var(--color-muted); }
 .gauge-popup .gauge-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
 
+/* Radar pin hover tooltip — compact name + scan elevations + range. */
+.radar-hover-popup .maplibregl-popup-content { padding: 6px 9px !important; }
+.radar-pop { font: 11px/1.45 var(--font-mono); white-space: nowrap; }
+.radar-pop .radar-pop-title { font-weight: 600; color: var(--color-bright); margin-bottom: 2px; }
+.radar-pop .gauge-muted { color: var(--color-muted); }
+
 /* ===========================================================================
    MOBILE — touch-target + iOS-quirk fixes for the /m/* route tree.
    These cascade to desktop too but are harmless there.
