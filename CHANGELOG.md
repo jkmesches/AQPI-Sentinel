@@ -28,6 +28,16 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Added
 
+- **Map: Stream gauges (NWM USGS sites).** Fourth toggle in the
+  Geography section. Renders the 468 USGS sites parsed from radarca's
+  `stream_data.csv`, with two tiers: R-status (52 real-time sites,
+  larger filled blue circles) and B-status (416 basic sites, smaller
+  faint dots). Click a marker → MapLibre popup with the COMID; for
+  R-status sites it fires the per-COMID forecast + observed fetches
+  and patches the popup body in once the values land. New backend
+  endpoints `/api/upstream/stream_gauges` (parsed CSV, 1h
+  server-side cache) and `/api/upstream/stream_data` (proxy for the
+  per-COMID time-series).
 - **Map: Geographic reference layers.** Two new toggles in the Live
   map's Layers panel under a new "Geography" section, both persisted
   per browser:
