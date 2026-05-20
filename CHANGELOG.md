@@ -28,6 +28,18 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Added
 
+- **Map: per-radar tilt selection (Phase 1).** When exactly one X-band
+  radar is active, a "Tilt" dropdown appears in the Layers panel listing
+  that radar's scan elevations (e.g. XSWR: 2.5/3.5/4.5/5.5°). Picking an
+  elevation overlays the corresponding PPI from the CSU Web Radar Display
+  (radardisplay.engr.colostate.edu), replacing radarca's single
+  pre-rendered sweep for that radar. radar-display only carries Z / V /
+  ρhv, so Zdr + ΦDP tabs disable while a tilt is engaged. Phase 1 shows
+  the newest frame only; scrubbing is Phase 2. New backend proxies
+  `/api/upstream/tilt_steps` + `/api/upstream/tilt_image.png` (dedicated
+  verify=False client — radar-display's TLS cert is expired). CBAND +
+  NEXRAD aren't in that directory, so the control never appears for them.
+
 - **Map: Stream gauges (NWM USGS sites).** Fourth toggle in the
   Geography section. Renders the 468 USGS sites parsed from radarca's
   `stream_data.csv`, with two tiers: R-status (52 real-time sites,
