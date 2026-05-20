@@ -133,10 +133,12 @@
 	let watershedsOn = $state(false);
 	let reservoirsOn = $state(false);
 	let terrainOn = $state(false);
+	let terrain3DOn = $state(false);
 	let streamGaugesOn = $state(false);
 	const WATERSHEDS_KEY = 'sentinel-map-watersheds';
 	const RESERVOIRS_KEY = 'sentinel-map-reservoirs';
 	const TERRAIN_KEY = 'sentinel-map-terrain';
+	const TERRAIN_3D_KEY = 'sentinel-map-terrain-3d';
 	const STREAM_GAUGES_KEY = 'sentinel-map-stream-gauges';
 
 	// Lazy-loaded GeoJSON data, fetched the first time a layer is enabled.
@@ -887,6 +889,15 @@
 		} catch { /* */ }
 		refreshTerrain(theme.resolved);
 	});
+	// 3D terrain mesh toggle — drapes the scene + pitches the camera.
+	// Independent from hillshade; the underlying DEM source is shared.
+	$effect(() => {
+		void terrain3DOn;
+		try {
+			localStorage.setItem(TERRAIN_3D_KEY, terrain3DOn ? 'on' : 'off');
+		} catch { /* */ }
+		refreshTerrain3D();
+	});
 	// Stream gauges toggle. Fetch is lazy — first time the toggle flips
 	// on, the loader hits /api/upstream/stream_gauges (cached server-side
 	// for an hour) and renders the markers.
@@ -1078,6 +1089,7 @@
 		refreshRadarOverlays();
 		refreshGeography(t);
 		refreshTerrain(t);
+		refreshTerrain3D();
 		refreshStreamGauges(t);
 	}
 
@@ -1212,39 +1224,84 @@
 		if (oEl) oEl.innerHTML = `<span class="gauge-muted">observed:</span> ${gaugeSummaryHtml(obs)}`;
 	}
 
-	// Hillshade from AWS Open Data terrarium-format DEM tiles. Inserted
-	// before 'range-fill' (the lowest custom layer), which puts it below
-	// the radar/forecast/CoSMoS composite + NEXRAD raster overlays — so a
-	// water-depth composite renders ON TOP of the terrain shading and
-	// reads as "where would this water actually pool given the
-	// topography." Free public tiles; no API key.
-	function refreshTerrain(t: 'light' | 'dark') {
-		if (!map || !styleReady) return;
-		if (map.getLayer('hillshade-layer')) map.removeLayer('hillshade-layer');
-		if (map.getSource('terrain-dem')) map.removeSource('terrain-dem');
-		if (!terrainOn) return;
+	// Terrain stack — DEM source from AWS Open Data terrarium-format
+	// tiles, consumed by two independent toggles:
+	//
+	//   - Hillshade (terrainOn): a flat raster layer drawn before
+	//     'range-fill', so the relief sits below every overlay. CoSMoS
+	//     water-depth composites render ON TOP of the shading and read
+	//     as "where would this water actually pool given the topography."
+	//   - 3D mesh (terrain3DOn): toggles map.setTerrain() to drape the
+	//     scene onto a real elevation mesh + eases the camera to a
+	//     pitched view. Off → pitch returns to 0 (top-down). Note that
+	//     raster overlays draped on the mesh distort at the edges; this
+	//     is an A/B exploration knob, not a default.
+	//
+	// One source, shared. Free public tiles; no API key.
+	const DEM_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/v2/terrarium/{z}/{x}/{y}.png';
+
+	function ensureTerrainSource() {
+		if (!map) return;
+		if (map.getSource('terrain-dem')) return;
 		map.addSource('terrain-dem', {
 			type: 'raster-dem',
-			tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/v2/terrarium/{z}/{x}/{y}.png'],
+			tiles: [DEM_TILE_URL],
 			encoding: 'terrarium',
 			tileSize: 256,
 			maxzoom: 15,
 			attribution: 'Terrain: AWS / Mapzen Open Data'
 		});
-		map.addLayer(
-			{
-				id: 'hillshade-layer',
-				type: 'hillshade',
-				source: 'terrain-dem',
-				paint: {
-					'hillshade-exaggeration': 0.55,
-					'hillshade-shadow-color': t === 'light' ? '#3a3a3a' : '#000000',
-					'hillshade-highlight-color': t === 'light' ? '#ffffff' : '#3a3a3a',
-					'hillshade-accent-color': t === 'light' ? '#202020' : '#0a0a0a'
-				}
-			},
-			'range-fill'
-		);
+	}
+
+	function removeTerrainSourceIfUnused() {
+		if (!map) return;
+		// Source can only be removed if nothing references it. Both the
+		// hillshade layer AND the 3D terrain (map.getTerrain()) hold
+		// references; bail if either is still live.
+		if (map.getLayer('hillshade-layer')) return;
+		if (map.getTerrain && map.getTerrain()) return;
+		if (map.getSource('terrain-dem')) map.removeSource('terrain-dem');
+	}
+
+	function refreshTerrain(t: 'light' | 'dark') {
+		if (!map || !styleReady) return;
+		if (map.getLayer('hillshade-layer')) map.removeLayer('hillshade-layer');
+		if (terrainOn) {
+			ensureTerrainSource();
+			map.addLayer(
+				{
+					id: 'hillshade-layer',
+					type: 'hillshade',
+					source: 'terrain-dem',
+					paint: {
+						'hillshade-exaggeration': 0.55,
+						'hillshade-shadow-color': t === 'light' ? '#3a3a3a' : '#000000',
+						'hillshade-highlight-color': t === 'light' ? '#ffffff' : '#3a3a3a',
+						'hillshade-accent-color': t === 'light' ? '#202020' : '#0a0a0a'
+					}
+				},
+				'range-fill'
+			);
+		} else {
+			removeTerrainSourceIfUnused();
+		}
+	}
+
+	// 3D mesh terrain — drape the whole scene over the DEM and pitch the
+	// camera. Disabling resets pitch to 0 so the operator goes back to a
+	// clean top-down view.
+	const PITCH_3D = 50;
+	function refreshTerrain3D() {
+		if (!map || !styleReady) return;
+		if (terrain3DOn) {
+			ensureTerrainSource();
+			map.setTerrain({ source: 'terrain-dem', exaggeration: 1.2 });
+			map.easeTo({ pitch: PITCH_3D, duration: 700 });
+		} else {
+			map.setTerrain(null);
+			map.easeTo({ pitch: 0, duration: 500 });
+			removeTerrainSourceIfUnused();
+		}
 	}
 
 	// Watershed outlines + reservoir markers. Inserted before the radar
@@ -1351,6 +1408,7 @@
 			if (localStorage.getItem(WATERSHEDS_KEY) === 'on') watershedsOn = true;
 			if (localStorage.getItem(RESERVOIRS_KEY) === 'on') reservoirsOn = true;
 			if (localStorage.getItem(TERRAIN_KEY) === 'on') terrainOn = true;
+			if (localStorage.getItem(TERRAIN_3D_KEY) === 'on') terrain3DOn = true;
 			if (localStorage.getItem(STREAM_GAUGES_KEY) === 'on') streamGaugesOn = true;
 		} catch { /* */ }
 		radars = await fetch('/api/radars/meta').then((r) => r.json());
@@ -1635,6 +1693,24 @@
 			</span>
 			<span class="num text-[9.5px] {terrainOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{terrainOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+		<button
+			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (terrain3DOn = !terrain3DOn)}
+			title="3D terrain mesh — pitches the camera and drapes the scene over an elevation mesh. Raster overlays may distort at the edges."
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {terrain3DOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">3D terrain</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">pitched mesh</span>
+			</span>
+			<span class="num text-[9.5px] {terrain3DOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{terrain3DOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
 		<button
