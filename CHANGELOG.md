@@ -28,16 +28,19 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Added
 
-- **Map: per-radar tilt selection (Phase 1).** When exactly one X-band
-  radar is active, a "Tilt" dropdown appears in the Layers panel listing
-  that radar's scan elevations (e.g. XSWR: 2.5/3.5/4.5/5.5°). Picking an
+- **Map: per-radar tilt selection.** When exactly one X-band radar is
+  active, a "Tilt" dropdown appears in the Layers panel listing that
+  radar's scan elevations (e.g. XSWR: 2.5/3.5/4.5/5.5°). Picking an
   elevation overlays the corresponding PPI from the CSU Web Radar Display
   (radardisplay.engr.colostate.edu), replacing radarca's single
   pre-rendered sweep for that radar. radar-display only carries Z / V /
-  ρhv, so Zdr + ΦDP tabs disable while a tilt is engaged. Phase 1 shows
-  the newest frame only; scrubbing is Phase 2. New backend proxies
-  `/api/upstream/tilt_steps` + `/api/upstream/tilt_image.png` (dedicated
-  verify=False client — radar-display's TLS cert is expired). CBAND +
+  ρhv, so Zdr + ΦDP tabs disable while a tilt is engaged. The time strip
+  rebinds to radar-display's 7-frame loop (~14-min window, ~2-min
+  cadence) so play + scrub animate the chosen tilt; engaging a tilt
+  turns the composite off since the two run on different timebases. New
+  backend proxies `/api/upstream/tilt_steps` (all 7 frame timestamps,
+  parallel-fetched) + `/api/upstream/tilt_image.png`, behind a dedicated
+  verify=False client (radar-display's TLS cert is expired). CBAND +
   NEXRAD aren't in that directory, so the control never appears for them.
 
 - **Map: Stream gauges (NWM USGS sites).** Fourth toggle in the

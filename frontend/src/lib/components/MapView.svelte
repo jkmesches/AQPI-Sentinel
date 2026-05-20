@@ -492,6 +492,34 @@
 	async function loadComposite() {
 		stopPlay();
 		activity = [];
+		// Tilt mode owns the scrubber when engaged — its 7 radar-display
+		// frames replace the radarca/composite step list. Highest priority.
+		if (tiltEngaged) {
+			const r = singleTiltRadar();
+			const tiltMoment = MOMENT_TO_TILT[currentMoment];
+			if (r && tiltMoment) {
+				try {
+					const resp = await fetch(
+						`/api/upstream/tilt_steps?radar=${r.id}&el=${tiltEl}&moment=${tiltMoment}`
+					);
+					const j = await resp.json();
+					_tiltGeo = { lon: j.center[0], lat: j.center[1], range_km: j.range_km };
+					const frames = (j.steps ?? []) as { frame: number; ts: string }[];
+					// radar-display frame 0 = newest. Order oldest→newest so the
+					// rightmost scrubber position (steps[last]) is the live frame.
+					const ordered = [...frames].sort((a, b) => b.frame - a.frame);
+					steps = ordered.map((f, idx) => tiltStep(f.frame, f.ts, idx));
+					stepIdx = steps.length - 1;
+				} catch {
+					_tiltGeo = null;
+					steps = [];
+					stepIdx = -1;
+				}
+			}
+			syncAllToStep();
+			return;
+		}
+		_tiltGeo = null;
 		if (composite !== 'none') {
 			try {
 				const r = await fetch(`/api/upstream/product_steps?product_id=${composite}`);
@@ -639,9 +667,16 @@
 		}
 	}
 	function syncAllToStep() {
-		renderCompositeFrame();
-		syncNexradTime();
-		syncRadarOverlayTime();
+		// In tilt mode the scrubber drives the radar-display frames only —
+		// composite/NEXRAD/per-radar run on a different (radarca) timebase,
+		// so we don't try to align them. refreshTilt renders the frame;
+		// when not engaged it tears the overlay down.
+		if (!tiltEngaged) {
+			renderCompositeFrame();
+			syncNexradTime();
+			syncRadarOverlayTime();
+		}
+		refreshTilt();
 	}
 	function stepFirst() { stopPlay(); stepIdx = 0; syncAllToStep(); }
 	function stepLast()  { stopPlay(); stepIdx = steps.length - 1; syncAllToStep(); }
@@ -873,56 +908,76 @@
 		syncBaseSources();
 	}
 
-	// Tilt overlay (Phase 1: static, newest frame only). When a single
-	// X-band radar is active and an elevation is picked, fetch that tilt's
-	// metadata + PPI from radar-display and render it at center ± MaxRange.
-	// Replaces the radarca overlay for that radar (suppressed above).
+	// Tilt overlay (Phase 2: scrubbable). When a single X-band radar is
+	// active and an elevation is picked, the time strip is driven by the
+	// radar-display frame list (built in loadComposite); this fn renders
+	// the frame at the current stepIdx. Tears down the overlay when tilt
+	// isn't engaged. _tiltGeo (center + range) is captured in
+	// loadComposite so a scrub/play tick doesn't re-fetch metadata.
 	let _tiltToken = 0;
+	let _tiltGeo: { lon: number; lat: number; range_km: number } | null = null;
+	// Frame number radar-display should serve for the current step. Tilt
+	// steps stash their frame index in `imageName` (frame 0 = newest).
+	function currentTiltFrame(): number {
+		if (stepIdx < 0 || stepIdx >= steps.length) return 0;
+		const f = parseInt(steps[stepIdx]?.imageName ?? '0', 10);
+		return Number.isFinite(f) ? f : 0;
+	}
+	// Build a Step for a tilt frame, parsing the radar_plot timestamp for
+	// the scrubber labels. ts is radar-local ("Tue, 19 May 2026 20:16:03").
+	function tiltStep(frame: number, ts: string | null, i: number): Step {
+		const d = ts ? new Date(ts) : null;
+		const ok = d && !Number.isNaN(d.getTime());
+		return {
+			i,
+			ts: ok ? d!.toISOString() : null,
+			imageName: String(frame),
+			day: ok ? d!.toUTCString().slice(0, 3).toUpperCase() : '',
+			date: ok ? d!.toISOString().slice(0, 10) : '',
+			time: ok ? d!.toISOString().slice(11, 19) : ''
+		};
+	}
 	async function refreshTilt() {
 		if (!map || !styleReady) return;
-		const myToken = ++_tiltToken;
-		if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
-		if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
 		const id = tiltOverlayRadarId();
-		if (!id) return;
 		const tiltMoment = MOMENT_TO_TILT[currentMoment];
-		if (!tiltMoment) return;
-		let meta: { center: [number, number]; range_km: number };
-		try {
-			const resp = await fetch(
-				`/api/upstream/tilt_steps?radar=${id}&el=${tiltEl}&moment=${tiltMoment}`
-			);
-			if (!resp.ok) return;
-			meta = await resp.json();
-		} catch {
+		// Not engaged → tear down and bail.
+		if (!id || !tiltMoment || !_tiltGeo) {
+			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
+			if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
 			return;
 		}
-		// Guard: state may have changed during the fetch.
-		if (!map || !styleReady || myToken !== _tiltToken) return;
-		if (map.getSource('tilt-overlay')) return;
-		const [lon, lat] = meta.center;
-		const km = meta.range_km;
+		const myToken = ++_tiltToken;
+		const isCurrent = () => myToken === _tiltToken && !!map && styleReady;
+		const { lon, lat, range_km: km } = _tiltGeo;
 		const dLat = km / 111;
 		const dLon = km / (111 * Math.cos((lat * Math.PI) / 180));
+		const frame = currentTiltFrame();
 		const url = apiUrl(
-			`/api/upstream/tilt_image.png?radar=${id}&el=${tiltEl}&moment=${tiltMoment}&frame=0`
+			`/api/upstream/tilt_image.png?radar=${id}&el=${tiltEl}&moment=${tiltMoment}&frame=${frame}`
 		);
-		map.addSource('tilt-overlay', {
-			type: 'image',
-			url,
-			coordinates: [
-				[lon - dLon, lat + dLat],
-				[lon + dLon, lat + dLat],
-				[lon + dLon, lat - dLat],
-				[lon - dLon, lat - dLat]
-			]
-		});
-		map.addLayer({
-			id: 'tilt-overlay-layer',
-			type: 'raster',
-			source: 'tilt-overlay',
-			paint: { 'raster-opacity': overlayOpacity }
-		});
+		const coords: [number, number][] = [
+			[lon - dLon, lat + dLat],
+			[lon + dLon, lat + dLat],
+			[lon + dLon, lat - dLat],
+			[lon - dLon, lat - dLat]
+		];
+		const ok = await preloadImage(url, isCurrent);
+		if (!ok || !isCurrent()) return;
+		const src = map.getSource('tilt-overlay') as maplibregl.ImageSource | undefined;
+		if (src && typeof src.updateImage === 'function') {
+			src.updateImage({ url, coordinates: coords });
+		} else {
+			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
+			if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
+			map.addSource('tilt-overlay', { type: 'image', url, coordinates: coords });
+			map.addLayer({
+				id: 'tilt-overlay-layer',
+				type: 'raster',
+				source: 'tilt-overlay',
+				paint: { 'raster-opacity': overlayOpacity }
+			});
+		}
 	}
 
 	// Opacity changes are a hot path (slider drag) — keep them off the heavy
@@ -987,6 +1042,7 @@
 		void activeRadars.length;       // crossing 0↔N flips manifest source
 		void currentMoment;
 		void nexradEnabled;             // toggling NEXRAD when nothing else is on
+		void tiltEl;                    // entering/leaving tilt rebuilds the step list
 		untrack(() => { loadComposite(); });
 	});
 	$effect(() => {
@@ -1007,15 +1063,15 @@
 		void currentMoment;
 		syncRadarOverlayTime();
 	});
-	// Tilt mode — re-evaluate radarca-overlay suppression + (re)render the
-	// tilt overlay whenever the elevation pick, active-radar set, or moment
-	// changes.
+	// Tilt mode — re-evaluate radarca-overlay suppression when the
+	// elevation pick / active-radar set / moment changes. The frame render
+	// itself is driven by loadComposite → syncAllToStep (which owns the
+	// step list), so we don't call refreshTilt here.
 	$effect(() => {
 		void tiltEl;
 		void currentMoment;
 		void activeRadars.length;
 		refreshRadarOverlays();
-		refreshTilt();
 	});
 	// Watershed + reservoir toggles. Persist immediately so a reload
 	// restores the user's choice, and re-run the geography refresh so the
@@ -1931,11 +1987,17 @@
 						value={tiltEl}
 						onchange={(e) => {
 							tiltEl = Number((e.target as HTMLSelectElement).value);
-							// If engaging tilt on a moment radar-display lacks,
-							// fall back to Reflectivity so something renders.
-							if (tiltEl >= 1 && !MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
+							if (tiltEl >= 1) {
+								// Tilt drives the time strip on radar-display's
+								// 14-min/7-frame timebase; the composite runs on
+								// radarca's hour-long one. Turn the composite off so
+								// the scrubber isn't ambiguous.
+								composite = 'none';
+								// radar-display lacks Zdr/ΦDP — fall back to Z.
+								if (!MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
+							}
 						}}
-						title="Pick a scan elevation. Default uses radarca's single sweep."
+						title="Pick a scan elevation. Default uses radarca's single sweep. Drives the time strip on the radar's 7-frame loop."
 					>
 						<option value={0}>Default (radarca)</option>
 						{#each tiltRadarMeta.elevations ?? [] as ang, i}
@@ -1945,7 +2007,7 @@
 				</div>
 				{#if tiltEngaged}
 					<div class="mt-1 text-[9.5px] text-[var(--color-faint)] num text-center">
-						radar-display · newest frame
+						radar-display · {steps.length}-frame loop
 					</div>
 				{/if}
 			{/if}

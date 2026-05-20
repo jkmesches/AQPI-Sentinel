@@ -547,33 +547,43 @@ def _tilt_guard(radar: str, el: int, moment: str) -> None:
 
 @router.get("/tilt_steps")
 async def tilt_steps(radar: str, el: int, moment: str):
-    """Metadata for a (radar, elevation) tilt: center, range, scan angle,
-    plus the newest frame's timestamp.
+    """Metadata + per-frame timestamps for a (radar, elevation) tilt.
 
-    Phase 1 reads only frame 0 (newest) — enough to georeference + label
-    a static overlay. Frame enumeration for scrubbing is a Phase 2 add.
+    Fetches all `_TILT_FRAMES` radar_plot_<n>.json files in parallel
+    (frame 0 = newest). The center/range/angle are taken from frame 0
+    (static per radar+elevation); each step carries its own timestamp so
+    the frontend can label + scrub the loop.
     """
     _tilt_guard(radar, el, moment)
-    url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_0.json"
-    try:
-        r = await _rd_client().get(url)
-    except Exception as e:
-        raise HTTPException(502, f"radar-display unavailable: {humanize_error(e)}")
-    if r.status_code != 200:
-        raise HTTPException(502, f"radar-display returned HTTP {r.status_code}")
-    try:
-        j = r.json()
-    except Exception:
-        raise HTTPException(502, "radar-display returned malformed JSON")
+    import asyncio as _asyncio
+
+    async def _fetch(frame: int):
+        url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_{frame}.json"
+        try:
+            r = await _rd_client().get(url)
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception:
+            return None
+
+    results = await _asyncio.gather(*[_fetch(f) for f in range(_TILT_FRAMES)])
+    newest = results[0]
+    if newest is None:
+        raise HTTPException(502, "radar-display returned no tilt frames")
+    steps = [
+        {"frame": f, "ts": (j.get("Time", {}) or {}).get("Value")}
+        for f, j in enumerate(results)
+        if j is not None
+    ]
     return {
         "radar": radar,
         "el": el,
         "moment": moment,
-        "center": [j["Longitude"]["Value"], j["Latitude"]["Value"]],
-        "range_km": j["MaxRange"]["Value"],
-        "angle": j["Scan"]["Angle"]["Value"],
-        "frames": _TILT_FRAMES,
-        "latest_ts": j.get("Time", {}).get("Value"),
+        "center": [newest["Longitude"]["Value"], newest["Latitude"]["Value"]],
+        "range_km": newest["MaxRange"]["Value"],
+        "angle": newest["Scan"]["Angle"]["Value"],
+        "steps": steps,
     }
 
 
