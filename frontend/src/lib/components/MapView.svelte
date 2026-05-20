@@ -1101,7 +1101,10 @@
 		} catch {
 			return;  // upstream unreachable; toggle stays on, retry on next refresh
 		}
-		if (!map || !map.isStyleLoaded() || map.getSource('stream-gauges')) return;
+		// Don't check isStyleLoaded() — it flickers false whenever any
+		// other source is processing tiles (e.g. watersheds GeoJSON
+		// finishing parse), which races our own additions.
+		if (!map || !styleReady || map.getSource('stream-gauges')) return;
 		map.addSource('stream-gauges', { type: 'geojson', data });
 		map.addLayer(
 			{
@@ -1257,7 +1260,7 @@
 		if (watershedsOn) {
 			const data = await loadWatersheds();
 			// Guard: theme may have swapped while the fetch was in flight.
-			if (!map || !map.isStyleLoaded() || map.getSource('watersheds')) return;
+			if (!map || !styleReady || map.getSource('watersheds')) return;
 			map.addSource('watersheds', { type: 'geojson', data });
 			map.addLayer(
 				{
@@ -1281,7 +1284,7 @@
 		if (map.getSource('reservoirs')) map.removeSource('reservoirs');
 		if (reservoirsOn) {
 			const data = await loadReservoirs();
-			if (!map || !map.isStyleLoaded() || map.getSource('reservoirs')) return;
+			if (!map || !styleReady || map.getSource('reservoirs')) return;
 			map.addSource('reservoirs', { type: 'geojson', data });
 			map.addLayer(
 				{
