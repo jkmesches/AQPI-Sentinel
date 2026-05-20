@@ -133,13 +133,16 @@
 	let watershedsOn = $state(false);
 	let reservoirsOn = $state(false);
 	let terrainOn = $state(false);
+	let streamGaugesOn = $state(false);
 	const WATERSHEDS_KEY = 'sentinel-map-watersheds';
 	const RESERVOIRS_KEY = 'sentinel-map-reservoirs';
 	const TERRAIN_KEY = 'sentinel-map-terrain';
+	const STREAM_GAUGES_KEY = 'sentinel-map-stream-gauges';
 
 	// Lazy-loaded GeoJSON data, fetched the first time a layer is enabled.
 	let watershedsData: GeoJSON.FeatureCollection | null = null;
 	let reservoirsData: GeoJSON.FeatureCollection | null = null;
+	let streamGaugesData: GeoJSON.FeatureCollection | null = null;
 	async function loadWatersheds() {
 		if (watershedsData) return watershedsData;
 		const r = await fetch('/data/watersheds-huc8-norcal.geojson');
@@ -151,6 +154,20 @@
 		const r = await fetch('/data/reservoirs-norcal.json');
 		reservoirsData = await r.json();
 		return reservoirsData;
+	}
+	async function loadStreamGauges(): Promise<GeoJSON.FeatureCollection> {
+		if (streamGaugesData) return streamGaugesData;
+		const r = await fetch('/api/upstream/stream_gauges');
+		const j = (await r.json()) as { sites: { comid: string; lat: number; lon: number; status: string }[] };
+		streamGaugesData = {
+			type: 'FeatureCollection',
+			features: j.sites.map((s) => ({
+				type: 'Feature' as const,
+				properties: { comid: s.comid, status: s.status },
+				geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] }
+			}))
+		};
+		return streamGaugesData;
 	}
 
 	// Per-radar moment chooser — applies to every active overlay.
@@ -870,6 +887,16 @@
 		} catch { /* */ }
 		refreshTerrain(theme.resolved);
 	});
+	// Stream gauges toggle. Fetch is lazy — first time the toggle flips
+	// on, the loader hits /api/upstream/stream_gauges (cached server-side
+	// for an hour) and renders the markers.
+	$effect(() => {
+		void streamGaugesOn;
+		try {
+			localStorage.setItem(STREAM_GAUGES_KEY, streamGaugesOn ? 'on' : 'off');
+		} catch { /* */ }
+		refreshStreamGauges(theme.resolved);
+	});
 
 	// ---- bulk-action helpers ------------------------------------------------
 	// Fit the viewport to encompass every currently-active radar's range circle
@@ -1047,6 +1074,134 @@
 		refreshRadarOverlays();
 		refreshGeography(t);
 		refreshTerrain(t);
+		refreshStreamGauges(t);
+	}
+
+	// Stream gauges — USGS sites parsed from radarca's stream_data.csv,
+	// served via /api/upstream/stream_gauges. Two visual tiers:
+	//   - B-status (basic): small, faint hollow dot. Site exists upstream
+	//     but doesn't expose real-time data.
+	//   - R-status (real-time): brighter, larger filled circle. Click to
+	//     pull live forecast + observed streamflow into a popup.
+	async function refreshStreamGauges(t: 'light' | 'dark') {
+		if (!map || !styleReady) return;
+		// Tear down first so toggling off cleans up cleanly.
+		for (const lyr of ['stream-gauge-marker']) {
+			if (map.getLayer(lyr)) map.removeLayer(lyr);
+		}
+		if (map.getSource('stream-gauges')) map.removeSource('stream-gauges');
+		if (!streamGaugesOn) return;
+		let data: GeoJSON.FeatureCollection;
+		try {
+			data = await loadStreamGauges();
+		} catch {
+			return;  // upstream unreachable; toggle stays on, retry on next refresh
+		}
+		if (!map || !map.isStyleLoaded() || map.getSource('stream-gauges')) return;
+		map.addSource('stream-gauges', { type: 'geojson', data });
+		map.addLayer(
+			{
+				id: 'stream-gauge-marker',
+				type: 'circle',
+				source: 'stream-gauges',
+				paint: {
+					'circle-radius': ['case', ['==', ['get', 'status'], 'R'], 5.5, 3],
+					'circle-color': [
+						'case',
+						['==', ['get', 'status'], 'R'],
+						t === 'light' ? '#0a6f9b' : '#6ec2e0',
+						t === 'light' ? '#5d8aa8' : '#6e8aa0'
+					],
+					'circle-opacity': ['case', ['==', ['get', 'status'], 'R'], 0.95, 0.6],
+					'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',
+					'circle-stroke-width': ['case', ['==', ['get', 'status'], 'R'], 1.2, 0.6]
+				}
+			},
+			'radar-halo'
+		);
+	}
+
+	// Click handler for stream-gauge markers. Renders a MapLibre popup
+	// with the COMID + status; for R-status sites, fires the two
+	// per-COMID time-series fetches and populates the popup body in
+	// place once both land (or both fail). Forecast wants YYYYMMDD_HH
+	// (UTC); observed wants YYYYMMDD (UTC).
+	function utcHourString(d: Date): string {
+		const yyyy = d.getUTCFullYear();
+		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+		const dd = String(d.getUTCDate()).padStart(2, '0');
+		const hh = String(d.getUTCHours()).padStart(2, '0');
+		return `${yyyy}${mm}${dd}_${hh}`;
+	}
+	function utcDayString(d: Date): string {
+		const yyyy = d.getUTCFullYear();
+		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+		const dd = String(d.getUTCDate()).padStart(2, '0');
+		return `${yyyy}${mm}${dd}`;
+	}
+	type GaugeFetch = { headers?: string[]; values?: (string | number)[] };
+	async function fetchGaugeData(comid: string, kind: 'forecast' | 'observed', ts: string): Promise<GaugeFetch | null> {
+		try {
+			const r = await fetch(
+				`/api/upstream/stream_data?comid=${encodeURIComponent(comid)}&kind=${kind}&ts=${ts}`
+			);
+			if (!r.ok) return null;
+			return (await r.json()) as GaugeFetch;
+		} catch {
+			return null;
+		}
+	}
+	function gaugeSummaryHtml(j: GaugeFetch | null): string {
+		if (!j || !j.headers || j.headers.length <= 1) {
+			return '<span style="opacity:0.6">no data</span>';
+		}
+		// First column is COMID echo; skip it. Show a compact key:value
+		// list of the remaining columns. Numerical values rounded to 2dp
+		// for readability.
+		const pairs: string[] = [];
+		const hdrs = j.headers.slice(1);
+		const vals = (j.values ?? []).slice(1);
+		for (let i = 0; i < hdrs.length && i < vals.length; i++) {
+			const v = vals[i];
+			const rendered = typeof v === 'number' ? v.toFixed(2) : String(v);
+			pairs.push(`<span style="opacity:0.6">${hdrs[i]}:</span> ${rendered}`);
+		}
+		return pairs.join('  ·  ');
+	}
+	async function onStreamGaugeClick(e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) {
+		if (!e.features || e.features.length === 0 || !map) return;
+		const f = e.features[0];
+		const props = f.properties as { comid: string; status: string };
+		const coords = (f.geometry as GeoJSON.Point).coordinates.slice() as [number, number];
+		const isLive = props.status === 'R';
+		// Build the popup body now; for R-status, schedule the fetch and
+		// patch the body in once it lands.
+		const liveSlot = isLive
+			? `<div data-slot="forecast"><span style="opacity:0.6">loading forecast…</span></div>
+			   <div data-slot="observed"><span style="opacity:0.6">loading observed…</span></div>`
+			: `<div style="opacity:0.6">basic-status site (no live data)</div>`;
+		const html = `
+			<div style="font: 11px/1.4 ui-monospace,Menlo,monospace; min-width: 200px;">
+				<div style="font-weight:600">COMID ${props.comid}</div>
+				<div style="opacity:0.6">${isLive ? 'real-time' : 'basic'} site</div>
+				<div style="margin-top:6px; display:flex; flex-direction:column; gap:3px">${liveSlot}</div>
+			</div>`;
+		const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '320px' })
+			.setLngLat(coords)
+			.setHTML(html)
+			.addTo(map);
+		if (!isLive) return;
+		const now = new Date();
+		const [fcst, obs] = await Promise.all([
+			fetchGaugeData(props.comid, 'forecast', utcHourString(now)),
+			fetchGaugeData(props.comid, 'observed', utcDayString(now))
+		]);
+		const el = popup.getElement();
+		if (!el) return;
+		const fEl = el.querySelector('[data-slot="forecast"]');
+		const oEl = el.querySelector('[data-slot="observed"]');
+		if (fEl) fEl.innerHTML = `<span style="opacity:0.6">forecast:</span> ${gaugeSummaryHtml(fcst)}`;
+		if (oEl) oEl.innerHTML = `<span style="opacity:0.6">observed:</span> ${gaugeSummaryHtml(obs)}`;
 	}
 
 	// Hillshade from AWS Open Data terrarium-format DEM tiles. Inserted
@@ -1188,6 +1343,7 @@
 			if (localStorage.getItem(WATERSHEDS_KEY) === 'on') watershedsOn = true;
 			if (localStorage.getItem(RESERVOIRS_KEY) === 'on') reservoirsOn = true;
 			if (localStorage.getItem(TERRAIN_KEY) === 'on') terrainOn = true;
+			if (localStorage.getItem(STREAM_GAUGES_KEY) === 'on') streamGaugesOn = true;
 		} catch { /* */ }
 		radars = await fetch('/api/radars/meta').then((r) => r.json());
 		map = new maplibregl.Map({
@@ -1232,7 +1388,8 @@
 				const p = f.properties as { id: string; clickable?: boolean };
 				if (p.clickable) toggleRadar(p.id);
 			});
-			for (const layer of ['radar-point', 'radar-label']) {
+			map.on('click', 'stream-gauge-marker', onStreamGaugeClick);
+			for (const layer of ['radar-point', 'radar-label', 'stream-gauge-marker']) {
 				map.on('mouseenter', layer, () => {
 					if (map) map.getCanvas().style.cursor = 'pointer';
 				});
@@ -1456,7 +1613,7 @@
 			</span>
 		</button>
 		<button
-			class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={() => (terrainOn = !terrainOn)}
 		>
 			<span class="flex items-center gap-2">
@@ -1470,6 +1627,23 @@
 			</span>
 			<span class="num text-[9.5px] {terrainOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{terrainOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+		<button
+			class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (streamGaugesOn = !streamGaugesOn)}
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {streamGaugesOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Stream gauges</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">NWM · USGS sites</span>
+			</span>
+			<span class="num text-[9.5px] {streamGaugesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{streamGaugesOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
 

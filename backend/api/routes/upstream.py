@@ -396,3 +396,103 @@ async def latest_xband_scan(
             "x-moment": moment,
         },
     )
+
+
+# ----------------------------------------------------------------------
+# Stream gauges (USGS sites from radarca's stream_data.csv).
+#
+# The frontend's "Stream gauges" map layer needs the full site list to
+# render the markers and the per-COMID time-series endpoints to populate
+# the click popup. Both are proxied here so the browser stays same-origin
+# (avoids CORS) and so we can cache the (effectively static) site list
+# server-side instead of asking 100 browsers to fetch the 16.7 KB CSV
+# every time someone toggles the layer on.
+# ----------------------------------------------------------------------
+
+import csv as _csv
+import io as _io2
+import time as _time
+
+# Module-level cache for the parsed site list. radarca's CSV ships a
+# `Last-Modified: Wed, 07 Jan 2026` per the public characterization —
+# the list is effectively static, but we re-fetch hourly so any
+# additions don't sit stale for a day.
+_GAUGES_CACHE: dict[str, object] = {"data": None, "fetched_at": 0.0}
+_GAUGES_TTL_S = 3600
+
+
+@router.get("/stream_gauges")
+async def stream_gauges(request: Request):
+    """Return the parsed USGS site list from /data/stream_data.csv.
+
+    Shape:
+        {count: int,
+         sites: [{comid: str, lat: float, lon: float, status: 'B'|'R'}]}
+
+    `status` is 'B' (basic — site exists upstream) or 'R' (real-time —
+    has live data). Cached in-process for an hour.
+    """
+    now = _time.time()
+    if (
+        _GAUGES_CACHE["data"] is not None
+        and now - _GAUGES_CACHE["fetched_at"] < _GAUGES_TTL_S
+    ):
+        return _GAUGES_CACHE["data"]
+    ctx = request.app.state.context
+    try:
+        r = await ctx.http.get(f"{SETTINGS.base}/data/stream_data.csv")
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"Upstream returned HTTP {r.status_code}")
+    sites = []
+    reader = _csv.DictReader(_io2.StringIO(r.text))
+    for row in reader:
+        try:
+            sites.append({
+                "comid": row["COMID"],
+                "lat": float(row["LatSite"]),
+                "lon": float(row["LonSite"]),
+                "status": row["Status"],
+            })
+        except (KeyError, ValueError):
+            continue
+    payload = {"count": len(sites), "sites": sites}
+    _GAUGES_CACHE["data"] = payload
+    _GAUGES_CACHE["fetched_at"] = now
+    return payload
+
+
+@router.get("/stream_data")
+async def stream_data(comid: str, kind: str, ts: str, request: Request):
+    """Proxy radarca's per-COMID stream-data endpoints.
+
+    Parameters:
+        comid: USGS site COMID (string of digits).
+        kind:  'forecast' or 'observed'.
+        ts:    For forecast → 'YYYYMMDD_HH' (the validator accepts this
+               despite the error message claiming HHMM).
+               For observed → 'YYYYMMDD'.
+
+    Returns the upstream JSON as-is — typically
+        {headers: [...], values: [...]}
+    Empty headers/values is a valid response (no data for that hour).
+    """
+    if kind not in ("forecast", "observed"):
+        raise HTTPException(400, "kind must be 'forecast' or 'observed'")
+    path = (
+        f"/api/get_stream_data/{comid}/{ts}"
+        if kind == "forecast"
+        else f"/api/get_observed_stream_data/{comid}/{ts}"
+    )
+    ctx = request.app.state.context
+    try:
+        r = await ctx.http.get(f"{SETTINGS.base}{path}")
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"Upstream returned HTTP {r.status_code}")
+    try:
+        return r.json()
+    except Exception:
+        raise HTTPException(502, "Upstream returned malformed JSON")
