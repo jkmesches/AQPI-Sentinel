@@ -184,6 +184,23 @@
 		{ key: 'RhoHV',                     short: 'ρhv',  full: 'Correlation Coef' }
 	];
 
+	// ---- per-elevation tilt (single-radar inspector, Phase 1) -------------
+	// radar-display only carries 3 of our 5 moments. Map the shared ones;
+	// Zdr + ΦDP have no tilt source (null → tab disabled while tilt is on).
+	const MOMENT_TO_TILT: Record<Moment, string | null> = {
+		'Reflectivity': 'reflectivity',
+		'Velocity': 'velocity',
+		'RhoHV': 'copolarcorrelation',
+		'Differential Reflectivity': null,
+		'PhiDP': null
+	};
+	// 0 = off (radarca single-tilt overlay). 1..4 = radar-display elevation
+	// folder. Only takes effect when exactly one X-band radar is active.
+	let tiltEl = $state(0);
+	// Reactive view of the tilt eligibility, consumed by the panel UI.
+	const tiltRadarMeta = $derived.by(() => singleTiltRadar());
+	const tiltEngaged = $derived(tiltEl >= 1 && !!tiltRadarMeta);
+
 	// time controls — owned by MapView, drive composite overlay frame
 	interface Step { i: number; ts: string | null; imageName: string; day: string; date: string; time: string }
 	let steps = $state<Step[]>([]);
@@ -793,9 +810,34 @@
 	// when opacity-slider drags fire ~60 of these per second.
 	const _addedOverlays = new Set<string>();
 
+	// The single X-band radar eligible for tilt mode right now, or null.
+	// Conditions: exactly one radar active, it's an X-band with a known
+	// elevation list, and the current moment exists in radar-display.
+	function singleTiltRadar(): RadarMeta | null {
+		if (activeRadars.length !== 1) return null;
+		const r = radars.find((x) => x.id === activeRadars[0]);
+		if (!r || r.kind !== 'xband' || !r.elevations || !r.elevations.length) return null;
+		return r;
+	}
+	// The radar whose radarca overlay should be suppressed because the tilt
+	// overlay is rendering it instead.
+	function tiltOverlayRadarId(): string | null {
+		if (tiltEl < 1) return null;
+		const r = singleTiltRadar();
+		if (!r) return null;
+		if (!MOMENT_TO_TILT[currentMoment]) return null;  // moment has no tilt source
+		return r.id;
+	}
+
 	function refreshRadarOverlays() {
 		if (!map || !styleReady) return;
 		const active = new Set(activeRadars);
+		// When tilt mode owns a radar, drop it from the radarca overlay set
+		// so the two don't stack — the tilt overlay handles it instead. The
+		// removal branch below then tears down any radarca overlay we'd
+		// previously added for it.
+		const suppressed = tiltOverlayRadarId();
+		if (suppressed) active.delete(suppressed);
 
 		// remove overlays no longer active
 		for (const id of [..._addedOverlays]) {
@@ -831,6 +873,58 @@
 		syncBaseSources();
 	}
 
+	// Tilt overlay (Phase 1: static, newest frame only). When a single
+	// X-band radar is active and an elevation is picked, fetch that tilt's
+	// metadata + PPI from radar-display and render it at center ± MaxRange.
+	// Replaces the radarca overlay for that radar (suppressed above).
+	let _tiltToken = 0;
+	async function refreshTilt() {
+		if (!map || !styleReady) return;
+		const myToken = ++_tiltToken;
+		if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
+		if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
+		const id = tiltOverlayRadarId();
+		if (!id) return;
+		const tiltMoment = MOMENT_TO_TILT[currentMoment];
+		if (!tiltMoment) return;
+		let meta: { center: [number, number]; range_km: number };
+		try {
+			const resp = await fetch(
+				`/api/upstream/tilt_steps?radar=${id}&el=${tiltEl}&moment=${tiltMoment}`
+			);
+			if (!resp.ok) return;
+			meta = await resp.json();
+		} catch {
+			return;
+		}
+		// Guard: state may have changed during the fetch.
+		if (!map || !styleReady || myToken !== _tiltToken) return;
+		if (map.getSource('tilt-overlay')) return;
+		const [lon, lat] = meta.center;
+		const km = meta.range_km;
+		const dLat = km / 111;
+		const dLon = km / (111 * Math.cos((lat * Math.PI) / 180));
+		const url = apiUrl(
+			`/api/upstream/tilt_image.png?radar=${id}&el=${tiltEl}&moment=${tiltMoment}&frame=0`
+		);
+		map.addSource('tilt-overlay', {
+			type: 'image',
+			url,
+			coordinates: [
+				[lon - dLon, lat + dLat],
+				[lon + dLon, lat + dLat],
+				[lon + dLon, lat - dLat],
+				[lon - dLon, lat - dLat]
+			]
+		});
+		map.addLayer({
+			id: 'tilt-overlay-layer',
+			type: 'raster',
+			source: 'tilt-overlay',
+			paint: { 'raster-opacity': overlayOpacity }
+		});
+	}
+
 	// Opacity changes are a hot path (slider drag) — keep them off the heavy
 	// add/remove path. setPaintProperty is O(1) per layer.
 	function applyOpacity() {
@@ -839,6 +933,9 @@
 			if (map.getLayer(radarLayerId(id))) {
 				map.setPaintProperty(radarLayerId(id), 'raster-opacity', overlayOpacity);
 			}
+		}
+		if (map.getLayer('tilt-overlay-layer')) {
+			map.setPaintProperty('tilt-overlay-layer', 'raster-opacity', overlayOpacity);
 		}
 	}
 
@@ -909,6 +1006,16 @@
 	$effect(() => {
 		void currentMoment;
 		syncRadarOverlayTime();
+	});
+	// Tilt mode — re-evaluate radarca-overlay suppression + (re)render the
+	// tilt overlay whenever the elevation pick, active-radar set, or moment
+	// changes.
+	$effect(() => {
+		void tiltEl;
+		void currentMoment;
+		void activeRadars.length;
+		refreshRadarOverlays();
+		refreshTilt();
 	});
 	// Watershed + reservoir toggles. Persist immediately so a reload
 	// restores the user's choice, and re-run the geography refresh so the
@@ -1128,6 +1235,7 @@
 		refreshComposite();
 		refreshNexrad();
 		refreshRadarOverlays();
+		refreshTilt();
 		refreshGeography(t);
 		refreshTerrain(t);
 		refreshTerrain3D();
@@ -1790,12 +1898,18 @@
 			     treatment was too subtle to read at a glance (2026-05-18). -->
 			<div class="mt-1 flex gap-px rounded-sm border border-[var(--color-border-strong)] overflow-hidden">
 				{#each MOMENTS as m}
+					{@const unavailable = tiltEngaged && !MOMENT_TO_TILT[m.key]}
 					<button
 						class="num flex-1 py-1 text-[10.5px] font-medium transition-colors {currentMoment === m.key
 							? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
-							: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'}"
-						title={`${m.full} — currently selected: ${m.key === currentMoment ? 'yes' : 'no'}`}
-						onclick={() => (currentMoment = m.key)}
+							: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'} {unavailable
+							? 'opacity-30 cursor-not-allowed'
+							: ''}"
+						disabled={unavailable}
+						title={unavailable
+							? `${m.full} — not available in tilt mode (radar-display has Z / V / ρhv only)`
+							: `${m.full} — currently selected: ${m.key === currentMoment ? 'yes' : 'no'}`}
+						onclick={() => { if (!unavailable) currentMoment = m.key; }}
 					>
 						{m.short}
 					</button>
@@ -1804,6 +1918,37 @@
 			<div class="mt-1 text-[10px] text-[var(--color-faint)] num text-center">
 				moment: <span class="text-[var(--color-bright)]">{MOMENTS.find((m) => m.key === currentMoment)?.full ?? currentMoment}</span>
 			</div>
+
+			<!-- Tilt (elevation) selector — only when exactly one X-band radar
+			     is active. "Default" = radarca's single pre-rendered sweep;
+			     1..4 = radar-display per-elevation PPI (Phase 1: newest frame,
+			     no scrubbing). -->
+			{#if tiltRadarMeta}
+				<div class="mt-2 flex items-center gap-2">
+					<span class="num text-[9.5px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
+					<select
+						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+						value={tiltEl}
+						onchange={(e) => {
+							tiltEl = Number((e.target as HTMLSelectElement).value);
+							// If engaging tilt on a moment radar-display lacks,
+							// fall back to Reflectivity so something renders.
+							if (tiltEl >= 1 && !MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
+						}}
+						title="Pick a scan elevation. Default uses radarca's single sweep."
+					>
+						<option value={0}>Default (radarca)</option>
+						{#each tiltRadarMeta.elevations ?? [] as ang, i}
+							<option value={i + 1}>{ang}° EL</option>
+						{/each}
+					</select>
+				</div>
+				{#if tiltEngaged}
+					<div class="mt-1 text-[9.5px] text-[var(--color-faint)] num text-center">
+						radar-display · newest frame
+					</div>
+				{/if}
+			{/if}
 		</div>
 
 		<!-- Quick filters — text links, not buttons -->

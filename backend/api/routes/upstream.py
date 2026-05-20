@@ -496,3 +496,102 @@ async def stream_data(comid: str, kind: str, ts: str, request: Request):
         return r.json()
     except Exception:
         raise HTTPException(502, "Upstream returned malformed JSON")
+
+
+# ----------------------------------------------------------------------
+# Per-elevation tilt imagery (CSU Web Radar Display).
+#
+# radarca's /api/xbandRadarImages serves a single pre-rendered tilt per
+# moment. The separate radar-display app exposes the full per-elevation
+# PPI stack: for each X-band radar, 4 elevation folders × 3 moments × 7
+# frames (frame 0 = newest, ~2-min cadence). Each frame is a 665×665
+# georeferenced PPI PNG plus a radar_plot_<n>.json carrying the center
+# lat/lon, MaxRange, and scan angle.
+#
+# We proxy it (a) to dodge CORS and (b) because radar-display's TLS cert
+# is currently EXPIRED — a dedicated verify=False client handles that
+# host ONLY, leaving full TLS verification on every other upstream call.
+# ----------------------------------------------------------------------
+
+import httpx as _httpx
+
+_RD_BASE = "https://radardisplay.engr.colostate.edu"
+# Lazily-built client that skips cert verification — scoped to the
+# radar-display host (expired cert as of 2026-05). Do NOT route other
+# upstream traffic through this.
+_rd_client_inst: "_httpx.AsyncClient | None" = None
+
+
+def _rd_client() -> "_httpx.AsyncClient":
+    global _rd_client_inst
+    if _rd_client_inst is None:
+        _rd_client_inst = _httpx.AsyncClient(verify=False, timeout=12.0)
+    return _rd_client_inst
+
+
+# X-band radars present in the radar-display directory. CBAND + NEXRAD
+# are not served there.
+_TILT_RADARS = {"XEBY", "XSCR", "XSCV", "XSCW", "XSWR"}
+_TILT_MOMENTS = {"reflectivity", "velocity", "copolarcorrelation"}
+_TILT_FRAMES = 7  # _0.._6
+
+
+def _tilt_guard(radar: str, el: int, moment: str) -> None:
+    if radar not in _TILT_RADARS:
+        raise HTTPException(404, f"no tilt imagery for radar {radar}")
+    if moment not in _TILT_MOMENTS:
+        raise HTTPException(400, f"unknown moment {moment}")
+    if el < 1 or el > 4:
+        raise HTTPException(400, "el must be 1..4")
+
+
+@router.get("/tilt_steps")
+async def tilt_steps(radar: str, el: int, moment: str):
+    """Metadata for a (radar, elevation) tilt: center, range, scan angle,
+    plus the newest frame's timestamp.
+
+    Phase 1 reads only frame 0 (newest) — enough to georeference + label
+    a static overlay. Frame enumeration for scrubbing is a Phase 2 add.
+    """
+    _tilt_guard(radar, el, moment)
+    url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_0.json"
+    try:
+        r = await _rd_client().get(url)
+    except Exception as e:
+        raise HTTPException(502, f"radar-display unavailable: {humanize_error(e)}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"radar-display returned HTTP {r.status_code}")
+    try:
+        j = r.json()
+    except Exception:
+        raise HTTPException(502, "radar-display returned malformed JSON")
+    return {
+        "radar": radar,
+        "el": el,
+        "moment": moment,
+        "center": [j["Longitude"]["Value"], j["Latitude"]["Value"]],
+        "range_km": j["MaxRange"]["Value"],
+        "angle": j["Scan"]["Angle"]["Value"],
+        "frames": _TILT_FRAMES,
+        "latest_ts": j.get("Time", {}).get("Value"),
+    }
+
+
+@router.get("/tilt_image.png")
+async def tilt_image(radar: str, el: int, moment: str, frame: int = 0):
+    """Proxy a single per-elevation PPI PNG (frame 0 = newest)."""
+    _tilt_guard(radar, el, moment)
+    if frame < 0 or frame >= _TILT_FRAMES:
+        raise HTTPException(400, f"frame out of range (0..{_TILT_FRAMES - 1})")
+    url = f"{_RD_BASE}/{radar}/images/el_{el}/{moment}_{frame}.png"
+    try:
+        r = await _rd_client().get(url)
+    except Exception as e:
+        raise HTTPException(502, f"radar-display unavailable: {humanize_error(e)}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"radar-display returned HTTP {r.status_code}")
+    return Response(
+        content=r.content,
+        media_type="image/png",
+        headers={"cache-control": "no-store", "x-tilt-angle-el": str(el)},
+    )
