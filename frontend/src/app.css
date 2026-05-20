@@ -175,6 +175,38 @@ svg.spark path.stroke { opacity: 0.95; }
 .maplibregl-ctrl-attrib a { color: var(--map-attrib-link) !important; }
 .maplibregl-canvas:focus { outline: none; }
 
+/* MapLibre popup — theme-aware. The default styling is a white card
+   that turns invisible/painful in dark theme; route every color
+   through Sentinel's surface/border/text tokens so the popup
+   inherits whichever theme is active. */
+.maplibregl-popup-content {
+	background: var(--color-surface) !important;
+	color: var(--color-default) !important;
+	border: 1px solid var(--color-border-strong);
+	border-radius: 2px;
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+	padding: 8px 10px !important;
+	font-family: var(--font-display);
+}
+.maplibregl-popup-tip {
+	border-top-color: var(--color-surface) !important;
+	border-bottom-color: var(--color-surface) !important;
+}
+.maplibregl-popup-close-button {
+	color: var(--color-muted) !important;
+	font-size: 14px;
+	padding: 0 4px;
+}
+.maplibregl-popup-close-button:hover {
+	color: var(--color-bright) !important;
+	background: transparent !important;
+}
+/* Stream-gauge popup body — typography to match other Sentinel panels. */
+.gauge-popup { font: 11px/1.4 var(--font-mono); min-width: 200px; }
+.gauge-popup .gauge-title { font-weight: 600; color: var(--color-bright); }
+.gauge-popup .gauge-muted { color: var(--color-muted); }
+.gauge-popup .gauge-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+
 /* ===========================================================================
    MOBILE — touch-target + iOS-quirk fixes for the /m/* route tree.
    These cascade to desktop too but are harmless there.

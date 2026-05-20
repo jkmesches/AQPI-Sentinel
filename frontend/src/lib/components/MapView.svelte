@@ -999,8 +999,12 @@
 		map.once('styledata', () => {
 			if (!map) return;
 			if (map.getSource('ranges')) return;
-			addBaseSourcesAndLayers(t);
+			// Flip styleReady BEFORE re-adding so that refresh* fns called
+			// inside addBaseSourcesAndLayers (composite, nexrad, geography,
+			// terrain, stream-gauges) don't early-return on the !styleReady
+			// guard — they need to actually add their sources here.
 			styleReady = true;
+			addBaseSourcesAndLayers(t);
 		});
 	});
 
@@ -1153,7 +1157,7 @@
 	}
 	function gaugeSummaryHtml(j: GaugeFetch | null): string {
 		if (!j || !j.headers || j.headers.length <= 1) {
-			return '<span style="opacity:0.6">no data</span>';
+			return '<span class="gauge-muted">no data</span>';
 		}
 		// First column is COMID echo; skip it. Show a compact key:value
 		// list of the remaining columns. Numerical values rounded to 2dp
@@ -1164,7 +1168,7 @@
 		for (let i = 0; i < hdrs.length && i < vals.length; i++) {
 			const v = vals[i];
 			const rendered = typeof v === 'number' ? v.toFixed(2) : String(v);
-			pairs.push(`<span style="opacity:0.6">${hdrs[i]}:</span> ${rendered}`);
+			pairs.push(`<span class="gauge-muted">${hdrs[i]}:</span> ${rendered}`);
 		}
 		return pairs.join('  ·  ');
 	}
@@ -1174,17 +1178,18 @@
 		const props = f.properties as { comid: string; status: string };
 		const coords = (f.geometry as GeoJSON.Point).coordinates.slice() as [number, number];
 		const isLive = props.status === 'R';
-		// Build the popup body now; for R-status, schedule the fetch and
-		// patch the body in once it lands.
+		// Popup body. Colors come from the .maplibregl-popup-content CSS
+		// in app.css, which routes through Sentinel's theme tokens — so
+		// the popup follows light/dark without inline overrides.
 		const liveSlot = isLive
-			? `<div data-slot="forecast"><span style="opacity:0.6">loading forecast…</span></div>
-			   <div data-slot="observed"><span style="opacity:0.6">loading observed…</span></div>`
-			: `<div style="opacity:0.6">basic-status site (no live data)</div>`;
+			? `<div data-slot="forecast"><span class="gauge-muted">loading forecast…</span></div>
+			   <div data-slot="observed"><span class="gauge-muted">loading observed…</span></div>`
+			: `<div class="gauge-muted">basic-status site (no live data)</div>`;
 		const html = `
-			<div style="font: 11px/1.4 ui-monospace,Menlo,monospace; min-width: 200px;">
-				<div style="font-weight:600">COMID ${props.comid}</div>
-				<div style="opacity:0.6">${isLive ? 'real-time' : 'basic'} site</div>
-				<div style="margin-top:6px; display:flex; flex-direction:column; gap:3px">${liveSlot}</div>
+			<div class="gauge-popup">
+				<div class="gauge-title">COMID ${props.comid}</div>
+				<div class="gauge-muted">${isLive ? 'real-time' : 'basic'} site</div>
+				<div class="gauge-rows">${liveSlot}</div>
 			</div>`;
 		const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '320px' })
 			.setLngLat(coords)
@@ -1200,8 +1205,8 @@
 		if (!el) return;
 		const fEl = el.querySelector('[data-slot="forecast"]');
 		const oEl = el.querySelector('[data-slot="observed"]');
-		if (fEl) fEl.innerHTML = `<span style="opacity:0.6">forecast:</span> ${gaugeSummaryHtml(fcst)}`;
-		if (oEl) oEl.innerHTML = `<span style="opacity:0.6">observed:</span> ${gaugeSummaryHtml(obs)}`;
+		if (fEl) fEl.innerHTML = `<span class="gauge-muted">forecast:</span> ${gaugeSummaryHtml(fcst)}`;
+		if (oEl) oEl.innerHTML = `<span class="gauge-muted">observed:</span> ${gaugeSummaryHtml(obs)}`;
 	}
 
 	// Hillshade from AWS Open Data terrarium-format DEM tiles. Inserted
