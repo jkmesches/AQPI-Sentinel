@@ -90,14 +90,60 @@ class Store:
 
     # ----- reads ----------------------------------------------------------
     async def latest_per_check(self) -> list[dict[str, Any]]:
+        """Newest run per check_id, via a loose index scan.
+
+        === Load-bearing ===
+        The obvious spelling of this is `SELECT DISTINCT ON (check_id) ...
+        ORDER BY check_id, finished_at DESC`, and that is what this was
+        until 2026-08-08. Do not go back to it.
+
+        Postgres has no loose (skip) index scan, so DISTINCT ON reads
+        EVERY row of check_runs in index order and discards all but the
+        first per key in the Unique node — and because the select list
+        includes `payload`, it also heap-fetches all of them. At 2.2M
+        rows that measured 6.8s and 1.9M buffer reads per call. Worse,
+        before idx_run_check_finished existed the planner had no usable
+        index at all (idx_run_check is on started_at, not finished_at),
+        so it did a Seq Scan + full Sort, spilling ~1.4GB to
+        base/pgsql_tmp on every call.
+
+        This method is called from three hot paths — the scheduler tick,
+        every alarm evaluation, and every /api/status poll — so those
+        spills stacked faster than they drained and filled the disk,
+        taking production down for 6 days from 2026-08-01. See
+        docs/MAINTENANCE.md "Disk space".
+
+        The recursive CTE below walks the ~40 distinct check_ids by
+        repeatedly asking the index for the next key greater than the
+        last, then does one LIMIT 1 index descent per key. Same result,
+        160 buffer hits, 3.2ms, and — the part that matters — cost that
+        stays flat as check_runs grows instead of scaling with it.
+        """
         assert self.pool is not None
         rows = await self.pool.fetch(
             """
-            SELECT DISTINCT ON (check_id)
-                id, check_id, target, stage, status, started_at, finished_at,
-                summary, payload, artifacts
-            FROM check_runs
-            ORDER BY check_id, finished_at DESC
+            WITH RECURSIVE keys AS (
+                (SELECT check_id FROM check_runs ORDER BY check_id LIMIT 1)
+                UNION ALL
+                SELECT (SELECT c.check_id FROM check_runs c
+                         WHERE c.check_id > k.check_id
+                         ORDER BY c.check_id LIMIT 1)
+                FROM keys k
+                WHERE k.check_id IS NOT NULL
+            )
+            SELECT r.id, r.check_id, r.target, r.stage, r.status,
+                   r.started_at, r.finished_at, r.summary, r.payload,
+                   r.artifacts
+            FROM keys k
+            CROSS JOIN LATERAL (
+                SELECT id, check_id, target, stage, status, started_at,
+                       finished_at, summary, payload, artifacts
+                FROM check_runs r2
+                WHERE r2.check_id = k.check_id
+                ORDER BY r2.finished_at DESC
+                LIMIT 1
+            ) r
+            WHERE k.check_id IS NOT NULL
             """
         )
         return [dict(r) for r in rows]

@@ -24,6 +24,15 @@ CREATE INDEX IF NOT EXISTS idx_run_check        ON check_runs(check_id, started_
 CREATE INDEX IF NOT EXISTS idx_run_stage        ON check_runs(stage, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_target       ON check_runs(target, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_payload_gin  ON check_runs USING GIN (payload);
+-- Store.latest_per_check() orders by finished_at, NOT started_at. Without a
+-- matching index its plan degrades to Seq Scan + full Sort, which spills
+-- ~1.4GB of temp files per call at 2M rows — that is what filled the prod
+-- disk on 2026-08-01. Keep this in step with that query's ORDER BY.
+CREATE INDEX IF NOT EXISTS idx_run_check_finished ON check_runs(check_id, finished_at DESC);
+-- Retention sweeps delete by age across the whole table; without this they
+-- Seq Scan to find the cutoff.
+CREATE INDEX IF NOT EXISTS idx_run_finished     ON check_runs(finished_at);
+CREATE INDEX IF NOT EXISTS idx_ms_ts            ON metric_samples(ts);
 
 CREATE TABLE IF NOT EXISTS metric_samples (
   ts            TIMESTAMPTZ NOT NULL,
