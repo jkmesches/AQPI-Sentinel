@@ -15,22 +15,46 @@
 
 name: sentinel
 
+# Every service pins json-file rotation. Without it the driver grows a single
+# log forever — the backend's reached 1.6GB before 2026-08-08. Rotation, not
+# truncation: max-file copies are kept, just bounded.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: sentinel-postgres
     restart: unless-stopped
+    # temp_file_limit is the disk-full backstop. It was unlimited (-1) when a
+    # single unindexed sort in latest_per_check() spilled ~1.4GB per call and
+    # filled the disk. A query that needs more than this on a 2M-row table is
+    # a bug — fail that query loudly instead of taking the host down.
+    command:
+      - postgres
+      - -c
+      - temp_file_limit=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - log_temp_files=64MB
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-sentinel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
       POSTGRES_DB:       ${POSTGRES_DB:-sentinel}
     volumes:
+      # Stays on local disk. Do NOT relocate to the NFS mount — Postgres
+      # depends on fsync + locking semantics NFS doesn't reliably provide.
       - sentinel_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}"]
       interval: 10s
       timeout: 5s
       retries: 10
+    logging: *default-logging
     networks:
       - sentinel
 
@@ -53,6 +77,11 @@ services:
       SENTINEL_ARCHIVE_ENABLED: "1"
       SENTINEL_ARCHIVE_ROOT:    /data/archive
       SENTINEL_ARCHIVE_RETENTION_DAYS: ${SENTINEL_ARCHIVE_RETENTION_DAYS:-}
+      # Rows older than this are exported to /data/cold as compressed CSV and
+      # then dropped from the live tables. Unset = keep everything forever.
+      SENTINEL_DB_RETENTION_DAYS: ${SENTINEL_DB_RETENTION_DAYS:-}
+      SENTINEL_COLD_ROOT:       /data/cold
+      SENTINEL_RETENTION_HOUR_UTC: ${SENTINEL_RETENTION_HOUR_UTC:-9}
       # First-run admin bootstrap. Ignored once any user exists.
       SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}
       SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
@@ -60,9 +89,15 @@ services:
       # Public-facing dashboard URL embedded in alert emails.
       SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-}
     volumes:
-      - sentinel_archive:/data/archive
+      # Both accept either a named volume (bare name, the dev default) or a
+      # host path (leading slash → bind mount). Production points these at the
+      # NFS share on Erebor so 18GB of PNGs and the cold exports live off the
+      # container disk: SENTINEL_ARCHIVE_HOST_PATH=/mnt/aqpi-data/archive
+      - ${SENTINEL_ARCHIVE_HOST_PATH:-sentinel_archive}:/data/archive
+      - ${SENTINEL_COLD_HOST_PATH:-sentinel_cold}:/data/cold
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    logging: *default-logging
     networks:
       - sentinel
 
@@ -85,14 +120,20 @@ services:
       PORT: 3000
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    logging: *default-logging
     networks:
       - sentinel
 
 volumes:
   sentinel_pgdata:
     name: sentinel_pgdata
+  # Fallbacks for dev / any deploy that hasn't set the *_HOST_PATH vars.
+  # Production overrides both to bind mounts; these then go unused (the old
+  # sentinel_archive volume is retained as the migration rollback).
   sentinel_archive:
     name: sentinel_archive
+  sentinel_cold:
+    name: sentinel_cold
 
 networks:
   sentinel:
