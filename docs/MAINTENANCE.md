@@ -431,6 +431,141 @@ isn't empty, you have to use psql.
 
 ---
 
+## Disk space
+
+The production LXC's local disk is the scarce resource in this deployment,
+and it is what took Sentinel down for six days in August 2026. Read this
+section before changing anything that writes to disk.
+
+### Storage layout
+
+| What | Where | Why there |
+|---|---|---|
+| `pgdata` | local disk, `sentinel_pgdata` volume | **Must stay local.** Postgres relies on fsync + locking semantics that NFS does not reliably provide. |
+| Image archive (PNGs) | NFS — `/mnt/aqpi-data/archive` | Write-once, read-rarely, 18 GB and growing. Nothing is gained by keeping it on the container disk. |
+| Cold exports (offloaded rows) | NFS — `/mnt/aqpi-data/cold` | Archival CSV. Only read when restoring history. |
+| Nightly `pg_dump` | NFS — `/mnt/aqpi-data/backups/db` | Off-box by definition. |
+| Container logs | local disk, rotated | Capped at 50 MB × 3 per service by the compose `x-logging` anchor. |
+
+The NFS share is `10.25.0.80:/Erebor/aqpi_data` (2.6 TB). Point the backend at
+it with `SENTINEL_ARCHIVE_HOST_PATH` / `SENTINEL_COLD_HOST_PATH` in
+`ops/.env.prod` — both accept either a bare volume name (dev default) or a
+host path (bind mount).
+
+### What filled the disk on 2026-08-01
+
+Worth understanding in full, because the failure mode is silent and the fix
+is not obvious from the symptom.
+
+`Store.latest_per_check()` was spelled as `SELECT DISTINCT ON (check_id) …
+ORDER BY check_id, finished_at DESC`. The only index on `check_runs` that
+could have served it was `idx_run_check`, which is on **`started_at`**, not
+`finished_at` — so the planner fell back to a Seq Scan plus a full Sort of
+the table. With `work_mem=4MB` and `temp_file_limit=-1`, each call spilled
+~1.4 GB into `base/pgsql_tmp`.
+
+That method is called from three hot paths — the scheduler tick, every alarm
+evaluation, and every `/api/status` poll. At 25 k rows (May) the sort ran in
+memory in milliseconds and nobody noticed. At 2.2 M rows (August) the calls
+took ~2 minutes each, arrived faster than they drained, and stacked: 15
+concurrent copies, 13 GB of temp files, disk full, Postgres wedged. Data
+collection stopped for 6 d 17 h until a host reboot cleared the temp files.
+
+Three defences are now in place, and all three matter:
+
+1. `idx_run_check_finished (check_id, finished_at DESC)` — gives the query an
+   index at all.
+2. The query is a recursive loose index scan, not `DISTINCT ON` — see the
+   comment on `Store.latest_per_check`. Postgres has no skip scan, so
+   `DISTINCT ON` reads *every* row even with a perfect index. 3.2 ms vs
+   6.8 s, and flat as the table grows.
+3. `temp_file_limit=1GB` in the compose `command:` — any future query that
+   tries to spill more now fails loudly instead of taking the host down.
+
+If you ever see `pgsql_tmp` growing into the gigabytes, some query has lost
+its index. Find it with:
+
+```bash
+ssh <prod-host> 'du -sh /var/lib/docker/volumes/sentinel_pgdata/_data/base/pgsql_tmp'
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c \
+  "SELECT pid, now()-query_start AS dur, left(query,120) FROM pg_stat_activity
+    WHERE state='active' ORDER BY dur DESC LIMIT 10;"
+```
+
+`log_temp_files=64MB` is on, so offenders also announce themselves in the
+Postgres log.
+
+### Retention / offload
+
+`backend/retention.py` runs a daily sweep at `SENTINEL_RETENTION_HOUR_UTC`
+(default 09:00 UTC). It is **offload, not delete**: rows are exported to
+`/data/cold/<table>/<table>_<from>_<to>.csv.gz`, the file is fsync'd, and the
+COPY row count is verified against the count about to be removed. Any
+mismatch aborts before the delete.
+
+| Env var | Effect |
+|---|---|
+| `SENTINEL_DB_RETENTION_DAYS` | Offload `check_runs` + `metric_samples` older than N days. Unset = keep everything. Production: **60**. |
+| `SENTINEL_ARCHIVE_RETENTION_DAYS` | Delete archived images not seen in N days. Unset = permanent. Production: **unset** — the archive lives on 2.5 TB of NFS, there is nothing to gain by pruning it. |
+| `SENTINEL_RETENTION_HOUR_UTC` | Hour of the daily sweep. Deliberately wall-clock, so a restart doesn't re-trigger it. |
+
+Note that `SENTINEL_ARCHIVE_RETENTION_DAYS` was parsed into `Settings` but
+read by **nothing** from the archive feature shipping until 2026-08-08. If
+you are reading old notes that claim it prunes anything before that date, it
+did not.
+
+Deleting rows returns space to Postgres' free space map, not to the
+filesystem — the table stops growing rather than shrinking. That is the
+intent. To actually return space to the OS you need `VACUUM FULL`, which
+takes an exclusive lock and needs free space equal to the table size:
+
+```bash
+# Rare. Stop the backend first; this locks check_runs for the duration.
+docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod stop backend
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c "VACUUM FULL check_runs;"
+docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod start backend
+```
+
+### Restoring offloaded rows
+
+The cold exports are plain gzipped CSV with a header row:
+
+```bash
+gunzip < /mnt/aqpi-data/cold/check_runs/check_runs_20260516T015206_20260610T000000.csv.gz \
+  | docker exec -i sentinel-postgres psql -U sentinel -d sentinel \
+      -c "COPY check_runs (id, check_id, target, stage, status, started_at,
+                           finished_at, summary, payload, artifacts)
+          FROM STDIN WITH (FORMAT csv, HEADER true)"
+```
+
+`check_runs.id` is preserved in the export, so re-imported rows keep their
+original identity. If the sequence has since passed those ids there is no
+conflict; if you are restoring into a fresh database, run
+`SELECT setval('check_runs_id_seq', (SELECT max(id) FROM check_runs));`
+afterwards.
+
+### Backups
+
+`ops/backup.sh` dumps Postgres to the NFS share and keeps the newest 14.
+Install it on the prod host:
+
+```bash
+ssh <prod-host> 'crontab -l 2>/dev/null; echo "0 8 * * * /srv/sentinel/ops/backup.sh >> /var/log/sentinel-backup.log 2>&1"' | ssh <prod-host> crontab -
+```
+
+It runs at 08:00 UTC, an hour ahead of the retention sweep, so every night's
+dump predates the offload that removes rows.
+
+### Self-monitoring
+
+`layer0.self.disk` (L0, 5-minute cadence) reports local-disk and archive-mount
+headroom, warning at 75% and failing at 88% — both overridable via the global
+thresholds `disk_warn_pct` / `disk_fail_pct` in `/admin/thresholds`. It exists
+because in August 2026 every radar check was green while the box hosting them
+ran out of disk.
+
+---
+
 ## Troubleshooting
 
 ### "The dashboard is frozen"
