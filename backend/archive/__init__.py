@@ -13,6 +13,7 @@ one image_archive row, with potentially many image_index rows pointing
 at that sha.
 """
 from __future__ import annotations
+import asyncio
 import hashlib
 import io
 import logging
@@ -27,6 +28,29 @@ log = logging.getLogger(__name__)
 
 def _sha_path(root: Path, sha: str, ext: str) -> Path:
     return root / sha[:2] / f"{sha}.{ext}"
+
+
+def _write_blob(path: Path, content: bytes) -> None:
+    """Idempotent write of one content-addressed blob. Runs in a thread.
+
+    Idempotent because many checks hash to the same sha and there's no point
+    rewriting the file; the tmp+rename also avoids a partial file being
+    visible if two checks fire concurrently for the same content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(content)
+    os.replace(tmp, path)
+
+
+def _read_blob(path: Path) -> bytes | None:
+    """Read one blob, or None if it isn't there. Runs in a thread."""
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
 
 
 def _detect_ext(content_type: str | None) -> str:
@@ -60,14 +84,20 @@ async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
             pass
 
         path = _sha_path(archive_root, sha, ext)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Idempotent write — many checks will hash to the same sha and
-        # we don't want to keep rewriting the file (also avoids partial
-        # writes if two checks fire concurrently for the same content).
-        if not path.exists():
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_bytes(content)
-            os.replace(tmp, path)
+        # === Load-bearing: file I/O goes through a worker thread ===
+        #
+        # As of 2026-08-08 the production archive_root is an NFS bind mount
+        # (Erebor, see docs/MAINTENANCE.md "Disk space"), mounted `hard`. A
+        # hard mount blocks I/O indefinitely while the server is unreachable
+        # rather than returning an error — so doing these stat/write/rename
+        # calls inline, on the event loop, means one NAS reboot wedges the
+        # ENTIRE backend: every check, the API, and the WebSocket fan-out,
+        # not just archiving.
+        #
+        # asyncio.to_thread confines that stall to a thread-pool worker. The
+        # outer `except` still swallows real errors, keeping archiving
+        # best-effort as designed.
+        await asyncio.to_thread(_write_blob, path, content)
 
         now = datetime.now(timezone.utc)
         async with pool.acquire() as conn:
@@ -113,12 +143,15 @@ async def lookup_by_source(pool, archive_root: Path, source: str) -> tuple[bytes
             return None
         sha, ext = row["sha256"], row["ext"]
         path = _sha_path(archive_root, sha, ext)
-        if not path.exists():
+        # Threaded for the same reason as the write path — this serves the
+        # History detail modal's images straight off the NFS mount.
+        data = await asyncio.to_thread(_read_blob, path)
+        if data is None:
             log.warning("image_index row exists but file missing: %s", path)
             return None
         ct = {"png": "image/png", "jpg": "image/jpeg",
               "gif": "image/gif", "webp": "image/webp"}.get(ext, "application/octet-stream")
-        return path.read_bytes(), ct
+        return data, ct
     except Exception:
         log.exception("archive.lookup_by_source failed for %r", source)
         return None
