@@ -447,10 +447,17 @@ section before changing anything that writes to disk.
 | Nightly `pg_dump` | NFS — `/mnt/aqpi-data/backups/db` | Off-box by definition. |
 | Container logs | local disk, rotated | Capped at 50 MB × 3 per service by the compose `x-logging` anchor. |
 
-The NFS share is `10.25.0.80:/Erebor/aqpi_data` (2.6 TB). Point the backend at
-it with `SENTINEL_ARCHIVE_HOST_PATH` / `SENTINEL_COLD_HOST_PATH` in
-`ops/.env.prod` — both accept either a bare volume name (dev default) or a
-host path (bind mount).
+The NFS share is `10.25.0.80:/Erebor/aqpi_data` (2.6 TB), attached to the LXC
+as a **Proxmox bind mount declared in the container config on the host**
+(`mp0:` in `/etc/pve/lxc/123.conf`), not by the guest. It is persistent across
+reboots. Note that this means `/etc/fstab` inside the container is empty and
+`systemctl` reports the mount as `loaded (/proc/self/mountinfo)` — that is the
+expected appearance for a host-side bind mount, **not** evidence that the
+mount is temporary. Check the host's container config, not the guest's fstab.
+
+Point the backend at it with `SENTINEL_ARCHIVE_HOST_PATH` /
+`SENTINEL_COLD_HOST_PATH` in `ops/.env.prod` — both accept either a bare
+volume name (dev default) or a host path (bind mount).
 
 ### What filled the disk on 2026-08-01
 
