@@ -196,13 +196,21 @@ async def lifespan(app: FastAPI):
     sched.on_result = _maybe_broadcast
     await sched.start()
 
+    # Daily offload of aged rows to cold storage. No-op unless a retention
+    # window is configured; see backend/retention.py.
+    from ..retention import RetentionTask
+    retention = RetentionTask(store.pool, SETTINGS)
+    await retention.start()
+
     app.state.store = store
     app.state.scheduler = sched
     app.state.context = ctx
     app.state.engine = engine
+    app.state.retention = retention
     try:
         yield
     finally:
+        await retention.stop()
         await sched.stop()
         await engine.stop()
         await ctx.aclose()

@@ -30,6 +30,9 @@ class Settings:
     archive_enabled: bool
     archive_root: Path
     archive_retention_days: int | None    # None == permanent
+    cold_root: Path                       # offloaded CSV exports land here
+    db_retention_days: int | None         # None == keep all rows in the hot DB
+    retention_hour_utc: int               # daily sweep runs at this UTC hour
     admin_email: str                       # bootstrap admin (only used if no users exist)
     admin_password: str
     admin_display_name: str
@@ -46,6 +49,8 @@ def _load() -> Settings:
     data_dir = Path(os.environ.get("SENTINEL_DATA_DIR", "./data")).resolve()
     retention_env = os.environ.get("SENTINEL_ARCHIVE_RETENTION_DAYS", "").strip()
     retention = int(retention_env) if retention_env else None
+    db_retention_env = os.environ.get("SENTINEL_DB_RETENTION_DAYS", "").strip()
+    db_retention = int(db_retention_env) if db_retention_env else None
     return Settings(
         db_url=db,
         base=os.environ.get("SENTINEL_BASE", "https://radarca.engr.colostate.edu"),
@@ -56,6 +61,9 @@ def _load() -> Settings:
         archive_enabled=os.environ.get("SENTINEL_ARCHIVE_ENABLED", "1") not in ("0", "false", "no"),
         archive_root=Path(os.environ.get("SENTINEL_ARCHIVE_ROOT", str(data_dir / "archive"))).resolve(),
         archive_retention_days=retention,
+        cold_root=Path(os.environ.get("SENTINEL_COLD_ROOT", str(data_dir / "cold"))).resolve(),
+        db_retention_days=db_retention,
+        retention_hour_utc=int(os.environ.get("SENTINEL_RETENTION_HOUR_UTC", "9")),
         admin_email=os.environ.get("SENTINEL_ADMIN_EMAIL", ""),
         admin_password=os.environ.get("SENTINEL_ADMIN_PASSWORD", ""),
         admin_display_name=os.environ.get("SENTINEL_ADMIN_DISPLAY_NAME", ""),
