@@ -26,7 +26,88 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ## [Unreleased]
 
+### Fixed
+
+- **Disk-full outage: `latest_per_check()` no longer sorts the whole table.**
+  Production stopped collecting from 2026-08-01 23:56 UTC to 2026-08-08
+  17:44 UTC — 6 d 17 h — because the local disk filled. Root cause was a
+  query/index mismatch: `Store.latest_per_check()` orders by `finished_at`,
+  but the only index on `check_runs` was `idx_run_check (check_id,
+  started_at DESC)`. With no usable index the planner chose Seq Scan + full
+  Sort, and with `work_mem=4MB` / `temp_file_limit=-1` each call spilled
+  ~1.4 GB into `base/pgsql_tmp`. The method is called from the scheduler
+  tick, every alarm evaluation, and every `/api/status` poll; at 2.2 M rows
+  the calls took ~2 min each, arrived faster than they drained, and stacked
+  15 deep — 13 GB of temp files, disk full, Postgres wedged. At 25 k rows in
+  May the same query sorted in memory in milliseconds, which is why it
+  shipped unnoticed.
+
+  Three independent defences now:
+  - `idx_run_check_finished (check_id, finished_at DESC)` — the missing index.
+  - The query is now a recursive loose index scan over the ~40 distinct
+    `check_id`s instead of `DISTINCT ON`. Postgres has no skip scan, so
+    `DISTINCT ON` reads every row and heap-fetches every tuple even with a
+    perfect index — measured 6.8 s / 1.9 M buffer reads. The rewrite is
+    **3.2 ms / 160 buffer hits**, and stays flat as `check_runs` grows.
+  - `temp_file_limit=1GB` + `log_temp_files=64MB` on the Postgres service, so
+    a future regression fails one query loudly instead of taking the host
+    down.
+
+- **Archive I/O no longer blocks the event loop.** `save_image()` and
+  `lookup_by_source()` did synchronous `write_bytes`/`read_bytes`/`exists()`
+  inline in async functions. Harmless on local disk; with the archive now on
+  a `hard` NFS mount, a single NAS reboot would have blocked the entire
+  backend — every check, the API, and the WebSocket fan-out — not just
+  archiving. Both paths now go through `asyncio.to_thread`.
+
+- **Unbounded container logs.** No `logging:` block existed in
+  `docker-compose.prod.yml`, so the json-file driver grew one file forever;
+  the backend's had reached 1.6 GB. All three services now rotate at
+  50 MB × 3.
+
 ### Added
+
+- **Retention / cold-storage offload** (`backend/retention.py`). A daily
+  sweep at `SENTINEL_RETENTION_HOUR_UTC` (default 09:00) exports
+  `check_runs` + `metric_samples` rows older than
+  `SENTINEL_DB_RETENTION_DAYS` to gzipped CSV under `SENTINEL_COLD_ROOT`,
+  then drops them. **Offload, not delete**: the export is fsync'd and its
+  COPY row count verified against the count about to be removed, and any
+  mismatch aborts before the delete. Sweeps are bounded by a snapshot taken
+  before the export, so rows written mid-sweep are never in its delete
+  predicate. Production: 60 days. Guarded by
+  `validation_tests/test_retention_offload.py`.
+
+- **`SENTINEL_ARCHIVE_RETENTION_DAYS` now does something.** It has been
+  parsed into `Settings.archive_retention_days` since the archive feature
+  shipped and read by *nothing* — a documented knob that silently did
+  nothing. It now drives `retention.prune_archive()`, keyed on `last_seen_at`
+  so recurring content stays live. Production leaves it unset (permanent);
+  the archive lives on 2.5 TB of NFS and there is nothing to gain by pruning.
+
+- **`layer0.self.disk`** — Sentinel monitors its own host. Reports local-disk
+  and archive-mount headroom every 5 min, warning at 75% and failing at 88%
+  (`disk_warn_pct` / `disk_fail_pct` in the global thresholds). A hung NFS
+  mount is reported as a warn via a 10 s statfs timeout rather than hanging
+  the check. This check exists because in August 2026 every radar check was
+  green while the box hosting them ran out of disk.
+
+- **`ops/backup.sh`** — nightly `pg_dump | gzip` to the NFS share, keeping
+  the newest 14, with a gzip integrity check and `.part`-then-rename so a
+  truncated dump is never mistaken for a good one. Runs at 08:00 UTC, an
+  hour ahead of the retention sweep, so every night's backup predates the
+  offload that removes rows.
+
+- **Data mounts are now configurable**, via `SENTINEL_ARCHIVE_HOST_PATH` /
+  `SENTINEL_COLD_HOST_PATH`. Both accept a bare docker volume name (dev
+  default) or an absolute host path (bind mount). Production points them at
+  `/mnt/aqpi-data/{archive,cold}` on the Erebor NFS share so the container
+  disk stays light. `pgdata` deliberately stays on local disk — Postgres
+  needs fsync/locking semantics NFS doesn't reliably provide.
+
+- **`docs/MAINTENANCE.md` "Disk space"** — storage layout, the full
+  post-mortem above, retention/offload configuration, how to restore
+  offloaded rows, backups, and what to do when `pgsql_tmp` starts growing.
 
 - **Map: per-radar tilt selection.** When exactly one X-band radar is
   active, a "Tilt" dropdown appears in the Layers panel listing that
