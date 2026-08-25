@@ -9,6 +9,13 @@ glossary defines the vocabulary; this doc records the policy.
 | Tier | Meaning | Status values |
 |---|---|---|
 | **Action required** | Broken. Auto-pages after 30 minutes if still open. | `fail`, `error` |
+
+> **`fail` vs `error`.** Both sit in the action-required tier, but they are no
+> longer rendered identically. `fail` means the monitored thing is broken;
+> `error` means the check could not determine its state (upstream API timeout,
+> probe crash). Until 2026-08-25 both were painted the same red and summed into
+> one "F" counter, which made ~1,500 upstream API timeouts/day read as radar
+> outages. `error` now has its own colour and its own counter.
 | **Attention required** | Degraded but not broken. Surfaces on the dashboard, doesn't page by default. | `warn` |
 | **Useful to watch** | Healthy or out-of-scope. | `pass`, `skip` |
 
@@ -89,6 +96,28 @@ Verdicts from radar reconciliation:
 `STUCK_DOWN_FLAG` is a flag-stuck-true upstream bug — the radar is
 operating but the status feed says otherwise. Worth noticing,
 doesn't need a page.
+
+#### Fleet correlation
+
+| Check | Trip condition | Status | Tier |
+|---|---|---|---|
+| `layer2.xband.fleet` | ≥4 of 5 X-band radars simultaneously unhealthy | `fail` | Action |
+
+The five X-band radars sit at separate sites and do not fail in lockstep.
+Measured over 14 days to 2026-08-25, **80.2%** of all `GHOST_UP` runs occurred
+while 4–5 radars were ghosting at once, and only **2.8%** were isolated to a
+single radar; one episode had four sites entering and leaving `GHOST_UP`
+within the same second, 79 hours apart. Correlation that tight is one upstream
+event, not five radar outages.
+
+The five X-band radar checks list `layer2.xband.fleet` in `depends_on`, so when
+it trips their alarms are still recorded but marked `suppressed_by` — one
+actionable page describing the true scope instead of five saying the same
+thing. `layer2.radar.CBAND` deliberately does **not** depend on it: different
+band, different site, and it stayed healthy through the real episodes.
+
+An isolated single-radar failure does not trip this check and pages exactly as
+before.
 
 ### L3 — Map Overlays
 
