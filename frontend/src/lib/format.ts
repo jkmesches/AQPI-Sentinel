@@ -37,7 +37,7 @@ export function statusColor(s: string): string {
 			pass: 'text-[var(--color-ok)]',
 			warn: 'text-[var(--color-warn)]',
 			fail: 'text-[var(--color-fail)]',
-			error: 'text-[var(--color-fail)]',
+			error: 'text-[var(--color-error)]',
 			skip: 'text-[var(--color-muted)]'
 		}[s] ?? 'text-[var(--color-muted)]'
 	);
@@ -49,7 +49,7 @@ export function statusDotBg(s: string): string {
 			pass: 'bg-[var(--color-ok)]',
 			warn: 'bg-[var(--color-warn)]',
 			fail: 'bg-[var(--color-fail)]',
-			error: 'bg-[var(--color-fail)]',
+			error: 'bg-[var(--color-error)]',
 			skip: 'bg-[var(--color-muted)]',
 			critical: 'bg-[var(--color-critical)]',
 			info: 'bg-[var(--color-info)]'
@@ -63,7 +63,7 @@ export function statusBorder(s: string): string {
 			pass: 'border-[var(--color-ok)]/40',
 			warn: 'border-[var(--color-warn)]/40',
 			fail: 'border-[var(--color-fail)]/45',
-			error: 'border-[var(--color-fail)]/45',
+			error: 'border-[var(--color-error)]/45',
 			skip: 'border-[var(--color-faint)]'
 		}[s] ?? 'border-[var(--color-faint)]'
 	);
@@ -75,7 +75,7 @@ export function statusText(s: string): string {
 			pass: 'text-[var(--color-ok)]',
 			warn: 'text-[var(--color-warn)]',
 			fail: 'text-[var(--color-fail)]',
-			error: 'text-[var(--color-fail)]',
+			error: 'text-[var(--color-error)]',
 			skip: 'text-[var(--color-muted)]',
 			critical: 'text-[var(--color-critical)]',
 			info: 'text-[var(--color-info)]'

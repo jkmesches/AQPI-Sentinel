@@ -185,7 +185,7 @@
 		pass:  'var(--color-ok)',
 		warn:  'var(--color-warn)',
 		fail:  'var(--color-fail)',
-		error: 'var(--color-fail)',
+		error: 'var(--color-error)',
 		skip:  'var(--color-faint)',
 		critical: 'var(--color-fail)',
 		info:  'var(--color-info)'

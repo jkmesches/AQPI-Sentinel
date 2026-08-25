@@ -294,7 +294,7 @@
 									{#each sub as [k, v]}
 										<tr class="border-b border-[var(--color-border)]/40 last:border-b-0">
 											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">{k}</td>
-											<td class="px-3 py-1 {v === 'pass' ? 'text-[var(--color-ok)]' : v === 'warn' ? 'text-[var(--color-warn)]' : v === 'fail' || v === 'error' ? 'text-[var(--color-fail)]' : 'text-[var(--color-muted)]'}">{v}</td>
+											<td class="px-3 py-1 {v === 'pass' ? 'text-[var(--color-ok)]' : v === 'warn' ? 'text-[var(--color-warn)]' : v === 'fail' ? 'text-[var(--color-fail)]' : v === 'error' ? 'text-[var(--color-error)]' : 'text-[var(--color-muted)]'}">{v}</td>
 										</tr>
 									{/each}
 								</tbody>

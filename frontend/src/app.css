@@ -34,6 +34,13 @@
 	--color-ok:       #4ade80;
 	--color-warn:     #fbbf24;
 	--color-fail:     #f87171;
+	/* `error` = the check could not determine state (upstream API timed out,
+	   Playwright crashed), as distinct from `fail` = the monitored thing is
+	   broken. These were the same red until 2026-08-25, which made ~1,500
+	   upstream-API timeouts/day render as radar outages. Violet is legible
+	   against ok/warn/fail/muted for the common color-vision types and does
+	   not read as "worse than fail". */
+	--color-error:    #a78bfa;
 	--color-info:     #60a5fa;
 	--color-suppress: #8a8f8a;
 	--color-critical: #f472b6;
@@ -98,6 +105,7 @@ body {
 	--color-ok:       #16a34a;          /* green-600, 4.5:1 — vivid + readable */
 	--color-warn:     #9a6905;          /* deep gold, 5.5:1 */
 	--color-fail:     #B91C1C;          /* red-700, 6.3:1 */
+	--color-error:    #6D28D9;          /* violet-700, 7.1:1 — see dark theme note */
 	--color-info:     #1d4ed8;          /* blue-700, 7.5:1 */
 	--color-suppress: #57584C;
 	--color-critical: #831843;          /* pink-900, 9.5:1 */

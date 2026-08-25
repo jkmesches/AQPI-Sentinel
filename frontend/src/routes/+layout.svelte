@@ -60,9 +60,11 @@
 	const counts = $derived(sentinel.rollup?.counts ?? {});
 	const totalPass = $derived(Object.values(counts).reduce((a, b) => a + b.pass, 0));
 	const totalWarn = $derived(Object.values(counts).reduce((a, b) => a + b.warn, 0));
-	const totalFail = $derived(
-		Object.values(counts).reduce((a, b) => a + b.fail + b.error, 0)
-	);
+	// fail and error are counted separately. Folding them together overstated
+	// failures on the most-read number in the app: an upstream API timeout
+	// ("we could not measure") is not a radar outage ("the thing is broken").
+	const totalFail = $derived(Object.values(counts).reduce((a, b) => a + b.fail, 0));
+	const totalError = $derived(Object.values(counts).reduce((a, b) => a + b.error, 0));
 	const totalSkip = $derived(Object.values(counts).reduce((a, b) => a + (b.skip ?? 0), 0));
 	const total = $derived(Object.values(counts).reduce((a, b) => a + b.total, 0));
 	const sinceUpdate = $derived(
@@ -112,13 +114,16 @@
 				</div>
 			</div>
 
-			<!-- ratio + WARN/FAIL/SKIP pill — every cell of the sub-strip
-			     contributes here so pass + warn + fail + skip = total. Without
-			     skip the math didn't add up (e.g. 36 pass + 1 fail vs 38 total). -->
+			<!-- ratio + WARN/FAIL/ERROR/SKIP pill — every cell of the sub-strip
+			     contributes here so pass + warn + fail + error + skip = total.
+			     Without skip the math didn't add up (e.g. 36 pass + 1 fail vs 38
+			     total); error is broken out separately from fail so an upstream
+			     API timeout doesn't read as an outage. -->
 			<div class="flex items-center gap-3 num">
 				<span class="text-[var(--color-ok)]">{totalPass}</span>
 				{#if totalWarn}<span class="text-[var(--color-warn)]">{totalWarn} W</span>{/if}
 				{#if totalFail}<span class="text-[var(--color-fail)]">{totalFail} F</span>{/if}
+				{#if totalError}<span class="text-[var(--color-error)]" title="checks that could not determine state (upstream API error, probe crash) — not the same as a failure">{totalError} E</span>{/if}
 				{#if totalSkip}<span class="text-[var(--color-muted)]">{totalSkip} S</span>{/if}
 				<span class="text-[var(--color-faint)]">/ {total}</span>
 			</div>
@@ -194,7 +199,8 @@
 				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stageLabel(stage)}</span>
 				<span class="num text-[10.5px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
 				{#if c.warn}<span class="num text-[10.5px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
-				{#if c.fail + c.error}<span class="num text-[10.5px] text-[var(--color-fail)]">{c.fail + c.error} F</span>{/if}
+				{#if c.fail}<span class="num text-[10.5px] text-[var(--color-fail)]">{c.fail} F</span>{/if}
+				{#if c.error}<span class="num text-[10.5px] text-[var(--color-error)]">{c.error} E</span>{/if}
 			</div>
 			<span class="text-[var(--color-faint)]">·</span>
 		{/each}
