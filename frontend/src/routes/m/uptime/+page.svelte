@@ -51,7 +51,7 @@
 		pass:  'var(--color-ok)',
 		warn:  'var(--color-warn)',
 		fail:  'var(--color-fail)',
-		error: 'var(--color-fail)',
+		error: 'var(--color-error)',
 		skip:  'var(--color-faint)'
 	};
 
@@ -539,7 +539,7 @@
 						{#each subgroups as sg, gi}
 							{#each sg.cols as col}
 								{@const cell = b.cells[cellKey(col)]}
-								{@const isUpstream = cell?.reason === 'upstream_unhealthy'}
+								{@const isUpstream = cell?.reason === 'upstream_unhealthy' || cell?.reason === 'upstream_api'}
 								<button
 									type="button"
 									onclick={() => openDetail(b, col)}

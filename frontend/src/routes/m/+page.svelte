@@ -135,7 +135,8 @@
 			<span class="text-[14px] font-semibold tracking-[0.12em] text-[var(--color-bright)]" title={stage}>{stageLabel(stage)}</span>
 			<span class="num text-[12px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
 			{#if c.warn}<span class="num text-[12px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
-			{#if c.fail + c.error}<span class="num text-[12px] text-[var(--color-fail)]">{c.fail + c.error} F</span>{/if}
+			{#if c.fail}<span class="num text-[12px] text-[var(--color-fail)]">{c.fail} F</span>{/if}
+			{#if c.error}<span class="num text-[12px] text-[var(--color-error)]">{c.error} E</span>{/if}
 			<span class="ml-auto text-[12px] text-[var(--color-faint)]">
 				{expanded[stage] ? '−' : '+'}
 			</span>

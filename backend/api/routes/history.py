@@ -201,7 +201,11 @@ async def history_timeline(
         "    AT TIME ZONE 'UTC' AS bucket_ts, "
         "  check_id, target, stage, "
         "  MAX(CASE status "
-        "        WHEN 'fail'  THEN 4 "
+        # fail outranks error: "the monitored thing is broken" is a stronger
+        # statement than "our probe could not determine its state". They were
+        # equal until 2026-08-25, which is why upstream API timeouts rendered
+        # as radar outages on the timeline.
+        "        WHEN 'fail'  THEN 5 "
         "        WHEN 'error' THEN 4 "
         "        WHEN 'warn'  THEN 3 "
         "        WHEN 'pass'  THEN 2 "
@@ -215,6 +219,7 @@ async def history_timeline(
         # skipping its step-count sub-check). We pick the first non-pass
         # reason seen — 'upstream_unhealthy' wins when it appears.
         "  bool_or(payload->>'reason' = 'upstream_unhealthy') AS any_upstream, "
+        "  bool_or(payload->>'reason' = 'upstream_api')       AS any_upstream_api, "
         "  COUNT(*) AS n "
         "FROM check_runs "
         "WHERE " + " AND ".join(where) + " "
@@ -232,7 +237,7 @@ async def history_timeline(
         buckets.append({"ts": ts.isoformat(), "cells": {}})
         ts_index[int(ts.timestamp())] = i
 
-    rank_to_status = {3: "warn", 2: "pass", 1: "skip", 0: "unknown"}
+    rank_to_status = {4: "error", 3: "warn", 2: "pass", 1: "skip", 0: "unknown"}
     for r in rows:
         bts = r["bucket_ts"]
         if bts.tzinfo is None:
@@ -241,18 +246,17 @@ async def history_timeline(
         if idx is None:
             continue
         rank = r["worst_rank"] or 0
-        if rank == 4:
-            # Prefer 'fail' label when both happened — it conveys "the check
-            # reported a real-world failure" rather than crashed plumbing.
-            status = "fail" if r["has_fail"] else "error"
-        else:
-            status = rank_to_status[rank]
+        # rank 5 == fail. A bucket containing both a fail and an error still
+        # reads 'fail': a real-world failure is the more important fact.
+        status = "fail" if rank == 5 else rank_to_status[rank]
         key = f"{r['check_id']}|{r['target']}"
         cell: dict = {"status": status, "n": int(r["n"])}
         # Only emit `reason` when it's load-bearing — the field is omitted
         # for vanilla skips so the JSON stays small over the wire.
         if r.get("any_upstream"):
             cell["reason"] = "upstream_unhealthy"
+        elif r.get("any_upstream_api"):
+            cell["reason"] = "upstream_api"
         buckets[idx]["cells"][key] = cell
 
     older_cursor = (until_snapped - timedelta(seconds=span_s)).isoformat()
@@ -318,7 +322,11 @@ async def history_report_csv(
         "    AT TIME ZONE 'UTC' AS bucket_ts, "
         "  check_id, target, stage, "
         "  MAX(CASE status "
-        "        WHEN 'fail'  THEN 4 "
+        # fail outranks error: "the monitored thing is broken" is a stronger
+        # statement than "our probe could not determine its state". They were
+        # equal until 2026-08-25, which is why upstream API timeouts rendered
+        # as radar outages on the timeline.
+        "        WHEN 'fail'  THEN 5 "
         "        WHEN 'error' THEN 4 "
         "        WHEN 'warn'  THEN 3 "
         "        WHEN 'pass'  THEN 2 "
@@ -333,7 +341,7 @@ async def history_report_csv(
         "ORDER BY bucket_ts ASC, stage, check_id, target"
     )
     rows = await pool.fetch(sql, *args)
-    rank_to_status = {3: "warn", 2: "pass", 1: "skip", 0: "unknown"}
+    rank_to_status = {4: "error", 3: "warn", 2: "pass", 1: "skip", 0: "unknown"}
 
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -343,10 +351,8 @@ async def history_report_csv(
         if bts.tzinfo is None:
             bts = bts.replace(tzinfo=timezone.utc)
         rank = r["worst_rank"] or 0
-        status = (
-            ("fail" if r["has_fail"] else "error") if rank == 4
-            else rank_to_status[rank]
-        )
+        # rank 5 == fail (see the CASE above); everything else maps directly.
+        status = "fail" if rank == 5 else rank_to_status[rank]
         w.writerow([
             bts.isoformat(),
             r["stage"],

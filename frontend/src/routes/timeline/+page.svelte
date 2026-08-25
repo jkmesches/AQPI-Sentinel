@@ -49,7 +49,7 @@
 		pass:    'var(--color-ok)',
 		warn:    'var(--color-warn)',
 		fail:    'var(--color-fail)',
-		error:   'var(--color-fail)',
+		error:   'var(--color-error)',
 		skip:    'var(--color-faint)',
 		unknown: 'transparent'
 	};
@@ -874,7 +874,7 @@
 										`Cadence:   every ${col.cadence_s}s`,
 										`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 										``,
-										`Cell colors: green = pass · yellow = warn · red = fail/error · gray = no data / skipped.`,
+										`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
 										`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 									].join('\n')}
 								>
@@ -915,7 +915,7 @@
 								`Cadence:   every ${col.cadence_s}s`,
 								`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 								``,
-								`Cell colors: green = pass · yellow = warn · red = fail/error · gray = no data / skipped.`,
+								`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
 								`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 							].join('\n')}
 						>

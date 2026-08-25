@@ -14,7 +14,9 @@ export interface StatusRow {
 export interface StatusRollup {
 	at: string;
 	stages: Record<string, StatusRow[]>;
-	counts: Record<string, { pass: number; warn: number; fail: number; error: number; total: number }>;
+	// `skip` is sent by the backend and read by the header strips; it was
+	// missing here, so every `counts.skip` access was a type error.
+	counts: Record<string, { pass: number; warn: number; fail: number; error: number; skip: number; total: number }>;
 }
 export interface CheckMeta {
 	id: string;
@@ -66,10 +68,14 @@ async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 export interface TimelineCell {
 	status: 'pass' | 'warn' | 'fail' | 'error' | 'skip';
 	n: number;
-	/** Optional. Present when the bucket's runs were cascade-demoted
-	 *  because an upstream dependency was unhealthy — distinct from an
-	 *  intrinsic skip (e.g. a forecast product skipping a sub-check). */
-	reason?: 'upstream_unhealthy';
+	/** Optional.
+	 *  'upstream_unhealthy' — the bucket's runs were cascade-demoted because
+	 *    an upstream dependency was unhealthy (distinct from an intrinsic
+	 *    skip, e.g. a forecast product skipping a sub-check).
+	 *  'upstream_api'       — the check could not determine state at all
+	 *    because the upstream API errored or timed out. This is a gap in our
+	 *    visibility, NOT evidence the monitored thing is broken. */
+	reason?: 'upstream_unhealthy' | 'upstream_api';
 }
 export interface TimelineBucket { ts: string; cells: Record<string, TimelineCell> }
 export interface TimelinePage {

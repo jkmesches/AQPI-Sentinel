@@ -34,7 +34,7 @@
 			pass:  'text-[var(--color-ok)]',
 			warn:  'text-[var(--color-warn)]',
 			fail:  'text-[var(--color-fail)]',
-			error: 'text-[var(--color-fail)]',
+			error: 'text-[var(--color-error)]',
 			skip:  'text-[var(--color-muted)]'
 		}[s] ?? 'text-[var(--color-muted)]';
 	}
