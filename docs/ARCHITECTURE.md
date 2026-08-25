@@ -11,7 +11,7 @@ understanding the codebase well enough to make non-trivial changes.
 ```mermaid
 flowchart TB
     upstream["radarca.engr.colostate.edu<br/>(the system we monitor)"]
-    backend["<b>backend · FastAPI + asyncio</b><br/>Scheduler → Check.run → CheckResult (39 impls)<br/>AlarmEngine — open/close · route · dispatch<br/>Store — asyncpg pool, full Postgres schema<br/>ConnectionManager — WebSocket fan-out (transition-only)<br/>FastAPI routes /api/* — status, alarms, timeline,<br/>history, upstream, auth, admin/*, ws, _debug/stats"]
+    backend["<b>backend · FastAPI + asyncio</b><br/>Scheduler → Check.run → CheckResult (41 impls)<br/>AlarmEngine — open/close · route · dispatch<br/>Store — asyncpg pool, full Postgres schema<br/>ConnectionManager — WebSocket fan-out (transition-only)<br/>FastAPI routes /api/* — status, alarms, timeline,<br/>history, upstream, auth, admin/*, ws, _debug/stats"]
     frontend["<b>frontend · SvelteKit + Svelte 5</b><br/>stores/state.svelte.ts — REST poll (5s) + WS push,<br/>dedupe + microtask coalesce<br/>routes/+page.svelte — Live (map + radars + products + alarms)<br/>routes/timeline — state-over-time grid + explainRun<br/>routes/history — filtered alarms + check_runs<br/>routes/admin/* — auth-gated config<br/>routes/m/* — mobile shell<br/>routes/settings/devices — per-device push mirror<br/>lib/origin.ts — API_BASE detection + Bearer header<br/>lib/format.ts — stageLabel · productLabel · productCategory"]
 
     upstream -- "HTTP probes · image fetches ·<br/>Playwright JS-render" --> backend

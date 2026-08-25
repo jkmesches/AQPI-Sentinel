@@ -28,6 +28,35 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Fixed
 
+
+- **Upstream API errors were inflating the outage picture.** Investigation on
+  2026-08-25 found 14.2% of check runs in a fail/error state, and traced it to
+  three separate mechanisms rather than actual radar downtime.
+
+  **Upstream latency changed regime on 2026-08-16.** Our own `latency_ms` p95
+  went from ~2.4 s to 5.9–8.4 s and stayed there; a 25-probe live sample of
+  `/api/radar-status/` measured p50 3.4 s, **p90 17.5 s**, max >25 s. The HTTP
+  client's 12 s timeout — tuned when p95 was 2.4 s — sat *below* upstream's
+  p90, so successful-but-slow responses became error ticks: 2–31/day before
+  Aug 16, then 1,500–1,800/day. Timeout raised to 20 s, and idempotent GETs now
+  retry once with jittered backoff on transport errors and 429/5xx (28% of all
+  errors were isolated single ticks that the next run already recovered from).
+  4xx other than 429 are not retried.
+
+  **Six checks were fetching the same URL.** Each of the six radar checks
+  independently `GET`s `/api/radar-status/` every cycle — 4,320 calls/day where
+  720 suffice — so one slow response produced six simultaneous "radar
+  unreachable" errors. Now a single short-TTL, single-flight memo shared across
+  the fleet. Also, `_declared()` returned `None` both when the API failed *and*
+  when it answered fine but omitted a radar, labelling both "radar-status API
+  unreachable"; those are now distinct messages.
+
+  **`error` was rendered as `fail`.** Both ranked equally in the history
+  aggregation and shared `--color-fail`, and the header strips summed
+  `fail + error` into a single "F". "We could not measure it" is not "it is
+  broken." `error` now has its own rank (below `fail`), its own token
+  (`--color-error`), and its own counter.
+
 - **Disk-full outage: `latest_per_check()` no longer sorts the whole table.**
   Production stopped collecting from 2026-08-01 23:56 UTC to 2026-08-08
   17:44 UTC — 6 d 17 h — because the local disk filled. Root cause was a
@@ -66,6 +95,31 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
   50 MB × 3.
 
 ### Added
+
+- **`layer2.xband.fleet` — fleet correlation check.** Over 14 days, **80.2%**
+  of `GHOST_UP` runs occurred while 4–5 X-band radars were ghosting
+  simultaneously; only **2.8%** were isolated. The largest episode had XSWR,
+  XSCR, XSCV and XSCW entering `GHOST_UP` at `2026-08-13 12:29:52` and leaving
+  at `2026-08-16 19:29:54` — sub-second alignment across four sites, 79.0 hours
+  apart. Radars at separate sites do not fail in lockstep; that is one upstream
+  event being counted as four multi-day radar outages.
+
+  The check fails when ≥4 of 5 X-band radars are unhealthy at once, and the
+  per-radar X-band checks now list it in `depends_on` so the existing
+  dependency-suppression machinery records their alarms but suppresses the
+  duplicate notifications. An isolated radar failure is unaffected and still
+  pages. `layer2.radar.CBAND` deliberately does not depend on it — different
+  band and site, and it stayed healthy (2,301 passes) right through the
+  episodes above, which is what proved the API itself was fine.
+
+  Note this makes the verdicts *more* accurate, not quieter for its own sake:
+  the 79-hour episode was a real data outage. It was simply one of them.
+
+- **`validation_tests/test_api_error_handling.py`** — 21 assertions over retry
+  semantics, fetch sharing, and fleet correlation. The load-bearing cases are
+  the negative ones: a retry that still fails must not count as a save, an
+  isolated radar failure must still page, and CBAND must never be suppressed by
+  an X-band event.
 
 - **Retention / cold-storage offload** (`backend/retention.py`). A daily
   sweep at `SENTINEL_RETENTION_HOUR_UTC` (default 09:00) exports
