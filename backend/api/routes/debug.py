@@ -61,6 +61,12 @@ async def stats(request: Request):
             "available":      True,
             "in_flight":      getattr(http, "in_flight", None),
             "total_requests": getattr(http, "total_requests", None),
+            # Retry health. attempted-vs-succeeded is the honest read on
+            # whether the retry is absorbing transient upstream blips or just
+            # doubling load against something genuinely down: a high attempted
+            # count with a low succeeded count means the latter.
+            "retries_attempted": getattr(http, "retries_attempted", None),
+            "retries_succeeded": getattr(http, "retries_succeeded", None),
         }
 
     # WebSocket clients -----------------------------------------------
