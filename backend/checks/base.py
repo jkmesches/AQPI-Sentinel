@@ -48,6 +48,19 @@ class Check:
     target:     str = ""
     cadence_s:  int = 60
     depends_on: list[str] = []
+    # Dependencies used for ALARM SUPPRESSION ONLY — they do not cause the
+    # scheduler to demote this check's result to `skip`.
+    #
+    # `depends_on` means "if that is broken, my observation is meaningless
+    # collateral" (origin unreachable -> per-radar results are unknowable), so
+    # the scheduler demotes to skip. That is wrong for a dependency which is
+    # an AGGREGATE OF THIS CHECK rather than a cause of it: the fleet
+    # correlation check is computed from the radar verdicts, so letting it
+    # demote them would have an aggregate marking its own inputs "not
+    # measured" when in fact we measured them precisely. Use this instead to
+    # get one page instead of five while keeping every per-radar verdict
+    # visible and true.
+    alarm_only_depends_on: list[str] = []
 
     async def run(self, ctx: "CheckContext") -> CheckResult:
         raise NotImplementedError

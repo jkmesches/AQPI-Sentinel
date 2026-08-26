@@ -31,5 +31,20 @@ def compute_suppression(
     return None
 
 
-def build_depends_on_index(checks: Iterable) -> dict[str, list[str]]:
-    return {c.id: list(c.depends_on) for c in checks}
+def build_depends_on_index(
+    checks: Iterable, *, include_alarm_only: bool = False
+) -> dict[str, list[str]]:
+    """Map check_id -> dependency ids.
+
+    `include_alarm_only` adds each check's ``alarm_only_depends_on``. The
+    AlarmEngine wants those (they should suppress duplicate pages); the
+    scheduler must NOT (they should not demote a real verdict to skip). See
+    Check.alarm_only_depends_on for why the distinction exists.
+    """
+    out: dict[str, list[str]] = {}
+    for c in checks:
+        deps = list(c.depends_on)
+        if include_alarm_only:
+            deps += list(getattr(c, "alarm_only_depends_on", None) or [])
+        out[c.id] = deps
+    return out
