@@ -12,10 +12,33 @@ Usage:
     python -m backend.tune_silent_fail --emit       # also print a paste-ready
                                                     # RADAR_SILENT_FAIL_S dict
 
-Methodology: take 1.5× each radar's observed worst-case inter-scan gap,
-round up to the nearest minute, and floor at 4 min (so a tightly-paced
-radar's threshold doesn't fire on a single missed scan). Adjust the
-multiplier in BUFFER_MULT below if the fleet's typical jitter changes.
+Methodology: take 1.5× the LARGER of (a) the observed worst-case inter-scan
+gap and (b) the age of the newest published image, round up to the nearest
+minute, floor at 4 min.
+
+Point (b) is easy to omit and was omitted until 2026-08-26, with real
+consequences. The GHOST_UP check does not gate on scan cadence — it gates on
+``now - newest_published_timestamp``, which also contains upstream's
+PUBLICATION LAG. Those are different quantities. XSWR scans every 120 s
+(p50 gap = 120 s, a perfectly healthy radar) yet its newest published image
+is routinely ~370-430 s old, so a threshold derived from cadence alone
+(240 s) was impossible to satisfy: XSWR reported GHOST_UP on 96% of runs in
+the 24 h to 2026-08-26 while delivering ~27 images per poll. Conversely the
+gap-only rule recommended 480 s for CBAND, below CBAND's observed age p99 of
+717 s, which would have started false-firing a radar that was fine.
+
+A single snapshot's `age` is one random draw, so treat this script as a
+starting point. The authoritative basis is the distribution Sentinel already
+records:
+
+    SELECT check_id,
+           percentile_cont(0.99) WITHIN GROUP (ORDER BY value) AS age_p99,
+           max(value) AS age_max
+    FROM metric_samples
+    WHERE metric = 'primary_age_s' AND ts > now() - interval '24 hours'
+    GROUP BY 1;
+
+Set the threshold above age_p99 during HEALTHY operation, with buffer.
 
 Output is informational only — this script never writes to config.py.
 Copy the suggested dict into backend/config.py manually after reviewing.
@@ -81,8 +104,16 @@ def fetch(folder: str) -> list[str]:
         return json.load(r).get("images", []) or []
 
 
-def recommend(max_gap_s: float) -> int:
-    raw = max_gap_s * BUFFER_MULT
+def recommend(max_gap_s: float, newest_age_s: float = 0.0) -> int:
+    """Threshold covering both scan cadence AND publication lag.
+
+    The check compares `now - newest_published_ts` against this value, so a
+    recommendation derived from inter-scan gaps alone under-shoots whenever
+    upstream publishes with a lag — which is the normal case here. Taking the
+    max of the two keeps a fast-cadence/slow-publish radar (XSWR) from being
+    permanently GHOST_UP without loosening a fast-publish one.
+    """
+    raw = max(max_gap_s, newest_age_s) * BUFFER_MULT
     raw = max(raw, MIN_THRESHOLD_S)
     return int(math.ceil(raw / 60.0) * 60)
 
@@ -91,7 +122,10 @@ def main(emit: bool) -> None:
     now = datetime.now(timezone.utc)
     print(f"\nRadar cadence sample @ {now.isoformat(timespec='seconds')}")
     print(f"Source: {SETTINGS.base}/api/xbandRadarImages/")
-    print(f"Buffer: {BUFFER_MULT}x max observed gap, floor {MIN_THRESHOLD_S}s\n")
+    print(f"Buffer: {BUFFER_MULT}x max(inter-scan gap, newest-image age), "
+          f"floor {MIN_THRESHOLD_S}s")
+    print("Note: the check gates on newest-image AGE (includes publication "
+          "lag), not cadence.\n")
 
     hdr = f"{'radar':6s}  {'n':>3s}  {'min':>5s}  {'p50':>5s}  {'p90':>5s}  {'max':>5s}  {'newest_age':>10s}  {'now':>5s}  {'rec':>5s}"
     print(hdr)
@@ -119,10 +153,13 @@ def main(emit: bool) -> None:
         mx = gaps[-1]
         age = (now - ts_list[-1]).total_seconds()
         current = RADAR_SILENT_FAIL_S.get(radar_id, 600)
-        rec = recommend(mx)
+        rec = recommend(mx, age)
         diff = ""
         if rec != current:
             diff = f"  (was {current}s)"
+        if age > mx:
+            # Publication lag, not cadence, is what sets this radar's floor.
+            diff += "  [lag-dominated]"
         print(f"{radar_id:6s}  {len(ts_list):>3d}  "
               f"{int(mn):>5d}  {int(p50):>5d}  {int(p90):>5d}  {int(mx):>5d}  "
               f"{int(age):>10d}  {current:>5d}  {rec:>5d}{diff}")
