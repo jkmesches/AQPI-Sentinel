@@ -259,14 +259,23 @@ async def history_timeline(
             cell["reason"] = "upstream_api"
         buckets[idx]["cells"][key] = cell
 
+    # `older_cursor` is purely arithmetic (until - span), so on its own it is
+    # never null and the client would offer "load older" forever, paging into
+    # empty grids well past the beginning of recorded history. Report the
+    # oldest row we actually hold so the client can stop at the real boundary
+    # and say something true about why it stopped — "older data has been
+    # offloaded to cold storage" reads very differently from "end of data".
+    oldest_row = await pool.fetchval("SELECT min(finished_at) FROM check_runs")
     older_cursor = (until_snapped - timedelta(seconds=span_s)).isoformat()
+    has_older = oldest_row is not None and since_dt > oldest_row
     return {
         "bucket":        bucket,
         "bucket_s":      bucket_s,
         "until":         until_snapped.isoformat(),
         "since":         since_dt.isoformat(),
         "buckets":       buckets,
-        "older_cursor":  older_cursor,
+        "older_cursor":  older_cursor if has_older else None,
+        "oldest_available": oldest_row.isoformat() if oldest_row else None,
     }
 
 

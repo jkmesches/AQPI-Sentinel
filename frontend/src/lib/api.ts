@@ -84,7 +84,11 @@ export interface TimelinePage {
 	until: string;
 	since: string;
 	buckets: TimelineBucket[];
-	older_cursor: string;
+	/** null once the grid has reached the oldest row we actually hold — the
+	 *  cursor itself is pure arithmetic and would otherwise page forever. */
+	older_cursor: string | null;
+	/** Oldest finished_at in check_runs, or null if the table is empty. */
+	oldest_available: string | null;
 }
 
 export const api = {
