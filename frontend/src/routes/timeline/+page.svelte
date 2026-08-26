@@ -18,7 +18,7 @@
 		{ key: '15m', label: '15 min',  pageLimit: 40 },
 		{ key: '1h',  label: '1 hour',  pageLimit: 48 },
 		{ key: '6h',  label: '6 hours', pageLimit: 40 },
-		{ key: '1d',  label: '1 day',   pageLimit: 30 }
+		{ key: '1d',  label: '1 day',   pageLimit: 90 }   // 90 = the server's max span at 1d grain
 	];
 	// Hard cap on total accumulated rows. Beyond this we evict the oldest
 	// so the table doesn't grow unbounded as the user scrolls — a 4-figure
@@ -70,6 +70,7 @@
 	let columns       = $state<CheckMeta[]>([]);
 	let buckets       = $state<TimelineBucket[]>([]);
 	let olderCursor   = $state<string | null>(null);
+	let oldestAvailable = $state<string | null>(null);
 	let loading       = $state(false);
 	let loadingMore   = $state(false);
 	let error         = $state<string | null>(null);
@@ -200,6 +201,7 @@
 			columns = cks;
 			buckets = page.buckets;
 			olderCursor = page.older_cursor;
+			oldestAvailable = page.oldest_available ?? oldestAvailable;
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
@@ -216,6 +218,7 @@
 			if (merged.length > MAX_BUCKETS) merged = merged.slice(0, MAX_BUCKETS);
 			buckets = merged;
 			olderCursor = page.older_cursor;
+			oldestAvailable = page.oldest_available ?? oldestAvailable;
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
@@ -970,6 +973,14 @@
 					</button>
 				{:else if buckets.length >= MAX_BUCKETS}
 					<span class="text-[var(--color-faint)]">cap reached ({MAX_BUCKETS} rows) — pick a coarser grain</span>
+				{:else if oldestAvailable}
+					<!-- Say what actually happened. Rows beyond this point were
+					     offloaded to cold storage by the retention sweep, not
+					     never recorded — "end of data" implied the latter. -->
+					<span class="text-[var(--color-faint)]">
+						beginning of retained history ({oldestAvailable.slice(0, 10)}) — anything older was
+						offloaded to cold storage and can be restored (see MAINTENANCE.md)
+					</span>
 				{:else}
 					<span>end of data</span>
 				{/if}
