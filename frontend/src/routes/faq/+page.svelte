@@ -35,6 +35,10 @@
 
 <svelte:head><title>FAQ · AQPI Sentinel</title></svelte:head>
 
+<!-- The app shell is `<main class="flex-1 overflow-hidden">`, so every page
+     owns its own scroll region. Without this wrapper the FAQ was simply
+     clipped at the viewport with no way to reach the later questions. -->
+<div class="h-full overflow-y-auto">
 <div class="mx-auto w-full max-w-[52rem] px-4 py-6">
 	<header class="mb-5 border-b border-[var(--color-border)] pb-4">
 		<div class="flex items-baseline justify-between gap-3">
@@ -117,6 +121,7 @@
 			rel="noopener"
 		>documentation site</a>.
 	</footer>
+</div>
 </div>
 
 {#snippet block(b: FaqBlock)}
