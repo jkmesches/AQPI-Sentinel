@@ -95,6 +95,7 @@
 			<NavLink href="/" label="Live" />
 			<NavLink href="/timeline" label="Timeline" />
 			<NavLink href="/history" label="History" />
+			<NavLink href="/faq" label="FAQ" />
 			{#if auth.isAdmin}
 				<NavLink href="/admin" label="Admin" />
 			{/if}
@@ -241,6 +242,11 @@
 				<span class="num text-[var(--color-faint)]">v{version.value}</span>
 				<span class="text-[var(--color-faint)]">·</span>
 			{/if}
+			<a
+				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				href="/faq"
+			>FAQ</a>
+			<span class="text-[var(--color-faint)]">·</span>
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://jkmesches.github.io/SentinelProject/"
