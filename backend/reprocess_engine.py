@@ -178,54 +178,96 @@ def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
 
 
 def _reverdict_l2(row: dict) -> tuple[str, dict] | None:
-    """Re-evaluate the ghost-up freshness verdict only. Other verdicts
-    (CONFIRMED_DOWN / STUCK_DOWN_FLAG / OBSERVED_API_ERROR) come from
-    declared status + transport state, not threshold knobs.
+    """Re-evaluate the GHOST_UP freshness verdict under current thresholds.
+
+    Other verdicts (CONFIRMED_DOWN / STUCK_DOWN_FLAG / OBSERVED_API_ERROR)
+    derive from declared status + transport state, not threshold knobs, and
+    are preserved untouched.
+
+    === This function silently did nothing until 2026-08-26 ===
+
+    It read ``payload["reconcile"]``, a key layer2_radar has never emitted —
+    the fields live under ``payload["observed"]`` with ``verdict`` at the top
+    level. Every row therefore returned None, so L2 reprocessing was a no-op
+    and the belief that "historical L2 can't be reprocessed" grew up around
+    it. Verified against production: 0 of 231,356 L2 rows carry `reconcile`,
+    212,572 carry `observed`. The data needed was always present.
+
+    === Load-bearing: zero-image runs are NEVER reclassified ===
+
+    A radar publishing no images at all is not-fresh regardless of any
+    threshold (see layer2_radar: ``elif primary_n == 0: fresh = False``).
+    Those GHOST_UPs are real stoppages — 5,042 of XSWR's 7,950 over the 14
+    days to 2026-08-26, including the 79-hour fleet episode — and must
+    survive any threshold change untouched. Only "images present but stale"
+    is threshold-sensitive. Raising a threshold can therefore never erase a
+    genuine outage from history; it can only relabel runs where data WAS
+    flowing and we called it stale too eagerly.
     """
     payload = row["payload"] or {}
     if isinstance(payload, str):
         payload = json.loads(payload)
-    reco = payload.get("reconcile")
-    if not isinstance(reco, dict):
+
+    obs = payload.get("observed")
+    if not isinstance(obs, dict):
+        # Tolerate the legacy shape this function used to assume, in case any
+        # deployment somewhere still writes it.
+        legacy = payload.get("reconcile")
+        obs = legacy if isinstance(legacy, dict) else None
+    if obs is None:
         return None
-    primary_ts_iso = reco.get("primary_newest_ts")
+
+    old_verdict = payload.get("verdict") or obs.get("verdict")
+    if old_verdict not in ("HEALTHY", "GHOST_UP"):
+        return None
+
+    primary_n = obs.get("primary")
+    if not isinstance(primary_n, int) or primary_n <= 0:
+        return None                      # real stoppage — leave it alone
+
+    primary_ts_iso = obs.get("primary_newest_ts")
     if not primary_ts_iso:
         return None
-    radar_id = row["target"]
-    finished_at = row["finished_at"]
-
     try:
-        primary_ts = datetime.fromisoformat(primary_ts_iso.replace("Z", "+00:00"))
+        primary_ts = datetime.fromisoformat(str(primary_ts_iso).replace("Z", "+00:00"))
     except Exception:
         return None
 
+    radar_id = row["target"]
     silent_fail_s = float(_thresholds.get_radar(radar_id, "silent_fail_s", 600))
     hyst = float(_thresholds.get_global("hysteresis", 0.10))
     upper = silent_fail_s * (1 + hyst)
-    age_s = (finished_at - primary_ts).total_seconds()
-    # Without prior-state across rows we use upper-bound only — gives a
-    # conservative "stale = age > upper". Hysteresis affects in-stream
+    age_s = (row["finished_at"] - primary_ts).total_seconds()
+    # Without prior-state across rows we use the upper bound only — a
+    # conservative "stale = age > upper". Hysteresis governs in-stream
     # transitions, not historical reclassification.
     fresh = age_s <= upper
 
-    # Re-derive verdict. We can only change between HEALTHY ↔ GHOST_UP
-    # here; CONFIRMED_DOWN etc. are preserved.
-    old_verdict = reco.get("verdict")
-    if old_verdict not in ("HEALTHY", "GHOST_UP"):
-        return None
     new_verdict = "HEALTHY" if fresh else "GHOST_UP"
     new_status = "pass" if fresh else "fail"
 
-    new_reco = {
-        **reco,
-        "verdict": new_verdict,
-        "fresh":   fresh,
+    new_obs = {
+        **obs,
+        "fresh": fresh,
         "primary_age_s": int(age_s),
         "silent_fail_s": int(silent_fail_s),
         "silent_fail_band": [int(silent_fail_s * (1 - hyst)), int(upper)],
     }
-    new_payload = {**payload, "reconcile": new_reco,
-                   "reprocessed_at": datetime.now(timezone.utc).isoformat()}
+    new_payload = {
+        **payload,
+        "observed": new_obs,
+        "verdict": new_verdict,
+        "reprocessed_at": datetime.now(timezone.utc).isoformat(),
+        # Keep the FIRST original across repeated reprocesses, so re-running
+        # never overwrites the true as-observed verdict with an already
+        # reprocessed one. Nothing is lost: the raw observation
+        # (primary count, newest timestamp) is untouched either way.
+        "original": payload.get("original") or {
+            "verdict":       old_verdict,
+            "status":        row["status"],
+            "silent_fail_s": obs.get("silent_fail_s"),
+        },
+    }
     return new_status, new_payload
 
 

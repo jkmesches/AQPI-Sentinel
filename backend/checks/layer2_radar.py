@@ -437,7 +437,14 @@ class Layer2RadarReconcile(Check):
                         int((now - primary_ts).total_seconds()) if primary_ts else None
                     ),
                     "fresh": fresh,
-                    "silent_fail_s": self.silent_fail_s,
+                    # The LIVE threshold this run was gated on, not the
+                    # constructor default. self.silent_fail_s is only a
+                    # last-resort fallback for before thresholds.init(); using
+                    # it here made the payload disagree with silent_fail_band
+                    # (observed 2026-08-26: field said 240 while the band said
+                    # [594, 726]) and would have fed the wrong "original"
+                    # threshold into any reprocess audit trail.
+                    "silent_fail_s": int(silent_fail_s),
                     "silent_fail_band": [int(lower), int(upper)],
                 },
                 "moments": moments,

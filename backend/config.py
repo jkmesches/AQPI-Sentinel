@@ -191,13 +191,49 @@ STATUS_TO_RADAR = {"EBAY": "XEBY", "CBand": "CBAND"}
 #   XSCV  (down at calibration)  → 600s   (X-band default)
 #
 # Default for any radar not listed: 600s.
+# Recalibrated 2026-08-26. THE CHECK GATES ON PUBLISHED-IMAGE AGE, NOT SCAN
+# CADENCE — that distinction is the whole reason these values changed.
+#
+# `age = now - newest_published_timestamp` includes upstream's PUBLICATION
+# LAG, which on this fleet runs ~300-500s. The May values were derived from
+# inter-scan gaps (~120s) and so were impossible to satisfy: XSWR scans every
+# 120s and delivers ~27 images per poll, yet reported GHOST_UP on 96% of runs
+# in the 24h to 2026-08-26 because its 240s threshold sat below the
+# publication lag alone.
+#
+# Basis: 1.5 x the observed p99 of the `primary_age_s` metric over 24h of
+# healthy operation, cross-checked against `python -m backend.tune_silent_fail`
+# (which now accounts for lag) and rounded up to the minute. Where the two
+# disagreed the more conservative — larger — value was taken, because a
+# too-tight threshold produces constant false GHOST_UP while a slightly loose
+# one only delays detection of a frozen feed.
+#
+#   radar   age_p99(24h)   tool rec   chosen    was
+#   XSCV       425 s         600      660       600
+#   XSCW       478 s         540      720       720   (tool's 540 < observed max 596)
+#   XSCR       n/a*          780      780       300
+#   XSWR       429 s         600      660       240
+#   CBAND      717 s         780     1080       600   (tool's 780 < 1.5 x p99)
+#   XEBY       no scans       —       300       300   (declared DOWN upstream)
+#
+#   * XSCR's age percentiles are contaminated by genuine outages (only 79 of
+#     582 runs had any images), so the tool's lag-based figure is used.
+#
+# SAFETY: raising these cannot hide an outage. A radar publishing NO images is
+# marked not-fresh regardless of threshold (`elif primary_n == 0` in
+# layer2_radar), and 5,042 of XSWR's 7,950 GHOST_UPs over 14 days were exactly
+# that. Thresholds only govern the "images present but stale" (frozen feed)
+# case, where the cost is detection latency: XSWR 240s -> 660s, i.e. a frozen
+# feed is caught in 11 minutes instead of 4.
+#
+# Re-tune monthly with `python -m backend.tune_silent_fail`.
 RADAR_SILENT_FAIL_S = {
     "XEBY":  300,
-    "XSCV":  600,
+    "XSCV":  660,
     "XSCW":  720,
-    "XSCR":  300,
-    "XSWR":  240,
-    "CBAND": 600,
+    "XSCR":  780,
+    "XSWR":  660,
+    "CBAND": 1080,
 }
 
 # Moment name → productPrefix mapping (the JS bundle's `j` object + L's CBAND
