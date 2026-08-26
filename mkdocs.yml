@@ -101,6 +101,7 @@ nav:
       - Getting started: 01-getting-started.md
       - Deployment: 02-deployment.md
       - Administration: 03-administration.md
+      - FAQ (for the lab team): 04-faq.md
       - Maintenance: MAINTENANCE.md
       - Troubleshooting: 05-troubleshooting.md
       - Porting to other upstreams: 06-porting-to-other-upstreams.md
