@@ -45,7 +45,11 @@ class AlarmEngine:
         self.cfg = cfg if cfg is not None else AlertsConfig()
         self.router = Router(self.cfg)
         self.sinks = build_sinks(self.cfg)
-        self.depends_on_index = sup_lib.build_depends_on_index(CHECKS.values())
+        # include_alarm_only: correlation deps suppress duplicate pages but
+        # must not demote verdicts (that is the scheduler's index, built without).
+        self.depends_on_index = sup_lib.build_depends_on_index(
+            CHECKS.values(), include_alarm_only=True
+        )
         self._stop = asyncio.Event()
         self._ticker_task: asyncio.Task | None = None
         # listeners notified on alarm/run events (P1.5 WebSocket)

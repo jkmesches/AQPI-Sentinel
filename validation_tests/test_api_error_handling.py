@@ -233,16 +233,28 @@ async def test_fleet_correlation() -> None:
     check("stale verdicts expire", L2._not_reporting_xband(now) == set())
 
     checks = [L2.Layer2RadarReconcile(radar_id=r) for r in L2.RADAR_FOLDER] + [fleet]
-    idx = build_depends_on_index(checks)
+    alarm_idx = build_depends_on_index(checks, include_alarm_only=True)
+    sched_idx = build_depends_on_index(checks)          # scheduler's view
     failing = {L2.FLEET_CHECK_ID: "fail", "layer0.origin.alive": "pass"}
     check("X-band alarms suppress under a fleet event",
-          compute_suppression("layer2.radar.XSCR", failing, idx) == L2.FLEET_CHECK_ID)
+          compute_suppression("layer2.radar.XSCR", failing, alarm_idx) == L2.FLEET_CHECK_ID)
     check("CBAND is NEVER suppressed by an X-band event",
-          compute_suppression("layer2.radar.CBAND", failing, idx) is None,
+          compute_suppression("layer2.radar.CBAND", failing, alarm_idx) is None,
           "different band, different site — it stayed healthy through the real episodes")
     healthy = {L2.FLEET_CHECK_ID: "pass", "layer0.origin.alive": "pass"}
     check("no suppression while the fleet is healthy",
-          compute_suppression("layer2.radar.XSCR", healthy, idx) is None)
+          compute_suppression("layer2.radar.XSCR", healthy, alarm_idx) is None)
+
+    # The scheduler must NOT see the fleet dependency, or it demotes a real
+    # GHOST_UP verdict to skip — an aggregate marking its own inputs
+    # "not measured". Observed live on 2026-08-26 00:02 before this split.
+    check("scheduler does NOT demote radars for a fleet event",
+          compute_suppression("layer2.radar.XSCR", failing, sched_idx) is None,
+          "per-radar verdicts must stay visible and true during a systemic event")
+    check("scheduler DOES still demote for a genuine upstream cause",
+          compute_suppression(
+              "layer2.radar.XSCR",
+              {"layer0.origin.alive": "fail"}, sched_idx) == "layer0.origin.alive")
 
 
 async def main() -> int:

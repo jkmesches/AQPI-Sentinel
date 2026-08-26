@@ -243,7 +243,10 @@ class Layer2RadarReconcile(Check):
         # stayed healthy right through the multi-day X-band episodes — is not
         # suppressed by an X-band fleet event.
         if radar_id in XBAND_FLEET:
-            self.depends_on = [*Layer2RadarReconcile.depends_on, FLEET_CHECK_ID]
+            # alarm-only: one page instead of five, WITHOUT the scheduler
+            # demoting a real GHOST_UP verdict to skip. See
+            # Check.alarm_only_depends_on.
+            self.alarm_only_depends_on = [FLEET_CHECK_ID]
 
     async def _declared(self, ctx) -> tuple[str | None, str | None]:
         """Look up this radar's declared status. Returns (status, error).
