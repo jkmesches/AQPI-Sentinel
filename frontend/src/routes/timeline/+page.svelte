@@ -742,8 +742,21 @@
 		</button>
 
 		<div class="flex items-center gap-2 ml-auto">
-			{#each ['pass', 'warn', 'fail', 'skip', 'unknown'] as s}
-				<span class="flex items-center gap-1 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">
+			<!-- `error` is a distinct state from `fail` (see --color-error): the
+			     check could not determine anything, rather than finding the
+			     monitored thing broken. It must appear here or the violet cells
+			     on the grid have no key. -->
+			{#each ['pass', 'warn', 'fail', 'error', 'skip', 'unknown'] as s}
+				<span
+					class="flex items-center gap-1 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider"
+					title={s === 'error'
+						? 'error — the check could not determine state (upstream API timed out, probe crashed). Not the same as fail.'
+						: s === 'fail'
+						? 'fail — the monitored thing is broken'
+						: s === 'unknown'
+						? 'no data — nothing ran in this bucket'
+						: ''}
+				>
 					<span class="inline-block h-2.5 w-2.5" style="background:{STATUS_BG[s]}"></span>
 					{s === 'unknown' ? 'no data' : s}
 				</span>

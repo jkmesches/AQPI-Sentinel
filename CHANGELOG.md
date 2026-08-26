@@ -27,6 +27,58 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 ## [Unreleased]
 
 ### Fixed
+- **GHOST_UP thresholds were measuring the wrong quantity.** The check gates
+  on `now - newest_published_timestamp`, which includes upstream's
+  **publication lag** (~300–500 s on this fleet), but `RADAR_SILENT_FAIL_S`
+  was calibrated from *inter-scan cadence* (~120 s). Several thresholds were
+  therefore impossible to satisfy: XSWR scans every 120 s and delivers ~27
+  images per poll — a healthy radar — yet reported `GHOST_UP` on **96%** of
+  runs in the 24 h to 2026-08-26, because its 240 s threshold sat below the
+  publication lag alone.
+
+  Recalibrated from 1.5× the observed p99 of `primary_age_s` over 24 h of
+  healthy operation: XSCV 600→660, XSCW 720 (kept), XSCR 300→**780**,
+  XSWR 240→**660**, CBAND 600→**1080**, XEBY 300 (kept).
+
+  **This cannot hide an outage.** A radar publishing no images is not-fresh
+  regardless of threshold (`primary_n == 0`), and 5,042 of XSWR's 7,950
+  GHOST_UPs over 14 days were exactly that. Thresholds govern only the
+  "images present but stale" case, where the cost is detection latency — a
+  frozen XSWR feed is now caught in 11 minutes instead of 4.
+
+  Applied retroactively: 231,430 rows evaluated, **6,406 reclassified**
+  (all `GHOST_UP` → `HEALTHY`; XSWR 2,900, XSCR 2,401, CBAND 1,056, XSCW 43,
+  XSCV 5, XEBY 1). Verified after: zero-image ghosts 37,872 before and after,
+  no rows deleted, all originals preserved, and the 79-hour 2026-08-13 fleet
+  episode still recorded in full across all five radars.
+
+- **`tune_silent_fail` perpetuated the same error.** It recommended from max
+  inter-scan gap while computing — and printing — the newest-image age it then
+  ignored. Worse, it recommended 480 s for CBAND, *below* CBAND's observed age
+  p99 of 717 s, which would have started false-firing a healthy radar. Now
+  recommends from `max(gap, age)` and flags `[lag-dominated]` radars.
+
+- **L2 reprocessing was a silent no-op.** `_reverdict_l2` read
+  `payload["reconcile"]`, a key `layer2_radar` has never emitted, so every row
+  returned `None` — which is where the belief that "historical L2 can't be
+  reprocessed" came from. Verified: 0 of 231,356 rows carry `reconcile`,
+  212,572 carry `observed`. Rewritten against the real shape, preserving the
+  original verdict/status/threshold under `payload.original` (first one wins
+  across repeated runs) and refusing outright to touch a zero-image row.
+
+- **L2 payload recorded the wrong threshold.** It stored `self.silent_fail_s`
+  (the constructor default) rather than the live threshold the run was gated
+  on — the field read 240 while `silent_fail_band` read `[594, 726]`. That
+  disagreement would have fed a wrong "original" threshold into the reprocess
+  audit trail.
+
+### Added
+- **`docs/04-faq.md` — FAQ for the lab team.** Ten questions for people who
+  use Sentinel's readings rather than its code: what it watches (public
+  radarca APIs only — no privileged access), `fail` vs `error`, why per-radar
+  thresholds differ, why five simultaneous red radars is one incident, whether
+  history can change, and an explicit "what Sentinel does not do".
+
 
 
 - **Upstream API errors were inflating the outage picture.** Investigation on
@@ -93,8 +145,6 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
   `docker-compose.prod.yml`, so the json-file driver grew one file forever;
   the backend's had reached 1.6 GB. All three services now rotate at
   50 MB × 3.
-
-### Added
 
 - **`layer2.xband.fleet` — fleet correlation check.** Over 14 days, **80.2%**
   of `GHOST_UP` runs occurred while 4–5 X-band radars were ghosting
