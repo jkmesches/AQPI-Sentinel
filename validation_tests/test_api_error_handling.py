@@ -202,11 +202,35 @@ async def test_fleet_correlation() -> None:
     check("ONE radar down is NOT systemic — it must still page",
           (await fleet.run(ctx)).status == "pass")
 
+    # A declared-down radar is a known outage, not evidence of an anomaly;
+    # counting it would inflate the systemic tally with radars nobody is
+    # confused about. Likewise STUCK_DOWN_FLAG means data IS flowing.
+    L2._reset_fleet_state()
+    for rid in ["XSCR", "XSCV", "XSCW", "XSWR"]:
+        L2._publish_verdict(rid, "CONFIRMED_DOWN", now)
+    L2._publish_verdict("XEBY", "HEALTHY", now)
+    check("4 CONFIRMED_DOWN is NOT systemic (upstream declares them down)",
+          (await fleet.run(ctx)).status == "pass")
+
+    L2._reset_fleet_state()
+    for rid in ["XSCR", "XSCV", "XSCW", "XSWR"]:
+        L2._publish_verdict(rid, "STUCK_DOWN_FLAG", now)
+    L2._publish_verdict("XEBY", "HEALTHY", now)
+    check("4 STUCK_DOWN_FLAG is NOT systemic (data is flowing)",
+          (await fleet.run(ctx)).status == "pass")
+
+    L2._reset_fleet_state()
+    for rid in ["XSCR", "XSCV", "XSCW", "XSWR"]:
+        L2._publish_verdict(rid, "OBSERVED_API_ERROR", now)
+    L2._publish_verdict("XEBY", "HEALTHY", now)
+    check("4 OBSERVED_API_ERROR IS systemic (we cannot observe the fleet)",
+          (await fleet.run(ctx)).status == "fail")
+
     L2._reset_fleet_state()
     stale = now - timedelta(seconds=L2._VERDICT_TTL_S + 60)
     for rid in ["XSCR", "XSCV", "XSCW", "XSWR"]:
         L2._publish_verdict(rid, "GHOST_UP", stale)
-    check("stale verdicts expire", L2._unhealthy_xband(now) == set())
+    check("stale verdicts expire", L2._not_reporting_xband(now) == set())
 
     checks = [L2.Layer2RadarReconcile(radar_id=r) for r in L2.RADAR_FOLDER] + [fleet]
     idx = build_depends_on_index(checks)
