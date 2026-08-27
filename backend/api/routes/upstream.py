@@ -101,30 +101,19 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
     name = steps[step]["imageName"]
     file_path = image_path(product_id, name)
 
-    # Serve from the shared LRU when we already have these bytes — scrubbing
-    # back and forth over the same frames used to re-fetch every one of them.
-    cached = _IMAGE_CACHE.get(file_path)
-    if cached is not None:
-        body, ct = cached
-        _IMAGE_CACHE.move_to_end(file_path)
-    else:
-        store = getattr(request.app.state, "store", None)
-        pool = store.pool if store else None
-        task = _INFLIGHT.get(file_path)
-        if task is None:
-            task = _asyncio.create_task(_fetch_image_upstream(ctx, pool, file_path))
-            _INFLIGHT[file_path] = task
-            task.add_done_callback(lambda t, k=file_path: _INFLIGHT.pop(k, None))
-        try:
-            body, ct = await _asyncio.shield(task)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
+    # LRU -> local archive -> upstream. Scrubbing over frames Sentinel has
+    # already captured now costs radarca nothing at all.
+    try:
+        body, ct, prov = await _serve_source(request.app, ctx, file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
 
     return Response(
         content=body, media_type=ct or "image/png",
         headers={"cache-control": "public, max-age=60",
+                 "x-sentinel-cache": prov,
                  "x-scan-name": name,
                  "x-scan-ts": steps[step].get("timestamp") or "",
                  "x-step": str(step), "x-total": str(len(steps))},
@@ -174,6 +163,29 @@ _PD_TTL_S = 20.0
 _PD_CACHE: dict[str, tuple[float, list]] = {}
 
 
+_XB_TTL_S = 20.0
+_XB_CACHE: dict[tuple[str, str], tuple[float, list]] = {}
+
+
+async def _xband_listing_cached(ctx, folder: str, prefix: str) -> list:
+    """Memo of one radar/moment's rolling image listing (same rationale as
+    _product_steps_cached: radars publish every ~120s)."""
+    key = (folder, prefix)
+    now = _time_mod.monotonic()
+    hit = _XB_CACHE.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    r = await ctx.http.get(
+        f"{SETTINGS.base}/api/xbandRadarImages/",
+        params={"radarFolder": folder, "productPrefix": prefix},
+    )
+    if r.status_code != 200:
+        raise HTTPException(502, f"upstream xbandRadarImages HTTP {r.status_code}")
+    imgs = r.json().get("images") or []
+    _XB_CACHE[key] = (now + _XB_TTL_S, imgs)
+    return imgs
+
+
 async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list:
     hit = _PD_CACHE.get(product_id)
     now = _time_mod.monotonic()
@@ -203,17 +215,35 @@ async def image_by_source(source: str, request: Request):
 
     Returns 502 only if the upstream rotated the file out AND we don't
     have it archived locally."""
+    body, ct, prov = await _serve_source(request.app, request.app.state.context, source)
+    return Response(
+        content=body, media_type=ct,
+        headers={"cache-control": "public, max-age=300", "x-sentinel-cache": prov},
+    )
+
+
+async def _serve_source(app, ctx, source: str) -> tuple[bytes, str, str]:
+    """Resolve one upstream image path to bytes, cheapest source first.
+
+    Order: in-process LRU -> local archive -> upstream.
+
+    The archive step is the important one and was missing from the map's two
+    hot paths (product_image.png, xband_scan.png) — they went straight
+    upstream every time despite Sentinel already holding 63k composite frames
+    and 152k radar frames locally, back to 2026-05-16. Anything we have ever
+    captured is served from our own copy; upstream is only touched for frames
+    we have genuinely never seen.
+
+    Returns (body, content_type, provenance) where provenance is one of
+    lru | disk | upstream, surfaced as the x-sentinel-cache header so it is
+    obvious in devtools which frames actually cost radarca anything.
+    """
     cached = _IMAGE_CACHE.get(source)
     if cached is not None:
         body, ct = cached
         _IMAGE_CACHE.move_to_end(source)
-        return Response(
-            content=body, media_type=ct,
-            headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "lru"},
-        )
+        return body, ct, "lru"
 
-    # Local archive — survives upstream rotation.
-    app = request.app
     store = getattr(app.state, "store", None)
     pool = store.pool if store else None
     if pool is not None and SETTINGS.archive_enabled:
@@ -223,13 +253,8 @@ async def image_by_source(source: str, request: Request):
             _IMAGE_CACHE[source] = (body, ct)
             while len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
                 _IMAGE_CACHE.popitem(last=False)
-            return Response(
-                content=body, media_type=ct,
-                headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "disk"},
-            )
+            return body, ct, "disk"
 
-    # Upstream fallback. Recently-failed sources are refused from the negative
-    # cache without touching upstream at all.
     exp = _NEG_CACHE.get(source)
     if exp is not None:
         if exp > _time_mod.monotonic():
@@ -238,22 +263,13 @@ async def image_by_source(source: str, request: Request):
             )
         _NEG_CACHE.pop(source, None)
 
-    ctx = app.state.context
-
-    # Single-flight: concurrent requests for the same source share one fetch.
     task = _INFLIGHT.get(source)
     if task is None:
         task = _asyncio.create_task(_fetch_image_upstream(ctx, pool, source))
         _INFLIGHT[source] = task
-        task.add_done_callback(lambda t, s=source: _INFLIGHT.pop(s, None))
-    # shield so a client disconnecting mid-request doesn't cancel the fetch
-    # that other waiters are depending on.
+        task.add_done_callback(lambda t, k=source: _INFLIGHT.pop(k, None))
     body, ct = await _asyncio.shield(task)
-
-    return Response(
-        content=body, media_type=ct,
-        headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "upstream"},
-    )
+    return body, ct, "upstream"
 
 
 async def _fetch_image_upstream(ctx, pool, source: str) -> tuple[bytes, str]:
@@ -445,13 +461,9 @@ async def latest_xband_scan(
         except KeyError:
             raise HTTPException(400, f"unknown moment: {moment}")
     ctx = request.app.state.context
-    r = await ctx.http.get(
-        f"{SETTINGS.base}/api/xbandRadarImages/",
-        params={"radarFolder": folder, "productPrefix": prefix},
-    )
-    if r.status_code != 200:
-        raise HTTPException(502, f"upstream xbandRadarImages HTTP {r.status_code}")
-    imgs = r.json().get("images") or []
+    # Listing memo: scrubbing a radar overlay re-requested this per frame,
+    # doubling the upstream cost of every scrub position.
+    imgs = await _xband_listing_cached(ctx, folder, prefix)
     if not imgs:
         raise HTTPException(404, "no scans in window")
 
@@ -477,14 +489,13 @@ async def latest_xband_scan(
         if best is not None:
             chosen = best
 
-    ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": chosen})
-    if ir.status_code != 200:
-        raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+    body, ct, prov = await _serve_source(request.app, ctx, chosen)
     return Response(
-        content=ir.content,
-        media_type="image/png",
+        content=body,
+        media_type=ct or "image/png",
         headers={
-            "cache-control": "no-store",
+            "cache-control": "public, max-age=60",
+            "x-sentinel-cache": prov,
             "x-scan-name": chosen,
             "x-scan-ts": chosen_ts.isoformat() if chosen_ts else "",
             "x-prefix": prefix,
