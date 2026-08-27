@@ -1,6 +1,9 @@
 """Thin upstream proxy — fetch radarca PNGs through Sentinel so the frontend
 can use them as MapLibre raster sources without CORS issues."""
 from __future__ import annotations
+import asyncio as _asyncio
+import time as _time_mod
+
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from ...config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
@@ -17,15 +20,12 @@ async def latest_product_image(product_id: str, request: Request):
         raise HTTPException(404, f"Unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    try:
-        pd = await ctx.http.get(
-            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
-    if pd.status_code != 200:
-        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
-    steps = pd.json().get("steps") or []
+    # Step lists change at the product's own cadence (120s for the fast
+    # radar composites), so re-fetching one per scrub position was pure
+    # waste: this endpoint made TWO upstream calls per frame — a
+    # productDetail to resolve the step plus the imageData itself — which is
+    # exactly the 2.00x amplification measured on 2026-08-27.
+    steps = await _product_steps_cached(ctx, product_id, cfg["details"])
     if not steps:
         raise HTTPException(404, "No scans available")
     latest = steps[-1]["imageName"]
@@ -100,15 +100,31 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
         raise HTTPException(400, f"Step out of range (0..{len(steps)-1})")
     name = steps[step]["imageName"]
     file_path = image_path(product_id, name)
-    try:
-        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
-    except Exception as e:
-        raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
-    if ir.status_code != 200:
-        raise HTTPException(502, f"Upstream image returned HTTP {ir.status_code}")
+
+    # Serve from the shared LRU when we already have these bytes — scrubbing
+    # back and forth over the same frames used to re-fetch every one of them.
+    cached = _IMAGE_CACHE.get(file_path)
+    if cached is not None:
+        body, ct = cached
+        _IMAGE_CACHE.move_to_end(file_path)
+    else:
+        store = getattr(request.app.state, "store", None)
+        pool = store.pool if store else None
+        task = _INFLIGHT.get(file_path)
+        if task is None:
+            task = _asyncio.create_task(_fetch_image_upstream(ctx, pool, file_path))
+            _INFLIGHT[file_path] = task
+            task.add_done_callback(lambda t, k=file_path: _INFLIGHT.pop(k, None))
+        try:
+            body, ct = await _asyncio.shield(task)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
+
     return Response(
-        content=ir.content, media_type="image/png",
-        headers={"cache-control": "no-store",
+        content=body, media_type=ct or "image/png",
+        headers={"cache-control": "public, max-age=60",
                  "x-scan-name": name,
                  "x-scan-ts": steps[step].get("timestamp") or "",
                  "x-step": str(step), "x-total": str(len(steps))},
@@ -125,6 +141,55 @@ from ...archive import save_image as _archive_save
 # memory stays predictable; eviction is FIFO-by-recency.
 _IMAGE_CACHE: "_OrderedDict[str, tuple[bytes, str]]" = _OrderedDict()
 _IMAGE_CACHE_MAX = 256
+
+# === Load-bearing: single-flight, negative cache, and a concurrency cap ===
+#
+# Measured 2026-08-27: one map scrub produced 347 upstream imageData calls for
+# only 182 distinct URLs. Individual frames were fetched 7-11 times, and the
+# water_depth image that 404s upstream was re-requested 11 times in one pass.
+#
+# Cause: there is an `await` between the LRU check and the LRU write, so N
+# concurrent requests for the same frame all miss the cache and all hit
+# upstream (a thundering herd on our own proxy). A non-200 cached nothing at
+# all, so a known-missing image was re-fetched on every single request.
+#
+# This matters more than ordinary inefficiency: radarca is slow and fragile —
+# measured p50 3.4s / p90 8.3s while completely idle — and it is someone
+# else's production research system. Our dashboard should not be capable of
+# multiplying one operator's scrub into a burst against it.
+#
+# _INFLIGHT      collapses concurrent identical fetches into one.
+# _NEG_CACHE     remembers a non-200 briefly so we stop hammering a 404.
+# _UPSTREAM_SEM  caps how many user-driven image fetches can be in flight at
+#                once, independent of the scheduled checks' own traffic.
+_INFLIGHT: dict[str, "_asyncio.Task[tuple[bytes, str]]"] = {}
+_NEG_CACHE: dict[str, float] = {}
+_NEG_TTL_S = 120.0
+_UPSTREAM_SEM = _asyncio.Semaphore(6)
+
+# Short-TTL memo of productDetail step lists. The fast composites publish
+# every 120s, so a few seconds of staleness is invisible to a scrubbing
+# operator while collapsing a whole scrub's worth of lookups into one call.
+_PD_TTL_S = 20.0
+_PD_CACHE: dict[str, tuple[float, list]] = {}
+
+
+async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list:
+    hit = _PD_CACHE.get(product_id)
+    now = _time_mod.monotonic()
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    try:
+        pd = await ctx.http.get(
+            f"{SETTINGS.base}/api/productDetail", params={"file": details_path},
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
+    if pd.status_code != 200:
+        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
+    steps = pd.json().get("steps") or []
+    _PD_CACHE[product_id] = (now + _PD_TTL_S, steps)
+    return steps
 
 
 @router.get("/image_by_source.png")
@@ -163,10 +228,44 @@ async def image_by_source(source: str, request: Request):
                 headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "disk"},
             )
 
-    # Upstream fallback.
+    # Upstream fallback. Recently-failed sources are refused from the negative
+    # cache without touching upstream at all.
+    exp = _NEG_CACHE.get(source)
+    if exp is not None:
+        if exp > _time_mod.monotonic():
+            raise HTTPException(
+                502, f"upstream imageData unavailable for {source} (negative-cached)"
+            )
+        _NEG_CACHE.pop(source, None)
+
     ctx = app.state.context
-    ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
+
+    # Single-flight: concurrent requests for the same source share one fetch.
+    task = _INFLIGHT.get(source)
+    if task is None:
+        task = _asyncio.create_task(_fetch_image_upstream(ctx, pool, source))
+        _INFLIGHT[source] = task
+        task.add_done_callback(lambda t, s=source: _INFLIGHT.pop(s, None))
+    # shield so a client disconnecting mid-request doesn't cancel the fetch
+    # that other waiters are depending on.
+    body, ct = await _asyncio.shield(task)
+
+    return Response(
+        content=body, media_type=ct,
+        headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "upstream"},
+    )
+
+
+async def _fetch_image_upstream(ctx, pool, source: str) -> tuple[bytes, str]:
+    """Fetch one image from radarca, populate caches, archive it.
+
+    Runs under _UPSTREAM_SEM so a scrub can't open an unbounded number of
+    concurrent connections against a slow origin.
+    """
+    async with _UPSTREAM_SEM:
+        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
     if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/"):
+        _NEG_CACHE[source] = _time_mod.monotonic() + _NEG_TTL_S
         raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
     body = ir.content
     ct = ir.headers.get("content-type", "image/png")
@@ -176,18 +275,14 @@ async def image_by_source(source: str, request: Request):
     # Opportunistically archive — same logic as a live L4 capture, so a
     # source we proxy-fetched for the first time gets a long-term home.
     if pool is not None and SETTINGS.archive_enabled:
-        import asyncio
-        asyncio.create_task(
+        _asyncio.create_task(
             _archive_save(
                 pool, SETTINGS.archive_root,
                 source=source, content=body, content_type=ct,
                 origin_url=f"{SETTINGS.base}/api/imageData?file={source}",
             )
         )
-    return Response(
-        content=body, media_type=ct,
-        headers={"cache-control": "public, max-age=300", "x-sentinel-cache": "upstream"},
-    )
+    return body, ct
 
 
 _XBAND_TS_RE = __import__("re").compile(r"_(\d{8})-(\d{4})\.png$")
@@ -555,7 +650,6 @@ async def tilt_steps(radar: str, el: int, moment: str):
     the frontend can label + scrub the loop.
     """
     _tilt_guard(radar, el, moment)
-    import asyncio as _asyncio
 
     async def _fetch(frame: int):
         url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_{frame}.json"
