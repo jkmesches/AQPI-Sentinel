@@ -6,6 +6,7 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import TimeControls from '$lib/components/TimeControls.svelte';
 	import { url as apiUrl } from '$lib/origin';
+	import { productLabel } from '$lib/format';
 
 	interface RadarMeta {
 		id: string;
@@ -208,6 +209,46 @@
 	let playing = $state(false);
 	let playTimer: ReturnType<typeof setInterval> | undefined;
 	let activity = $state<number[]>([]);     // non-empty pixel fraction per step
+	// === Stale-composite guard ===
+	//
+	// The CoSMoS hydro products (water_depth / water_level / max_water_*)
+	// froze upstream at a 2026-07-07 forecast run and never resumed. The
+	// water_* images have since 404'd, which is self-evident on screen — but
+	// max_water_* still serve a perfectly good PNG that is over 50 days old,
+	// and the map would happily draw it as if it were current inundation.
+	// That is the dangerous case: stale data that looks live.
+	//
+	// Derived from the loaded step list rather than a new API: forecast
+	// products legitimately carry FUTURE steps (negative age), so only a
+	// newest-step that has fallen into the past counts as stale.
+	const STALE_AFTER_H = 3;
+
+	const compositeAgeH = $derived.by(() => {
+		if (composite === 'none' || steps.length === 0) return null;
+		const ts = steps
+			.map((s) => (s.ts ? Date.parse(s.ts) : NaN))
+			.filter((n) => !Number.isNaN(n));
+		if (ts.length === 0) return null;
+		return (Date.now() - Math.max(...ts)) / 3_600_000;
+	});
+	const compositeStale = $derived(compositeAgeH !== null && compositeAgeH > STALE_AFTER_H);
+
+	function humanAge(h: number): string {
+		if (h >= 48) return `${Math.floor(h / 24)} days`;
+		if (h >= 2) return `${Math.floor(h)} hours`;
+		return `${Math.max(1, Math.round(h * 60))} min`;
+	}
+
+	// Products whose L1 check is currently unhealthy — used to mark options in
+	// the composite picker so a stale one is visible BEFORE it is selected.
+	const unhealthyProducts = $derived.by(() => {
+		const out: Record<string, string> = {};
+		for (const r of sentinel.rollup?.stages?.L1 ?? []) {
+			if (r.status === 'fail' || r.status === 'error') out[r.target] = r.status;
+		}
+		return out;
+	});
+
 	const stepLabel = $derived(
 		stepIdx >= 0 && stepIdx < steps.length
 			? `${(steps[stepIdx].day || '').toUpperCase()} ${steps[stepIdx].date || ''}  ${steps[stepIdx].time || ''}`
@@ -1753,6 +1794,24 @@
 	<div class="relative flex-1">
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 
+		<!-- Stale-composite banner. Deliberately centred over the map rather
+		     than tucked in a corner: the failure this guards against is an
+		     operator reading a 50-day-old inundation frame as current, and a
+		     subtle marker would not stop that. Non-interactive so it never
+		     blocks map controls. -->
+		{#if compositeStale && compositeAgeH !== null}
+			<div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 max-w-[92%]">
+				<div class="rounded-sm border border-[var(--color-warn)] bg-[var(--color-warn)]/[0.14] px-3 py-1.5 text-center shadow-xl backdrop-blur">
+					<div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
+						⚠ Not current — {humanAge(compositeAgeH)} old
+					</div>
+					<div class="mt-0.5 text-[10.5px] num text-[var(--color-default)]">
+						{productLabel(composite)} last updated {stepLabel || '—'}. Upstream stopped publishing; this is not live data.
+					</div>
+				</div>
+			</div>
+		{/if}
+
 	<!-- LAYERS CONTROL -->
 	{#if !panelOpen}
 		<!-- Collapsed: a single compact badge -->
@@ -1815,12 +1874,14 @@
 						{#if g.label}
 							<optgroup label={g.label}>
 								{#each g.options as opt}
-									<option value={opt.key}>{opt.label}</option>
+									<!-- Mark products whose L1 check is unhealthy, so a stale
+									     composite is visible BEFORE it's selected. -->
+									<option value={opt.key}>{opt.label}{unhealthyProducts[opt.key] ? '  ⚠ not updating' : ''}</option>
 								{/each}
 							</optgroup>
 						{:else}
 							{#each g.options as opt}
-								<option value={opt.key}>{opt.label}</option>
+								<option value={opt.key}>{opt.label}{unhealthyProducts[opt.key] ? '  ⚠ not updating' : ''}</option>
 							{/each}
 						{/if}
 					{/each}
