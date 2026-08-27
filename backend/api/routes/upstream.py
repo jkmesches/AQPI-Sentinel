@@ -101,7 +101,20 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
 
     return Response(
         content=body, media_type=ct or "image/png",
-        headers={"cache-control": "public, max-age=60",
+        # === Load-bearing: no-store ===
+        # MapView loads this URL TWICE — once via new Image() in
+        # preloadImage() (a no-CORS request, which caches an OPAQUE
+        # response) and again via MapLibre's updateImage(), which fetches
+        # with CORS. If the first response is cacheable, the second reads
+        # the opaque entry back out of the HTTP cache and the browser
+        # rejects it: net::ERR_FAILED on every single frame. Making this
+        # cacheable on 2026-08-27 broke every composite frame in the map.
+        #
+        # Independently: the URL is keyed by STEP INDEX, and the step->frame
+        # mapping shifts as the rolling window advances, so a cached
+        # response can also be silently wrong. Server-side we still serve
+        # from the LRU/archive, so no-store costs upstream nothing.
+        headers={"cache-control": "no-store",
                  "x-sentinel-cache": prov,
                  "x-scan-name": name,
                  "x-scan-ts": steps[step].get("timestamp") or "",
@@ -481,7 +494,10 @@ async def latest_xband_scan(
         content=body,
         media_type=ct or "image/png",
         headers={
-            "cache-control": "public, max-age=60",
+            # no-store for the same reason as product_image.png — the
+            # per-radar overlay is loaded by both preloadImage() and
+            # MapLibre, and a cacheable response poisons the CORS fetch.
+            "cache-control": "no-store",
             "x-sentinel-cache": prov,
             "x-scan-name": chosen,
             "x-scan-ts": chosen_ts.isoformat() if chosen_ts else "",
