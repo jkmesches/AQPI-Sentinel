@@ -31,13 +31,13 @@ async def latest_product_image(product_id: str, request: Request):
     latest = steps[-1]["imageName"]
     file_path = image_path(product_id, latest)
     try:
-        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": file_path})
+        body, ct, prov = await _serve_source(request.app, ctx, file_path)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Upstream image fetch failed: {humanize_error(e)}")
-    if ir.status_code != 200:
-        raise HTTPException(502, f"Upstream image returned HTTP {ir.status_code}")
     return Response(
-        content=ir.content,
+        content=body,
         media_type="image/png",
         headers={"cache-control": "no-store", "x-scan-name": latest},
     )
@@ -56,18 +56,7 @@ async def product_steps(product_id: str, request: Request):
         raise HTTPException(404, f"unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    try:
-        pd = await ctx.http.get(
-            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
-    if pd.status_code != 200:
-        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
-    try:
-        raw = pd.json().get("steps") or []
-    except Exception:
-        raise HTTPException(502, "Upstream returned malformed JSON")
+    raw = await _product_steps_cached(ctx, product_id, cfg["details"])
     out = [
         {"i": i, "ts": s.get("timestamp"), "imageName": s.get("imageName"),
          "day": s.get("day"), "date": s.get("date"), "time": s.get("time")}
@@ -307,19 +296,28 @@ _XBAND_TS_RE = __import__("re").compile(r"_(\d{8})-(\d{4})\.png$")
 _activity_cache: dict[str, float] = {}
 
 
-async def _activity_for(ctx, scan_path: str) -> float:
+async def _activity_for(app, ctx, scan_path: str) -> float:
+    """Non-empty pixel fraction for one frame.
+
+    Goes through _serve_source, so the sparkline is computed from our own
+    archived copy wherever we have one. This endpoint is the single largest
+    consumer of upstream bandwidth in the whole app — selecting a composite
+    asks it for EVERY step in the timeline (31 frames), and before this it
+    fetched all of them straight from radarca and decoded each with PIL.
+    """
     cached = _activity_cache.get(scan_path)
     if cached is not None:
         return cached
-    r = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": scan_path})
-    if r.status_code != 200:
+    try:
+        body, _ct, _prov = await _serve_source(app, ctx, scan_path)
+    except Exception:
         _activity_cache[scan_path] = 0.0
         return 0.0
     try:
         import io as _io
         import numpy as _np
         from PIL import Image as _Img
-        arr = _np.asarray(_Img.open(_io.BytesIO(r.content)).convert("RGBA"))
+        arr = _np.asarray(_Img.open(_io.BytesIO(body)).convert("RGBA"))
         ratio = float((arr[:, :, 3] > 10).sum()) / arr[:, :, 3].size
     except Exception:
         ratio = 0.0
@@ -346,15 +344,10 @@ async def step_activity(
         if product_id not in PRODUCTS:
             raise HTTPException(404, f"unknown product: {product_id}")
         cfg = PRODUCTS[product_id]
-        pd = await ctx.http.get(
-            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-        )
-        if pd.status_code != 200:
-            raise HTTPException(502, "productDetail unreachable")
-        for i, s in enumerate(pd.json().get("steps") or []):
+        for i, s in enumerate(await _product_steps_cached(ctx, product_id, cfg["details"])):
             path = image_path(product_id, s["imageName"])
             out.append({"i": i, "ts": s.get("timestamp"),
-                        "activity": await _activity_for(ctx, path)})
+                        "activity": await _activity_for(request.app, ctx, path)})
     elif radar:
         if radar not in RADAR_FOLDER:
             raise HTTPException(404, f"unknown radar: {radar}")
@@ -364,17 +357,11 @@ async def step_activity(
                 prefix = moment_to_prefix(radar, moment)
             except KeyError:
                 raise HTTPException(400, f"unknown moment: {moment}")
-        r = await ctx.http.get(
-            f"{SETTINGS.base}/api/xbandRadarImages/",
-            params={"radarFolder": folder, "productPrefix": prefix},
-        )
-        if r.status_code != 200:
-            raise HTTPException(502, "xbandRadarImages unreachable")
-        for i, fname in enumerate(r.json().get("images") or []):
+        for i, fname in enumerate(await _xband_listing_cached(ctx, folder, prefix)):
             ts = _parse_xband_ts(fname)
             out.append({"i": i,
                         "ts": ts.isoformat() if ts else None,
-                        "activity": await _activity_for(ctx, fname)})
+                        "activity": await _activity_for(request.app, ctx, fname)})
     else:
         raise HTTPException(400, "need product_id or radar")
 
