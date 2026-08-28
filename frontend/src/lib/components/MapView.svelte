@@ -634,7 +634,28 @@
 		}
 		const myToken = ++_compositeToken;
 		const isCurrent = () => myToken === _compositeToken && !!map && styleReady;
-		const url = apiUrl(`/api/upstream/product_image.png?product_id=${composite}&step=${stepIdx}&_=${Date.now()}`);
+		// === Load-bearing: key the URL on CONTENT, not on Date.now() ===
+		//
+		// A per-render cache-buster meant every render was a unique URL, so
+		// nothing was ever reused: scrubbing back over a frame already viewed
+		// re-fetched ~1MB, re-decoded it, and (once responses became
+		// cacheable) wrote it to disk cache for nothing. Measured: revisiting
+		// five already-seen steps cost five more server hits and dropped the
+		// scrub to ~17fps with 1.2s main-thread blocks.
+		//
+		// The step's timestamp identifies the frame, so revisits are cache
+		// hits with no refetch and no re-decode. It is also SAFER than
+		// caching on step index alone: when the rolling window advances, a
+		// given index maps to a new ts, so the URL changes and we cannot
+		// serve a stale frame under a shifted index.
+		//
+		// _forceBuster (30s-quantised, bumped by pokeOverlays) still forces a
+		// genuine refresh of the live frame — same mechanism as xbandScanUrl.
+		const cq = new URLSearchParams({ product_id: composite, step: String(stepIdx) });
+		const cts = steps[stepIdx]?.ts;
+		if (cts) cq.set('ts', cts);
+		if (_forceBuster) cq.set('_t', String(_forceBuster));
+		const url = apiUrl(`/api/upstream/product_image.png?${cq.toString()}`);
 		const coords: [number, number][] = [
 			[e.west, e.north],
 			[e.east, e.north],
