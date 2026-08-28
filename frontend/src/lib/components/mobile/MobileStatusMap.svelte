@@ -41,7 +41,82 @@
 	// open that radar's drilldown. The mobile map has no per-radar image
 	// overlays (it shows status pins plus one composite raster), so the
 	// desktop's toggle-overlay behaviour would be invisible here.
-	let { onRadarTap }: { onRadarTap?: (radarId: string) => void } = $props();
+	// Tapping a radar toggles its overlay, mirroring desktop. Multiple radars
+	// can be active at once. Showing any radar hides the composite: the two
+	// draw over the same ground and a regional composite on top of a
+	// single-radar sweep is unreadable on a phone screen.
+	let activeRadars = $state<string[]>([]);
+	const radarsActive = $derived(activeRadars.length > 0);
+	const _addedOverlays = new Set<string>();
+
+	// Same extent math as the desktop map — km offsets from the radar centre.
+	function radarExtent(r: RadarMeta) {
+		const km = r.range_m / 1000;
+		const dLat = km / 111;
+		const dLon = km / (111 * Math.cos((r.lat * Math.PI) / 180));
+		return { west: r.lon - dLon, east: r.lon + dLon, south: r.lat - dLat, north: r.lat + dLat };
+	}
+	const radarSrcId = (id: string) => `radar-img-${id}`;
+	const radarLayerId = (id: string) => `radar-img-layer-${id}`;
+
+	function radarScanUrl(id: string): string {
+		const qs = new URLSearchParams({ radar: id, moment: 'Reflectivity' });
+		const t = steps[stepIdx]?.ts;
+		if (t) qs.set('time', t);
+		return apiUrl(`/api/upstream/xband_scan.png?${qs.toString()}`);
+	}
+
+	function toggleRadar(id: string) {
+		activeRadars = activeRadars.includes(id)
+			? activeRadars.filter((x) => x !== id)
+			: [...activeRadars, id];
+		if (map?.getSource('radars')) (map.getSource('radars') as any).setData(geo());
+		// Selecting the first radar (or clearing the last) swaps what drives
+		// the scrubber between radar frames and composite steps.
+		void refreshForSelection();
+	}
+
+	async function refreshForSelection() {
+		await loadSteps();
+		await renderComposite();
+		refreshRadarOverlays();
+	}
+
+	function refreshRadarOverlays() {
+		if (!mapAlive() || !styleReady || !maplibregl) return;
+		const active = new Set(activeRadars);
+		for (const id of [..._addedOverlays]) {
+			if (active.has(id)) continue;
+			if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
+			if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
+			_addedOverlays.delete(id);
+		}
+		for (const id of active) {
+			const r = radars.find((x) => x.id === id);
+			if (!r) continue;
+			const e = radarExtent(r);
+			const coords: [number, number][] = [
+				[e.west, e.north], [e.east, e.north],
+				[e.east, e.south], [e.west, e.south]
+			];
+			const src = map.getSource(radarSrcId(id)) as any;
+			if (src && typeof src.updateImage === 'function') {
+				src.updateImage({ url: radarScanUrl(id), coordinates: coords });
+				continue;
+			}
+			if (_addedOverlays.has(id)) continue;
+			map.addSource(radarSrcId(id), {
+				type: 'image', url: radarScanUrl(id), coordinates: coords
+			});
+			// Below the halo so the status pins stay readable on top.
+			const beforeId = map.getLayer('radar-halo') ? 'radar-halo' : undefined;
+			map.addLayer({
+				id: radarLayerId(id), type: 'raster', source: radarSrcId(id),
+				paint: { 'raster-opacity': 0.82 }
+			}, beforeId);
+			_addedOverlays.add(id);
+		}
+	}
 
 	let radars = $state<RadarMeta[]>([]);
 	let loadError = $state<string | null>(null);
@@ -125,7 +200,10 @@
 					properties: {
 						id: r.id, name: r.name, status: s,
 						center_color: centerColorFor(s),
-						halo_color:   haloColorFor(s)
+						halo_color:   haloColorFor(s),
+						// Drives the selection ring — without visible feedback a
+						// tap that toggles an overlay off looks like a dead tap.
+						selected: activeRadars.includes(r.id) ? 1 : 0
 					}
 				};
 			})
@@ -152,7 +230,7 @@
 				layers: ['radar-circles', 'radar-label', 'radar-halo'].filter((l) => !!map!.getLayer(l))
 			});
 			const id = hits[0]?.properties?.id as string | undefined;
-			if (id) onRadarTap?.(id);
+			if (id) toggleRadar(id);
 		});
 
 		map.addSource('radars', { type: 'geojson', data: geo() });
@@ -169,10 +247,17 @@
 		map.addLayer({
 			id: 'radar-circles', type: 'circle', source: 'radars',
 			paint: {
-				'circle-radius': 6,
+				// Selected radars grow and take an accent ring. A tap that
+				// toggles an overlay needs visible feedback on the pin itself,
+				// or turning one OFF reads as an unresponsive tap.
+				'circle-radius': ['case', ['==', ['get', 'selected'], 1], 8, 6],
 				'circle-color': ['get', 'center_color'],
-				'circle-stroke-color': theme.resolved === 'light' ? '#ffffff' : '#0c100d',
-				'circle-stroke-width': 1.5
+				'circle-stroke-color': [
+					'case', ['==', ['get', 'selected'], 1],
+					'#8ABE82',
+					theme.resolved === 'light' ? '#ffffff' : '#0c100d'
+				],
+				'circle-stroke-width': ['case', ['==', ['get', 'selected'], 1], 3, 1.5]
 			}
 		});
 		map.addLayer({
@@ -193,6 +278,23 @@
 	}
 
 	async function loadSteps() {
+		// With radars selected the scrubber follows radar frames, not the
+		// composite's — otherwise play/scrub would move a timeline that no
+		// longer corresponds to anything on screen.
+		if (activeRadars.length > 0) {
+			try {
+				const r = await fetch(
+					`/api/upstream/radar_steps?radar=${activeRadars[0]}&moment=Reflectivity`
+				);
+				if (!r.ok) throw new Error(`HTTP ${r.status}`);
+				const j = await r.json();
+				steps = (j.steps ?? []) as Step[];
+				stepIdx = j.current_idx ?? steps.length - 1;
+			} catch {
+				steps = []; stepIdx = -1;
+			}
+			return;
+		}
 		if (composite === 'none') {
 			steps = [];
 			stepIdx = -1;
@@ -216,7 +318,9 @@
 	async function renderComposite() {
 		if (!mapAlive() || !styleReady || !maplibregl) return;
 		try {
-			if (composite === 'none' || stepIdx < 0) {
+			// Radars win: their sweeps and the regional composite overlap the
+			// same ground, and stacking them is unreadable on a phone.
+			if (radarsActive || composite === 'none' || stepIdx < 0) {
 				if (map.getLayer('comp-layer')) map.removeLayer('comp-layer');
 				if (map.getSource('comp-src')) map.removeSource('comp-src');
 				return;
@@ -256,7 +360,7 @@
 	function tick() {
 		if (steps.length === 0) return;
 		stepIdx = (stepIdx + 1) % steps.length;
-		renderComposite();
+		syncFrame();
 	}
 	function togglePlay() {
 		if (playing) { stopPlay(); return; }
@@ -264,8 +368,11 @@
 		playing = true;
 		playTimer = setInterval(tick, 800);
 	}
-	function stepPrev() { stopPlay(); if (steps.length) { stepIdx = (stepIdx - 1 + steps.length) % steps.length; renderComposite(); } }
-	function stepNext() { stopPlay(); if (steps.length) { stepIdx = (stepIdx + 1) % steps.length; renderComposite(); } }
+	// syncFrame, not renderComposite: with radars selected the composite is
+	// suppressed and the radar overlays are what actually need re-pointing.
+	function syncFrame() { renderComposite(); refreshRadarOverlays(); }
+	function stepPrev() { stopPlay(); if (steps.length) { stepIdx = (stepIdx - 1 + steps.length) % steps.length; syncFrame(); } }
+	function stepNext() { stopPlay(); if (steps.length) { stepIdx = (stepIdx + 1) % steps.length; syncFrame(); } }
 
 	// Re-fetch step list whenever composite changes, then render the latest.
 	$effect(() => {
@@ -273,14 +380,14 @@
 		(async () => {
 			stopPlay();
 			await loadSteps();
-			renderComposite();
+			syncFrame();
 		})();
 	});
 
 	// Re-render the current frame when style/map become ready.
 	$effect(() => {
 		void styleReady;
-		if (styleReady) renderComposite();
+		if (styleReady) syncFrame();
 	});
 
 	onMount(async () => {
@@ -424,7 +531,7 @@
 					max={steps.length - 1}
 					step="1"
 					value={stepIdx}
-					oninput={(e) => { stopPlay(); stepIdx = Number((e.target as HTMLInputElement).value); renderComposite(); }}
+					oninput={(e) => { stopPlay(); stepIdx = Number((e.target as HTMLInputElement).value); syncFrame(); }}
 					class="w-24 accent-[var(--color-ok)]"
 					aria-label="scrub frames"
 				/>
