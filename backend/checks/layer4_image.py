@@ -29,6 +29,10 @@ from .imaging import tier1_stats, tier2_heuristics
 # Module-level in-memory store of last pHash per (check_id, target). Survives
 # the process; will be moved to image_archive in a later milestone (P4.0).
 _LAST_PHASH: dict[str, str] = {}
+# The SOURCE the previous pHash came from. Without this, re-sampling one
+# published image reports it as frozen against itself — see the frozen-frame
+# block below.
+_LAST_SOURCE: dict[str, str] = {}
 
 
 def _parse_step_ts(s: dict) -> datetime | None:
@@ -223,22 +227,48 @@ class Layer4ImageCheck(Check):
         # product is also expected. Both demote to QUIET, which counts as
         # pass in the rollup.
         prev_phash = _LAST_PHASH.get(self.id)
-        if prev_phash is not None and prev_phash == t1["phash"]:
+        prev_source = _LAST_SOURCE.get(self.id)
+
+        # === Load-bearing: only compare DIFFERENT published frames ===
+        #
+        # FROZEN means "upstream published a new frame and it is pixel
+        # identical to the last one" — a stuck feed. It does NOT mean "we
+        # looked at the same file twice", which is guaranteed to match and
+        # says nothing at all.
+        #
+        # This check runs every 120s, but publish cadences vary: CBAND
+        # publishes every ~240s, so half of its runs re-sampled the frame
+        # they had already seen and reported it as frozen against itself.
+        # Measured over 24h: of 366 runs where the source was unchanged,
+        # 366 flagged FROZEN; of 352 runs with a genuinely new image, 0 did.
+        # That was 1,520 warnings in 7 days, 42x the next noisiest radar,
+        # and every one of them was the detector comparing a frame to
+        # itself.
+        #
+        # Tuning CBAND's thresholds would have hidden this rather than
+        # fixed it, and would have suppressed real stuck-feed detection
+        # during exactly the high-coverage weather where it matters most.
+        if prev_source is not None and src == prev_source:
+            frozen_verdict = "OK_SAME_FRAME"       # nothing new to compare
+        elif prev_phash is not None and prev_phash == t1["phash"]:
             if skip_frozen:
                 frozen_verdict = "QUIET_SLOW"      # slow-cadence product
             elif t1["coverage_pct"] < frozen_min_cov_pct:
                 frozen_verdict = "QUIET_LOW_COV"   # quiet sky, just clutter
             else:
-                frozen_verdict = "FROZEN"
+                frozen_verdict = "FROZEN"          # genuine stuck feed
         else:
             frozen_verdict = "OK"
         _LAST_PHASH[self.id] = t1["phash"]
+        if src:
+            _LAST_SOURCE[self.id] = src
 
         sub_verdicts: list[str] = []
         # Verdicts we treat as "pass" (no anomaly worth alarming on).
         OK_VERDICTS = (
             "OK", "N/A", "EMPTY", "TOO_SPARSE",
             "QUIET_LOW_COV", "QUIET_SLOW", "OK_LOW_COV",
+            "OK_SAME_FRAME",
         )
         def _v(name: str, verdict: str):
             sub_verdicts.append("pass" if verdict in OK_VERDICTS else "warn")
@@ -265,7 +295,8 @@ class Layer4ImageCheck(Check):
                 "tier1": t1,
                 "tier2": {
                     **t2,
-                    "frozen": {"verdict": frozen_verdict, "prev_phash": prev_phash},
+                    "frozen": {"verdict": frozen_verdict, "prev_phash": prev_phash,
+                               "prev_source": prev_source},
                 },
             },
             metrics={
