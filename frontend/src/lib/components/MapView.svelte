@@ -1688,6 +1688,23 @@
 			addBaseSourcesAndLayers(theme.resolved);
 			styleReady = true;
 
+			// === Load-bearing: paint once the style is ready ===
+			//
+			// Every render path early-returns on `!styleReady`. loadComposite()
+			// is async, so if it finishes BEFORE the map fires 'load' its
+			// syncAllToStep() call is silently dropped and no overlay is ever
+			// drawn — the map sits empty until something unrelated pokes it
+			// (a step change, the 120s refresher, a theme swap).
+			//
+			// This was latent for months and only started reproducing on
+			// 2026-08-27, when memoising /product_steps took it from ~3s
+			// (upstream fetch) to ~1.5ms and loadComposite began winning the
+			// race routinely. Making an API fast is exactly the kind of change
+			// that converts a rare race into a permanent bug, so re-issue the
+			// paint here rather than relying on who finishes first.
+			syncAllToStep();
+			refreshRadarOverlays();
+
 			map.on('click', 'radar-point', (e) => {
 				const f = e.features?.[0];
 				if (!f) return;
