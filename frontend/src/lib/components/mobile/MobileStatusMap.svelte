@@ -37,6 +37,12 @@
 	let mapDiv: HTMLDivElement;
 	let map: any = null;
 	let maplibregl: any = null;
+	// Tapping a radar pin should do what tapping its row in the list does —
+	// open that radar's drilldown. The mobile map has no per-radar image
+	// overlays (it shows status pins plus one composite raster), so the
+	// desktop's toggle-overlay behaviour would be invisible here.
+	let { onRadarTap }: { onRadarTap?: (radarId: string) => void } = $props();
+
 	let radars = $state<RadarMeta[]>([]);
 	let loadError = $state<string | null>(null);
 	let styleReady = $state(false);
@@ -132,6 +138,23 @@
 			const src = map.getSource('radars');
 			if (src) { src.setData(geo()); return; }
 		} catch { mapDead = true; return; }
+		// Touch targets: a radar circle is ~7px, which is far below the ~44px
+		// a finger can reliably hit, so query a padded box around the tap
+		// rather than requiring a direct hit on the rendered geometry.
+		const TAP_PAD = 18;
+		map.on('click', (e: maplibregl.MapMouseEvent) => {
+			if (!map) return;
+			const box: [maplibregl.PointLike, maplibregl.PointLike] = [
+				[e.point.x - TAP_PAD, e.point.y - TAP_PAD],
+				[e.point.x + TAP_PAD, e.point.y + TAP_PAD]
+			];
+			const hits = map.queryRenderedFeatures(box, {
+				layers: ['radar-circles', 'radar-label', 'radar-halo'].filter((l) => !!map!.getLayer(l))
+			});
+			const id = hits[0]?.properties?.id as string | undefined;
+			if (id) onRadarTap?.(id);
+		});
+
 		map.addSource('radars', { type: 'geojson', data: geo() });
 		map.addLayer({
 			id: 'radar-halo', type: 'circle', source: 'radars',
