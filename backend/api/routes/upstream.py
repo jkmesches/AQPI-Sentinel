@@ -212,7 +212,39 @@ async def _xband_refresh_bg(ctx, folder: str, prefix: str) -> None:
         _XB_REFRESHING.discard(key)
 
 
-async def _xband_listing_cached(ctx, folder: str, prefix: str) -> list:
+async def _xband_listing_local(pool, folder: str, prefix: str) -> list:
+    """Reconstruct a radar's recent frame list from our own archive.
+
+    We already hold 95-100% of every radar's rolling window — measured
+    2026-08-28: XSCR 23/23, XSCV 26/27, XSCW 25/26, XSWR 25/26, CBAND 13/17 —
+    because the L4 check archives each radar's newest frame every 120s. So
+    the listing is answerable locally, and answering it locally means the map
+    keeps working even when radarca does not.
+
+    What we are always missing is the NEWEST frame or two: L4 archives one
+    cycle behind, so the live edge lags by up to a check interval. That is
+    why this is the floor rather than the whole story — a background refresh
+    still pulls upstream to discover frames newer than ours.
+    """
+    if pool is None:
+        return []
+    rows = await pool.fetch(
+        """
+        SELECT source FROM image_index
+        WHERE source LIKE $1 AND source LIKE $2
+        ORDER BY source DESC
+        LIMIT 40
+        """,
+        # `_` is LIKE's single-char wildcard, which conveniently matches the
+        # literal underscore in `<folder>_<prefix>_<timestamp>.png` — so the
+        # pattern needs no ESCAPE clause.
+        f"xband_chivo/{folder}/%", f"%_{prefix}_%",
+    )
+    # filenames embed the timestamp, so lexical order IS chronological
+    return [r["source"] for r in reversed(rows)]
+
+
+async def _xband_listing_cached(ctx, folder: str, prefix: str, pool=None) -> list:
     key = (folder, prefix)
     now = _time_mod.monotonic()
     hit = _XB_CACHE.get(key)
@@ -221,6 +253,17 @@ async def _xband_listing_cached(ctx, folder: str, prefix: str) -> list:
             _XB_REFRESHING.add(key)
             _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix))
         return hit[1]                       # fresh or stale, answer now
+
+    # Cold. Prefer our own archive over blocking on a 3-8s upstream call —
+    # this is the last path that could still make a click wait on radarca.
+    local = await _xband_listing_local(pool, folder, prefix)
+    if local:
+        _XB_CACHE[key] = (now, local)       # already stale: refresh right away
+        if key not in _XB_REFRESHING:
+            _XB_REFRESHING.add(key)
+            _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix))
+        return local
+
     imgs = await _xband_fetch_listing(ctx, folder, prefix)
     _XB_CACHE[key] = (now + _XB_TTL_S, imgs)
     return imgs
@@ -428,7 +471,9 @@ async def step_activity(
                 prefix = moment_to_prefix(radar, moment)
             except KeyError:
                 raise HTTPException(400, f"unknown moment: {moment}")
-        for i, fname in enumerate(await _xband_listing_cached(ctx, folder, prefix)):
+        _store = getattr(request.app.state, "store", None)
+        for i, fname in enumerate(await _xband_listing_cached(
+                ctx, folder, prefix, _store.pool if _store else None)):
             ts = _parse_xband_ts(fname)
             out.append({"i": i,
                         "ts": ts.isoformat() if ts else None,
@@ -522,7 +567,9 @@ async def latest_xband_scan(
     ctx = request.app.state.context
     # Listing memo: scrubbing a radar overlay re-requested this per frame,
     # doubling the upstream cost of every scrub position.
-    imgs = await _xband_listing_cached(ctx, folder, prefix)
+    _store = getattr(request.app.state, "store", None)
+    imgs = await _xband_listing_cached(ctx, folder, prefix,
+                                       _store.pool if _store else None)
     if not imgs:
         raise HTTPException(404, "no scans in window")
 
