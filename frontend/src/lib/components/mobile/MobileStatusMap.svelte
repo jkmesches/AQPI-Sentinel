@@ -49,6 +49,13 @@
 	let activeRadars = $state<string[]>([]);
 	const radarsActive = $derived(activeRadars.length > 0);
 	const _addedOverlays = new Set<string>();
+	// Last image URL actually applied per radar. refreshRadarOverlays is
+	// reached from several legitimate paths (selection change, every step
+	// change, the play tick, style-ready), and MapLibre re-fetches on every
+	// updateImage call even when the URL is identical — so one state change
+	// was re-requesting the same frame half a dozen times. Each caller is
+	// correct; the update just needs to be idempotent.
+	const _appliedUrl = new Map<string, string>();
 
 	// Same extent math as the desktop map — km offsets from the radar centre.
 	function radarExtent(r: RadarMeta) {
@@ -91,6 +98,7 @@
 			if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
 			if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
 			_addedOverlays.delete(id);
+			_appliedUrl.delete(id);
 		}
 		for (const id of active) {
 			const r = radars.find((x) => x.id === id);
@@ -100,15 +108,16 @@
 				[e.west, e.north], [e.east, e.north],
 				[e.east, e.south], [e.west, e.south]
 			];
+			const url = radarScanUrl(id);
 			const src = map.getSource(radarSrcId(id)) as any;
 			if (src && typeof src.updateImage === 'function') {
-				src.updateImage({ url: radarScanUrl(id), coordinates: coords });
+				if (_appliedUrl.get(id) === url) continue;   // already showing this frame
+				src.updateImage({ url, coordinates: coords });
+				_appliedUrl.set(id, url);
 				continue;
 			}
 			if (_addedOverlays.has(id)) continue;
-			map.addSource(radarSrcId(id), {
-				type: 'image', url: radarScanUrl(id), coordinates: coords
-			});
+			map.addSource(radarSrcId(id), { type: 'image', url, coordinates: coords });
 			// Below the halo so the status pins stay readable on top.
 			const beforeId = map.getLayer('radar-halo') ? 'radar-halo' : undefined;
 			map.addLayer({
@@ -116,6 +125,7 @@
 				paint: { 'raster-opacity': 0.82 }
 			}, beforeId);
 			_addedOverlays.add(id);
+			_appliedUrl.set(id, url);
 		}
 	}
 
