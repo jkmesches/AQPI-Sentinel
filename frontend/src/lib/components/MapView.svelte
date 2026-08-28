@@ -75,6 +75,21 @@
 		try {
 			if (!isCurrent()) return false;
 			const img = new Image();
+			// === Load-bearing: crossOrigin BEFORE src ===
+			//
+			// This preload and MapLibre's updateImage() request the SAME url.
+			// Without crossOrigin the preload is a no-CORS request and caches
+			// an OPAQUE entry; MapLibre then fetches with CORS, reads that
+			// entry back, and the browser refuses it — net::ERR_FAILED on
+			// every frame. That is exactly what broke the map on 2026-08-27,
+			// and it forced these responses to be no-store, which in turn
+			// meant both requests hit the network.
+			//
+			// Requesting with CORS here makes the cached entry reusable by
+			// MapLibre, so the pair collapses to one fetch and the responses
+			// can be cacheable again. Must be assigned before .src or the
+			// browser has already started a no-CORS load.
+			img.crossOrigin = 'anonymous';
 			img.decoding = 'async';
 			img.src = url;
 			await img.decode();
