@@ -168,38 +168,65 @@ _UPSTREAM_SEM = _asyncio.Semaphore(6)
 # costs the backend.
 _PROXY_HITS: dict[str, int] = {"product_image": 0, "xband_scan": 0, "image_by_source": 0}
 
-_PD_TTL_S = 20.0
+_PD_TTL_S = 90.0
 _PD_CACHE: dict[str, tuple[float, list]] = {}
+_PD_REFRESHING: set[str] = set()
 
 
-_XB_TTL_S = 20.0
+# === Load-bearing: stale-while-revalidate, not plain TTL ===
+#
+# These listings say WHICH frames exist; the images themselves come from our
+# LRU/archive in milliseconds. With a plain 20s TTL, selecting a radar more
+# than 20s after the last request blocked on radarca — measured 6.2s for one
+# selection whose image was already in the LRU. radarca's p50 is 3.4s and p90
+# 8.3s, so a user interaction must never wait on it.
+#
+# Fresh window: serve immediately. Stale but present: serve the stale list AND
+# refresh in the background — radars publish every ~120s, so a listing a
+# minute old still names the frames that exist. Only a completely cold entry
+# blocks, and the scheduled L2 checks touch every radar every 120s, so that is
+# rare after boot.
+_XB_TTL_S = 90.0
 _XB_CACHE: dict[tuple[str, str], tuple[float, list]] = {}
+_XB_REFRESHING: set[tuple[str, str]] = set()
 
 
-async def _xband_listing_cached(ctx, folder: str, prefix: str) -> list:
-    """Memo of one radar/moment's rolling image listing (same rationale as
-    _product_steps_cached: radars publish every ~120s)."""
-    key = (folder, prefix)
-    now = _time_mod.monotonic()
-    hit = _XB_CACHE.get(key)
-    if hit is not None and hit[0] > now:
-        return hit[1]
+async def _xband_fetch_listing(ctx, folder: str, prefix: str) -> list:
     r = await ctx.http.get(
         f"{SETTINGS.base}/api/xbandRadarImages/",
         params={"radarFolder": folder, "productPrefix": prefix},
     )
     if r.status_code != 200:
         raise HTTPException(502, f"upstream xbandRadarImages HTTP {r.status_code}")
-    imgs = r.json().get("images") or []
+    return r.json().get("images") or []
+
+
+async def _xband_refresh_bg(ctx, folder: str, prefix: str) -> None:
+    key = (folder, prefix)
+    try:
+        imgs = await _xband_fetch_listing(ctx, folder, prefix)
+        _XB_CACHE[key] = (_time_mod.monotonic() + _XB_TTL_S, imgs)
+    except Exception:
+        pass          # keep serving the stale list; the next request retries
+    finally:
+        _XB_REFRESHING.discard(key)
+
+
+async def _xband_listing_cached(ctx, folder: str, prefix: str) -> list:
+    key = (folder, prefix)
+    now = _time_mod.monotonic()
+    hit = _XB_CACHE.get(key)
+    if hit is not None:
+        if hit[0] <= now and key not in _XB_REFRESHING:
+            _XB_REFRESHING.add(key)
+            _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix))
+        return hit[1]                       # fresh or stale, answer now
+    imgs = await _xband_fetch_listing(ctx, folder, prefix)
     _XB_CACHE[key] = (now + _XB_TTL_S, imgs)
     return imgs
 
 
-async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list:
-    hit = _PD_CACHE.get(product_id)
-    now = _time_mod.monotonic()
-    if hit is not None and hit[0] > now:
-        return hit[1]
+async def _pd_fetch(ctx, details_path: str) -> list:
     try:
         pd = await ctx.http.get(
             f"{SETTINGS.base}/api/productDetail", params={"file": details_path},
@@ -208,7 +235,30 @@ async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list
         raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
     if pd.status_code != 200:
         raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
-    steps = pd.json().get("steps") or []
+    return pd.json().get("steps") or []
+
+
+async def _pd_refresh_bg(ctx, product_id: str, details_path: str) -> None:
+    try:
+        _PD_CACHE[product_id] = (_time_mod.monotonic() + _PD_TTL_S,
+                                 await _pd_fetch(ctx, details_path))
+    except Exception:
+        pass
+    finally:
+        _PD_REFRESHING.discard(product_id)
+
+
+async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list:
+    """Stale-while-revalidate, for the same reason as _xband_listing_cached:
+    switching composite must not block on a 3-8s upstream call."""
+    now = _time_mod.monotonic()
+    hit = _PD_CACHE.get(product_id)
+    if hit is not None:
+        if hit[0] <= now and product_id not in _PD_REFRESHING:
+            _PD_REFRESHING.add(product_id)
+            _asyncio.create_task(_pd_refresh_bg(ctx, product_id, details_path))
+        return hit[1]
+    steps = await _pd_fetch(ctx, details_path)
     _PD_CACHE[product_id] = (now + _PD_TTL_S, steps)
     return steps
 
