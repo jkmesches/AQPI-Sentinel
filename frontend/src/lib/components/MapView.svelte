@@ -885,6 +885,8 @@
 	// which deep-copies the basemap style on every invocation — very expensive
 	// when opacity-slider drags fire ~60 of these per second.
 	const _addedOverlays = new Set<string>();
+	// Last image URL applied per radar — see syncRadarOverlayTime.
+	const _appliedRadarUrl = new Map<string, string>();
 
 	// The single X-band radar eligible for tilt mode right now, or null.
 	// Conditions: exactly one radar active, it's an X-band with a known
@@ -921,6 +923,7 @@
 			if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
 			if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
 			_addedOverlays.delete(id);
+			_appliedRadarUrl.delete(id);
 		}
 		// add overlays newly active
 		for (const id of active) {
@@ -928,9 +931,14 @@
 			const r = radars.find((x) => x.id === id);
 			if (!r) continue;
 			const e = radarExtent(r);
+			// Record the URL the source is created with, so the first
+			// syncRadarOverlayTime after an add doesn't immediately re-fetch
+			// the frame the source already loaded.
+			const addUrl = xbandScanUrl(id);
+			_appliedRadarUrl.set(id, addUrl);
 			map.addSource(radarSrcId(id), {
 				type: 'image',
-				url: xbandScanUrl(id),
+				url: addUrl,
 				coordinates: [
 					[e.west, e.north],
 					[e.east, e.north],
@@ -1052,6 +1060,11 @@
 
 		for (const t of targets) {
 			if (!isCurrent()) return;
+			// Skip frames already on screen. MapLibre re-fetches and re-decodes
+			// on every updateImage even when the URL is identical, and this
+			// runs on each step change plus the 120s poke. The URL carries the
+			// time and _forceBuster, so a genuine refresh still gets through.
+			if (_appliedRadarUrl.get(t.id) === t.url) continue;
 			const ok = await preloadImage(t.url, isCurrent);
 			if (!ok || !isCurrent()) continue;
 			const src = map!.getSource(radarSrcId(t.id)) as maplibregl.ImageSource | undefined;
@@ -1065,6 +1078,7 @@
 					[t.e.west, t.e.south]
 				]
 			});
+			_appliedRadarUrl.set(t.id, t.url);
 		}
 	}
 
