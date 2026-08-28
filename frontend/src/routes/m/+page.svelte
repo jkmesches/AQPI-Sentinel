@@ -44,6 +44,17 @@
 		return expanded[stageKey] ? rows : rows.filter((r) => r.status !== 'pass' && r.status !== 'skip');
 	}
 
+	// Tapping a radar pin on the map opens the same drilldown as tapping its
+	// row in the list below. Falls back to any check for that target if the
+	// L2 reconciliation row isn't present (e.g. it was demoted to skip).
+	function openRadarFromMap(radarId: string) {
+		const all = Object.values(sentinel.rollup?.stages ?? {}).flat() as any[];
+		const row =
+			all.find((r) => r.target === radarId && r.check_id?.startsWith('layer2.radar.')) ??
+			all.find((r) => r.target === radarId);
+		if (row) openDetail(row);
+	}
+
 	// Tap-to-drill-down: opens the full-screen mobile detail sheet.
 	let detailOpen = $state(false);
 	let detailRow = $state<any>(null);
@@ -108,7 +119,7 @@
 
 <!-- Geographic context: tiny radar map (lazy-loaded MapLibre chunk) -->
 <section class="mb-4">
-	<MobileStatusMap />
+	<MobileStatusMap onRadarTap={openRadarFromMap} />
 </section>
 
 <!-- Per-stage cards -->
