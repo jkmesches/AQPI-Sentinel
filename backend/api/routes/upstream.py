@@ -68,6 +68,7 @@ async def product_steps(product_id: str, request: Request):
 @router.get("/product_image.png")
 async def product_image_by_step(product_id: str, step: int, request: Request):
     """Return the PNG for an arbitrary step (0-indexed; negative wraps from end)."""
+    _PROXY_HITS["product_image"] += 1
     if product_id not in PRODUCTS:
         raise HTTPException(404, f"Unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
@@ -101,20 +102,20 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
 
     return Response(
         content=body, media_type=ct or "image/png",
-        # === Load-bearing: no-store ===
-        # MapView loads this URL TWICE — once via new Image() in
-        # preloadImage() (a no-CORS request, which caches an OPAQUE
-        # response) and again via MapLibre's updateImage(), which fetches
-        # with CORS. If the first response is cacheable, the second reads
-        # the opaque entry back out of the HTTP cache and the browser
-        # rejects it: net::ERR_FAILED on every single frame. Making this
-        # cacheable on 2026-08-27 broke every composite frame in the map.
+        # === Cacheable, but deliberately short ===
+        # MapView requests this URL twice per frame — preloadImage() then
+        # MapLibre's updateImage() — so a cacheable response collapses the
+        # pair into one network fetch. That only works because preloadImage
+        # now sets crossOrigin='anonymous'; without it the preload caches an
+        # OPAQUE entry that the CORS fetch cannot reuse, which is what broke
+        # every frame on 2026-08-27.
         #
-        # Independently: the URL is keyed by STEP INDEX, and the step->frame
-        # mapping shifts as the rolling window advances, so a cached
-        # response can also be silently wrong. Server-side we still serve
-        # from the LRU/archive, so no-store costs upstream nothing.
-        headers={"cache-control": "no-store",
+        # Short TTL because the URL is keyed by STEP INDEX and the
+        # step->frame mapping shifts as the rolling window advances. The
+        # client also appends a per-render cache-buster, so reuse only ever
+        # happens within a single render — 30s is far more headroom than the
+        # preload/update gap needs, and far below the ~120s publish cycle.
+        headers={"cache-control": "public, max-age=30",
                  "x-sentinel-cache": prov,
                  "x-scan-name": name,
                  "x-scan-ts": steps[step].get("timestamp") or "",
@@ -161,6 +162,12 @@ _UPSTREAM_SEM = _asyncio.Semaphore(6)
 # Short-TTL memo of productDetail step lists. The fast composites publish
 # every 120s, so a few seconds of staleness is invisible to a scrubbing
 # operator while collapsing a whole scrub's worth of lookups into one call.
+# Inbound image-proxy request counter, surfaced in /api/_debug/stats. The
+# browser-side request count can't distinguish a network fetch from an HTTP
+# cache hit, so this is the only honest way to see what the map actually
+# costs the backend.
+_PROXY_HITS: dict[str, int] = {"product_image": 0, "xband_scan": 0, "image_by_source": 0}
+
 _PD_TTL_S = 20.0
 _PD_CACHE: dict[str, tuple[float, list]] = {}
 
@@ -217,6 +224,7 @@ async def image_by_source(source: str, request: Request):
 
     Returns 502 only if the upstream rotated the file out AND we don't
     have it archived locally."""
+    _PROXY_HITS["image_by_source"] += 1
     body, ct, prov = await _serve_source(request.app, request.app.state.context, source)
     return Response(
         content=body, media_type=ct,
@@ -450,6 +458,7 @@ async def latest_xband_scan(
     Used by the map's per-radar overlay so it can scrub in sync with the
     composite scrubber.
     """
+    _PROXY_HITS["xband_scan"] += 1
     if radar not in RADAR_FOLDER:
         raise HTTPException(404, f"unknown radar: {radar}")
     folder = RADAR_FOLDER[radar]
@@ -494,10 +503,11 @@ async def latest_xband_scan(
         content=body,
         media_type=ct or "image/png",
         headers={
-            # no-store for the same reason as product_image.png — the
-            # per-radar overlay is loaded by both preloadImage() and
-            # MapLibre, and a cacheable response poisons the CORS fetch.
-            "cache-control": "no-store",
+            # Cacheable for the same reason as product_image.png, and safely
+            # longer: this URL carries radar+moment+time, so it identifies
+            # its content rather than a shifting index. pokeOverlays bumps
+            # _forceBuster to force a refresh of the live frame.
+            "cache-control": "public, max-age=60",
             "x-sentinel-cache": prov,
             "x-scan-name": chosen,
             "x-scan-ts": chosen_ts.isoformat() if chosen_ts else "",

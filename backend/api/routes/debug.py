@@ -69,6 +69,15 @@ async def stats(request: Request):
             "retries_succeeded": getattr(http, "retries_succeeded", None),
         }
 
+    # Inbound image-proxy hits. Distinguishes "the browser asked us" from
+    # "we asked radarca" — the two differ once browser caching is working.
+    # Imported at call time (not module scope) to avoid an import cycle;
+    # NOT wrapped in a bare except, because the first version of this used
+    # the wrong module path and the swallowed ImportError made the field
+    # silently absent rather than obviously broken.
+    from .upstream import _PROXY_HITS
+    http_stats["proxy_hits"] = dict(_PROXY_HITS)
+
     # WebSocket clients -----------------------------------------------
     ws_state: dict[str, object] = {"available": False}
     ws = getattr(app.state, "ws", None)
