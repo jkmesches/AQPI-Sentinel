@@ -12,6 +12,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { url as apiUrl } from '$lib/origin';
+	import { buildSharedTimeline } from '$lib/radarTimeline';
 
 	// Stadia styles — same as desktop MapView. Theme-locked at mount.
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
@@ -282,15 +283,14 @@
 		// composite's — otherwise play/scrub would move a timeline that no
 		// longer corresponds to anything on screen.
 		if (activeRadars.length > 0) {
-			try {
-				const r = await fetch(
-					`/api/upstream/radar_steps?radar=${activeRadars[0]}&moment=Reflectivity`
-				);
-				if (!r.ok) throw new Error(`HTTP ${r.status}`);
-				const j = await r.json();
-				steps = (j.steps ?? []) as Step[];
-				stepIdx = j.current_idx ?? steps.length - 1;
-			} catch {
+			// Shared timebase across every selected radar — see
+			// $lib/radarTimeline. Using one radar's frame list left the others
+			// permanently approximated.
+			const merged = await buildSharedTimeline(activeRadars, 'Reflectivity');
+			if (merged) {
+				steps = merged.steps as Step[];
+				stepIdx = merged.idx;
+			} else {
 				steps = []; stepIdx = -1;
 			}
 			return;

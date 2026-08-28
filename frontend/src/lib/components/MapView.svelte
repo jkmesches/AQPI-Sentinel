@@ -7,6 +7,7 @@
 	import TimeControls from '$lib/components/TimeControls.svelte';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
+	import { buildSharedTimeline } from '$lib/radarTimeline';
 
 	interface RadarMeta {
 		id: string;
@@ -513,21 +514,20 @@
 	// happens to be the down one with 0 historical scans. Returns
 	// {steps, idx} or null if every active radar is empty.
 	async function loadStepsFromAnyActiveRadar(): Promise<{ steps: Step[]; idx: number } | null> {
-		for (const id of activeRadars) {
-			try {
-				const r = await fetch(
-					`/api/upstream/radar_steps?radar=${id}` +
-					`&moment=${encodeURIComponent(currentMoment)}`
-				);
-				const j = await r.json();
-				const s = (j.steps ?? []) as Step[];
-				if (s.length > 0) {
-					loadActivity(`radar=${id}&moment=${encodeURIComponent(currentMoment)}`);
-					return { steps: s, idx: j.current_idx ?? s.length - 1 };
-				}
-			} catch { /* try next radar */ }
+		// Shared timebase across ALL active radars rather than whichever one
+		// answered first. Radars scan on independent cadences and phases, so
+		// driving the scrubber from a single radar left every other one
+		// permanently snapped to a nearby frame — including at the newest
+		// step, where a radar that had just published sat a frame behind.
+		// See $lib/radarTimeline for the merge rule.
+		const merged = await buildSharedTimeline(activeRadars, currentMoment);
+		if (!merged) return null;
+		// The activity sparkline is a single trace, so it follows the first
+		// active radar; it is indicative rather than per-radar.
+		if (activeRadars.length > 0) {
+			loadActivity(`radar=${activeRadars[0]}&moment=${encodeURIComponent(currentMoment)}`);
 		}
-		return null;
+		return { steps: merged.steps as Step[], idx: merged.idx };
 	}
 
 	async function loadComposite() {
