@@ -63,6 +63,34 @@ def reset():
     L4._LAST_SOURCE.clear()
 
 
+# ---------------------------------------------------------------------------
+# The reprocess engine must reach the SAME verdict as the live detector, or a
+# retroactive pass would rewrite history to something the running system would
+# never produce. These two implementations are separate code and drift is
+# silent, so compare them directly on the same inputs.
+# ---------------------------------------------------------------------------
+def test_reprocess_parity() -> None:
+    from backend import reprocess_engine as R
+    print("\n[7] reprocess engine agrees with the live detector")
+
+    cases = [
+        # (label, cur_phash, prev_phash, cur_src, prev_src, coverage, expected)
+        ("re-sampled same frame",      "aaaa", "aaaa", "f1.png", "f1.png", 6.0, "OK_SAME_FRAME"),
+        ("new frame, same pixels",     "aaaa", "aaaa", "f2.png", "f1.png", 6.0, "FROZEN"),
+        ("new frame, new pixels",      "bbbb", "aaaa", "f2.png", "f1.png", 6.0, "OK"),
+        ("new frame, low coverage",    "aaaa", "aaaa", "f2.png", "f1.png", 1.0, "QUIET_LOW_COV"),
+        ("no history yet",             "aaaa", None,   "f1.png", None,     6.0, "OK"),
+    ]
+    for label, cur, prev, csrc, psrc, cov, expected in cases:
+        got = R._l4_frozen_verdict(cur, prev, cov, False, 5.0,
+                                   cur_source=csrc, prev_source=psrc)
+        check(f"reprocess: {label}", got == expected, f"got {got}, expected {expected}")
+
+    check("OK_SAME_FRAME is a pass verdict in the reprocess engine too",
+          "OK_SAME_FRAME" in R._L4_OK_VERDICTS)
+
+
+
 def main() -> int:
     cid = "layer4.xband.CBAND"
 
@@ -113,6 +141,8 @@ def main() -> int:
     verdict(xid, "x_1200.png", "aaaa", 0.01)
     v = verdict(xid, "x_1202.png", "cccc", 0.01)
     check("fast-cadence radar with fresh frames stays OK", v == "OK", v)
+
+    test_reprocess_parity()
 
     print(f"\n{'PASS' if not failures else 'FAILED: ' + ', '.join(failures)}")
     return 1 if failures else 0
