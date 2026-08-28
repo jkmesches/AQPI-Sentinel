@@ -58,6 +58,7 @@ def _worst_of(*statuses: str) -> str:
 _L4_OK_VERDICTS = {
     "OK", "N/A", "EMPTY", "TOO_SPARSE",
     "QUIET_LOW_COV", "QUIET_SLOW", "OK_LOW_COV",
+    "OK_SAME_FRAME",
 }
 
 
@@ -72,7 +73,18 @@ def _l4_extreme_verdict(fraction, threshold, coverage_pct, min_cov_pct):
     return raw
 
 
-def _l4_frozen_verdict(cur_phash, prev_phash, coverage_pct, skip_frozen, min_cov_pct):
+def _l4_frozen_verdict(cur_phash, prev_phash, coverage_pct, skip_frozen, min_cov_pct,
+                       cur_source=None, prev_source=None):
+    """Mirror of the live detector in checks/layer4_image.py.
+
+    Keep the two in step. The same-frame guard exists because the check runs
+    every 120s while publish cadences vary — CBAND publishes every ~240s, so
+    half its runs re-sampled a frame they had already seen and compared it
+    against itself, which always matches. Measured over 24h: 366 of 366
+    same-source runs flagged FROZEN, versus 0 of 352 genuinely-new ones.
+    """
+    if prev_source is not None and cur_source is not None and cur_source == prev_source:
+        return "OK_SAME_FRAME"
     if prev_phash is None or cur_phash is None:
         return "OK"
     if cur_phash != prev_phash:
@@ -84,7 +96,8 @@ def _l4_frozen_verdict(cur_phash, prev_phash, coverage_pct, skip_frozen, min_cov
     return "FROZEN"
 
 
-def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None]) -> tuple[str, dict] | None:
+def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None],
+                  prev_source_map: dict[tuple[str, str], str | None] | None = None) -> tuple[str, dict] | None:
     payload = row["payload"] or {}
     if isinstance(payload, str):
         payload = json.loads(payload)
@@ -104,6 +117,8 @@ def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None]) 
     cur_phash = tier1.get("phash")
     key = (row["check_id"], row["target"])
     prev = prev_phash_map.get(key)
+    cur_source = payload.get("source")
+    prev_source = prev_source_map.get(key) if prev_source_map is not None else None
 
     new_ext = _l4_extreme_verdict(
         (tier2.get("extreme") or {}).get("fraction"),
@@ -111,8 +126,11 @@ def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None]) 
     )
     new_frz = _l4_frozen_verdict(
         cur_phash, prev, coverage, skip_frozen, frozen_min_cov,
+        cur_source=cur_source, prev_source=prev_source,
     )
     prev_phash_map[key] = cur_phash
+    if prev_source_map is not None and cur_source:
+        prev_source_map[key] = cur_source
 
     spk  = (tier2.get("speckle")    or {}).get("verdict", "OK")
     ring = (tier2.get("range_ring") or {}).get("verdict", "N/A")
@@ -123,8 +141,15 @@ def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None]) 
     new_tier2 = dict(tier2)
     new_tier2["extreme"] = {**(tier2.get("extreme") or {}), "verdict": new_ext}
     new_tier2["frozen"]  = {**(tier2.get("frozen")  or {}), "verdict": new_frz}
-    new_payload = {**payload, "tier2": new_tier2,
-                   "reprocessed_at": datetime.now(timezone.utc).isoformat()}
+    new_payload = {
+        **payload, "tier2": new_tier2,
+        "reprocessed_at": datetime.now(timezone.utc).isoformat(),
+        "original": payload.get("original") or {
+            "status":  row["status"],
+            "extreme": (tier2.get("extreme") or {}).get("verdict"),
+            "frozen":  (tier2.get("frozen")  or {}).get("verdict"),
+        },
+    }
     return new_status, new_payload
 
 
@@ -358,6 +383,7 @@ async def run_reprocess(pool, job: ReprocessJob) -> None:
         )
 
         l4_phash: dict[tuple[str, str], str | None] = defaultdict(lambda: None)
+        l4_source: dict[tuple[str, str], str | None] = defaultdict(lambda: None)
         updates: list[tuple[int, str, dict]] = []
 
         for r in rows:
@@ -385,6 +411,8 @@ async def run_reprocess(pool, job: ReprocessJob) -> None:
                     tier1 = payload.get("tier1") or {}
                     if tier1.get("phash"):
                         l4_phash[(row["check_id"], row["target"])] = tier1["phash"]
+                    if payload.get("source"):
+                        l4_source[(row["check_id"], row["target"])] = payload["source"]
                 continue
 
             new = None
@@ -393,7 +421,7 @@ async def run_reprocess(pool, job: ReprocessJob) -> None:
             elif row["stage"] == "L2":
                 new = _reverdict_l2(row)
             elif row["stage"] == "L4-T1T2":
-                new = _reverdict_l4(row, l4_phash)
+                new = _reverdict_l4(row, l4_phash, l4_source)
 
             if new is None:
                 continue
