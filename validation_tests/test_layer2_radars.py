@@ -14,12 +14,20 @@ import requests
 
 from config import BASE, RADAR_FOLDER, STATUS_TO_RADAR, X_MOMENTS, moment_to_prefix
 
+# Live-probe timeout. Deliberately matches the production ceiling
+# (transports/http.DEFAULT_TIMEOUT_S) rather than being a round number: these
+# tests hit the same endpoint the fleet does, and a ceiling below it fails for
+# reasons unrelated to what is being tested. The 10s values here were set when
+# upstream's p95 was ~2.4s; measured 2026-08-31 its p90 is 8-13s, so a 10s
+# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S.
+LIVE_TIMEOUT_S = 20
+
 # Threshold: observed silence longer than this with declared=UP = "ghost UP"
 SILENT_FAIL_S = 600   # 10 min
 
 
 def declared_status():
-    r = requests.get(f"{BASE}/api/radar-status/", timeout=10)
+    r = requests.get(f"{BASE}/api/radar-status/", timeout=LIVE_TIMEOUT_S)
     r.raise_for_status()
     return {row["radar"]: row["status"] for row in r.json()}
 
@@ -30,7 +38,7 @@ def observed_window(radar_id: str, prefix: str) -> dict:
     folder = RADAR_FOLDER.get(radar_id, radar_id.lower())
     r = requests.get(f"{BASE}/api/xbandRadarImages/",
                      params={"radarFolder": folder, "productPrefix": prefix},
-                     timeout=15)
+                     timeout=LIVE_TIMEOUT_S)
     if r.status_code != 200:
         return {"http": r.status_code, "error": True}
     d = r.json()
