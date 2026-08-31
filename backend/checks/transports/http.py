@@ -49,10 +49,32 @@ def reset_http_caller(token) -> None:
 # successful-but-slow responses were being converted into error ticks —
 # ~1,500-1,800/day, rendered on the timeline as radar outages.
 #
-# Raise this if upstream slows further; lower it if it recovers. Check with:
-#   for i in $(seq 25); do curl -s -o /dev/null -w '%{time_total}\n' \
-#     --max-time 30 https://radarca.engr.colostate.edu/api/radar-status/; done | sort -n
-DEFAULT_TIMEOUT_S = 20.0
+# 2026-08-31, raised 20 -> 35 on evidence the 20s ceiling could not itself
+# produce. Every latency we record comes from a request that did NOT time out,
+# so the distribution is censored at the ceiling and can never show a value
+# above it; judging the ceiling with it is circular. layer0.origin.latency was
+# added to break that — it probes the same endpoint with a 75s ceiling — and it
+# measured a single sequential request at 28.2s, with over_ceiling at 2.8% of
+# samples. An independent 20-round probe the same hour: p90 21.0s, max 29.9s,
+# 2 of 20 past 20s. The tail genuinely crosses the old ceiling.
+#
+# 35s covers the observed ~30s tail. The wall-cost objection is already paid:
+# read timeouts are no longer retried (NO_RETRY_EXC), so worst case is now one
+# timeout rather than two, and 35s is LESS than the 40.5s the 20s-plus-retry
+# configuration cost. On the shortest cadence that still uses it (60s) a worst
+# case consumes 58% of the cycle, which is the real ceiling on raising this
+# further.
+#
+# Do NOT raise it to chase burst-induced timeouts. Those come from our own
+# concurrency during an episode, not from upstream being uniformly slow — a
+# single request measured 0.5s during a burst that was killing five checks at
+# 20s. Jitter and layer0.origin.episode address that; a longer timeout does not.
+#
+# Watch `over_ceiling` on layer0.origin.latency, not the censored percentiles:
+#   SELECT avg(value) FROM metric_samples
+#   WHERE check_id='layer0.origin.latency' AND metric='over_ceiling';
+# Sustained above ~1% means the tail has moved again.
+DEFAULT_TIMEOUT_S = 35.0
 
 # One retry, not three. These are 2-minute-cadence health probes: the next
 # scheduled run is itself a retry, so deep retry ladders mostly add load and
