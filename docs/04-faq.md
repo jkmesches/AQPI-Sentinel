@@ -193,6 +193,144 @@ false alarms found so far were a stale threshold and a colour that made
 
 ---
 
+## 11. What happens to an image between radarca publishing it and a verdict appearing?
+
+Seven steps, every cycle, for each X-band radar and each mosaic product.
+
+| Step | What happens |
+|---|---|
+| 1. Resolve | Ask radarca which scan is *latest* — `xbandRadarImages` for a radar, `productDetail` for a mosaic product. |
+| 2. Fetch | Pull the PNG bytes. This is the only upstream request the image checks make. |
+| 3. Archive | Hash the bytes with SHA-256 and store them content-addressed. Identical bytes are stored once. |
+| 4. Tier 1 | Measure the frame — coverage, intensity, structure, perceptual hash. No judgement yet. |
+| 5. Tier 2 | Run the pathology detectors against those pixels. |
+| 6. Compare | Check the perceptual hash against the previous run to catch a stuck feed. |
+| 7. Verdict | Take the worst sub-verdict. Anything not on the OK list becomes a `warn`. |
+
+The split between steps 4 and 5 is deliberate and load-bearing. **Tier 1
+records what the frame is** and is threshold-free. **Tier 2 decides whether
+that is a problem**, and every tunable number lives there.
+
+The payoff is that when a threshold turns out to be wrong — which has happened
+more than once — the judgement can be re-run over stored measurements without
+re-fetching a single image from radarca. That is how 13,575 rows were corrected
+in August without adding any upstream load.
+
+!!! note
+    Image checks emit `warn`, never `fail`. A strange-looking frame is a reason
+    for a human to go and look, not a claim that the product is broken.
+    Sentinel cannot distinguish an artifact from genuinely unusual weather, and
+    it should not pretend otherwise.
+
+---
+
+## 12. What tests do you actually run on the image itself?
+
+### Tier 1 — measurement
+
+A pixel counts as **active** where its alpha channel exceeds 10. These are
+recorded for every frame, whether or not anything is wrong:
+
+| Measurement | What it captures |
+|---|---|
+| Coverage % | Share of the canvas carrying data. Drives most of the suppression logic in §13. |
+| Mean / std intensity | Brightest channel per active pixel — overall level and spread. |
+| Top-3 intensity bins | Where the intensity histogram piles up, in 16 buckets. |
+| Horizontal autocorrelation | Whether neighbouring pixels agree. Structured weather correlates; noise does not. |
+| Perceptual hash | 16×16 pHash. Two frames with the same hash are visually identical. |
+| SHA-256 + byte size | Exact identity of the file, for the archive and for dedup. |
+
+### Tier 2 — judgement
+
+Four detectors, each with a tunable threshold:
+
+| Detector | Trips when | What it catches |
+|---|---|---|
+| **Saturation** | One quantised colour holds >40% of active pixels | A frame collapsed to a single value — a stuck colour map or an encoder fault. |
+| **Speckle** | >35% of active pixels have no active 4-neighbour | Noise dressed as data: isolated pixels with no structure. |
+| **Range ring** | Peak ring deviation >0.80× the median across 50 polar bins | Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only: mosaics have no radar-centred geometry. |
+| **Frozen frame** | pHash identical to the previous run | A feed that is still publishing but no longer changing. |
+
+The saturation threshold is **per product, not global**. Forecast fields such
+as water depth encode a scalar with a thresholded colour ramp and legitimately
+sit above 40% in normal operation; radar reflectivity does not. A single global
+number would either miss real saturation on radar or cry wolf on every forecast
+frame.
+
+### And separately, at Layer 1
+
+Product checks test the image more cheaply as part of the freshness check:
+that it exists and is really a PNG, that it is not implausibly small for that
+product, and that its bytes hash to a recorded value. That is a delivery check,
+not a content check — Layer 1 asks *did we get a file*, Layer 4 asks *is the
+picture sane*.
+
+---
+
+## 13. Why do image checks so often say "quiet" or "low coverage" instead of pass or fail?
+
+Because the honest answer is frequently *"that detector cannot say anything
+useful about this frame"*, and saying so beats guessing. Each of these means
+the test ran and declined to draw a conclusion:
+
+| Verdict | Means |
+|---|---|
+| `OK_SAME_FRAME` | Upstream has not published anything new since the last check, so there is nothing to compare against. |
+| `QUIET_LOW_COV` | Coverage is below 5%. A radar watching a clear sky produces near-identical frames; that is calm weather, not a stuck feed. |
+| `QUIET_SLOW` | This product updates more slowly than we check it, so repeats are expected. |
+| `OK_LOW_COV` | Too few pixels for a saturation reading to mean anything. |
+| `TOO_SPARSE` / `EMPTY` | Not enough active pixels for the detector to run at all. |
+
+These exist because the first version did not have them, and it was badly
+wrong in a way that is worth describing plainly.
+
+The frozen-frame detector compared each run against the previous one without
+first asking whether upstream had published anything in between. Our check
+cadence is faster than the publication cadence, so much of the time we were
+re-sampling **the same published image** and reporting it as frozen against
+itself — the detector was measuring our own polling rate, not the feed.
+
+The scale of it is visible in the record: **15,326** captures are marked
+`OK_SAME_FRAME`, meaning upstream had published nothing new since the previous
+check. Every one of those would previously have been a candidate for a false
+FROZEN. Reprocessing the history with the source comparison in place took the
+FROZEN count from **13,837 to 263** (August 2026); it stands at 265 today, the
+difference being two genuine ones since.
+
+The lesson generalises: a detector that cannot tell "nothing changed" from
+"nothing new arrived" will confidently report a fault that does not exist.
+
+!!! note
+    A suppressed verdict is still recorded in full. Nothing is deleted — you can
+    always see which detector declined and why.
+
+---
+
+## 14. Do you keep the images? Can I see what Sentinel actually saw?
+
+Yes. Every frame a Layer 4 check evaluates is stored — currently about
+**298,000 captures, 22 GB**. Clicking a cell in the timeline shows the frame
+that produced *that* verdict, not a fresh fetch of whatever happens to be
+current now. Evidence for a past call does not drift.
+
+Storage is **content-addressed**: each file is named by the SHA-256 of its own
+bytes, under `archive/<first two hex chars>/<full hash>.png`. Three
+consequences follow:
+
+| Property | Why it matters |
+|---|---|
+| Self-verifying | Re-hash a file and compare it to its own name. Silent corruption cannot hide, which is what let an 18 GB migration onto network storage be verified rather than trusted. |
+| Automatic dedup | A forecast product idle for an hour, or a radar sitting on a steady clutter pattern, stores one copy however many times we fetch it. |
+| Stable reference | A verdict points at exact bytes, so the evidence behind it is immutable. |
+
+Two indexes sit over the files: one from hash to metadata (size, dimensions,
+first and last seen), and one from the upstream `source` string to the hash.
+The second is what lets the map replay a time window from our own copies
+instead of asking radarca again — which is why scrubbing the map costs upstream
+nothing.
+
+---
+
 ## What Sentinel does not do
 
 Worth being explicit, so the readings aren't over-read:
