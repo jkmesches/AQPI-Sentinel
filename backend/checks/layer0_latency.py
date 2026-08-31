@@ -43,15 +43,40 @@ from __future__ import annotations
 
 import httpx
 
+import time
+
 from ..config import SETTINGS
 from ..errors import humanize_error
 from ..registry import register
 from .base import Check, CheckResult, utcnow
+from .layer0_episode import in_episode
 from .transports.http import DEFAULT_TIMEOUT_S
 
 # Well beyond the worst observed (42s during a slow episode on 2026-08-31), so
 # a sample is only lost if upstream has genuinely stopped answering.
 CANARY_TIMEOUT_S = 75.0
+
+# === Load-bearing: sample where the interesting behaviour is ===
+#
+# The first version sampled every 300s flat, and the first hour of data showed
+# why that is not enough. Episodes last about a minute; a 300s sampler catches
+# one second in every 300, so of 13 samples exactly one landed inside an
+# episode minute — and the largest reading (19.5s) fell ~10s BEFORE an episode
+# rather than during it. The canary characterised the baseline well and almost
+# entirely missed the regime that produces the timeouts, which is the regime it
+# was built to measure.
+#
+# So: baseline every BASELINE_INTERVAL_S, but while the episode detector says
+# one is in progress, sample every EPISODE_INTERVAL_S instead. That is a burst
+# of extra requests precisely when upstream is already struggling, which is why
+# the episode interval is not tighter — one probe every 45s against a saturated
+# origin is a rounding error next to the fleet, and without it the tail during
+# an episode stays unmeasured.
+BASELINE_INTERVAL_S = 300.0
+EPISODE_INTERVAL_S = 45.0
+
+# Monotonic, so a clock step cannot make the canary stop sampling entirely.
+_last_probe_at: float | None = None
 
 
 @register
@@ -59,14 +84,36 @@ class Layer0OriginLatency(Check):
     id         = "layer0.origin.latency"
     stage      = "L0"
     target     = "origin-latency"
-    cadence_s  = 300
+    # Runs every 60s but only PROBES when due (see the interval
+    # constants). The short cadence exists to react to an episode
+    # quickly, not to add load.
+    cadence_s  = 60
     reports_timeout_rate = True
     # Parented on the same upstream-blame chain as origin.alive: if our own
     # network is down this measurement is meaningless, not evidence about them.
     depends_on = ["layer0.net.internet", "layer0.net.dns"]
 
     async def run(self, ctx) -> CheckResult:
+        global _last_probe_at
         t0 = utcnow()
+
+        episode = in_episode()
+        now_m = time.monotonic()
+        due_after = EPISODE_INTERVAL_S if episode else BASELINE_INTERVAL_S
+        if _last_probe_at is not None and (now_m - _last_probe_at) < due_after:
+            # Not due. Skip rather than probe: this check runs on a short
+            # cadence only so it can react to an episode quickly, not so it can
+            # add load every minute.
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="skip", started_at=t0, finished_at=utcnow(),
+                summary=f"next sample in {due_after - (now_m - _last_probe_at):.0f}s"
+                        + (" (episode cadence)" if episode else ""),
+                payload={"reason": "not_due", "episode": episode,
+                         "interval_s": due_after},
+            )
+        _last_probe_at = now_m
+
         try:
             r = await ctx.http.get(
                 f"{SETTINGS.base}/api/radar-status/",
@@ -80,7 +127,8 @@ class Layer0OriginLatency(Check):
                 summary=f"no answer within {CANARY_TIMEOUT_S:.0f}s: {humanize_error(e)}",
                 payload={"exception": type(e).__name__, "reason": "upstream_api",
                          "ceiling_s": CANARY_TIMEOUT_S},
-                metrics={"latency_censored_ms": elapsed_ms, "timed_out": 1.0},
+                metrics={"latency_censored_ms": elapsed_ms, "timed_out": 1.0,
+                         "during_episode": 1.0 if episode else 0.0},
             )
 
         elapsed_ms = (utcnow() - t0).total_seconds() * 1000
@@ -97,7 +145,8 @@ class Layer0OriginLatency(Check):
                    f"this request would have failed every other check" if over else "")
             ),
             payload={"http": r.status_code, "latency_ms": round(elapsed_ms),
-                     "over_ceiling": over, "ceiling_s": DEFAULT_TIMEOUT_S},
+                     "over_ceiling": over, "ceiling_s": DEFAULT_TIMEOUT_S,
+                     "during_episode": episode},
             metrics={
                 "latency_ms": elapsed_ms,
                 # 1 when this request would have been killed by the
@@ -105,5 +154,9 @@ class Layer0OriginLatency(Check):
                 # rate the censored metric cannot show.
                 "over_ceiling": 1.0 if over else 0.0,
                 "timed_out": 0.0,
+                # Lets the tail be computed separately for the two regimes:
+                #   ... WHERE metric='latency_ms' AND during_episode = 1
+                # is the distribution that actually decides the ceiling.
+                "during_episode": 1.0 if episode else 0.0,
             },
         )

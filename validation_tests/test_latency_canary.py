@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -36,6 +37,7 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 import httpx                                                  # noqa: E402
 import backend.checks as _all                                 # noqa: E402,F401
 from backend.registry import CHECKS                           # noqa: E402
+from backend.checks.base import utcnow                       # noqa: E402
 from backend.checks.layer0_latency import CANARY_TIMEOUT_S    # noqa: E402
 from backend.checks.transports.http import DEFAULT_TIMEOUT_S  # noqa: E402
 
@@ -71,10 +73,88 @@ class _Ctx:
         self.http = http
 
 
+async def test_sampling_cadence(canary) -> None:
+    """The canary must sample the regime that causes timeouts.
+
+    First hour of live data: 13 samples, exactly ONE inside an episode minute,
+    and the largest reading landed ~10s before an episode rather than during
+    it. A flat 300s sampler catches one second in every 300 while episodes last
+    about a minute, so it characterises the baseline and misses the tail it was
+    built to measure. These assertions pin the fix.
+    """
+    import backend.checks.layer0_latency as LC
+    import backend.checks.layer0_episode as EP
+
+    LC._last_probe_at = None
+    EP._timeouts.clear()
+
+    ctx = _Ctx()
+    r = await canary.run(ctx)
+    check("the first run always probes", r.status == "pass" and len(ctx.timeouts) == 1)
+    check("...and is tagged as a baseline sample",
+          r.metrics.get("during_episode") == 0.0, str(r.metrics.get("during_episode")))
+
+    # Immediately after, with no episode, it must NOT probe again.
+    ctx2 = _Ctx()
+    r2 = await canary.run(ctx2)
+    check("a follow-up outside an episode skips instead of probing",
+          r2.status == "skip" and ctx2.timeouts == [], f"{r2.status} calls={len(ctx2.timeouts)}")
+    check("...and says why", r2.payload.get("reason") == "not_due")
+
+    # Now declare an episode. The shorter interval must let it sample.
+    now = utcnow()
+    for i in range(EP.EPISODE_MIN_CHECKS):
+        EP.record_upstream_timeout(f"c{i}", now)
+    assert EP.in_episode()
+
+    # Still inside the episode interval -> still skips.
+    LC._last_probe_at = time.monotonic()
+    ctx3 = _Ctx()
+    r3 = await canary.run(ctx3)
+    check("even during an episode it respects the episode interval",
+          r3.status == "skip", r3.status)
+    check("...and reports the episode cadence", "episode" in r3.summary, r3.summary)
+
+    # Past the episode interval but well short of the baseline one: this is the
+    # whole point — without episode triggering this would stay silent for 300s.
+    LC._last_probe_at = time.monotonic() - (LC.EPISODE_INTERVAL_S + 1)
+    ctx4 = _Ctx()
+    r4 = await canary.run(ctx4)
+    check("during an episode it samples on the SHORT interval",
+          r4.status == "pass" and len(ctx4.timeouts) == 1,
+          f"{r4.status} calls={len(ctx4.timeouts)}")
+    check("...tagged as an episode sample, so the tails can be separated",
+          r4.metrics.get("during_episode") == 1.0, str(r4.metrics.get("during_episode")))
+    check("the episode interval is well inside an episode's lifetime",
+          LC.EPISODE_INTERVAL_S < 60, f"{LC.EPISODE_INTERVAL_S}s")
+
+    # The same elapsed time with NO episode must still be skipped, or the
+    # short cadence would quietly become the baseline rate.
+    EP._timeouts.clear()
+    LC._last_probe_at = time.monotonic() - (LC.EPISODE_INTERVAL_S + 1)
+    ctx5 = _Ctx()
+    r5 = await canary.run(ctx5)
+    check("outside an episode the short interval does NOT apply",
+          r5.status == "skip" and ctx5.timeouts == [],
+          f"{r5.status} calls={len(ctx5.timeouts)}")
+
+    check("baseline sampling stays cheap", LC.BASELINE_INTERVAL_S >= 300,
+          f"{LC.BASELINE_INTERVAL_S}s")
+    LC._last_probe_at = None
+    EP._timeouts.clear()
+
+
 async def main() -> int:
     canary = CHECKS["layer0.origin.latency"]
+    # Sampling gates every other assertion below, so establish it first and
+    # reset the module state it touches.
+    await test_sampling_cadence(canary)
+    import backend.checks.layer0_latency as _LC
+    _LC._last_probe_at = None
 
     # --- 1. the canary must not inherit the operational ceiling ----------
+    import backend.checks.layer0_latency as _L
+    _L._last_probe_at = None
     ctx = _Ctx()
     r = await canary.run(ctx)
     check("the canary passes its own, longer ceiling to the client",
@@ -99,6 +179,7 @@ async def main() -> int:
     real_ceiling = LC.DEFAULT_TIMEOUT_S
     LC.DEFAULT_TIMEOUT_S = 0.05
     try:
+        _L._last_probe_at = None
         slow = _Ctx(delay_s=0.12)
         r2 = await canary.run(slow)
     finally:
@@ -111,6 +192,7 @@ async def main() -> int:
     check("...while still being recorded as a successful measurement",
           r2.metrics["timed_out"] == 0.0 and r2.status == "pass")
 
+    _L._last_probe_at = None
     fast = _Ctx(delay_s=0)
     r2b = await canary.run(fast)
     check("a fast response does not set over_ceiling",
@@ -119,6 +201,7 @@ async def main() -> int:
     # 100ms is comfortably under a 20_000ms ceiling but over a bare `20`, so
     # this is the case that separates the correct comparison from a ms/s
     # unit mix-up. A near-instant response cannot: it is under both.
+    _L._last_probe_at = None
     modest = _Ctx(delay_s=0.1)
     r2c = await canary.run(modest)
     check("a 100ms response is not over a 20s ceiling (ms/s units)",
@@ -135,6 +218,7 @@ async def main() -> int:
           r.status not in ("fail", "error"))
 
     # --- 5. genuine non-response IS an error, and is marked censored -----
+    _L._last_probe_at = None
     dead = _Ctx(exc=httpx.ReadTimeout(""))
     r3 = await canary.run(dead)
     check("no answer within the canary ceiling is an error", r3.status == "error", r3.status)
@@ -159,8 +243,16 @@ async def main() -> int:
     check("the canary emits the success side", r.metrics.get("timed_out") == 0.0)
 
     # --- 6. it must be cheap enough to leave running ---------------------
-    check("cadence is low enough to be negligible load",
-          canary.cadence_s >= 300, f"{canary.cadence_s}s")
+    # cadence_s is how often run() WAKES, not how often it probes — it is
+    # short so an episode can be reacted to promptly, and most wakes skip.
+    # Load is governed by the probe intervals, so assert on those.
+    import backend.checks.layer0_latency as _LL
+    check("baseline probing is rare enough to be negligible load",
+          _LL.BASELINE_INTERVAL_S >= 300, f"{_LL.BASELINE_INTERVAL_S}s")
+    check("even the episode rate stays well under one request a second",
+          _LL.EPISODE_INTERVAL_S >= 30, f"{_LL.EPISODE_INTERVAL_S}s")
+    check("waking often enough to notice an episode within its lifetime",
+          canary.cadence_s <= 60, f"{canary.cadence_s}s")
     check("it cannot be demoted by the thing it measures",
           "layer0.origin.alive" not in canary.depends_on, str(canary.depends_on))
 
