@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { sentinel } from '$lib/stores/state.svelte';
+	import { rankAlarms } from '$lib/alarmRank';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import MapView from '$lib/components/MapView.svelte';
@@ -96,6 +97,22 @@
 		warn: 'text-[var(--color-warn)]',
 		critical: 'text-[var(--color-critical)]'
 	};
+
+	// The front page is a glance surface, so the alarm list is capped and
+	// ordered by urgency rather than by arrival. Everything hidden here is one
+	// click away in /history?tab=alarms, and the header always states the true
+	// open count — a dashboard that quietly shows fewer problems than exist is
+	// worse than one that shows too many.
+	const ALARM_ROWS = 5;
+
+	// Acknowledged means someone has taken it; it stays in the record and in
+	// the count, it just stops occupying one of five scarce rows.
+	let showAcked = $state(false);
+
+	const ranking = $derived(rankAlarms(sentinel.alarms, { showAcked, limit: ALARM_ROWS }));
+	const shownAlarms   = $derived(ranking.shown);
+	const overflowCount = $derived(ranking.overflow);
+	const ackedCount    = $derived(ranking.acked);
 </script>
 
 <div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
@@ -205,8 +222,28 @@
 				? `oldest ${fmtAge(Math.max(...sentinel.alarms.map((a) => (Date.now() - new Date(a.opened_at).getTime()) / 1000)))}`
 				: 'all clear'}
 		/>
+		{#if sentinel.alarms.length}
+			<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-faint)]">
+				<span>most severe first · top {ALARM_ROWS}</span>
+				{#if ackedCount}
+					<label class="flex cursor-pointer items-center gap-1.5 text-[var(--color-muted)] hover:text-[var(--color-bright)]">
+						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 accent-[var(--color-ok)]" />
+						show acknowledged ({ackedCount})
+					</label>
+				{/if}
+				<span class="ml-auto normal-case tracking-normal">
+					{#if overflowCount}
+						<a class="text-[var(--color-muted)] underline decoration-dotted hover:text-[var(--color-bright)]"
+						   href="/history?tab=alarms">+{overflowCount} more not shown</a>
+					{:else}
+						<a class="text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+						   href="/history?tab=alarms">all alarms</a>
+					{/if}
+				</span>
+			</div>
+		{/if}
 		<ul class="divide-y divide-[var(--color-border)] overflow-y-auto">
-			{#each sentinel.alarms as a}
+			{#each shownAlarms as a (a.id)}
 				{@const opened = new Date(a.opened_at)}
 				{@const ageS = (Date.now() - opened.getTime()) / 1000}
 				{@const olderThanDay = ageS > 86400}
@@ -271,6 +308,15 @@
 			{/each}
 			{#if !sentinel.alarms.length}
 				<li class="px-4 py-3 text-[12px] text-[var(--color-faint)]">no open alarms.</li>
+			{:else if !shownAlarms.length}
+				<!-- Open alarms exist but every one is acknowledged. Say so
+				     explicitly: "no open alarms" here would be a lie. -->
+				<li class="px-4 py-3 text-[12px] text-[var(--color-faint)]">
+					all {sentinel.alarms.length} open alarm{sentinel.alarms.length === 1 ? '' : 's'}
+					{sentinel.alarms.length === 1 ? 'is' : 'are'} acknowledged —
+					<button type="button" class="underline decoration-dotted hover:text-[var(--color-bright)]"
+					        onclick={() => (showAcked = true)}>show {sentinel.alarms.length === 1 ? 'it' : 'them'}</button>.
+				</li>
 			{/if}
 		</ul>
 	</section>
