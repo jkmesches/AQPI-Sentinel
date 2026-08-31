@@ -421,16 +421,47 @@ class Scheduler:
                     # must keep saying we could not measure.
                     is_read_timeout = isinstance(e, httpx.ReadTimeout)
                     payload = {"exception": type(e).__name__, "message": str(e)}
+                    metrics: dict[str, float] = {}
                     if is_read_timeout:
                         record_upstream_timeout(check.id, t0)
                         payload["reason"] = "upstream_api"
                         payload["episode"] = in_episode()
+                        # === Load-bearing: make the censoring visible ===
+                        #
+                        # A timed-out request writes no latency_ms, so every
+                        # percentile over that metric is conditioned on NOT
+                        # timing out. The distribution is censored at the
+                        # ceiling and can never show a value above it — which
+                        # is how "p99 is 19.2s, so our 20s timeout is not
+                        # cutting into traffic" got believed while 1-2% of runs
+                        # were being killed at exactly 20s.
+                        #
+                        # `timed_out` is that missing mass. Read it as the
+                        # fraction of attempts the ceiling truncated:
+                        #   SELECT avg(value) FROM metric_samples
+                        #   WHERE metric = 'timed_out'
+                        # and treat any latency percentile above (1 - that) as
+                        # unmeasured rather than as the value it reports.
+                        # `latency_censored_ms` records where we gave up, which
+                        # is a lower bound on what the request would have taken.
+                        elapsed_ms = (utcnow() - t0).total_seconds() * 1000
+                        # Always meaningful on its own: "we gave up at X ms",
+                        # a lower bound on what the request would have taken.
+                        metrics["latency_censored_ms"] = elapsed_ms
+                        # Only for checks that also emit the 0 case. Emitting
+                        # it for every check would give `timed_out` a
+                        # denominator made only of failures — measured 0.87 on
+                        # first deploy, which reads as "87% of requests time
+                        # out" and is pure artefact.
+                        if getattr(check, "reports_timeout_rate", False):
+                            metrics["timed_out"] = 1.0
                     result = CheckResult(
                         check_id=check.id, target=check.target, stage=check.stage,
                         status="error",
                         started_at=t0, finished_at=utcnow(),
                         summary=humanize_error(e),
                         payload=payload,
+                        metrics=metrics,
                     )
 
             # Local-network blame shield: if our own internet is down (per the
