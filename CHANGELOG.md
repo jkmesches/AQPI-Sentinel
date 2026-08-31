@@ -26,6 +26,59 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ## [Unreleased]
 
+### Added
+- **Upstream slow-episode correlation (`layer0.origin.episode`).** radarca does
+  not fail to respond — 112 live probes of `/api/radar-status/` all returned
+  HTTP 200. It answers slowly: steady-state p90 8–13s and rising, with episodes
+  roughly half-hourly pushing the tail to 26–42s. Requests still waiting when
+  an episode lands raise `ReadTimeout`, and they arrive in bursts: 153 of 268
+  read timeouts over 7 days fell inside 20 minutes where 4+ checks timed out
+  together, one burst covering 15 checks in a single minute. The new check is
+  the single point of blame for those, so the operator gets one page naming the
+  scope instead of fifteen. Nothing is hidden — every check keeps its own
+  verdict and timeline cell; only the alarm collapses, via
+  `alarm_only_depends_on`. `layer0.net.*` and `layer0.self.*` are exempt, so our
+  own network and disk faults can never be excused by upstream.
+- **`read_timeouts` counter** on `HttpClient`, exposed in `/api/_debug/stats`.
+  Watch it against `total_requests`: a sustained rise means upstream's latency
+  tail has moved and `DEFAULT_TIMEOUT_S` wants revisiting.
+
+### Changed
+- **Read timeouts are no longer retried.** A `ReadTimeout` means upstream took
+  the connection and went quiet — alive but saturated. We have already cost it
+  a full timeout, and the retry lands while it is still struggling; measured
+  counters said it rescued about 1 in 9 while doubling our wall cost per cycle
+  (20s → 40.5s on a 120s cadence). `ConnectTimeout`, `ConnectError` and 5xx
+  stay retryable — those cost upstream nothing.
+- **The check fleet is de-correlated.** Checks looped on a fixed period, so any
+  set starting together stayed in lockstep forever: 10–15 checks landing in the
+  same second was routine and 33–34 happened. Added ±5%-of-cadence zero-mean
+  per-cycle jitter (floor 2s), and widened the initial topological stagger from
+  2s to 8s per rank with the within-rank spread filling the whole step. Ranks
+  still start strictly in order. Measured in production, excluding the boot
+  transient: seconds carrying 8 or more concurrent checks fell from **17.0% to
+  1.3%**, and the mean from 3.44 to 1.50 checks/second. The *worst* single
+  second is unchanged (13 → 14) and that is expected — jitter makes phases
+  drift, so occasional coincidences still happen; what it removes is the
+  *sustained* lockstep, which is what was converting upstream's slow episodes
+  into our timeouts.
+
+### Fixed
+- **An image-fetch read timeout was reported as a broken product.** The image
+  fetch set `F_image_exists=fail` on *any* exception, rolling the product up to
+  `fail` — a red cell asserting the image is missing when all we knew was that
+  upstream did not answer in time. The manifest fetch on the same check already
+  returned `error` for the identical cause, so the verdict depended only on
+  which of the two fetches the slowness happened to land on. Now returns
+  `error` + `reason=upstream_api`. Applied retroactively to 121 rows spanning
+  2026-06-18 → 2026-08-31; the as-observed verdict is preserved under
+  `payload.original`, and re-running the job changes nothing.
+- **The episode detector undercounted**, seeing 10 of 14 concurrent timeouts,
+  because product checks handle their own image-fetch errors and never reached
+  the scheduler's handler. Both product fetch paths now feed it.
+- **`payload.image_error` recorded an empty string** — `str()` on an httpx
+  `ReadTimeout` is `""`. The exception class is captured alongside it.
+
 ### Fixed
 - **GHOST_UP thresholds were measuring the wrong quantity.** The check gates
   on `now - newest_published_timestamp`, which includes upstream's
