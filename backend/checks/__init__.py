@@ -11,6 +11,16 @@ from . import layer1_stream    # noqa: F401  — 1 stream-canary check
 from . import layer2_radar     # noqa: F401  — 6 per-radar checks + 1 fleet correlation
 from . import layer3_overlay   # noqa: F401  — 1 Playwright overlay parity check
 from . import layer4_image     # noqa: F401  — 5 X-band + 3 mosaic image checks
+from . import layer0_episode   # noqa: F401  — 1 upstream slow-episode correlation
+
+# Wire alarm suppression LAST: attach_episode_suppression walks the registry,
+# so every check above must already be registered or it silently misses them.
+from ..registry import CHECKS                      # noqa: E402
+from .layer0_episode import attach_episode_suppression  # noqa: E402
+
+_wired = attach_episode_suppression(CHECKS.values())
+assert _wired, "episode suppression wired 0 checks — registry import order broke"
+
 # future:
 # from . import layer4_tier3_cross_radar
 # from . import layer4_tier4_dualpol

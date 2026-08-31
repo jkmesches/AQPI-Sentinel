@@ -41,6 +41,28 @@ RETRY_BACKOFF_S = 0.5
 # 4xx other than 429 are NOT retried — they are deterministic answers.
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
+# === Load-bearing: a read timeout is the one failure we must NOT retry ===
+#
+# A ReadTimeout means the connection was established and upstream then went
+# quiet past DEFAULT_TIMEOUT_S — i.e. it is alive but saturated. Retrying that
+# is the worst thing we can do: we have already made it spend a full timeout
+# of work, and the retry lands while it is still struggling.
+#
+# Measured 2026-08-31 on radarca /api/radar-status/ (112 probes, 100% HTTP
+# 200 — it never fails to answer, it just answers slowly):
+#   sequential          p50 5.1s  p90 13.2s  max 17.9s   0% over 20s
+#   12 concurrent       p50 6.3s  p90 41.7s  max 42.2s  28% over 20s
+# during a slow episode. Steady-state p90 has been 8-13s all week and rising.
+# Retry counters over the same period: 9 attempted, 1 succeeded — the retry
+# rescues about 1 in 9 while doubling both our wall cost per cycle
+# (20s -> 40.5s, a third of a 120s cadence) and the load we add to an already
+# saturated origin.
+#
+# ConnectTimeout / ConnectError stay retryable: those cost upstream nothing,
+# and a refused or dropped SYN really is the transient blip the retry was
+# introduced for. Only the "we already made them do the work" case is exempt.
+NO_RETRY_EXC = (httpx.ReadTimeout,)
+
 
 class HttpClient:
     """Shared httpx client.
@@ -73,6 +95,10 @@ class HttpClient:
         # genuinely-down upstream.
         self.retries_attempted = 0
         self.retries_succeeded = 0
+        # Read timeouts are counted but never retried (see NO_RETRY_EXC).
+        # Watch this against total_requests: a rising ratio means upstream is
+        # degrading, and is the signal to revisit DEFAULT_TIMEOUT_S.
+        self.read_timeouts = 0
 
     async def _request(self, method: str, url: str, *, retries: int | None = None,
                        **kw) -> httpx.Response:
@@ -96,6 +122,9 @@ class HttpClient:
                 return r
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last_exc = e
+                if isinstance(e, NO_RETRY_EXC):
+                    self.read_timeouts += 1
+                    raise
                 if attempt < attempts - 1:
                     self.retries_attempted += 1
                     await self._backoff(attempt)

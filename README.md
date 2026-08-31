@@ -14,7 +14,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 **v0.1.2** — feature-complete; running 24×7 against radarca. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
 
-- **41 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
+- **42 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
 - **18-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
 - **Alarm engine** with routes, groups (schedule-gated bundles of users), escalation policies, acks, silences, dependency-graph suppression, and per-step recipient dedup.
 - **Three-tier severity model** (v0.1.2): `info` = attention-required, `warn` = broken (action required), `critical` = sustained outage. Auto-promotes `warn → critical` after 30 minutes.
