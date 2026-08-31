@@ -220,6 +220,15 @@ async def history_timeline(
         # reason seen — 'upstream_unhealthy' wins when it appears.
         "  bool_or(payload->>'reason' = 'upstream_unhealthy') AS any_upstream, "
         "  bool_or(payload->>'reason' = 'upstream_api')       AS any_upstream_api, "
+        # Per-status counts so the client can render DENSITY, not just
+        # severity. Worst-of-bunch alone gets increasingly pessimistic as the
+        # grain coarsens: measured over 7 days, a red cell is 76.5% bad at 5m
+        # but only 27.6% bad at 1d, where a single bad run in ~1000 painted a
+        # whole day red. Severity still decides the colour; these decide how
+        # strongly it is drawn.
+        "  COUNT(*) FILTER (WHERE status = 'fail')  AS n_fail, "
+        "  COUNT(*) FILTER (WHERE status = 'error') AS n_error, "
+        "  COUNT(*) FILTER (WHERE status = 'warn')  AS n_warn, "
         "  COUNT(*) AS n "
         "FROM check_runs "
         "WHERE " + " AND ".join(where) + " "
@@ -251,6 +260,12 @@ async def history_timeline(
         status = "fail" if rank == 5 else rank_to_status[rank]
         key = f"{r['check_id']}|{r['target']}"
         cell: dict = {"status": status, "n": int(r["n"])}
+        # Counts for the displayed status. Emitted always (not only when
+        # non-zero) so a consumer never has to guess whether an absent field
+        # means zero or means the server is older than this feature.
+        cell["n_fail"] = int(r["n_fail"] or 0)
+        cell["n_error"] = int(r["n_error"] or 0)
+        cell["n_warn"] = int(r["n_warn"] or 0)
         # Only emit `reason` when it's load-bearing — the field is omitted
         # for vanilla skips so the JSON stays small over the wire.
         if r.get("any_upstream"):
@@ -343,6 +358,12 @@ async def history_report_csv(
         "        ELSE 0 END) AS worst_rank, "
         "  bool_or(status = 'fail')  AS has_fail, "
         "  bool_or(status = 'error') AS has_error, "
+        # Same per-status counts as the timeline endpoint, so an availability
+        # figure computed from this CSV uses real numbers rather than
+        # inferring one from a worst-of-bunch label.
+        "  COUNT(*) FILTER (WHERE status = 'fail')  AS n_fail, "
+        "  COUNT(*) FILTER (WHERE status = 'error') AS n_error, "
+        "  COUNT(*) FILTER (WHERE status = 'warn')  AS n_warn, "
         "  COUNT(*) AS n "
         "FROM check_runs "
         "WHERE " + " AND ".join(where) + " "
@@ -354,7 +375,8 @@ async def history_report_csv(
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["bucket_ts", "stage", "check_id", "target", "status", "n_runs"])
+    w.writerow(["bucket_ts", "stage", "check_id", "target", "status",
+                "n_runs", "n_fail", "n_error", "n_warn"])
     for r in rows:
         bts = r["bucket_ts"]
         if bts.tzinfo is None:
@@ -369,6 +391,9 @@ async def history_report_csv(
             r["target"] or "",
             status,
             int(r["n"]),
+            int(r["n_fail"] or 0),
+            int(r["n_error"] or 0),
+            int(r["n_warn"] or 0),
         ])
 
     fname = f"sentinel-report-{bucket}-{since_snapped.strftime('%Y%m%dT%H%M')}-{until_snapped.strftime('%Y%m%dT%H%M')}.csv"
