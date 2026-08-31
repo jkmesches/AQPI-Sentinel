@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket, type TimelineCell } from '$lib/api';
+	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
 	import {
 		prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
@@ -45,78 +46,6 @@
 		{ key: 'radars',   label: 'Radars',   stages: ['L2', 'L3', 'L4-T1T2'],
 		  desc: 'Per-radar rollup, cross-checks, and image quality control.' }
 	];
-	const STATUS_BG: Record<string, string> = {
-		pass:    'var(--color-ok)',
-		warn:    'var(--color-warn)',
-		fail:    'var(--color-fail)',
-		error:   'var(--color-error)',
-		skip:    'var(--color-faint)',
-		unknown: 'transparent'
-	};
-	// === Encoding: colour = worst status, FILL HEIGHT = how much ===
-	//
-	// A monitoring grid must never hide a failure, so worst-of-bunch still
-	// decides the colour — any red at all means something failed in this
-	// window. But worst-of alone gets more pessimistic as the grain coarsens.
-	// Measured over 7 days, inside cells drawn as bad:
-	//     5m   76.5% of runs really were bad
-	//     1h   64.5%
-	//     1d   27.6%   (worst case: 1 bad run in ~1000 painting a whole day)
-	//
-	// The first attempt encoded that with opacity. It did not work: on a dark
-	// canvas, lowering opacity blends toward black, so a sparse cell still
-	// reads as a filled dark-red block — and the intermediate values came out
-	// muddy brown. Opacity reads as "dim", not as "less".
-	//
-	// Proportional fill instead. The bad portion is drawn at full saturation
-	// as a band rising from the bottom of the cell, sized by its share of the
-	// bucket; the remainder is the healthy colour. The eye reads length as
-	// quantity, which is the thing being encoded, and a colour at full
-	// saturation never turns to mud.
-	//
-	// MIN_BAD_PX is load-bearing: any non-zero failure keeps a visible band,
-	// so one bad run in a thousand is a thin unmistakable red line rather
-	// than a rounding error. Never let it reach zero.
-	const MIN_BAD_PX = 3;
-
-	function badFraction(cell: TimelineCell | undefined): number {
-		if (!cell || !cell.n) return 0;
-		const at =
-			cell.status === 'fail'  ? cell.n_fail :
-			cell.status === 'error' ? cell.n_error :
-			cell.status === 'warn'  ? cell.n_warn : undefined;
-		if (at === undefined) return 1;         // pass/skip: the whole cell
-		if (at <= 0) return 1;                  // older server, no counts: solid
-		return Math.min(1, at / cell.n);
-	}
-
-	/** Background for one cell: a full-saturation band of `status` sized by
-	 *  its share, over the healthy colour. */
-	function cellFill(cell: TimelineCell | undefined, st: string, h: number): string {
-		const bad = STATUS_BG[st] ?? 'transparent';
-		if (st === 'pass' || st === 'skip' || st === 'unknown') return bad;
-		const frac = badFraction(cell);
-		if (frac >= 1) return bad;
-		// floor the band so a rare failure stays visible at any row height
-		const px = Math.max(MIN_BAD_PX, Math.round(frac * h));
-		const pct = Math.min(100, (px / h) * 100);
-		return `linear-gradient(to top, ${bad} 0 ${pct}%, ${STATUS_BG['pass']} ${pct}% 100%)`;
-	}
-
-	function cellRatioText(cell: TimelineCell | undefined): string {
-		if (!cell || !cell.n) return '';
-		const at =
-			cell.status === 'fail'  ? cell.n_fail :
-			cell.status === 'error' ? cell.n_error :
-			cell.status === 'warn'  ? cell.n_warn : undefined;
-		if (at === undefined) return `${cell.n} run${cell.n === 1 ? '' : 's'}`;
-		const pct = cell.n ? Math.round((at / cell.n) * 100) : 0;
-		return `${at} of ${cell.n} run${cell.n === 1 ? '' : 's'} ${STATUS_WORD[cell.status] ?? cell.status} (${pct}%)`;
-	}
-
-	const STATUS_WORD: Record<string, string> = {
-		pass: 'PASS', warn: 'WARN', fail: 'FAIL', error: 'ERROR', skip: 'SKIP', unknown: '—'
-	};
 
 	// Static cell+row geometry. Rows = checks (horizontal labels on the left,
 	// no rotation), columns = time buckets oldest→newest.
