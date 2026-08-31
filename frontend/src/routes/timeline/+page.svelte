@@ -1190,15 +1190,18 @@
 			{/each}
 
 			<div class="mt-4 flex gap-2">
-				{#snippet historyLink()}
-					{@const baseTs = new Date(detail.ts).getTime()}
+				<!-- `detail` is non-null here, but a snippet body is its own scope and
+     the {#if detail} narrowing does not reach inside it. Take it as a
+     parameter so the type is real rather than asserted. -->
+				{#snippet historyLink(d: NonNullable<typeof detail>)}
+					{@const baseTs = new Date(d.ts).getTime()}
 					{@const bucketSec = BUCKET_SECONDS[bucket] ?? 60}
 					{@const bucketMs = bucketSec * 1000}
 					{@const sinceIso = new Date(baseTs - bucketMs).toISOString()}
 					{@const untilIso = new Date(baseTs + bucketMs * 2).toISOString()}
-					{@const href = `/history?tab=checks&check_id=${encodeURIComponent(detail.col.id)}` +
-						`&target=${encodeURIComponent(detail.col.target)}` +
-						`&stage=${encodeURIComponent(detail.col.stage)}` +
+					{@const href = `/history?tab=checks&check_id=${encodeURIComponent(d.col.id)}` +
+						`&target=${encodeURIComponent(d.col.target)}` +
+						`&stage=${encodeURIComponent(d.col.stage)}` +
 						`&since=${encodeURIComponent(sinceIso)}&until=${encodeURIComponent(untilIso)}`}
 					<a
 						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
@@ -1208,7 +1211,7 @@
 						open in history
 					</a>
 				{/snippet}
-				{@render historyLink()}
+				{@render historyLink(detail)}
 			</div>
 		</div>
 	{/if}

@@ -160,20 +160,28 @@
 	const STREAM_GAUGES_KEY = 'sentinel-map-stream-gauges';
 
 	// Lazy-loaded GeoJSON data, fetched the first time a layer is enabled.
+	/** MapLibre's ImageSource wants exactly four corners, clockwise from the
+	 *  top-left. A plain [number, number][] loses that arity and will not
+	 *  typecheck against it. */
+	type ImageCorners = [
+		[number, number], [number, number], [number, number], [number, number]
+	];
 	let watershedsData: GeoJSON.FeatureCollection | null = null;
 	let reservoirsData: GeoJSON.FeatureCollection | null = null;
 	let streamGaugesData: GeoJSON.FeatureCollection | null = null;
-	async function loadWatersheds() {
+	async function loadWatersheds(): Promise<GeoJSON.FeatureCollection> {
 		if (watershedsData) return watershedsData;
 		const r = await fetch('/data/watersheds-huc8-norcal.geojson');
-		watershedsData = await r.json();
-		return watershedsData;
+		const data = (await r.json()) as GeoJSON.FeatureCollection;
+		watershedsData = data;
+		return data;
 	}
-	async function loadReservoirs() {
+	async function loadReservoirs(): Promise<GeoJSON.FeatureCollection> {
 		if (reservoirsData) return reservoirsData;
 		const r = await fetch('/data/reservoirs-norcal.json');
-		reservoirsData = await r.json();
-		return reservoirsData;
+		const data = (await r.json()) as GeoJSON.FeatureCollection;
+		reservoirsData = data;
+		return data;
 	}
 	async function loadStreamGauges(): Promise<GeoJSON.FeatureCollection> {
 		if (streamGaugesData) return streamGaugesData;
@@ -656,7 +664,7 @@
 		if (cts) cq.set('ts', cts);
 		if (_forceBuster) cq.set('_t', String(_forceBuster));
 		const url = apiUrl(`/api/upstream/product_image.png?${cq.toString()}`);
-		const coords: [number, number][] = [
+		const coords: ImageCorners = [
 			[e.west, e.north],
 			[e.east, e.north],
 			[e.east, e.south],
@@ -1041,7 +1049,7 @@
 		const url = apiUrl(
 			`/api/upstream/tilt_image.png?radar=${id}&el=${tiltEl}&moment=${tiltMoment}&frame=${frame}`
 		);
-		const coords: [number, number][] = [
+		const coords: ImageCorners = [
 			[lon - dLon, lat + dLat],
 			[lon + dLon, lat + dLat],
 			[lon + dLon, lat - dLat],
