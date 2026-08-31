@@ -106,6 +106,39 @@ def _find_unhealthy_ancestor(
     return None
 
 
+# === Load-bearing: de-correlating the check fleet ===
+#
+# Checks loop on a fixed period, so any set that starts together stays in
+# lockstep forever. Measured 2026-08-31: 10-15 checks landing in the same
+# second was routine and 33-34 happened, and the restart that afternoon put 9
+# read timeouts in the first 79 requests (11%, against a historical 0.1-1.2%)
+# purely because everything fired at once. radarca answers a sequential probe
+# in 17.9s worst-case but blows past 40s under a concurrent burst during one of
+# its slow episodes, so our own synchronisation is what converts its slowness
+# into our timeouts.
+#
+# JITTER_FRAC is a fraction of each check's own cadence, so a 60s check is
+# nudged less than a 300s one and no check's period is distorted much. It is
+# zero-mean: over many cycles the average cadence is unchanged, but phases
+# random-walk apart instead of staying locked.
+JITTER_FRAC = 0.05          # +/- 5% of cadence
+JITTER_MIN_S = 2.0          # ...but always enough to actually separate two checks
+
+
+def _jittered_delay(cadence_s: float, elapsed_s: float,
+                    rand=random.uniform) -> float:
+    """Seconds to sleep before this check's next run.
+
+    Subtracts the time the run itself took so the cadence is a period, not a
+    gap, then applies zero-mean jitter. Never returns less than 1s: a check
+    that overran its whole cadence must still yield to the event loop rather
+    than spin.
+    """
+    base = max(1.0, cadence_s - elapsed_s)
+    j = max(JITTER_MIN_S, cadence_s * JITTER_FRAC)
+    return max(1.0, base + rand(-j, j))
+
+
 class Scheduler:
     def __init__(self, store: Store, ctx: CheckContext, engine=None):
         self.store = store
@@ -220,9 +253,18 @@ class Scheduler:
         # Topological-stagger initial-start. Root checks (rank 0) start
         # immediately; deeper layers wait `rank * 2s` so the first wave
         # propagates roots → leaves in order.
-        STAGGER_S = 2.0
+        # Was 2.0s with a 0-1s jitter inside _loop, which spread ~20 rank-0
+        # checks across one second — the boot thundering herd. Widened so the
+        # within-rank spread fills the whole stagger step: rank N now occupies
+        # [N*STAGGER_S, (N+1)*STAGGER_S), so ranks still start in order and
+        # never overlap, while the checks inside a rank fan out across the
+        # full window. Max rank is 3, so a cold start is fully launched in
+        # ~32s instead of ~7s, which is the right trade for not opening with a
+        # burst that upstream answers with timeouts.
+        STAGGER_S = 8.0
         for check in CHECKS.values():
-            initial_delay = self._rank.get(check.id, 0) * STAGGER_S
+            initial_delay = (self._rank.get(check.id, 0) * STAGGER_S
+                             + random.uniform(0.0, STAGGER_S))
             t = asyncio.create_task(self._loop(check, initial_delay),
                                      name=f"check:{check.id}")
             self._tasks.append(t)
@@ -334,9 +376,9 @@ class Scheduler:
         )
 
     async def _loop(self, check: Check, initial_delay_s: float = 0.0) -> None:
-        # Topological-stagger initial delay + small random jitter (0..1 s)
-        # to spread the first wave so 36 checks don't all fire at t=0.
-        await asyncio.sleep(initial_delay_s + random.uniform(0, 1.0))
+        # The caller already folded the within-rank spread into this value
+        # (see STAGGER_S in start); adding more here would blur rank ordering.
+        await asyncio.sleep(initial_delay_s)
         while not self._stop.is_set():
             # Block if any transitive upstream is mid-tick. Bounded.
             await self._await_upstream_settled(check)
@@ -436,7 +478,7 @@ class Scheduler:
                     log.exception("on_result broadcast for %s failed", check.id)
 
             elapsed = (utcnow() - t0).total_seconds()
-            delay = max(1.0, check.cadence_s - elapsed)
+            delay = _jittered_delay(check.cadence_s, elapsed)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 # if we get here the stop event fired
