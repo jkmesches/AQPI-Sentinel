@@ -53,36 +53,54 @@
 		skip:    'var(--color-faint)',
 		unknown: 'transparent'
 	};
-	// === Density: how much of the bucket was at the displayed status ===
+	// === Encoding: colour = worst status, FILL HEIGHT = how much ===
 	//
-	// Worst-of-bunch decides the colour and always will — a monitoring grid
-	// must never hide a failure, and an average would: a 20-minute outage
-	// inside a 1-day bucket is 98.6% "uptime" and would render green.
-	//
-	// But worst-of alone gets more pessimistic the coarser the grain.
+	// A monitoring grid must never hide a failure, so worst-of-bunch still
+	// decides the colour — any red at all means something failed in this
+	// window. But worst-of alone gets more pessimistic as the grain coarsens.
 	// Measured over 7 days, inside cells drawn as bad:
 	//     5m   76.5% of runs really were bad
 	//     1h   64.5%
 	//     1d   27.6%   (worst case: 1 bad run in ~1000 painting a whole day)
 	//
-	// So severity picks the hue and density picks the strength. A day with a
-	// single blip is a faint tick; a day that was mostly broken is solid.
+	// The first attempt encoded that with opacity. It did not work: on a dark
+	// canvas, lowering opacity blends toward black, so a sparse cell still
+	// reads as a filled dark-red block — and the intermediate values came out
+	// muddy brown. Opacity reads as "dim", not as "less".
 	//
-	// FLOOR is load-bearing: density never scales toward invisible, or a
-	// rare-but-real outage disappears and we have reinvented the averaging
-	// bug with extra steps.
-	const DENSITY_FLOOR = 0.35;
+	// Proportional fill instead. The bad portion is drawn at full saturation
+	// as a band rising from the bottom of the cell, sized by its share of the
+	// bucket; the remainder is the healthy colour. The eye reads length as
+	// quantity, which is the thing being encoded, and a colour at full
+	// saturation never turns to mud.
+	//
+	// MIN_BAD_PX is load-bearing: any non-zero failure keeps a visible band,
+	// so one bad run in a thousand is a thin unmistakable red line rather
+	// than a rounding error. Never let it reach zero.
+	const MIN_BAD_PX = 3;
 
-	function cellDensity(cell: TimelineCell | undefined): number {
-		if (!cell || !cell.n) return 1;
+	function badFraction(cell: TimelineCell | undefined): number {
+		if (!cell || !cell.n) return 0;
 		const at =
 			cell.status === 'fail'  ? cell.n_fail :
 			cell.status === 'error' ? cell.n_error :
 			cell.status === 'warn'  ? cell.n_warn : undefined;
-		if (at === undefined) return 1;              // pass/skip render solid
-		const frac = at / cell.n;
-		if (!Number.isFinite(frac) || frac <= 0) return 1;   // older server: no counts
-		return DENSITY_FLOOR + (1 - DENSITY_FLOOR) * Math.min(1, frac);
+		if (at === undefined) return 1;         // pass/skip: the whole cell
+		if (at <= 0) return 1;                  // older server, no counts: solid
+		return Math.min(1, at / cell.n);
+	}
+
+	/** Background for one cell: a full-saturation band of `status` sized by
+	 *  its share, over the healthy colour. */
+	function cellFill(cell: TimelineCell | undefined, st: string, h: number): string {
+		const bad = STATUS_BG[st] ?? 'transparent';
+		if (st === 'pass' || st === 'skip' || st === 'unknown') return bad;
+		const frac = badFraction(cell);
+		if (frac >= 1) return bad;
+		// floor the band so a rare failure stays visible at any row height
+		const px = Math.max(MIN_BAD_PX, Math.round(frac * h));
+		const pct = Math.min(100, (px / h) * 100);
+		return `linear-gradient(to top, ${bad} 0 ${pct}%, ${STATUS_BG['pass']} ${pct}% 100%)`;
 	}
 
 	function cellRatioText(cell: TimelineCell | undefined): string {
@@ -92,7 +110,8 @@
 			cell.status === 'error' ? cell.n_error :
 			cell.status === 'warn'  ? cell.n_warn : undefined;
 		if (at === undefined) return `${cell.n} run${cell.n === 1 ? '' : 's'}`;
-		return `${at} of ${cell.n} run${cell.n === 1 ? '' : 's'} ${STATUS_WORD[cell.status] ?? cell.status}`;
+		const pct = cell.n ? Math.round((at / cell.n) * 100) : 0;
+		return `${at} of ${cell.n} run${cell.n === 1 ? '' : 's'} ${STATUS_WORD[cell.status] ?? cell.status} (${pct}%)`;
 	}
 
 	const STATUS_WORD: Record<string, string> = {
@@ -933,7 +952,7 @@
 										`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 										``,
 										`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Colour = worst status in the bucket. Strength = how much of the bucket was at that status, so a single blip in a long window reads fainter than a sustained outage.`,
+										`Cell fill: the coloured band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
 										`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 									].join('\n')}
 								>
@@ -954,7 +973,7 @@
 									>
 										<span
 											class="block"
-											style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{STATUS_BG[st]}; opacity:{cellDensity(cell)}; border-radius:2px;"
+											style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{cellFill(cell, st, ROW_H - 6)}; border-radius:2px;"
 										></span>
 									</button>
 								{/each}
@@ -975,7 +994,7 @@
 								`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 								``,
 								`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Colour = worst status in the bucket. Strength = how much of the bucket was at that status, so a single blip in a long window reads fainter than a sustained outage.`,
+										`Cell fill: the coloured band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
 								`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 							].join('\n')}
 						>
@@ -996,7 +1015,7 @@
 							>
 								<span
 									class="block"
-									style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{STATUS_BG[st]}; opacity:{cellDensity(cell)}; border-radius:2px;"
+									style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{cellFill(cell, st, ROW_H - 6)}; border-radius:2px;"
 								></span>
 							</button>
 						{/each}
