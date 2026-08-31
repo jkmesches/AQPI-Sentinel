@@ -255,6 +255,29 @@ async def test_self_handled_timeouts() -> None:
     check("...and feeds the episode detector", prod.id in EP.episode_members(),
           str(EP.episode_members()))
 
+    # The shared radar-status fetch handles its own errors too, and hits the
+    # slowest endpoint upstream has — so it is the likeliest place for an
+    # episode to land and the easiest one to miss. Observed in prod: five
+    # radars timed out in the same second while the detector reported none.
+    EP._timeouts.clear()
+    import backend.checks.layer2_radar as L2
+    L2._reset_status_cache()
+
+    class _CtxDead:
+        class http:
+            @staticmethod
+            async def get(url, **kw):
+                raise httpx.ReadTimeout("")
+
+    mapping, err = await L2._radar_status_map(_CtxDead())
+    check("a radar-status timeout still yields no mapping", mapping is None)
+    check("...and is recorded for episode detection",
+          EP.episode_members() != [], str(EP.episode_members()))
+    check("...attributed to the shared fetch, not to one arbitrary radar",
+          EP.episode_members() == [L2.FLEET_CHECK_ID], str(EP.episode_members()))
+    L2._reset_status_cache()
+    EP._timeouts.clear()
+
     # THE negative case. Reclassifying timeouts must not blunt real detection:
     # a genuinely missing or non-image response is still a product failure and
     # must still be `fail` with F_image_exists=fail. If this ever flips to

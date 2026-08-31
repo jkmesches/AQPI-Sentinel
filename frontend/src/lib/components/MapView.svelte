@@ -160,6 +160,26 @@
 	const STREAM_GAUGES_KEY = 'sentinel-map-stream-gauges';
 
 	// Lazy-loaded GeoJSON data, fetched the first time a layer is enabled.
+	// === Load-bearing: image overlays go BENEATH the radar markers ===
+	//
+	// The marker layers are built in one pass at style load (range-fill,
+	// range-stroke, radar-halo, radar-point, radar-label) so they stack in that
+	// order. Image overlays are added and removed dynamically afterwards, which
+	// puts them at the TOP of the stack unless a beforeId says otherwise — and
+	// an opaque raster over the dots makes the radars unreadable and unclickable,
+	// which is the whole interaction on this map.
+	//
+	// `range-fill` is the lowest marker layer, so inserting before it keeps every
+	// marker and range ring above the imagery. The existence check matters: a
+	// beforeId that is not on the map makes MapLibre throw, and overlays can be
+	// requested before the marker layers exist (theme swap, early scrub). In that
+	// window top-of-stack is correct anyway, because the markers are added above.
+	const MARKER_BASE_LAYER = 'range-fill';
+
+	function addOverlayBelowMarkers(m: maplibregl.Map, layer: maplibregl.AddLayerObject) {
+		m.addLayer(layer, m.getLayer(MARKER_BASE_LAYER) ? MARKER_BASE_LAYER : undefined);
+	}
+
 	/** MapLibre's ImageSource wants exactly four corners, clockwise from the
 	 *  top-left. A plain [number, number][] loses that arity and will not
 	 *  typecheck against it. */
@@ -681,15 +701,12 @@
 			if (map!.getLayer('comp-overlay-layer')) map!.removeLayer('comp-overlay-layer');
 			if (map!.getSource('comp-overlay')) map!.removeSource('comp-overlay');
 			map!.addSource('comp-overlay', { type: 'image', url, coordinates: coords });
-			map!.addLayer(
-				{
-					id: 'comp-overlay-layer',
-					type: 'raster',
-					source: 'comp-overlay',
-					paint: { 'raster-opacity': 0.7 }
-				},
-				'range-fill'
-			);
+			addOverlayBelowMarkers(map!, {
+				id: 'comp-overlay-layer',
+				type: 'raster',
+				source: 'comp-overlay',
+				paint: { 'raster-opacity': 0.7 }
+			});
 		}
 	}
 
@@ -990,7 +1007,7 @@
 					[e.west, e.south]
 				]
 			});
-			map.addLayer({
+			addOverlayBelowMarkers(map, {
 				id: radarLayerId(id),
 				type: 'raster',
 				source: radarSrcId(id),
@@ -1064,7 +1081,7 @@
 			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
 			if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
 			map.addSource('tilt-overlay', { type: 'image', url, coordinates: coords });
-			map.addLayer({
+			addOverlayBelowMarkers(map, {
 				id: 'tilt-overlay-layer',
 				type: 'raster',
 				source: 'tilt-overlay',
