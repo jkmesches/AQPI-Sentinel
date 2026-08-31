@@ -45,6 +45,7 @@ from ..config import (
     moment_to_prefix,
 )
 from ..registry import register
+from .layer0_episode import note_upstream_exception
 from .base import Check, CheckResult, utcnow
 from .helpers import parse_filename_ts
 
@@ -88,6 +89,17 @@ async def _radar_status_map(ctx) -> tuple[dict[str, str] | None, str | None]:
                 }
                 err = None
         except Exception as e:
+            # Feed the episode detector from here too. This fetch is shared by
+            # all six radar checks and hits the slowest endpoint upstream has
+            # (radar-status p90 8-13s), so it is the single most likely place
+            # for a slow episode to land — and because this function handles
+            # the exception itself, the timeout never reaches the scheduler's
+            # handler that normally records it. Observed on 2026-08-31: five
+            # radars timed out in the same second while the episode check
+            # reported "no upstream read timeouts", because none of them were
+            # counted. Attributed to the shared fetch rather than to any one
+            # radar: it is one request, and one radar's id would be arbitrary.
+            note_upstream_exception(FLEET_CHECK_ID, e)
             mapping, err = None, f"radar-status API unreachable: {type(e).__name__}"
         c["at"], c["mapping"], c["error"] = time.monotonic(), mapping, err
         return mapping, err
