@@ -78,7 +78,10 @@
 	let previewWindows = $state<{ start: string; end: string }[]>([]);
 	let previewActiveNow = $state(false);
 
-	function authHeaders() {
+	// Return type is annotated, not inferred: without it TS infers the union
+	// `{Authorization: string} | {}`, whose empty arm widens to
+	// `{Authorization?: undefined}` and is not assignable to HeadersInit.
+	function authHeaders(): Record<string, string> {
 		return auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
 	}
 

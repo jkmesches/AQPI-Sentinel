@@ -3,7 +3,10 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 
-	let token = $derived(page.params.token);
+	// SvelteKit types every route param as optional. This route cannot match
+	// without one, but fall back to '' rather than asserting — an empty token
+	// just 404s at the API, which is the correct outcome anyway.
+	let token = $derived(page.params.token ?? '');
 	let loading = $state(true);
 	let email = $state<string | null>(null);
 	let error = $state<string | null>(null);

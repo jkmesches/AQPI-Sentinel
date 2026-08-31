@@ -3,7 +3,10 @@
 // guard with onMount / typeof window !== 'undefined').
 import { url } from './origin';
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+// Returns Uint8Array<ArrayBuffer>, not the default Uint8Array<ArrayBufferLike>:
+// PushManager.subscribe wants a BufferSource, and ArrayBufferLike also admits
+// SharedArrayBuffer, which is not a valid BufferSource.
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
 	const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
 	const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
 	const raw = atob(base64);

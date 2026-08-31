@@ -327,10 +327,15 @@
 			<button
 				type="button"
 				onclick={async () => {
+					// Capture up front: the handler runs later, so the {#if detailEvent}
+					// narrowing does not hold inside it, and the drawer can close (nulling
+					// the state) between the tap and this line.
+					const ev = detailEvent;
+					if (!ev) return;
 					const qs = new URLSearchParams({
-						check_id: detailEvent.check_id,
-						target:   detailEvent.target ?? '',
-						stage:    detailEvent.stage ?? ''
+						check_id: ev.check_id,
+						target:   ev.target ?? '',
+						stage:    ev.stage ?? ''
 					});
 					detailOpen = false;
 					await goto(`/m/uptime?${qs}`);
@@ -341,11 +346,13 @@
 			<button
 				type="button"
 				onclick={async () => {
-					const t = Date.parse(detailEvent.ts);
+					const ev = detailEvent;
+					if (!ev) return;
+					const t = Date.parse(ev.ts);
 					const qs = new URLSearchParams({
 						tab:      'checks',
-						check_id: detailEvent.check_id,
-						target:   detailEvent.target ?? '',
+						check_id: ev.check_id,
+						target:   ev.target ?? '',
 						since:    new Date(t - 3600_000).toISOString(),
 						until:    new Date(t + 3600_000).toISOString()
 					});
