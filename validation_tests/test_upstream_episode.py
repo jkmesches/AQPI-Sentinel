@@ -188,6 +188,102 @@ async def test_episode_check_result() -> None:
     EP._timeouts.clear()
 
 
+async def test_self_handled_timeouts() -> None:
+    print("\n[5] checks that catch their own transport errors")
+
+    now = utcnow()
+    EP._timeouts.clear()
+
+    check("a read timeout is recorded", EP.note_upstream_exception("c1", httpx.ReadTimeout("x"), now))
+    check("...and lands in the member list", EP.episode_members(now) == ["c1"])
+
+    # Only read timeouts. A connect failure is upstream being DOWN, which is a
+    # different event with a different explanation (origin.alive), and folding
+    # it in here would let a real outage masquerade as mere slowness.
+    for exc, label in ((httpx.ConnectError("x"), "ConnectError"),
+                       (httpx.ConnectTimeout("x"), "ConnectTimeout"),
+                       (ValueError("x"), "ValueError")):
+        EP._timeouts.clear()
+        check(f"{label} is not recorded as an episode member",
+              not EP.note_upstream_exception("c2", exc, now) and not EP.episode_members(now))
+
+    # The bug this closes: the four product checks handle their own image
+    # fetch, so on the 2026-08-31 deploy the detector saw 10 of 14 concurrent
+    # timeouts. Assert the product check now feeds the detector, and that a
+    # timeout is no longer reported as a missing image.
+    EP._timeouts.clear()
+    import backend.checks.layer1_product as L1
+    prod = next((c for c in CHECKS.values() if isinstance(c, L1.Layer1ProductCheck)), None)
+    if prod is None:
+        check("a product check exists to exercise", False)
+        return
+
+    # Steps must carry BOTH imageName and timestamp or the check bails at
+    # B_schema and never reaches the image fetch this test is about.
+    _now = utcnow().replace(microsecond=0, tzinfo=None).isoformat()
+
+    class _R:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        content = b"{}"
+        def json(self):
+            return {"product": "Test", "steps": [
+                {"imageName": "20260831_1800.png", "timestamp": _now}]}
+
+    class _Ctx:
+        """Manifest succeeds, image fetch times out — the exact shape seen in prod."""
+        class http:
+            @staticmethod
+            async def get(url, **kw):
+                if "imageData" in url:
+                    raise httpx.ReadTimeout("")
+                return _R()
+
+    try:
+        r = await prod.run(_Ctx())
+    except Exception as e:                       # noqa: BLE001 — surface, don't swallow
+        check("product check survives an image timeout", False, f"{type(e).__name__}: {e}")
+        return
+
+    check("an image timeout is `error`, not `fail`", r.status == "error", r.status)
+    check("...is tagged as a visibility gap", r.payload.get("reason") == "upstream_api")
+    check("...names the exception despite str(e) being empty",
+          r.payload.get("image_exception") == "ReadTimeout", str(r.payload.get("image_error")))
+    check("...does NOT claim the image is missing",
+          r.payload.get("sub_status", {}).get("F_image_exists") != "fail",
+          str(r.payload.get("sub_status", {}).get("F_image_exists")))
+    check("...and feeds the episode detector", prod.id in EP.episode_members(),
+          str(EP.episode_members()))
+
+    # THE negative case. Reclassifying timeouts must not blunt real detection:
+    # a genuinely missing or non-image response is still a product failure and
+    # must still be `fail` with F_image_exists=fail. If this ever flips to
+    # `error`, the grid stops reporting broken products at all.
+    EP._timeouts.clear()
+
+    class _Ctx404:
+        class http:
+            @staticmethod
+            async def get(url, **kw):
+                if "imageData" in url:
+                    class _E:
+                        status_code = 404
+                        headers = {"content-type": "text/html"}
+                        content = b"nope"
+                    return _E()
+                return _R()
+
+    r404 = await prod.run(_Ctx404())
+    check("a real missing image is STILL `fail`", r404.status == "fail", r404.status)
+    check("...and still marks F_image_exists=fail",
+          r404.payload.get("sub_status", {}).get("F_image_exists") == "fail")
+    check("...and is NOT excused as an upstream gap",
+          r404.payload.get("reason") != "upstream_api")
+    check("...and does not pollute the episode detector", EP.episode_members() == [],
+          str(EP.episode_members()))
+    EP._timeouts.clear()
+
+
 async def test_wiring_and_suppression() -> None:
     print("\n[4] suppression wiring — reach, and limits on reach")
 
@@ -257,6 +353,7 @@ async def main() -> int:
     await test_read_timeout_not_retried()
     await test_episode_detection()
     await test_episode_check_result()
+    await test_self_handled_timeouts()
     await test_wiring_and_suppression()
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall upstream-episode assertions passed")

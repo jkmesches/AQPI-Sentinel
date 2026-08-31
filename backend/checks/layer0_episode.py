@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import httpx
+
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 
@@ -67,6 +69,21 @@ _timeouts: dict[str, datetime] = {}
 def record_upstream_timeout(check_id: str, when: datetime | None = None) -> None:
     """Called by the scheduler when a check dies of a read timeout."""
     _timeouts[check_id] = when or utcnow()
+
+
+def note_upstream_exception(check_id: str, exc: BaseException,
+                            when: datetime | None = None) -> bool:
+    """Record `exc` if it is an upstream read timeout. Returns whether it was.
+
+    For checks that catch transport errors themselves instead of letting them
+    reach the scheduler. Without this the episode detector silently
+    undercounts: on the 2026-08-31 deploy it saw 10 of 14 concurrent timeouts,
+    because the four product checks handle their own image-fetch failures.
+    """
+    if not isinstance(exc, httpx.ReadTimeout):
+        return False
+    record_upstream_timeout(check_id, when)
+    return True
 
 
 def episode_members(now: datetime | None = None) -> list[str]:
