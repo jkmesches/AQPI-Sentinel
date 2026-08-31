@@ -163,6 +163,99 @@ export const FAQ: FaqItem[] = [
 			{ kind: 'p', text: 'For planned work use a **silence** rather than muting a check permanently — silenced alarms still appear on the dashboard and in the record, they just stop paging.' },
 			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. Two of the largest sources of false alarms found so far were a stale threshold and a colour that made "couldn\'t measure" look identical to "broken".' }
 		]
+	},
+	{
+		id: 'image-pipeline',
+		q: 'What happens to an image between radarca publishing it and a verdict appearing?',
+		blocks: [
+			{ kind: 'p', text: 'Seven steps, every cycle, per radar and per mosaic product:' },
+			{
+				kind: 'table',
+				head: ['Step', 'What happens'],
+				rows: [
+					['1. Resolve', 'Ask radarca which scan is *latest* — `xbandRadarImages` for a radar, `productDetail` for a mosaic product.'],
+					['2. Fetch', 'Pull the PNG bytes. This is the only upstream request the image checks make.'],
+					['3. Archive', 'Hash the bytes with SHA-256 and store them content-addressed. Identical bytes are stored once.'],
+					['4. Tier 1', 'Measure the frame — coverage, intensity, structure, perceptual hash. No judgement yet.'],
+					['5. Tier 2', 'Run the pathology detectors against those pixels.'],
+					['6. Compare', 'Check the perceptual hash against the previous run to catch a stuck feed.'],
+					['7. Verdict', 'Take the worst sub-verdict. Anything not on the OK list becomes a `warn`.']
+				]
+			},
+			{ kind: 'p', text: 'Separating step 4 from step 5 is deliberate. Tier 1 records **what the frame is**, and is threshold-free; Tier 2 decides **whether that is a problem**, and every threshold lives there. When a threshold turns out to be wrong we can re-run the judgement over stored measurements without re-fetching a single image from radarca.' },
+			{ kind: 'note', text: 'Image checks emit `warn`, never `fail`. A strange-looking frame is a reason to go and look, not a claim that the product is broken — Sentinel cannot tell an artifact from genuinely unusual weather.' }
+		]
+	},
+	{
+		id: 'image-tests',
+		q: 'What tests do you actually run on the image itself?',
+		blocks: [
+			{ kind: 'p', text: '**Tier 1 measures.** A pixel counts as *active* where alpha > 10, and these are recorded for every frame whether or not anything is wrong:' },
+			{
+				kind: 'table',
+				head: ['Measurement', 'What it captures'],
+				rows: [
+					['Coverage %', 'Share of the canvas carrying data. Drives most of the suppression logic below.'],
+					['Mean / std intensity', 'Brightest channel per active pixel — overall level and spread.'],
+					['Top-3 intensity bins', 'Where the intensity histogram piles up, in 16 buckets.'],
+					['Horizontal autocorrelation', 'Whether neighbouring pixels agree. Structured weather correlates; noise does not.'],
+					['Perceptual hash', '16×16 pHash. Two frames with the same hash are visually identical.'],
+					['SHA-256 + byte size', 'Exact identity of the file, for the archive and for dedup.']
+				]
+			},
+			{ kind: 'p', text: '**Tier 2 judges.** Four detectors, each with a tunable threshold:' },
+			{
+				kind: 'table',
+				head: ['Detector', 'Trips when', 'Catches'],
+				rows: [
+					['Saturation', 'One quantised colour holds >40% of active pixels', 'A frame collapsed to a single value — a stuck colour map or an encoder fault.'],
+					['Speckle', '>35% of active pixels have no active 4-neighbour', 'Noise dressed as data: isolated pixels with no structure.'],
+					['Range ring', 'Peak ring deviation >0.80× the median across 50 polar bins', 'Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only; mosaics have no radar-centred geometry.'],
+					['Frozen frame', 'pHash identical to the previous run', 'A feed that is publishing but no longer changing.']
+				]
+			},
+			{ kind: 'p', text: 'Product checks also test the image at Layer 1, separately and more cheaply: that it exists and is really a PNG, that it is not implausibly small for that product, and that its bytes hash to a recorded value.' },
+			{ kind: 'note', text: 'The saturation threshold is per product, not global. Forecast fields such as water depth encode a scalar with a thresholded colour ramp and legitimately sit above 40% in normal operation; radar reflectivity does not.' }
+		]
+	},
+	{
+		id: 'image-quiet-verdicts',
+		q: 'Why do image checks so often say "quiet" or "low coverage" instead of pass or fail?',
+		blocks: [
+			{ kind: 'p', text: 'Because the honest answer is frequently *"that detector cannot say anything useful about this frame"*, and saying so is better than guessing. Each of these means the test ran and declined to draw a conclusion:' },
+			{
+				kind: 'table',
+				head: ['Verdict', 'Means'],
+				rows: [
+					['`OK_SAME_FRAME`', 'Upstream has not published anything new since the last check, so there is nothing to compare against.'],
+					['`QUIET_LOW_COV`', 'Coverage is below 5%. A radar watching a clear sky produces near-identical frames; that is calm weather, not a stuck feed.'],
+					['`QUIET_SLOW`', 'This product updates more slowly than we check it, so repeats are expected.'],
+					['`OK_LOW_COV`', 'Too few pixels for a saturation reading to mean anything.'],
+					['`TOO_SPARSE` / `EMPTY`', 'Not enough active pixels for the detector to run at all.']
+				]
+			},
+			{ kind: 'p', text: 'These exist because the first version did not have them, and it was badly wrong. The frozen-frame detector compared each run against the previous one without asking whether upstream had published anything in between — so re-sampling one published image reported it as frozen against itself, measuring our own polling rate rather than the feed. **15,326** captures are marked `OK_SAME_FRAME` (upstream had published nothing new); every one would previously have been a candidate for a false FROZEN. Reprocessing with the source comparison took the count from **13,837 to 263** in August 2026, and it stands at 265 today.' },
+			{ kind: 'note', text: 'A suppressed verdict is still recorded in full. Nothing is deleted — you can always see which detector declined and why.' }
+		]
+	},
+	{
+		id: 'image-archive',
+		q: 'Do you keep the images? Can I see what Sentinel actually saw?',
+		blocks: [
+			{ kind: 'p', text: 'Yes. Every frame a Layer 4 check evaluates is stored, currently about **298,000 captures / 22 GB**. Clicking a cell in the timeline shows the frame that produced that verdict, not a fresh fetch of whatever is current now.' },
+			{ kind: 'p', text: 'Storage is **content-addressed**: a file is named by the SHA-256 of its own bytes. That has three consequences worth knowing:' },
+			{
+				kind: 'table',
+				head: ['Property', 'Why it matters'],
+				rows: [
+					['Self-verifying', 'Re-hash a file and compare to its name. Silent corruption cannot hide.'],
+					['Automatic dedup', 'A forecast product idle for an hour, or a radar on a steady clutter pattern, stores one copy however many times we fetch it.'],
+					['Stable reference', 'A verdict points at exact bytes, so evidence for a past call cannot drift.']
+				]
+			},
+			{ kind: 'p', text: 'Two indexes sit over it: one from hash to metadata (size, dimensions, first and last seen), and one from the upstream source string to the hash, which is what lets the map replay history from our own copies instead of asking radarca again.' },
+			{ kind: 'note', text: 'This is also why map scrubbing is polite. Frames already captured are served from the archive, so moving through a time window costs radarca nothing.' }
+		]
 	}
 ];
 
