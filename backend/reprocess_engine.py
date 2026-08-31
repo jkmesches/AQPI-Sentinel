@@ -153,6 +153,62 @@ def _reverdict_l4(row: dict, prev_phash_map: dict[tuple[str, str], str | None],
     return new_status, new_payload
 
 
+# humanize_error()'s exact phrase for httpx.ReadTimeout, on the image-fetch
+# path. Matched exactly rather than by prefix: a ConnectTimeout on the same
+# fetch reads "Connection timed out" and means upstream is DOWN, which is a
+# different event and must keep its own verdict.
+_IMAGE_TIMEOUT_SUMMARY = "Image fetch failed: Server took too long to respond"
+
+
+def _reverdict_l1_image_timeout(row: dict, payload: dict) -> tuple[str, dict] | None:
+    """Reclassify an image-fetch read timeout from `fail` to `error`.
+
+    Historically the image fetch recorded F_image_exists=fail on ANY exception,
+    which rolls the product up to `fail` — a red cell asserting the product
+    image is missing when all we actually knew was that upstream did not answer
+    within the timeout. The manifest fetch on the same check already returned
+    `error` for the identical cause, so the verdict depended only on which of
+    the two fetches the slowness happened to land on. The live path was fixed
+    on 2026-08-31; this brings the 121 historical rows into line.
+
+    Deliberately narrow, because the cost of over-reaching is erasing real
+    product failures from the record:
+      - the summary must name a read timeout exactly, and
+      - the row must carry no `image_http`. The timeout path returns before
+        that key is set, so its presence means we DID get a response and the
+        fail verdict is about the response itself. Those stay `fail`.
+    """
+    if row.get("summary") != _IMAGE_TIMEOUT_SUMMARY:
+        return None
+    if "image_http" in payload:
+        return None
+
+    sub = dict(payload.get("sub_status") or {})
+    if sub.get("F_image_exists") != "fail":
+        return None
+    # Drop the key rather than downgrading it, so the row matches exactly what
+    # the fixed live path now writes: F was never measured, so it says nothing.
+    sub.pop("F_image_exists", None)
+    sub.pop("G_image_size", None)
+    sub.pop("H_image_hash", None)
+
+    new_payload = {
+        **payload,
+        "sub_status": sub,
+        "reason": "upstream_api",
+        "image_exception": "ReadTimeout",
+        "reprocessed_at": datetime.now(timezone.utc).isoformat(),
+        # First original wins, as in _reverdict_l2 — re-running must never
+        # overwrite the true as-observed verdict with an already-reprocessed one.
+        "original": payload.get("original") or {
+            "status":      row["status"],
+            "sub_status":  payload.get("sub_status"),
+            "summary":     row.get("summary"),
+        },
+    }
+    return "error", new_payload
+
+
 def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
     """Re-evaluate freshness + step_count + image_size sub-checks under
     current thresholds. D_cadence is left at the recorded value (its
@@ -161,6 +217,14 @@ def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
     payload = row["payload"] or {}
     if isinstance(payload, str):
         payload = json.loads(payload)
+
+    # Checked before the sub_status recompute: this row's F verdict is not a
+    # threshold call at all, it is a transport failure misfiled as one, and
+    # recomputing thresholds over it would leave the wrong status in place.
+    timeout_fix = _reverdict_l1_image_timeout(row, payload)
+    if timeout_fix is not None:
+        return timeout_fix
+
     sub = payload.get("sub_status")
     if not isinstance(sub, dict):
         return None
