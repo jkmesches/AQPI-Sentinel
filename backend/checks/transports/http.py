@@ -6,12 +6,37 @@ idempotent requests.
 """
 from __future__ import annotations
 import asyncio
+import contextvars
 import logging
 import random
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+# === Load-bearing: separate monitoring traffic from user traffic ===
+#
+# One HttpClient is shared by the scheduler AND the /api/upstream map proxy, so
+# a single pair of counters conflates two populations with nothing to do with
+# each other. Someone scrubbing the map inflates read_timeouts with fetches
+# that say nothing about whether monitoring is healthy — observed 2026-08-31,
+# when the counter read 47 read timeouts while only 4 scheduled checks had
+# timed out; the other 43 were map frames.
+#
+# That matters because read_timeouts is the signal for "upstream's latency tail
+# has moved, revisit DEFAULT_TIMEOUT_S". Polluted by map usage it cannot carry
+# that meaning. A contextvar attributes each request instead: the API sets it
+# for the duration of a proxied request, everything else is scheduler traffic.
+_CALLER: contextvars.ContextVar[str] = contextvars.ContextVar("http_caller", default="check")
+
+
+def set_http_caller(kind: str):
+    """Tag upstream requests made on this task. Returns the reset token."""
+    return _CALLER.set(kind)
+
+
+def reset_http_caller(token) -> None:
+    _CALLER.reset(token)
 
 # === Load-bearing: this timeout tracks upstream's latency, not a round number ===
 #
@@ -96,9 +121,13 @@ class HttpClient:
         self.retries_attempted = 0
         self.retries_succeeded = 0
         # Read timeouts are counted but never retried (see NO_RETRY_EXC).
-        # Watch this against total_requests: a rising ratio means upstream is
-        # degrading, and is the signal to revisit DEFAULT_TIMEOUT_S.
-        self.read_timeouts = 0
+        # Split by caller: only the `check` bucket is a statement about
+        # upstream health, because the `proxy` bucket rises and falls with how
+        # much anyone happens to be using the map. Watch check_read_timeouts
+        # against check_requests — that ratio is the signal to revisit
+        # DEFAULT_TIMEOUT_S; the combined ratio is not.
+        self.read_timeouts = 0                      # total, both callers
+        self.by_caller: dict[str, dict[str, int]] = {}
 
     async def _request(self, method: str, url: str, *, retries: int | None = None,
                        **kw) -> httpx.Response:
@@ -107,6 +136,9 @@ class HttpClient:
         for attempt in range(attempts):
             self.in_flight += 1
             self.total_requests += 1
+            caller = _CALLER.get()
+            self.by_caller.setdefault(caller, {"requests": 0, "read_timeouts": 0})
+            self.by_caller[caller]["requests"] += 1
             try:
                 r = await self._client.request(method, url, **kw)
                 if r.status_code in RETRY_STATUS and attempt < attempts - 1:
@@ -124,6 +156,7 @@ class HttpClient:
                 last_exc = e
                 if isinstance(e, NO_RETRY_EXC):
                     self.read_timeouts += 1
+                    self.by_caller[caller]["read_timeouts"] += 1
                     raise
                 if attempt < attempts - 1:
                     self.retries_attempted += 1

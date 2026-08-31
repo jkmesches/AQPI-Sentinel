@@ -244,6 +244,20 @@ def create_app() -> FastAPI:
     # allow-origin" while the response looked fine in curl. If you
     # ever switch auth back to cookies, you'll need to enumerate
     # allowed origins explicitly (or proxy + same-origin).
+    # Attribute upstream requests made while serving an HTTP request to the
+    # `proxy` bucket. Without this, map traffic and scheduled monitoring share
+    # one set of counters, and the read-timeout ratio stops meaning anything
+    # about upstream health — see set_http_caller in transports/http.py.
+    from ..checks.transports.http import set_http_caller, reset_http_caller
+
+    @app.middleware("http")
+    async def _tag_http_caller(request, call_next):
+        token = set_http_caller("proxy")
+        try:
+            return await call_next(request)
+        finally:
+            reset_http_caller(token)
+
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,

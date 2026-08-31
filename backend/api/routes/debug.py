@@ -74,6 +74,9 @@ async def stats(request: Request):
             # as a ratio of total_requests. A sustained rise means upstream's
             # latency tail has moved and DEFAULT_TIMEOUT_S wants revisiting.
             "read_timeouts": getattr(http, "read_timeouts", None),
+            # Split by caller. Only the `check` bucket says anything about
+            # upstream health; `proxy` tracks how much the map is being used.
+            "by_caller": getattr(http, "by_caller", None),
         }
 
     # Inbound image-proxy hits. Distinguishes "the browser asked us" from
