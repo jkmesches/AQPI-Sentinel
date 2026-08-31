@@ -58,16 +58,29 @@ class Layer1ProductCheck(Check):
         metrics: dict[str, float] = {}
 
         # --- A. API up + B. schema ---------------------------------------
+        #
+        # Manifest latency is recorded deliberately. These fetches time out in
+        # production during episodes, yet every direct probe of the same
+        # endpoint returns in 0.03-0.33s — sequentially, at 48 concurrent, and
+        # alongside 12 slow radar-status requests on a shared client. Every one
+        # of those probes was a snapshot taken outside an episode, so none of
+        # them could see the thing being investigated. Recording it here
+        # measures the endpoint continuously, from the same process and code
+        # path that actually experiences the timeouts.
+        _m0 = utcnow()
         try:
             r = await ctx.http.get(
                 f"{SETTINGS.base}/api/productDetail",
                 params={"file": cfg["details"]},
             )
         except Exception as e:
+            # Censored observation: where we gave up, not how long it needed.
+            metrics["manifest_censored_ms"] = (utcnow() - _m0).total_seconds() * 1000
             if note_upstream_exception(self.id, e, t0):
                 payload["reason"] = "upstream_api"
                 payload["episode"] = in_episode()
             return _fail_envelope(self, t0, f"Manifest fetch failed: {humanize_error(e)}", payload, metrics)
+        metrics["manifest_ms"] = (utcnow() - _m0).total_seconds() * 1000
 
         payload["http"] = r.status_code
         if r.status_code != 200 or not r.headers.get("content-type", "").startswith("application/json"):

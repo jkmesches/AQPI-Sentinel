@@ -19,8 +19,9 @@ from config import BASE, RADAR_FOLDER, STATUS_TO_RADAR, X_MOMENTS, moment_to_pre
 # tests hit the same endpoint the fleet does, and a ceiling below it fails for
 # reasons unrelated to what is being tested. The 10s values here were set when
 # upstream's p95 was ~2.4s; measured 2026-08-31 its p90 is 8-13s, so a 10s
-# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S.
-LIVE_TIMEOUT_S = 20
+# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S
+# (moved 20 -> 35 with it on 2026-08-31).
+LIVE_TIMEOUT_S = 35
 
 # Threshold: observed silence longer than this with declared=UP = "ghost UP"
 SILENT_FAIL_S = 600   # 10 min

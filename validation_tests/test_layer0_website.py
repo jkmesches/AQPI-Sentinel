@@ -13,8 +13,9 @@ import requests
 # tests hit the same endpoint the fleet does, and a ceiling below it fails for
 # reasons unrelated to what is being tested. The 10s values here were set when
 # upstream's p95 was ~2.4s; measured 2026-08-31 its p90 is 8-13s, so a 10s
-# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S.
-LIVE_TIMEOUT_S = 20
+# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S
+# (moved 20 -> 35 with it on 2026-08-31).
+LIVE_TIMEOUT_S = 35
 
 BASE = "https://radarca.engr.colostate.edu"
 HOST = "radarca.engr.colostate.edu"
