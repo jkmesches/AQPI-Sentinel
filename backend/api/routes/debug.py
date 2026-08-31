@@ -67,6 +67,13 @@ async def stats(request: Request):
             # count with a low succeeded count means the latter.
             "retries_attempted": getattr(http, "retries_attempted", None),
             "retries_succeeded": getattr(http, "retries_succeeded", None),
+            # Read timeouts are deliberately NOT retried (see NO_RETRY_EXC in
+            # transports/http.py): upstream is alive but saturated, and a
+            # retry adds load at the worst moment. This counter is therefore
+            # the degradation signal that retries_* used to carry — watch it
+            # as a ratio of total_requests. A sustained rise means upstream's
+            # latency tail has moved and DEFAULT_TIMEOUT_S wants revisiting.
+            "read_timeouts": getattr(http, "read_timeouts", None),
         }
 
     # Inbound image-proxy hits. Distinguishes "the browser asked us" from

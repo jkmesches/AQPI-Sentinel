@@ -16,6 +16,7 @@ from typing import Any
 
 from ..config import PRODUCTS, SETTINGS, image_path
 from ..errors import humanize_error
+from .layer0_episode import note_upstream_exception, in_episode
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
@@ -63,6 +64,9 @@ class Layer1ProductCheck(Check):
                 params={"file": cfg["details"]},
             )
         except Exception as e:
+            if note_upstream_exception(self.id, e, t0):
+                payload["reason"] = "upstream_api"
+                payload["episode"] = in_episode()
             return _fail_envelope(self, t0, f"Manifest fetch failed: {humanize_error(e)}", payload, metrics)
 
         payload["http"] = r.status_code
@@ -156,8 +160,25 @@ class Layer1ProductCheck(Check):
         try:
             ir = await ctx.http.get(img_url, params={"file": img_file})
         except Exception as e:
+            # str() on an httpx timeout is empty, so record the class too or
+            # the only diagnostic left in the payload is a blank string.
+            payload["image_error"] = str(e) or type(e).__name__
+            payload["image_exception"] = type(e).__name__
+            # A read timeout is a gap in OUR visibility, not evidence the
+            # image is missing. Marking F_image_exists=fail rolls the whole
+            # product up to `fail` — a red cell asserting the product is
+            # broken — when all we actually know is that upstream did not
+            # answer in time. The manifest path above already gets this right
+            # via _fail_envelope; this one did not, so the same upstream
+            # slowness produced `error` or `fail` depending only on which
+            # fetch it happened to land on.
+            if note_upstream_exception(self.id, e, t0):
+                payload["reason"] = "upstream_api"
+                payload["episode"] = in_episode()
+                return _fail_envelope(
+                    self, t0, f"Image fetch timed out: {humanize_error(e)}",
+                    payload, metrics)
             sub["F_image_exists"] = "fail"
-            payload["image_error"] = str(e)
             return _final(self, t0, sub, payload, metrics,
                           summary=f"Image fetch failed: {humanize_error(e)}")
 
