@@ -8,6 +8,14 @@ import socket, ssl, subprocess, sys, time
 from datetime import datetime, timezone
 import requests
 
+# Live-probe timeout. Deliberately matches the production ceiling
+# (transports/http.DEFAULT_TIMEOUT_S) rather than being a round number: these
+# tests hit the same endpoint the fleet does, and a ceiling below it fails for
+# reasons unrelated to what is being tested. The 10s values here were set when
+# upstream's p95 was ~2.4s; measured 2026-08-31 its p90 is 8-13s, so a 10s
+# ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S.
+LIVE_TIMEOUT_S = 20
+
 BASE = "https://radarca.engr.colostate.edu"
 HOST = "radarca.engr.colostate.edu"
 PUBLIC_MARKERS = ("Radar Data", "Atmospheric Forecast", "CoSMoS Data",
@@ -19,7 +27,7 @@ TLS_DAYS_FLOOR = 30
 
 
 def check_public():
-    r = requests.get(f"{BASE}/public", timeout=10)
+    r = requests.get(f"{BASE}/public", timeout=LIVE_TIMEOUT_S)
     ok_status = r.status_code == 200
     ok_type = r.headers.get("content-type", "").startswith("text/html")
     ok_size = len(r.content) >= MIN_PUBLIC_BYTES
@@ -37,7 +45,7 @@ def check_public():
 def check_root_notfound():
     """Catch-all route renders Next.js not-found. Note: Next serves it with
     HTTP 200, so we assert via body markers, not status code."""
-    r = requests.get(f"{BASE}/", timeout=10)
+    r = requests.get(f"{BASE}/", timeout=LIVE_TIMEOUT_S)
     markers = {m: (m in r.text) for m in NOTFOUND_MARKERS}
     return {
         "pass": all(markers.values()),
@@ -48,7 +56,7 @@ def check_root_notfound():
 
 def check_tls():
     ctx = ssl.create_default_context()
-    with socket.create_connection((HOST, 443), timeout=10) as s:
+    with socket.create_connection((HOST, 443), timeout=LIVE_TIMEOUT_S) as s:
         with ctx.wrap_socket(s, server_hostname=HOST) as ss:
             cert = ss.getpeercert()
     not_after = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
@@ -74,7 +82,7 @@ def check_origin_alive():
     HIT permanently) — it stays 200 even if origin is dead. Use an /api route
     instead; those are no-store, so a 200 here proves the Django app is live.
     """
-    r = requests.get(f"{BASE}/api/radar-status/", timeout=10)
+    r = requests.get(f"{BASE}/api/radar-status/", timeout=LIVE_TIMEOUT_S)
     return {
         "pass": r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json"),
         "http": r.status_code,
