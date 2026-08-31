@@ -8,6 +8,7 @@
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
+	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS } from '$lib/mapPrefs';
 
 	interface RadarMeta {
 		id: string;
@@ -304,6 +305,76 @@
 	// Array (not Set) because Svelte 5 $state reliably re-triggers on array
 	// re-assignment but is finicky with Set replacement.
 	let activeRadars = $state<string[]>([]);
+
+	// The map's home view. Shared by first load and by Reset, so the two
+	// cannot drift apart.
+	const DEFAULT_CENTER: [number, number] = [-122.6, 37.95];
+	const DEFAULT_ZOOM = 7.2;
+
+	// --- persisted map settings -------------------------------------------
+	// Restored on mount, saved on change, cleared by Reset. Playback position
+	// and `playing` are deliberately excluded: restoring a scrubber to a
+	// timestamp that has scrolled out of the window shows stale weather, and
+	// auto-playing on arrival is hostile.
+	let prefsReady = $state(false);
+
+	function prefsVocabulary() {
+		return {
+			radars: radars.map((r) => r.id),
+			composites: Object.keys(COMP_EXTENT),
+			moments: MOMENTS.map((m) => m.key)
+		};
+	}
+
+	function applyPrefs(p: ReturnType<typeof loadPrefs>) {
+		composite       = p.composite as Composite;
+		currentMoment   = p.moment as Moment;
+		activeRadars    = [...p.activeRadars];
+		nexradEnabled   = p.nexrad;
+		overlayOpacity  = p.opacity;
+		panelOpen       = p.panelOpen;
+		watershedsOn    = p.watersheds;
+		reservoirsOn    = p.reservoirs;
+		terrainOn       = p.terrain;
+		terrain3DOn     = p.terrain3D;
+		streamGaugesOn  = p.streamGauges;
+		tiltEl          = p.tiltEl;
+		// Camera is deliberately NOT applied here. On mount the map is
+		// constructed at the saved camera instead (no visible snap), and Reset
+		// moves it explicitly. Calling jumpTo from here would also fire during
+		// the pre-radar-list pass, when `map` does not exist yet.
+	}
+
+	function currentPrefs() {
+		const c = map?.getCenter();
+		return {
+			composite, moment: currentMoment, activeRadars: [...activeRadars],
+			nexrad: nexradEnabled, opacity: overlayOpacity, panelOpen,
+			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
+			terrain3D: terrain3DOn, streamGauges: streamGaugesOn, tiltEl,
+			camera: c && map
+				? { lng: c.lng, lat: c.lat, zoom: map.getZoom(),
+				    bearing: map.getBearing(), pitch: map.getPitch() }
+				: null
+		};
+	}
+
+	// One writer for the whole blob. Gated on prefsReady so the empty state
+	// during mount cannot overwrite what we are still in the middle of
+	// restoring — without that gate, opening the page erases your settings.
+	$effect(() => {
+		void composite; void currentMoment; void activeRadars; void nexradEnabled;
+		void overlayOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
+		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
+		if (!prefsReady) return;
+		savePrefs(currentPrefs());
+	});
+
+	function resetMapSettings() {
+		const d = clearPrefs();
+		applyPrefs(d);
+		if (map) map.jumpTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, bearing: 0, pitch: 0 });
+	}
 	const isActive = (id: string) => activeRadars.includes(id);
 
 	const STYLE_DARK = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
@@ -1195,27 +1266,17 @@
 	$effect(() => {
 		void watershedsOn;
 		void reservoirsOn;
-		try {
-			localStorage.setItem(WATERSHEDS_KEY, watershedsOn ? 'on' : 'off');
-			localStorage.setItem(RESERVOIRS_KEY, reservoirsOn ? 'on' : 'off');
-		} catch { /* private mode etc. */ }
 		refreshGeography(theme.resolved);
 	});
 	// Terrain hillshade toggle — same shape as the geography one.
 	$effect(() => {
 		void terrainOn;
-		try {
-			localStorage.setItem(TERRAIN_KEY, terrainOn ? 'on' : 'off');
-		} catch { /* */ }
 		refreshTerrain(theme.resolved);
 	});
 	// 3D terrain mesh toggle — drapes the scene + pitches the camera.
 	// Independent from hillshade; the underlying DEM source is shared.
 	$effect(() => {
 		void terrain3DOn;
-		try {
-			localStorage.setItem(TERRAIN_3D_KEY, terrain3DOn ? 'on' : 'off');
-		} catch { /* */ }
 		refreshTerrain3D();
 	});
 	// Stream gauges toggle. Fetch is lazy — first time the toggle flips
@@ -1223,9 +1284,6 @@
 	// for an hour) and renders the markers.
 	$effect(() => {
 		void streamGaugesOn;
-		try {
-			localStorage.setItem(STREAM_GAUGES_KEY, streamGaugesOn ? 'on' : 'off');
-		} catch { /* */ }
 		refreshStreamGauges(theme.resolved);
 	});
 
@@ -1723,22 +1781,25 @@
 	}
 
 	onMount(async () => {
-		try {
-			const saved = localStorage.getItem(PANEL_KEY);
-			if (saved === 'closed') panelOpen = false;
-			if (localStorage.getItem(WATERSHEDS_KEY) === 'on') watershedsOn = true;
-			if (localStorage.getItem(RESERVOIRS_KEY) === 'on') reservoirsOn = true;
-			if (localStorage.getItem(TERRAIN_KEY) === 'on') terrainOn = true;
-			if (localStorage.getItem(TERRAIN_3D_KEY) === 'on') terrain3DOn = true;
-			if (localStorage.getItem(STREAM_GAUGES_KEY) === 'on') streamGaugesOn = true;
-		} catch { /* */ }
+		// Toggles that need no vocabulary can be applied before the radar list
+		// arrives; radars and composite are validated once we know what exists.
+		applyPrefs(loadPrefs());
 		radars = await fetch('/api/radars/meta').then((r) => r.json());
+		// Second pass, now able to drop a decommissioned radar or a renamed
+		// product rather than handing a stale id to MapLibre.
+		const restored = loadPrefs(prefsVocabulary());
+		applyPrefs(restored);
+		// Build the map AT the saved camera rather than jumping to it after
+		// load: a jumpTo here would render the default view first and visibly
+		// snap, and it would also fight the fitBounds paths on slow loads.
+		const cam = restored.camera;
 		map = new maplibregl.Map({
 			container: mapDiv,
 			style: styleUrl(),
-			center: [-122.6, 37.95],
-			zoom: 7.2,
-			bearing: defaultBearingFromRadars(radars),
+			center: cam ? [cam.lng, cam.lat] : DEFAULT_CENTER,
+			zoom: cam ? cam.zoom : DEFAULT_ZOOM,
+			pitch: cam ? cam.pitch : 0,
+			bearing: cam ? cam.bearing : defaultBearingFromRadars(radars),
 			attributionControl: { compact: true },
 			// Bound MapLibre's tile cache. Default is undefined → grows
 			// effectively unbounded. We don't pan, so a small cap suffices.
@@ -1758,10 +1819,18 @@
 			mapDead = true;
 		}, false);
 
+		// Persist the camera after the user stops moving, not during — moveend
+		// fires once per gesture, where `move` fires every frame.
+		map.on('moveend', () => { if (prefsReady) savePrefs(currentPrefs()); });
+
 		map.on('load', () => {
 			if (!map) return;
 			addBaseSourcesAndLayers(theme.resolved);
 			styleReady = true;
+			// Only now may the prefs writer run. Before this point the
+			// component is still assembling restored state, and an early save
+			// would persist a half-built snapshot over the user's real one.
+			prefsReady = true;
 
 			// === Load-bearing: paint once the style is ready ===
 			//
@@ -1909,7 +1978,7 @@
 		<!-- Collapsed: a single compact badge -->
 		<button
 			class="pointer-events-auto absolute right-3 top-3 flex items-center gap-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 px-2 py-1 text-[10.5px] shadow-xl backdrop-blur transition-colors hover:bg-[var(--color-elevated)]"
-			onclick={() => { panelOpen = true; try { localStorage.setItem(PANEL_KEY, 'open'); } catch { /* */ } }}
+			onclick={() => { panelOpen = true; }}
 			title="show layers"
 		>
 			<svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor" class="text-[var(--color-muted)]">
@@ -1934,16 +2003,26 @@
 					{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
 				</span>
 			</div>
+			<div class="flex items-center gap-2">
+				<button
+					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
+					title="reset radars, products, layers and view to defaults"
+					aria-label="reset map settings"
+					onclick={resetMapSettings}
+				>
+					reset
+				</button>
 			<button
 				class="inline-flex h-4 w-4 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 				title="hide panel"
 				aria-label="hide layers panel"
-				onclick={() => { panelOpen = false; try { localStorage.setItem(PANEL_KEY, 'closed'); } catch { /* */ } }}
+				onclick={() => { panelOpen = false; }}
 			>
 				<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5">
 					<line x1="2.5" y1="6" x2="9.5" y2="6" />
 				</svg>
 			</button>
+			</div>
 		</div>
 
 		<!-- Composite — dropdown picker (5 products + Off) -->
