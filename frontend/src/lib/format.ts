@@ -163,6 +163,7 @@ const L0_TARGET_LABELS: Record<string, string> = {
 	tls_cert:                  'TLS certificate',
 	origin_alive:              'Origin reachable',
 	'origin-episode':          'Upstream slow episode',
+	'origin-latency':          'Upstream latency canary',
 	public:                    'Public dashboard page',
 	root_notfound:             'Root URL (404 check)',
 	website_public:            'Public dashboard page',
@@ -246,6 +247,7 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	const tDash = target.replaceAll('_', ' ');
 	if (checkId.startsWith('layer0.tls.'))           return 'TLS certificate';
 	if (checkId === 'layer0.origin.episode')         return 'Upstream slow episode';
+	if (checkId === 'layer0.origin.latency')         return 'Upstream latency canary';
 	if (checkId.startsWith('layer0.origin.'))        return 'Origin reachable';
 	if (checkId.startsWith('layer0.website.public')) return 'Public dashboard page';
 	if (checkId.startsWith('layer0.website.root'))   return 'Root URL (404 check)';

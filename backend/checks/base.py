@@ -61,6 +61,15 @@ class Check:
     # get one page instead of five while keeping every per-radar verdict
     # visible and true.
     alarm_only_depends_on: list[str] = []
+    # Emit a `timed_out` metric (0 on success, 1 on read timeout) so
+    # avg(timed_out) over this check is a true truncation rate.
+    #
+    # Opt-in, because a rate needs BOTH outcomes. The scheduler can only see
+    # failures; the success side has to come from the check itself. If a check
+    # sets this without also emitting `timed_out: 0.0` on its success path the
+    # metric reads 1.0 forever, and if it emits 0 without setting this it reads
+    # 0.0 forever. Either way it silently lies, which is worse than absent.
+    reports_timeout_rate: bool = False
 
     async def run(self, ctx: "CheckContext") -> CheckResult:
         raise NotImplementedError

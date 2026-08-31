@@ -107,6 +107,8 @@ class OriginAliveCheck(Check):
     stage = "L0"
     target = "origin"
     cadence_s = 60
+    # Emits timed_out=0 on success below, so the scheduler may emit the 1.
+    reports_timeout_rate = True
     # Single point of blame for any upstream outage: if our internet or
     # DNS is broken, origin can't be reached even when it's fine. Sitting
     # those above origin in the dep tree means a Sentinel-side problem
@@ -117,6 +119,9 @@ class OriginAliveCheck(Check):
         t0 = utcnow()
         r = await ctx.http.get(f"{SETTINGS.base}/api/radar-status/")
         elapsed_ms = (utcnow() - t0).total_seconds() * 1000
+        # Emitted on success as well as failure so `timed_out` has a real
+        # denominator: avg(timed_out) is then the truncation rate directly,
+        # rather than something you have to reconstruct from run counts.
         passed = (
             r.status_code == 200
             and r.headers.get("content-type", "").startswith("application/json")
@@ -131,7 +136,7 @@ class OriginAliveCheck(Check):
                 "bytes": len(r.content),
                 "cache_control": r.headers.get("cache-control", ""),
             },
-            metrics={"latency_ms": elapsed_ms},
+            metrics={"latency_ms": elapsed_ms, "timed_out": 0.0},
         )
 
 
