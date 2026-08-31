@@ -18,7 +18,10 @@ from .check_labels import pretty_check_label
 from .checks.base import Check, CheckResult, utcnow
 from .checks.transports import CheckContext
 from .db.store import Store
+import httpx
+
 from .errors import humanize_error
+from .checks.layer0_episode import record_upstream_timeout, in_episode
 from .registry import CHECKS
 
 log = logging.getLogger(__name__)
@@ -367,12 +370,25 @@ class Scheduler:
                     )
                 else:
                     log.exception("check %s raised", check.id)
+                    # A read timeout means upstream accepted the connection and
+                    # then went quiet — it is alive but saturated. Record it so
+                    # layer0.origin.episode can tell one upstream slow episode
+                    # from N independent failures, and tag the payload as a gap
+                    # in OUR visibility rather than evidence the monitored thing
+                    # is broken. The verdict stays `error` either way: the cell
+                    # must keep saying we could not measure.
+                    is_read_timeout = isinstance(e, httpx.ReadTimeout)
+                    payload = {"exception": type(e).__name__, "message": str(e)}
+                    if is_read_timeout:
+                        record_upstream_timeout(check.id, t0)
+                        payload["reason"] = "upstream_api"
+                        payload["episode"] = in_episode()
                     result = CheckResult(
                         check_id=check.id, target=check.target, stage=check.stage,
                         status="error",
                         started_at=t0, finished_at=utcnow(),
                         summary=humanize_error(e),
-                        payload={"exception": type(e).__name__, "message": str(e)},
+                        payload=payload,
                     )
 
             # Local-network blame shield: if our own internet is down (per the
