@@ -13,6 +13,11 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket } from '$lib/api';
+	// Same encoding as the desktop timeline: colour is the worst status in the
+	// bucket, fill height is how much of it was at that status. Shared rather
+	// than reimplemented so the two surfaces cannot drift into disagreeing
+	// about what a cell means — see $lib/timelineFill.
+	import { STATUS_BG, cellFill, cellRatioText } from '$lib/timelineFill';
 	import {
 		prettyCheckLabel, stageLabel, productCategory,
 		PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
@@ -47,13 +52,6 @@
 		{ key: 'radar',        label: 'Radar',        stages: ['L2', 'L3', 'L4-T1T2'] }
 	];
 
-	const STATUS_BG: Record<string, string> = {
-		pass:  'var(--color-ok)',
-		warn:  'var(--color-warn)',
-		fail:  'var(--color-fail)',
-		error: 'var(--color-error)',
-		skip:  'var(--color-faint)'
-	};
 
 	// Cell geometry — sized so 14 columns + the time label fit in a
 	// 390px viewport without horizontal scroll. Wider columns (Radar
@@ -543,15 +541,15 @@
 								<button
 									type="button"
 									onclick={() => openDetail(b, col)}
-									aria-label="{prettyCheckLabel(col.id, col.target)} at {b.ts.slice(11,16)}Z: {cell?.status ?? 'no data'}{isUpstream ? ' (cascade from upstream)' : ''}"
+									aria-label="{prettyCheckLabel(col.id, col.target)} at {b.ts.slice(11,16)}Z: {cell?.status ?? 'no data'}{cell ? ', ' + cellRatioText(cell) : ''}{isUpstream ? ' (cascade from upstream)' : ''}"
 									class="shrink-0 rounded-[3px] border border-[var(--color-border)]/30 active:opacity-70 relative"
 									style="
 										width: {CELL}px; height: {CELL}px;
 										margin-right: {GAP}px;
-										background: {cell ? STATUS_BG[cell.status] : 'transparent'};
+										background: {cell ? cellFill(cell, cell.status, CELL) : 'transparent'};
 										-webkit-tap-highlight-color: transparent;
 									"
-									title={cell ? `${prettyCheckLabel(col.id, col.target)} — ${cell.status}${isUpstream ? ' (cascade from upstream)' : ''} (×${cell.n})` : prettyCheckLabel(col.id, col.target)}
+									title={cell ? `${prettyCheckLabel(col.id, col.target)} — ${cellRatioText(cell)}${isUpstream ? ' (cascade from upstream)' : ''}` : prettyCheckLabel(col.id, col.target)}
 								>
 									{#if isUpstream}
 										<!-- Up-arrow badge marks cells whose runs were cascade-
