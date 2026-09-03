@@ -12,7 +12,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 ## Status
 
-**v0.1.2** — feature-complete; running 24×7 against radarca. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
+**v0.2.0** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
 
 - **44 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
 - **18-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
