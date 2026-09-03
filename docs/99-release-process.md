@@ -73,11 +73,31 @@ which:
 
 1. Builds the backend + frontend images in parallel.
 2. Publishes to GHCR with the version-tag set:
-   - `ghcr.io/jkmesches/sentinel-backend:vX.Y.Z`
+   - `ghcr.io/jkmesches/sentinel-backend:X.Y.Z`
    - `ghcr.io/jkmesches/sentinel-backend:X.Y`
    - `ghcr.io/jkmesches/sentinel-backend:X`
+   - `ghcr.io/jkmesches/sentinel-backend:sha-<short>`
    - `ghcr.io/jkmesches/sentinel-backend:latest`
-   - (and the same four tags on the frontend)
+   - (and the same tags on the frontend)
+
+!!! warning "The image tag has no `v`, even though the git tag does"
+    `docker/metadata-action`'s `type=semver,pattern={{version}}` parses the
+    git ref as a semver and re-emits it **without** the leading `v`. So a git
+    tag of `v0.2.0` publishes an image tag of `0.2.0`:
+
+    ```bash
+    SENTINEL_TAG=0.2.0     # correct — pulls
+    SENTINEL_TAG=v0.2.0    # wrong  — manifest unknown
+    ```
+
+    This looks like a typo and invites "fixing", so: it is not. Confirmed
+    against the v0.2.0 publish logs, which pushed exactly `0.2.0`, `0.2`,
+    `0`, `latest` and `sha-abb11f5`. Every `SENTINEL_TAG=` example in these
+    docs was wrong by that one character until 2026-09-03.
+
+    Note also that a semver tag moves `latest` as well — metadata-action's
+    default `latest=auto` applies it to any non-prerelease version tag, in
+    addition to the explicit main-branch rule.
 
 Watch the run finish:
 
@@ -88,8 +108,8 @@ gh run watch
 ### 4. Verify the published images
 
 ```bash
-docker pull ghcr.io/jkmesches/sentinel-backend:vX.Y.Z
-docker pull ghcr.io/jkmesches/sentinel-frontend:vX.Y.Z
+docker pull ghcr.io/jkmesches/sentinel-backend:X.Y.Z
+docker pull ghcr.io/jkmesches/sentinel-frontend:X.Y.Z
 ```
 
 Both should succeed without authentication errors. If the packages
@@ -135,9 +155,9 @@ a normal release cycle:
 
 1. Pin prod to the previous good version on the host:
    ```bash
-   SENTINEL_TAG=vX.Y.Z-1 docker compose -f ops/docker-compose.ghcr.yml \
+   SENTINEL_TAG=X.Y.Z-1 docker compose -f ops/docker-compose.ghcr.yml \
        --env-file ops/.env.prod pull
-   SENTINEL_TAG=vX.Y.Z-1 docker compose -f ops/docker-compose.ghcr.yml \
+   SENTINEL_TAG=X.Y.Z-1 docker compose -f ops/docker-compose.ghcr.yml \
        --env-file ops/.env.prod up -d
    ```
 2. Branch from the last good tag locally:
@@ -157,9 +177,9 @@ a normal release cycle:
    ```
 6. CI publishes the new tag. Update prod:
    ```bash
-   SENTINEL_TAG=vX.Y.Z+1 docker compose -f ops/docker-compose.ghcr.yml \
+   SENTINEL_TAG=X.Y.Z+1 docker compose -f ops/docker-compose.ghcr.yml \
        --env-file ops/.env.prod pull
-   SENTINEL_TAG=vX.Y.Z+1 docker compose -f ops/docker-compose.ghcr.yml \
+   SENTINEL_TAG=X.Y.Z+1 docker compose -f ops/docker-compose.ghcr.yml \
        --env-file ops/.env.prod up -d
    ```
 7. Open a PR merging the hotfix back into main so future releases

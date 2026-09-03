@@ -4,9 +4,9 @@
 # `ghcr.io/jkmesches/sentinel-{backend,frontend}`.
 #
 # Pin to a specific tag for stability, or use `:latest` to track main:
-#   SENTINEL_TAG=v1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
+#   SENTINEL_TAG=1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
 #       --env-file ops/.env.prod pull
-#   SENTINEL_TAG=v1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
+#   SENTINEL_TAG=1.2.3 docker compose -f ops/docker-compose.ghcr.yml \
 #       --env-file ops/.env.prod up -d
 #
 # If the GHCR packages are still private, log in once with a personal
