@@ -17,7 +17,7 @@ different upstream is its own concern, covered in
 ## 1. Choosing a host
 
 Sentinel is light. A 2-vCPU / 4 GB / 30 GB host comfortably runs the
-radarca-scale install (38 checks, ~30 req/min outbound). The
+radarca-scale install (43 checks, ~30 req/min outbound). The
 reference deployment runs on an LXC at those specs and rarely tops
 1 GB resident — Playwright (used by the L3 overlay check) is the
 fattest single dependency, holding a Chromium worker.
@@ -118,26 +118,63 @@ pull.
 
 ## 3. The compose files
 
-Three compose files ship in `ops/`. They are not interchangeable:
+Four compose files ship in `ops/`. They are not interchangeable:
 
-| File | Source of images | Use for |
-|---|---|---|
-| `docker-compose.ghcr.yml` | Pulls from GHCR | **Production.** The fast, repeatable path. |
-| `docker-compose.prod.yml` | Builds locally from source | Branch testing, offline environments, or air-gapped deploys where GHCR is unreachable. |
-| `docker-compose.dev.yml` | Builds locally with dev hot-reload | Developer workflow only. **Never** point this at a prod database. |
+| File | Images | Proxy | Use for |
+|---|---|---|---|
+| `docker-compose.deploy.yml` | Pulls from GHCR | **Included** | **Start here.** A complete stack: proxy with TLS, Postgres, backend, frontend. |
+| `docker-compose.ghcr.yml` | Pulls from GHCR | none | You already run your own proxy and want Sentinel to slot into it. |
+| `docker-compose.prod.yml` | Builds from source | none | Branch testing, air-gapped hosts, or anywhere GHCR is unreachable. |
+| `docker-compose.dev.yml` | Postgres only | none | Developer workflow (`make dev`). **Never** point this at a prod database. |
 
-The two prod files mirror each other's env-var surface and named
-volumes exactly. Switching between them is purely an `-f` flag
-change in `docker compose` invocations. The dev compose has
-different volumes and ports; don't mix it with the prod ones.
+### Why `deploy` is the recommended one
+
+It is not merely `ghcr` plus a proxy. Three differences matter:
+
+**It publishes only the proxy's ports.** Postgres, the backend and the
+frontend are reachable only on the internal Docker network. That is
+also what makes the API same-origin, which in turn means
+`PUBLIC_SENTINEL_API_BASE` never has to be set — see §5.
+
+**Retention is on by default.** `SENTINEL_DB_RETENTION_DAYS` defaults
+to 60 in the file itself, not just in the example env. An operator who
+never opens the env file still gets a database that does not grow
+without bound. The other compose files leave it unset. This is not a
+hypothetical concern: the reference deployment filled its disk and
+crashed because of exactly this.
+
+**Logs are capped and every service has a healthcheck.** Container
+logs are the other unbounded disk-fill vector, and `depends_on:
+condition: service_healthy` means the proxy does not start routing to
+a backend that is still applying migrations.
+
+### First install, start to finish
+
+```bash
+cp ops/.env.deploy.example ops/.env
+chmod 600 ops/.env
+$EDITOR ops/.env                    # POSTGRES_PASSWORD + admin account are required
+
+bash ops/preflight.sh               # validates before anything starts
+
+docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env up -d
+docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env ps
+```
+
+`preflight.sh` checks the things that are cheap to catch now and
+expensive to diagnose later: missing password, busy port, unreachable
+GHCR package, a port accidentally left in `SENTINEL_SITE_ADDRESS`,
+retention disabled, insufficient disk. Blockers exit non-zero;
+judgement calls are warnings.
 
 ---
 
 ## 4. Environment variables
 
-The full reference is `ops/.env.prod.example` — it's annotated and
-self-documenting. The narrative version below explains *what each
-variable controls* and *when you'd change it*.
+The full reference is `ops/.env.deploy.example` for the recommended
+path (or `ops/.env.prod.example` if you build from source) — both are
+annotated and self-documenting. The narrative version below explains
+*what each variable controls* and *when you'd change it*.
 
 ### Postgres
 
@@ -230,22 +267,46 @@ falls back to 5s polling, pulse animations stop firing, and alarm
 notifications surface ~5 seconds late. Every config below handles
 this.
 
-### Caddy
+### Caddy — shipped, no config to write
 
-The shortest config. Caddy fetches certs from Let's Encrypt
-automatically.
+If you use `docker-compose.deploy.yml` you do not write any of this.
+`ops/Caddyfile` is included and wired up; you set two variables in
+`ops/.env` and it handles routing, WebSocket upgrade and certificates.
 
-```caddy
-sentinel.example.com {
-    reverse_proxy /api/* backend:8000
-    reverse_proxy /*     frontend:3000
-}
+| Deployment | `SENTINEL_SITE_ADDRESS` | `SENTINEL_TLS_DIRECTIVE` |
+|---|---|---|
+| LAN, no TLS — works with no DNS at all | `:80` | *(blank)* |
+| Internal hostname, self-signed | `https://sentinel.lab.example.edu` | `tls internal` |
+| Public hostname, Let's Encrypt | `https://sentinel.example.edu` | `tls ops@example.edu` |
+
+`:80` matches any hostname or IP, which is why the default install
+needs no DNS and no edits.
+
+!!! warning "Never put a port in `SENTINEL_SITE_ADDRESS`"
+    Caddy binds whatever port the address names **inside** the
+    container, while compose maps host ports to container 80/443.
+    Writing `http://host:8080` makes Caddy listen on 8080 internally,
+    leaves nothing behind container port 80, and the site becomes
+    unreachable **with no error in any log**. To serve on a different
+    host port set `HTTP_PORT` / `HTTPS_PORT` instead.
+    `preflight.sh` rejects this before you hit it.
+
+With `tls internal`, Caddy issues from its own CA. Browsers warn until
+that CA is trusted once; export it with:
+
+```bash
+docker cp sentinel-caddy:/data/caddy/pki/authorities/local/root.crt .
 ```
 
-That's it. WebSocket upgrade is handled transparently by Caddy's
-`reverse_proxy` directive. For LAN-only deployments without a public
-DNS name, swap the site address for `:443` and add an `tls
-internal` directive to use Caddy's built-in CA.
+The `sentinel_caddy_data` volume holds issued certificates and that CA.
+Losing it means re-issuing certs — and for `tls internal`, re-trusting
+a new CA on every client machine. Include it in backups.
+
+### Rolling your own
+
+The sections below are for slotting Sentinel into a proxy you already
+run, using `docker-compose.ghcr.yml`. The routing is the same:
+`/api/*` → `backend:8000`, everything else → `frontend:3000`.
 
 ### nginx
 
@@ -491,9 +552,18 @@ provider-agnostic.
 
 ## 9. First-time deploy checklist
 
+**Before you start anything**, run `bash ops/preflight.sh`. It covers
+the whole pre-boot half of this list — docker present, env file valid
+and not world-readable, required secrets set, ports free, images
+pullable, retention configured, disk adequate, compose and Caddyfile
+both parse. Everything below is the post-boot half, which only a
+running system can answer.
+
 Walk through these once before declaring the deploy "done":
 
-- [ ] `docker compose ps` shows all three containers `running healthy`.
+- [ ] `docker compose ps` shows every container `running healthy`
+      (four with `docker-compose.deploy.yml`: caddy, backend,
+      frontend, postgres).
 - [ ] Backend logs include `scheduler started with N checks (max
       topological rank M)` where N matches your check count.
 - [ ] `/api/_debug/stats → event_loop_lag_ms` < 5 ms.
@@ -513,6 +583,13 @@ Walk through these once before declaring the deploy "done":
 - [ ] Simulate an upstream outage (block egress to the upstream for
       30 seconds): only the root failure cell goes red, downstream
       checks demote to gray with `↑` badges.
+- [ ] Confirm retention is actually on:
+      `docker exec sentinel-backend printenv SENTINEL_DB_RETENTION_DAYS`
+      returns a number. Blank or `0` means the database grows without
+      bound, which is a slow failure you will not notice for months.
+- [ ] Take one backup and **restore it somewhere else** before you
+      need to. An untested backup is a guess — see
+      [`MAINTENANCE.md`](MAINTENANCE.md).
 
 If any box doesn't tick, the corresponding subsystem isn't set up
 yet — go back to its section above.

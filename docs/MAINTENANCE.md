@@ -115,7 +115,7 @@ whether the backend is wedged or whether the issue is browser-side.
 ### Performance tuning
 
 Sentinel runs comfortably on a 2-vCPU / 4 GB host for the radarca
-scale (38 checks, ~30 outbound req/min). Symptoms of under-resourcing
+scale (43 checks, ~30 outbound req/min). Symptoms of under-resourcing
 that show up in `/api/_debug/stats`:
 
 | Symptom | Likely cause | Fix |
@@ -447,7 +447,7 @@ section before changing anything that writes to disk.
 | Nightly `pg_dump` | NFS — `/mnt/aqpi-data/backups/db` | Off-box by definition. |
 | Container logs | local disk, rotated | Capped at 50 MB × 3 per service by the compose `x-logging` anchor. |
 
-The NFS share is `10.25.0.80:/Erebor/aqpi_data` (2.6 TB), attached to the LXC
+The NFS share in the reference deployment is a 2.6 TB export attached to the LXC
 as a **Proxmox bind mount declared in the container config on the host**
 (`mp0:` in `/etc/pve/lxc/123.conf`), not by the guest. It is persistent across
 reboots. Note that this means `/etc/fstab` inside the container is empty and

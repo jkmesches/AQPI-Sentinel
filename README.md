@@ -78,18 +78,27 @@ Make targets: `make dev | status | logs | stop | restart | restart-fe | restart-
 
 ## Production deploy
 
-Pull tagged images from GHCR:
+One command brings up the whole stack — reverse proxy with TLS,
+Postgres, backend, frontend. Nothing else to install.
 
 ```bash
-cp ops/.env.prod.example ops/.env.prod      # fill in values, one-time
+cp ops/.env.deploy.example ops/.env
+chmod 600 ops/.env
+$EDITOR ops/.env            # POSTGRES_PASSWORD + admin account are required
 
-SENTINEL_TAG=v0.1.2 docker compose -f ops/docker-compose.ghcr.yml \
-  --env-file ops/.env.prod pull
-SENTINEL_TAG=v0.1.2 docker compose -f ops/docker-compose.ghcr.yml \
-  --env-file ops/.env.prod up -d
+bash ops/preflight.sh       # catches config problems before anything starts
+
+docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env up -d
 ```
 
-`SENTINEL_TAG=latest` tracks `main`. Building locally instead works too — swap to `ops/docker-compose.prod.yml` with `--build`.
+Defaults to `:80` on any hostname, so it works with no DNS. For TLS set
+two variables (`SENTINEL_SITE_ADDRESS`, `SENTINEL_TLS_DIRECTIVE`) — see
+`ops/Caddyfile`. Pin `SENTINEL_TAG` to a release rather than `latest`
+for a deployment that does not change under you.
+
+Already run your own proxy? Use `ops/docker-compose.ghcr.yml` instead.
+Need to build from source (air-gapped, or a branch)?
+`ops/docker-compose.prod.yml` with `--build`.
 
 [Deployment & backup recipes →](docs/02-deployment.md)
 

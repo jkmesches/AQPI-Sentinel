@@ -22,9 +22,18 @@ data/
 !frontend/static/data/**
 
 # --- Local config / secrets ---
+#
+# Deliberately broad. The deployment docs instruct operators to create
+# ops/.env and ops/.env.prod, which the previous `.env` / `.env.*.local`
+# rules did NOT match — one `git add -A` would have put a Postgres password
+# and an admin password into git history permanently, where removing them
+# means rewriting history and rotating both.
+#
+# Ignore every env file anywhere, then re-admit the committed templates.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # --- Validation test artifacts (regenerable) ---
 validation_tests/samples/
