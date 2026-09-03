@@ -1,0 +1,167 @@
+# Sentinel — complete, self-contained deployment.
+#
+# This is the file to use for a fresh install on a machine you control. It
+# pulls pre-built images and brings up everything needed: reverse proxy with
+# TLS, Postgres, backend, frontend. Nothing else to install.
+#
+#   cp ops/.env.deploy.example ops/.env    # then edit it
+#   bash ops/preflight.sh                  # checks the env before first boot
+#   docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env up -d
+#
+# How this differs from the other compose files, so you pick the right one:
+#
+#   docker-compose.deploy.yml  (this)  pre-built images + proxy. For operators.
+#   docker-compose.ghcr.yml            pre-built images, no proxy, ports exposed.
+#   docker-compose.prod.yml            builds from source. For maintainers.
+#   docker-compose.dev.yml             Postgres only, for `make dev`.
+#
+# Only the proxy publishes host ports. Postgres, the backend and the frontend
+# are reachable only on the internal network, which is what lets the browser
+# treat the API as same-origin — see ops/Caddyfile for why that matters.
+
+name: sentinel
+
+# Container logs are an unbounded disk-fill vector, and on this project that is
+# not hypothetical: an earlier deployment filled its disk and crashed. Every
+# service caps them.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: sentinel-caddy
+    restart: unless-stopped
+    <<: *logging
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      SENTINEL_SITE_ADDRESS:  ${SENTINEL_SITE_ADDRESS:-http://localhost}
+      SENTINEL_TLS_DIRECTIVE: ${SENTINEL_TLS_DIRECTIVE:-}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      # 443 is published even for a plain-HTTP site address; it simply goes
+      # unused. Leaving it out would mean editing this file to enable TLS later.
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Issued certificates and Caddy's local CA. Losing this volume means
+      # re-issuing certs — and for `tls internal`, re-trusting a new CA on
+      # every client machine.
+      - sentinel_caddy_data:/data
+      - sentinel_caddy_config:/config
+    networks: [sentinel]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see ops/.env.deploy.example}
+      POSTGRES_DB:       ${POSTGRES_DB:-sentinel}
+    # Tuned for this workload rather than left at defaults. The timeline
+    # queries sort large windows; without work_mem they spill to disk, and
+    # without temp_file_limit a single bad query can fill the volume.
+    command: >
+      postgres
+      -c temp_file_limit=1GB
+      -c work_mem=16MB
+      -c log_temp_files=64MB
+    volumes:
+      - ${SENTINEL_PGDATA_PATH:-sentinel_pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [sentinel]
+
+  backend:
+    image: ghcr.io/${SENTINEL_IMAGE_OWNER:-jkmesches}/sentinel-backend:${SENTINEL_TAG:-latest}
+    container_name: sentinel-backend
+    restart: unless-stopped
+    <<: *logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SENTINEL_DB_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentinel}
+      SENTINEL_BASE:   ${SENTINEL_BASE:-https://radarca.engr.colostate.edu}
+      SENTINEL_API_HOST: 0.0.0.0
+      SENTINEL_API_PORT: 8000
+      SENTINEL_LOG_LEVEL: ${SENTINEL_LOG_LEVEL:-INFO}
+      SENTINEL_ARCHIVE_ENABLED: "1"
+      SENTINEL_ARCHIVE_ROOT:    /data/archive
+      SENTINEL_COLD_ROOT:       /data/cold
+      SENTINEL_ARCHIVE_RETENTION_DAYS: ${SENTINEL_ARCHIVE_RETENTION_DAYS:-}
+      # === Load-bearing: without these the database grows without bound ===
+      # Defaulted here rather than left blank because an operator who never
+      # reads the env file still gets retention. The alternative is the
+      # failure this project has already had once: the disk filled and the
+      # stack crashed.
+      SENTINEL_DB_RETENTION_DAYS: ${SENTINEL_DB_RETENTION_DAYS:-60}
+      SENTINEL_RETENTION_HOUR_UTC: ${SENTINEL_RETENTION_HOUR_UTC:-9}
+      SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}
+      SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
+      SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
+      SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-${SENTINEL_SITE_ADDRESS:-}}
+    volumes:
+      # Archived L4 images. Point SENTINEL_ARCHIVE_PATH at a large disk or a
+      # network mount if you keep images for long: this grows roughly 7 GB a
+      # month at radarca scale.
+      - ${SENTINEL_ARCHIVE_PATH:-sentinel_archive}:/data/archive
+      # Offloaded rows aged out of Postgres by the retention sweep.
+      - ${SENTINEL_COLD_PATH:-sentinel_cold}:/data/cold
+    healthcheck:
+      # urllib rather than curl. curl happens to be present in the image
+      # today, but that is an implementation detail of the base image that
+      # could change; python is the one interpreter guaranteed to be there.
+      # /api/version needs no auth and does not touch the database, so this
+      # reports the process being alive rather than the upstream being well —
+      # which is what a container healthcheck should do. Sentinel's own checks
+      # are what report on upstream.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/version', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Migrations and the first check sweep run at boot; do not fail during it.
+      start_period: 60s
+    networks: [sentinel]
+
+  frontend:
+    image: ghcr.io/${SENTINEL_IMAGE_OWNER:-jkmesches}/sentinel-frontend:${SENTINEL_TAG:-latest}
+    container_name: sentinel-frontend
+    restart: unless-stopped
+    <<: *logging
+    depends_on:
+      - backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks: [sentinel]
+
+volumes:
+  sentinel_pgdata:      { name: sentinel_pgdata }
+  sentinel_archive:     { name: sentinel_archive }
+  sentinel_cold:        { name: sentinel_cold }
+  sentinel_caddy_data:  { name: sentinel_caddy_data }
+  sentinel_caddy_config: { name: sentinel_caddy_config }
+
+networks:
+  sentinel:
+    name: sentinel

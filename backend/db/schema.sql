@@ -32,7 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_run_check_finished ON check_runs(check_id, finish
 -- Retention sweeps delete by age across the whole table; without this they
 -- Seq Scan to find the cutoff.
 CREATE INDEX IF NOT EXISTS idx_run_finished     ON check_runs(finished_at);
-CREATE INDEX IF NOT EXISTS idx_ms_ts            ON metric_samples(ts);
 
 CREATE TABLE IF NOT EXISTS metric_samples (
   ts            TIMESTAMPTZ NOT NULL,
@@ -42,6 +41,12 @@ CREATE TABLE IF NOT EXISTS metric_samples (
   value         DOUBLE PRECISION NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ms_lookup ON metric_samples(check_id, target, metric, ts DESC);
+-- Retention sweeps delete by ts across all checks, which idx_ms_lookup
+-- (leading with check_id) cannot serve. Must stay BELOW the table: an
+-- index above its CREATE TABLE only appears to work on a database that
+-- already has the table, so it passes every upgrade and fails every
+-- fresh install.
+CREATE INDEX IF NOT EXISTS idx_ms_ts            ON metric_samples(ts);
 
 CREATE TABLE IF NOT EXISTS alarms (
   id            BIGSERIAL PRIMARY KEY,

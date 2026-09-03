@@ -1,0 +1,78 @@
+# Sentinel reverse proxy.
+#
+# Why a proxy is not optional here: the frontend resolves the API origin at
+# runtime from window.location (see frontend/src/lib/origin.ts). Served on
+# port 3000 it assumes the backend is at :8000 on the same host, which forces
+# you to expose two ports and breaks the moment TLS or a hostname is involved.
+# Behind this proxy everything is same-origin, so PUBLIC_SENTINEL_API_BASE —
+# which is baked in at IMAGE BUILD TIME and therefore cannot be changed in a
+# pre-built GHCR image — never needs to be set at all.
+#
+# Configured by two variables in ops/.env (see .env.deploy.example).
+#
+# IMPORTANT: SENTINEL_SITE_ADDRESS must NOT contain a port. Caddy binds
+# whatever port the address names, INSIDE the container, while compose always
+# maps host ports to container 80/443. Writing http://host:8080 makes Caddy
+# listen on 8080 internally, nothing is behind container port 80, and the site
+# is silently unreachable with no error in any log. To serve on a different
+# HOST port, change HTTP_PORT / HTTPS_PORT instead and leave this portless.
+#
+# The three deployments that cover essentially everyone:
+#
+#   1. LAN, no TLS. The default. `:80` matches ANY hostname or IP, so this
+#      works out of the box with no DNS and nothing to configure.
+#        SENTINEL_SITE_ADDRESS=:80
+#        SENTINEL_TLS_DIRECTIVE=
+#
+#   2. Internal hostname, self-signed cert from Caddy's own CA. No public DNS
+#      needed; browsers warn until the CA is trusted once. The CA cert is at
+#      /data/caddy/pki/authorities/local/root.crt inside the caddy container.
+#        SENTINEL_SITE_ADDRESS=https://sentinel.lab.example.edu
+#        SENTINEL_TLS_DIRECTIVE=tls internal
+#
+#   3. Public hostname, automatic Let's Encrypt. Requires public DNS pointing
+#      here and ports 80+443 reachable from the internet.
+#        SENTINEL_SITE_ADDRESS=https://sentinel.example.edu
+#        SENTINEL_TLS_DIRECTIVE=tls ops@example.edu
+#
+# The ACME email lives in the TLS directive rather than a global `email`
+# option because Caddy rejects an empty `email` outright — a global option
+# cannot be left blank for the LAN case, so one variable covers all three.
+
+{
+	# The admin API is an unauthenticated local control plane. Nothing here
+	# uses it, so it stays off rather than listening on 2019.
+	admin off
+}
+
+{$SENTINEL_SITE_ADDRESS::80} {
+	{$SENTINEL_TLS_DIRECTIVE:}
+
+	encode zstd gzip
+
+	# Every backend route is under /api, including the /api/ws websocket —
+	# verified against the router prefixes, so this single rule is complete.
+	# Caddy performs the websocket upgrade transparently; do not add header
+	# manipulation here, it breaks the upgrade.
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			# L4 image proxying and long history exports can outlast the
+			# default. The backend's own upstream ceiling is 35s, so this
+			# must stay comfortably above it or the proxy would cut off
+			# requests the backend was going to answer.
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
