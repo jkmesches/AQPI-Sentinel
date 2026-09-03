@@ -64,7 +64,7 @@ three names to whitelist.
 
 CI publishes container images to GitHub Container Registry on every
 push to `main` and on every `vX.Y.Z` tag (see
-[`docker-publish.yml`](https://github.com/jkmesches/SentinelProject/blob/main/.github/workflows/docker-publish.yml)).
+[`docker-publish.yml`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/.github/workflows/docker-publish.yml)).
 Available image namespaces:
 
 - `ghcr.io/jkmesches/sentinel-backend`
@@ -694,8 +694,8 @@ the code while I deploy" days.
 **Recipe.**
 
 ```bash
-git clone https://github.com/jkmesches/SentinelProject.git
-cd SentinelProject
+git clone https://github.com/jkmesches/AQPI-Sentinel.git
+cd AQPI-Sentinel
 cp ops/.env.prod.example ops/.env.prod    # fill in
 docker compose -f ops/docker-compose.prod.yml \
     --env-file ops/.env.prod up -d --build

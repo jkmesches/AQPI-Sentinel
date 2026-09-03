@@ -593,7 +593,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/SentinelProject/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/jkmesches/SentinelProject/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/jkmesches/SentinelProject/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/jkmesches/SentinelProject/releases/tag/v0.1.0
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/jkmesches/AQPI-Sentinel/releases/tag/v0.1.0

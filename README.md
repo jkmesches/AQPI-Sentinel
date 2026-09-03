@@ -6,7 +6,7 @@
 
 Sentinel watches the upstream stack from five angles, turns anomalies into routed alarms (email · Web Push · webhook · console), and ships a CSU-themed operations console plus an iPhone-native PWA at `/m/*`.
 
-[**Full documentation →**](https://jkmesches.github.io/SentinelProject/) · [Architecture](docs/ARCHITECTURE.md) · [Maintenance](docs/MAINTENANCE.md) · [Changelog](CHANGELOG.md)
+[**Full documentation →**](https://jkmesches.github.io/AQPI-Sentinel/) · [Architecture](docs/ARCHITECTURE.md) · [Maintenance](docs/MAINTENANCE.md) · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -49,7 +49,7 @@ State-over-time grid pivoted on `(check × time bucket)`. Selectable grain (1m /
 Prereqs: **Docker** (for Postgres), **Python 3.12**, **Node 20+**.
 
 ```bash
-git clone https://github.com/jkmesches/SentinelProject sentinel
+git clone https://github.com/jkmesches/AQPI-Sentinel sentinel
 cd sentinel
 
 python3 -m venv .venv

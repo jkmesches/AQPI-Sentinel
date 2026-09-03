@@ -82,7 +82,7 @@
 				{/if}
 				<a
 					class="text-[var(--color-muted)] active:text-[var(--color-bright)] underline-offset-2 hover:underline"
-					href="https://jkmesches.github.io/SentinelProject/"
+					href="https://jkmesches.github.io/AQPI-Sentinel/"
 					target="_blank"
 					rel="noopener"
 				>documentation</a>

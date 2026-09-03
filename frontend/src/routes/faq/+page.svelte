@@ -116,7 +116,7 @@
 		A longer version of this page, plus deployment and maintenance guides, lives on the
 		<a
 			class="text-[var(--color-accent)] hover:text-[var(--color-bright)] transition-colors"
-			href="https://jkmesches.github.io/SentinelProject/04-faq/"
+			href="https://jkmesches.github.io/AQPI-Sentinel/04-faq/"
 			target="_blank"
 			rel="noopener"
 		>documentation site</a>.

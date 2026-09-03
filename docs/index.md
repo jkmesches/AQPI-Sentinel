@@ -36,7 +36,7 @@ are the source of truth.
 - **FAQ for the lab team**: [what Sentinel watches and how it decides](04-faq.md).
 - **Latest release**: see [CHANGELOG](changelog.md).
 - **Container images**: `ghcr.io/jkmesches/sentinel-{backend,frontend}`.
-- **Repository**: [github.com/jkmesches/SentinelProject](https://github.com/jkmesches/SentinelProject)
+- **Repository**: [github.com/jkmesches/AQPI-Sentinel](https://github.com/jkmesches/AQPI-Sentinel)
 - **API reference** (live, against a running backend): `https://<your-host>/api/docs`
 - **Quickstart**: pull `ops/docker-compose.ghcr.yml` from the repo,
   copy `ops/.env.prod.example` to `ops/.env.prod`, fill in the

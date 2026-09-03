@@ -8,7 +8,7 @@
 #     broken links and YAML errors before they hit main)
 #   - manual workflow_dispatch → on-demand redeploy
 #
-# Site URL: https://jkmesches.github.io/SentinelProject/
+# Site URL: https://jkmesches.github.io/AQPI-Sentinel/
 #
 # One-time setup in the repo settings:
 #   Settings → Pages → Build and deployment → Source: GitHub Actions

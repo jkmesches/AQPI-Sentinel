@@ -49,7 +49,7 @@ class CheckResult:
 The scheduler handles exceptions for you — if `run()` raises, the
 scheduler catches it and emits a `status=error` CheckResult with the
 humanized exception in the summary (see
-[`backend/errors.py`](https://github.com/jkmesches/SentinelProject/blob/main/backend/errors.py)).
+[`backend/errors.py`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/backend/errors.py)).
 So you only need explicit error handling for cases where you want a
 specific summary string.
 

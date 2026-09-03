@@ -14,9 +14,9 @@ site_name: AQPI Sentinel
 site_description: >-
   Documentation for AQPI Sentinel — radar / product / infrastructure
   monitoring for the radarca.engr.colostate.edu stack.
-site_url: https://jkmesches.github.io/SentinelProject/
-repo_url: https://github.com/jkmesches/SentinelProject
-repo_name: jkmesches/SentinelProject
+site_url: https://jkmesches.github.io/AQPI-Sentinel/
+repo_url: https://github.com/jkmesches/AQPI-Sentinel
+repo_name: jkmesches/AQPI-Sentinel
 edit_uri: edit/main/docs/
 
 # Renders the docs/ tree. README.md at the repo root stays as the
@@ -125,7 +125,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/jkmesches/SentinelProject
+      link: https://github.com/jkmesches/AQPI-Sentinel
   # Multi-version docs (mike) deferred — add `version: { provider: mike,
   # default: latest }` here and switch the workflow to `mike deploy`
   # once we want docs/v0.1/ vs docs/v1.0/ side-by-side.

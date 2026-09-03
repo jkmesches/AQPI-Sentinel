@@ -124,7 +124,7 @@ setups. The `app.state` pattern is the FastAPI-idiomatic escape hatch.
 ### Error handling
 
 Raise `HTTPException` with a status code + a plain-English detail.
-Use the [`humanize_error()`](https://github.com/jkmesches/SentinelProject/blob/main/backend/errors.py)
+Use the [`humanize_error()`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/backend/errors.py)
 helper for upstream exceptions:
 
 ```python
