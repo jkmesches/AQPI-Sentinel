@@ -87,14 +87,22 @@ then forgetting to pin back, is the most common foot-shoot.
 
 ### Private vs public packages
 
-By default a package's visibility tracks its repo's. While the
-repo is public but the packages are private (the current state),
-the prod host needs to authenticate before pulling:
+Both the repository and the packages are **private**, and they
+stay that way: Sentinel is proprietary and permission to deploy is
+granted per-party in writing (see [`LICENSE`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/LICENSE)).
+Every host that pulls therefore has to authenticate.
+
+!!! warning "Do not make the packages public"
+    Anonymous pulls would let anyone run the images regardless of
+    whether they hold permission, which is the thing the licence
+    exists to control. Public packages are the wrong answer here
+    even though they are the more convenient one.
+
+#### If you own the repository
 
 1. Generate a [Personal Access Token](https://github.com/settings/tokens)
-   (Classic) with **only** the `read:packages` scope. Save it
-   somewhere safe.
-2. On the prod host:
+   (Classic) with **only** the `read:packages` scope.
+2. On the host that will pull:
    ```bash
    echo "$GHCR_PAT" | docker login ghcr.io \
        -u <your-github-username> --password-stdin
@@ -103,11 +111,27 @@ the prod host needs to authenticate before pulling:
    configured credential helper). Subsequent `docker compose pull`
    calls authenticate automatically.
 
-**Going public** drops the auth step entirely — anonymous pulls
-work, multi-host deploys get easier, no PAT rotation. The downside
-is no visibility into who pulled what. Flip per-package from
-**github.com → your packages → sentinel-backend → Package settings
-→ Change visibility → Public** (repeat for `sentinel-frontend`).
+#### If you are deploying someone else's instance
+
+A token only ever carries **its own owner's** access, so you cannot
+authenticate to a private package you have not been granted. The
+`docker login` above will succeed and the pull will still fail with
+`manifest unknown` or `unauthorized` — which reads like a wrong tag
+rather than a permissions problem, so check this first.
+
+The owner grants access one of two ways:
+
+- **Package access** — the package's own settings carry a list of
+  users and teams with read access. This is the narrower grant: it
+  gives you the images without the source.
+- **Repository collaborator** — a package linked to a private repo
+  inherits that repo's access, so adding you as a collaborator also
+  grants the pull. Broader, since it includes the code.
+
+Either way **you** then create your own `read:packages` token and
+run the `docker login` above with your own username. Never share the
+owner's token: it cannot be scoped to one package, and revoking it
+breaks every host that used it.
 
 **Rotating the PAT.** Generate a new token, run `docker login` again
 to overwrite the saved credentials, then revoke the old token. No
