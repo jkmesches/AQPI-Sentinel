@@ -155,6 +155,38 @@ class AlarmEngine:
         if existing:
             # alarm already open — let the ticker handle promotions; no new row
             return
+
+        # === Hold-down: has this actually persisted? ===
+        #
+        # Route is resolved from the result rather than from an alarm row,
+        # because there is no alarm row yet — that is the decision being made.
+        hold_s = self.cfg.hold_down_for(
+            self.router.match(
+                {"check_id": result.check_id, "target": result.target,
+                 "stage": result.stage, "status_at_open": result.status},
+                {},
+            )
+        )
+        if hold_s > 0:
+            try:
+                started = await self.store.non_pass_streak_start(
+                    result.check_id, result.target
+                )
+            except Exception:
+                # Never let a hold-down lookup swallow a real alarm. Failing
+                # open here means at worst the old, noisier behaviour.
+                log.exception("hold-down lookup failed for %s; opening anyway",
+                              result.check_id)
+                started = None
+            if started is not None:
+                persisted = (result.finished_at - started).total_seconds()
+                if persisted < hold_s:
+                    log.debug(
+                        "hold-down: %s non-pass for %.0fs (< %ds) — not opening yet",
+                        result.check_id, persisted, hold_s,
+                    )
+                    return
+
         # open a new one
         sev = severity_for_status(result.status)
         latest_status_by_check = {

@@ -42,11 +42,33 @@ escalation_policies:
       # - delay: 5m
       #   receivers: [oncall-primary]
 
+# --- How long a condition must persist before it becomes an alarm ---------
+#
+# Without a hold-down, one bad check run opens an alarm and one good run
+# closes it. Measured over the 7 days to 2026-09-03: 2,308 alarms, 91.9% of
+# which closed in under five minutes. They flapped and self-resolved before a
+# human could look — and each would have been an email once SMTP was on.
+#
+# Surviving alarms by hold-down, same window:
+#     none 2,308  |  2m 719  |  5m 187  |  10m 122
+# All 21 alarms longer than four hours, and all 7 still open, are in the 187.
+#
+# Every individual bad run is still recorded and still drawn on the timeline.
+# This only changes what counts as an *alarm*.
+hold_down: 5m
+
 routes:
   # L0 — site / origin down: page immediately, hard.
+  #
+  # Shorter hold-down than the rest, deliberately. This route exists to page
+  # fast on a real outage, so five minutes is too much latency to accept. But
+  # it cannot be zero: layer0.origin.alive flapped 69 times in seven days,
+  # averaging 44 seconds, and every one of those would have hard-paged. Two
+  # minutes clears the flaps with the least delay that does.
   - match: {stage: L0}
     severity_floor: critical
     policy: hard-page
+    hold_down: 2m
     repeat_interval: 10m
 
   # L2 radar: anything not pass goes to standard.
