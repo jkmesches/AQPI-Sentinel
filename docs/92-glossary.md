@@ -275,7 +275,7 @@ How often a check is scheduled to run. Set on each check class as
 - L1 max-water: 3600 s (1 h).
 
 Sparkline window auto-adapts to the cadence
-([`format.ts:windowFromCadence`](https://github.com/jkmesches/SentinelProject/blob/main/frontend/src/lib/format.ts)).
+([`format.ts:windowFromCadence`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/frontend/src/lib/format.ts)).
 The sparkline plots ~30 cadence intervals at a glance, snapping the
 window to a natural unit so the inline label reads cleanly.
 

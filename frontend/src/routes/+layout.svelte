@@ -249,7 +249,7 @@
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
 				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
-				href="https://jkmesches.github.io/SentinelProject/"
+				href="https://jkmesches.github.io/AQPI-Sentinel/"
 				target="_blank"
 				rel="noopener"
 			>documentation</a>

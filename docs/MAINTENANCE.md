@@ -179,7 +179,7 @@ gives you a quick read on the upgrade risk:
 
 ```bash
 # Read the CHANGELOG between your current version and the target.
-gh release view v0.2.0 --repo jkmesches/SentinelProject
+gh release view v0.2.0 --repo jkmesches/AQPI-Sentinel
 
 # Pull the new tag.
 SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
@@ -188,7 +188,7 @@ SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
 # Check what changed in the env example — new variables may have
 # appeared with sensible defaults you might want to override.
 diff ops/.env.prod.example <(curl -fsSL \
-    "https://raw.githubusercontent.com/jkmesches/SentinelProject/v0.2.0/ops/.env.prod.example")
+    "https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/v0.2.0/ops/.env.prod.example")
 
 # Apply.
 SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \

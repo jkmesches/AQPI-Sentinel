@@ -48,9 +48,9 @@ directory on the host:
 
 ```bash
 mkdir -p /srv/sentinel/ops && cd /srv/sentinel
-curl -fsSL https://raw.githubusercontent.com/jkmesches/SentinelProject/main/ops/docker-compose.ghcr.yml \
+curl -fsSL https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/main/ops/docker-compose.ghcr.yml \
     -o ops/docker-compose.ghcr.yml
-curl -fsSL https://raw.githubusercontent.com/jkmesches/SentinelProject/main/ops/.env.prod.example \
+curl -fsSL https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/main/ops/.env.prod.example \
     -o ops/.env.prod
 ```
 
