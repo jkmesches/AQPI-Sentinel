@@ -68,6 +68,104 @@
 	let opaque = $state<Record<string, any>>({});
 
 	let source = $state<'db' | 'yaml' | ''>('');
+
+	// --- SMTP reachability -------------------------------------------------
+	// Email recipients are configured HERE, but SMTP is configured on
+	// /admin/email. Nothing on this page used to mention that, so a recipient
+	// could be added, listed, and wired into a plan while email delivery was
+	// impossible — the page showed a complete-looking setup that could not
+	// deliver. That is the state a fresh install is in on day one.
+	let smtpHost = $state<string | null>(null);
+	let smtpChecked = $state(false);
+	const smtpReady = $derived(smtpChecked && !!smtpHost);
+	const emailRecipients = $derived(receivers.filter((r) => r.email.length > 0));
+	const smtpMissing = $derived(smtpChecked && !smtpHost && emailRecipients.length > 0);
+
+	async function loadSmtp() {
+		try {
+			const r = await fetch('/api/admin/settings/smtp');
+			if (r.ok) {
+				const v = (await r.json())?.value;
+				smtpHost = v?.host || null;
+			}
+		} catch {
+			// Leave smtpHost null; the banner only appears once we have actually
+			// checked, so a failed probe stays silent rather than crying wolf.
+		} finally {
+			smtpChecked = true;
+		}
+	}
+
+	// --- per-recipient test send -------------------------------------------
+	// A global "send test" proves SMTP works. It does not prove THIS address
+	// is reachable, spelled correctly, or not being swallowed by a spam rule —
+	// which is what an operator actually wants to know before trusting it.
+	let testing = $state<string | null>(null);
+	let testResults = $state<Record<string, { ok: boolean; msg: string }>>({});
+
+	async function testRecipient(r: Receiver) {
+		if (!r.email.length) return;
+		testing = r.name;
+		try {
+			const res = await fetch('/api/admin/email/test', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ to: r.email.join(',') })
+			});
+			const j = await res.json().catch(() => ({}));
+			testResults[r.name] = res.ok
+				? { ok: true, msg: `sent to ${r.email.join(', ')}` }
+				: { ok: false, msg: j?.detail || `HTTP ${res.status}` };
+		} catch (e) {
+			testResults[r.name] = { ok: false, msg: String(e) };
+		} finally {
+			testing = null;
+			testResults = { ...testResults };
+		}
+	}
+
+	// --- guided first-run --------------------------------------------------
+	// The page is laid out bottom-up: recipients, then plans, then rules —
+	// implementation order. A newcomer thinks top-down ("tell me when
+	// something breaks") and has to infer the chain from three separate
+	// paragraphs before anything happens. This does the whole chain from one
+	// field, and only appears while nobody would be emailed anyway.
+	let quickEmail = $state('');
+	let quickBusy = $state(false);
+	let quickErr = $state('');
+	const needsQuickStart = $derived(
+		receivers.length > 0 && emailRecipients.length === 0
+	);
+
+	async function quickSetup() {
+		const addr = quickEmail.trim();
+		if (!addr || !addr.includes('@')) { quickErr = 'Enter an email address.'; return; }
+		quickErr = '';
+		quickBusy = true;
+		try {
+			const name = addr.split('@')[0] || 'ops';
+			if (!receivers.some((r) => r.name === name)) {
+				receivers = [...receivers, { name, email: [addr], webhook: '', console: false,
+				                             group_ids: [], template: 'default' }];
+			}
+			// Wire into every plan's first step, which is what the routing
+			// rules already point at. Adding a recipient without this is the
+			// step people miss — it looks configured and notifies nobody.
+			policies = policies.map((p) => ({
+				...p,
+				steps: p.steps.length
+					? p.steps.map((st, i) => (i === 0 && !st.receivers.includes(name)
+						? { ...st, receivers: [...st.receivers, name] } : st))
+					: [{ delay: '0m', receivers: [name], group_ids: [] }]
+			}));
+			await save();
+		} catch (e) {
+			quickErr = String(e);
+		} finally {
+			quickBusy = false;
+		}
+	}
+
 	let updatedAt = $state<string | null>(null);
 	let updatedBy = $state<string | null>(null);
 	let loading = $state(true);
@@ -469,7 +567,7 @@
 		}
 	}
 
-	onMount(() => { load(); loadGroups(); loadCheckRegistry(); });
+	onMount(() => { load(); loadGroups(); loadCheckRegistry(); loadSmtp(); });
 </script>
 
 <div class="p-6 max-w-5xl">
@@ -478,6 +576,58 @@
 		Decide who gets notified when an alarm fires, with what urgency, and through which channel.
 		Saved to DB; the running alarm engine hot-reloads on save (no restart needed).
 	</div>
+
+	<!-- SMTP is configured on a DIFFERENT page. Without this, an email
+	     recipient can be added, listed and wired into a plan while delivery is
+	     impossible — a complete-looking setup that notifies nobody. -->
+	{#if smtpMissing}
+		<div class="mb-4 rounded-sm border border-[var(--color-fail)]/50 bg-[var(--color-fail)]/10 px-3 py-2 text-[11.5px] leading-relaxed">
+			<span class="text-[var(--color-fail)] font-semibold">Email will not be delivered.</span>
+			{emailRecipients.length} recipient{emailRecipients.length === 1 ? ' has' : 's have'}
+			an email address, but no SMTP server is configured, so those notifications
+			go nowhere. Configure it on
+			<a href="/admin/email" class="underline decoration-dotted hover:text-[var(--color-bright)]">Email / SMTP</a>,
+			then use <em>test</em> next to a recipient to confirm delivery.
+		</div>
+	{/if}
+
+	<!-- Guided first run. The sections below are ordered bottom-up
+	     (recipients, plans, rules) which is implementation order; a newcomer
+	     thinks top-down. This does the whole chain from one field, and only
+	     shows while nobody would receive an email anyway. -->
+	{#if needsQuickStart && !loading}
+		<div class="mb-5 rounded-sm border border-[var(--color-ok)]/40 bg-[var(--color-ok)]/5 px-3 py-3">
+			<div class="label text-[var(--color-bright)] mb-1">START HERE</div>
+			<div class="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
+				Nobody is currently emailed when something breaks. Enter an address and
+				Sentinel will create the recipient and add it to every escalation plan's
+				first step — the part that is easy to miss, because a recipient on its own
+				notifies nobody.
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<input
+					type="email"
+					bind:value={quickEmail}
+					placeholder="you@lab.example.edu"
+					class="w-72 border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
+				/>
+				<button
+					type="button"
+					disabled={quickBusy}
+					onclick={quickSetup}
+					class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
+				>{quickBusy ? 'saving…' : 'email me when something breaks'}</button>
+				{#if quickErr}<span class="text-[11px] text-[var(--color-fail)]">{quickErr}</span>{/if}
+			</div>
+			{#if !smtpReady && smtpChecked}
+				<div class="mt-2 text-[11px] text-[var(--color-warn)]">
+					You will also need SMTP configured on
+					<a href="/admin/email" class="underline decoration-dotted">Email / SMTP</a>
+					before anything is delivered.
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if !loading}
 		<div class="sticky top-0 z-10 -mx-6 px-6 py-2 mb-6 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center gap-3">
@@ -548,6 +698,22 @@
 							</td>
 							<td class="px-2 py-1 num text-[var(--color-muted)]">{r.template || 'default'}</td>
 							<td class="px-2 py-1 text-right whitespace-nowrap">
+								<!-- Proves THIS address is reachable, which a global SMTP
+								     test cannot: a working server still says nothing about a
+								     typo, or a spam rule swallowing this particular mailbox. -->
+								{#if r.email.length}
+									<button
+										onclick={() => testRecipient(r)}
+										disabled={testing === r.name}
+										title="send a test email to {r.email.join(', ')}"
+										class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2 disabled:opacity-50"
+									>{testing === r.name ? 'sending…' : 'test'}</button>
+									{#if testResults[r.name]}
+										<span class="mr-2 text-[10px] {testResults[r.name].ok ? 'text-[var(--color-ok)]' : 'text-[var(--color-fail)]'}"
+											title={testResults[r.name].msg}
+										>{testResults[r.name].ok ? 'sent' : 'failed'}</span>
+									{/if}
+								{/if}
 								<button onclick={() => openEditor(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2">edit</button>
 								<button onclick={() => delReceiver(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete</button>
 							</td>
