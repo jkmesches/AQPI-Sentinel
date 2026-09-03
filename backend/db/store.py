@@ -236,6 +236,38 @@ class Store:
             alarm_id, severity,
         )
 
+    async def non_pass_streak_start(self, check_id: str, target: str):
+        """When the current unbroken run of non-pass results began.
+
+        Returns None if the most recent result was pass/skip — i.e. there is
+        no streak in progress. Used by the alarm engine's hold-down: a
+        condition has to persist before it is worth calling an alarm.
+
+        Derived from check_runs rather than tracked in memory on purpose. An
+        in-process counter resets on every deploy, and this project deploys
+        often — a restart would forgive every in-flight streak and re-open
+        alarms that had already been held down. Reading the history means the
+        hold-down survives restarts, which is exactly when a genuine outage is
+        most likely to be in progress.
+
+        Served by idx_run_check_finished (check_id, finished_at DESC).
+        """
+        assert self.pool is not None
+        row = await self.pool.fetchrow(
+            """
+            SELECT min(finished_at) AS started
+            FROM check_runs
+            WHERE check_id = $1 AND target = $2
+              AND finished_at > coalesce(
+                    (SELECT max(finished_at) FROM check_runs
+                     WHERE check_id = $1 AND target = $2
+                       AND status IN ('pass', 'skip')),
+                    '-infinity'::timestamptz)
+            """,
+            check_id, target,
+        )
+        return row["started"] if row else None
+
     async def find_open_alarm(self, check_id: str, target: str) -> dict | None:
         assert self.pool is not None
         row = await self.pool.fetchrow(
