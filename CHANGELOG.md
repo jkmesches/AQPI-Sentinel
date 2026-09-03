@@ -26,7 +26,15 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-03
+
+Deployability release. v0.1.x was a system its author could run; this is
+the first version another team can stand up, keep running, and trust the
+alerts from. Every change below came from operating it or from auditing it
+against an outside operator who has none of the context.
+
 ### Added
+
 - **Upstream slow-episode correlation (`layer0.origin.episode`).** radarca does
   not fail to respond — 112 live probes of `/api/radar-status/` all returned
   HTTP 200. It answers slowly: steady-state p90 8–13s and rising, with episodes
@@ -43,89 +51,6 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
   Watch it against `total_requests`: a sustained rise means upstream's latency
   tail has moved and `DEFAULT_TIMEOUT_S` wants revisiting.
 
-### Changed
-- **Read timeouts are no longer retried.** A `ReadTimeout` means upstream took
-  the connection and went quiet — alive but saturated. We have already cost it
-  a full timeout, and the retry lands while it is still struggling; measured
-  counters said it rescued about 1 in 9 while doubling our wall cost per cycle
-  (20s → 40.5s on a 120s cadence). `ConnectTimeout`, `ConnectError` and 5xx
-  stay retryable — those cost upstream nothing.
-- **The check fleet is de-correlated.** Checks looped on a fixed period, so any
-  set starting together stayed in lockstep forever: 10–15 checks landing in the
-  same second was routine and 33–34 happened. Added ±5%-of-cadence zero-mean
-  per-cycle jitter (floor 2s), and widened the initial topological stagger from
-  2s to 8s per rank with the within-rank spread filling the whole step. Ranks
-  still start strictly in order. Measured in production, excluding the boot
-  transient: seconds carrying 8 or more concurrent checks fell from **17.0% to
-  1.3%**, and the mean from 3.44 to 1.50 checks/second. The *worst* single
-  second is unchanged (13 → 14) and that is expected — jitter makes phases
-  drift, so occasional coincidences still happen; what it removes is the
-  *sustained* lockstep, which is what was converting upstream's slow episodes
-  into our timeouts.
-
-### Fixed
-- **An image-fetch read timeout was reported as a broken product.** The image
-  fetch set `F_image_exists=fail` on *any* exception, rolling the product up to
-  `fail` — a red cell asserting the image is missing when all we knew was that
-  upstream did not answer in time. The manifest fetch on the same check already
-  returned `error` for the identical cause, so the verdict depended only on
-  which of the two fetches the slowness happened to land on. Now returns
-  `error` + `reason=upstream_api`. Applied retroactively to 121 rows spanning
-  2026-06-18 → 2026-08-31; the as-observed verdict is preserved under
-  `payload.original`, and re-running the job changes nothing.
-- **The episode detector undercounted**, seeing 10 of 14 concurrent timeouts,
-  because product checks handle their own image-fetch errors and never reached
-  the scheduler's handler. Both product fetch paths now feed it.
-- **`payload.image_error` recorded an empty string** — `str()` on an httpx
-  `ReadTimeout` is `""`. The exception class is captured alongside it.
-
-### Fixed
-- **GHOST_UP thresholds were measuring the wrong quantity.** The check gates
-  on `now - newest_published_timestamp`, which includes upstream's
-  **publication lag** (~300–500 s on this fleet), but `RADAR_SILENT_FAIL_S`
-  was calibrated from *inter-scan cadence* (~120 s). Several thresholds were
-  therefore impossible to satisfy: XSWR scans every 120 s and delivers ~27
-  images per poll — a healthy radar — yet reported `GHOST_UP` on **96%** of
-  runs in the 24 h to 2026-08-26, because its 240 s threshold sat below the
-  publication lag alone.
-
-  Recalibrated from 1.5× the observed p99 of `primary_age_s` over 24 h of
-  healthy operation: XSCV 600→660, XSCW 720 (kept), XSCR 300→**780**,
-  XSWR 240→**660**, CBAND 600→**1080**, XEBY 300 (kept).
-
-  **This cannot hide an outage.** A radar publishing no images is not-fresh
-  regardless of threshold (`primary_n == 0`), and 5,042 of XSWR's 7,950
-  GHOST_UPs over 14 days were exactly that. Thresholds govern only the
-  "images present but stale" case, where the cost is detection latency — a
-  frozen XSWR feed is now caught in 11 minutes instead of 4.
-
-  Applied retroactively: 231,430 rows evaluated, **6,406 reclassified**
-  (all `GHOST_UP` → `HEALTHY`; XSWR 2,900, XSCR 2,401, CBAND 1,056, XSCW 43,
-  XSCV 5, XEBY 1). Verified after: zero-image ghosts 37,872 before and after,
-  no rows deleted, all originals preserved, and the 79-hour 2026-08-13 fleet
-  episode still recorded in full across all five radars.
-
-- **`tune_silent_fail` perpetuated the same error.** It recommended from max
-  inter-scan gap while computing — and printing — the newest-image age it then
-  ignored. Worse, it recommended 480 s for CBAND, *below* CBAND's observed age
-  p99 of 717 s, which would have started false-firing a healthy radar. Now
-  recommends from `max(gap, age)` and flags `[lag-dominated]` radars.
-
-- **L2 reprocessing was a silent no-op.** `_reverdict_l2` read
-  `payload["reconcile"]`, a key `layer2_radar` has never emitted, so every row
-  returned `None` — which is where the belief that "historical L2 can't be
-  reprocessed" came from. Verified: 0 of 231,356 rows carry `reconcile`,
-  212,572 carry `observed`. Rewritten against the real shape, preserving the
-  original verdict/status/threshold under `payload.original` (first one wins
-  across repeated runs) and refusing outright to touch a zero-image row.
-
-- **L2 payload recorded the wrong threshold.** It stored `self.silent_fail_s`
-  (the constructor default) rather than the live threshold the run was gated
-  on — the field read 240 while `silent_fail_band` read `[594, 726]`. That
-  disagreement would have fed a wrong "original" threshold into the reprocess
-  audit trail.
-
-### Added
 - **`docs/04-faq.md` — FAQ for the lab team.** Ten questions for people who
   use Sentinel's readings rather than its code: what it watches (public
   radarca APIs only — no privileged access), `fail` vs `error`, why per-radar
@@ -315,6 +240,26 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Changed
 
+- **Read timeouts are no longer retried.** A `ReadTimeout` means upstream took
+  the connection and went quiet — alive but saturated. We have already cost it
+  a full timeout, and the retry lands while it is still struggling; measured
+  counters said it rescued about 1 in 9 while doubling our wall cost per cycle
+  (20s → 40.5s on a 120s cadence). `ConnectTimeout`, `ConnectError` and 5xx
+  stay retryable — those cost upstream nothing.
+- **The check fleet is de-correlated.** Checks looped on a fixed period, so any
+  set starting together stayed in lockstep forever: 10–15 checks landing in the
+  same second was routine and 33–34 happened. Added ±5%-of-cadence zero-mean
+  per-cycle jitter (floor 2s), and widened the initial topological stagger from
+  2s to 8s per rank with the within-rank spread filling the whole step. Ranks
+  still start strictly in order. Measured in production, excluding the boot
+  transient: seconds carrying 8 or more concurrent checks fell from **17.0% to
+  1.3%**, and the mean from 3.44 to 1.50 checks/second. The *worst* single
+  second is unchanged (13 → 14) and that is expected — jitter makes phases
+  drift, so occasional coincidences still happen; what it removes is the
+  *sustained* lockstep, which is what was converting upstream's slow episodes
+  into our timeouts.
+
+
 - **Sparkline: hybrid value + flow representation.** The pure
   count-per-bucket rewrite from 2026-05-19 fixed the outage-spoofing
   failure mode but homogenized every check's trace under normal
@@ -322,6 +267,68 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
   bucket loop now plots per-bucket mean of `value` for non-empty
   buckets, with empty buckets still dropping to baseline. Per-check
   signal returns; outage-detection behavior preserved.
+
+### Fixed
+
+- **An image-fetch read timeout was reported as a broken product.** The image
+  fetch set `F_image_exists=fail` on *any* exception, rolling the product up to
+  `fail` — a red cell asserting the image is missing when all we knew was that
+  upstream did not answer in time. The manifest fetch on the same check already
+  returned `error` for the identical cause, so the verdict depended only on
+  which of the two fetches the slowness happened to land on. Now returns
+  `error` + `reason=upstream_api`. Applied retroactively to 121 rows spanning
+  2026-06-18 → 2026-08-31; the as-observed verdict is preserved under
+  `payload.original`, and re-running the job changes nothing.
+- **The episode detector undercounted**, seeing 10 of 14 concurrent timeouts,
+  because product checks handle their own image-fetch errors and never reached
+  the scheduler's handler. Both product fetch paths now feed it.
+- **`payload.image_error` recorded an empty string** — `str()` on an httpx
+  `ReadTimeout` is `""`. The exception class is captured alongside it.
+
+- **GHOST_UP thresholds were measuring the wrong quantity.** The check gates
+  on `now - newest_published_timestamp`, which includes upstream's
+  **publication lag** (~300–500 s on this fleet), but `RADAR_SILENT_FAIL_S`
+  was calibrated from *inter-scan cadence* (~120 s). Several thresholds were
+  therefore impossible to satisfy: XSWR scans every 120 s and delivers ~27
+  images per poll — a healthy radar — yet reported `GHOST_UP` on **96%** of
+  runs in the 24 h to 2026-08-26, because its 240 s threshold sat below the
+  publication lag alone.
+
+  Recalibrated from 1.5× the observed p99 of `primary_age_s` over 24 h of
+  healthy operation: XSCV 600→660, XSCW 720 (kept), XSCR 300→**780**,
+  XSWR 240→**660**, CBAND 600→**1080**, XEBY 300 (kept).
+
+  **This cannot hide an outage.** A radar publishing no images is not-fresh
+  regardless of threshold (`primary_n == 0`), and 5,042 of XSWR's 7,950
+  GHOST_UPs over 14 days were exactly that. Thresholds govern only the
+  "images present but stale" case, where the cost is detection latency — a
+  frozen XSWR feed is now caught in 11 minutes instead of 4.
+
+  Applied retroactively: 231,430 rows evaluated, **6,406 reclassified**
+  (all `GHOST_UP` → `HEALTHY`; XSWR 2,900, XSCR 2,401, CBAND 1,056, XSCW 43,
+  XSCV 5, XEBY 1). Verified after: zero-image ghosts 37,872 before and after,
+  no rows deleted, all originals preserved, and the 79-hour 2026-08-13 fleet
+  episode still recorded in full across all five radars.
+
+- **`tune_silent_fail` perpetuated the same error.** It recommended from max
+  inter-scan gap while computing — and printing — the newest-image age it then
+  ignored. Worse, it recommended 480 s for CBAND, *below* CBAND's observed age
+  p99 of 717 s, which would have started false-firing a healthy radar. Now
+  recommends from `max(gap, age)` and flags `[lag-dominated]` radars.
+
+- **L2 reprocessing was a silent no-op.** `_reverdict_l2` read
+  `payload["reconcile"]`, a key `layer2_radar` has never emitted, so every row
+  returned `None` — which is where the belief that "historical L2 can't be
+  reprocessed" came from. Verified: 0 of 231,356 rows carry `reconcile`,
+  212,572 carry `observed`. Rewritten against the real shape, preserving the
+  original verdict/status/threshold under `payload.original` (first one wins
+  across repeated runs) and refusing outright to touch a zero-image row.
+
+- **L2 payload recorded the wrong threshold.** It stored `self.silent_fail_s`
+  (the constructor default) rather than the live threshold the run was gated
+  on — the field read 240 while `silent_fail_band` read `[594, 726]`. That
+  disagreement would have fed a wrong "original" threshold into the reprocess
+  audit trail.
 
 ## [0.1.2] — 2026-05-19
 
