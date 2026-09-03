@@ -81,7 +81,7 @@ Available image namespaces:
 | `sha-<short>` | every CI run | Reproducible reference to a specific commit. |
 
 **Pinning strategy.** Prefer `vX.Y.Z` in production. Bumping is a
-one-line change in `.env.prod` (`SENTINEL_TAG=v0.2.0`), followed by
+one-line change in `.env.prod` (`SENTINEL_TAG=0.2.0`), followed by
 `docker compose pull && up -d`. Pulling `latest` to test something,
 then forgetting to pin back, is the most common foot-shoot.
 

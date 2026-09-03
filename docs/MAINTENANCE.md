@@ -49,7 +49,7 @@ pull the desired image on the prod host:
    SENTINEL_TAG=latest docker compose -f ops/docker-compose.ghcr.yml \
        --env-file ops/.env.prod up -d
    ```
-   Pin `SENTINEL_TAG=v0.1.0` (or any released version) for predictable
+   Pin `SENTINEL_TAG=0.1.0` (or any released version) for predictable
    rollback.
 
 If you'd rather **build locally on the prod host** (e.g. no internet,
@@ -70,9 +70,9 @@ password and is gitignored locally).
 
 Pin to the previous tag and re-pull:
 ```bash
-SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod pull
-SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod up -d
 ```
 
@@ -146,9 +146,9 @@ cd /srv/sentinel
 docker ps --format '{{.Names}}\t{{.Image}}'
 
 # Roll to a known-good version (substitute your last good tag):
-SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod pull
-SENTINEL_TAG=v0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.0.9 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod up -d
 ```
 
@@ -182,7 +182,7 @@ gives you a quick read on the upgrade risk:
 gh release view v0.2.0 --repo jkmesches/AQPI-Sentinel
 
 # Pull the new tag.
-SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod pull
 
 # Check what changed in the env example — new variables may have
@@ -191,7 +191,7 @@ diff ops/.env.prod.example <(curl -fsSL \
     "https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/v0.2.0/ops/.env.prod.example")
 
 # Apply.
-SENTINEL_TAG=v0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod up -d
 
 # Verify.

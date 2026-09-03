@@ -417,9 +417,9 @@ verify in the GitHub package settings.
 work-in-progress fixes. Pin to a released version:
 
 ```bash
-SENTINEL_TAG=v0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod pull
-SENTINEL_TAG=v0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=0.1.0 docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod up -d
 ```
 
