@@ -22,7 +22,10 @@ filesystem (the dev default, where archive lives under ./data).
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from .. import thresholds
@@ -132,3 +135,137 @@ class Layer0DiskCheck(Check):
 
 
 register(Layer0DiskCheck())
+
+
+# ---------------------------------------------------------------------------
+# Backup freshness
+# ---------------------------------------------------------------------------
+#
+# The disk check above exists because nobody was watching the box doing the
+# watching. This is the same argument one step further: nobody is watching the
+# backups either.
+#
+# A cron backup fails silently by construction. `ops/backup.sh` writes its
+# outcome to status.json on every run — success or failure, including an
+# unexpected abort — and this check reads it. Without this, the first sign that
+# backups stopped working is needing one.
+#
+# Deliberately `skip` rather than `fail` when the status file is absent. Not
+# every deployment mounts the backup directory into the backend, and a check
+# that fails on an unconfigured optional feature trains operators to ignore it.
+# The distinction that matters is "configured and broken" versus "not
+# configured", and those must not look the same.
+
+BACKUP_STATUS_PATH = Path(
+    os.environ.get("SENTINEL_BACKUP_STATUS_PATH", "/data/backups/status.json")
+)
+# A daily backup that has not run in 36h has missed one and is into the second.
+# Warn there; fail at 3 days, by which point the newest restore point is old
+# enough to lose real data.
+BACKUP_WARN_AGE_H = 36
+BACKUP_FAIL_AGE_H = 72
+
+
+def _read_backup_status(path: Path) -> dict | None:
+    try:
+        with path.open("r") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+@register
+class Layer0BackupCheck(Check):
+    """Is the database backup actually running, and recent?"""
+
+    id         = "layer0.self.backup"
+    stage      = "L0"
+    target     = "sentinel-backup"
+    cadence_s  = 900
+    # Nothing upstream: a broken backup is our problem regardless of radarca.
+    depends_on: list[str] = []
+
+    async def run(self, ctx) -> CheckResult:
+        t0 = utcnow()
+        path = BACKUP_STATUS_PATH
+
+        # Blocking I/O, and the path may be a hung network mount — the same
+        # hazard the disk check guards against.
+        try:
+            data = await asyncio.wait_for(
+                asyncio.to_thread(_read_backup_status, path), timeout=10
+            )
+        except asyncio.TimeoutError:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="warn", started_at=t0, finished_at=utcnow(),
+                summary=f"timed out reading {path} — backup volume may be hung",
+                payload={"path": str(path), "reason": "timeout"},
+            )
+
+        if data is None:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="skip", started_at=t0, finished_at=utcnow(),
+                summary="backup monitoring not configured",
+                payload={
+                    "path": str(path),
+                    "reason": "no_status_file",
+                    "hint": "Run ops/backup.sh on the host and mount its "
+                            "SENTINEL_BACKUP_DIR read-only at /data/backups, "
+                            "or set SENTINEL_BACKUP_STATUS_PATH.",
+                },
+            )
+
+        finished = data.get("finished_at") or ""
+        try:
+            when = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+            age_h = (utcnow() - when).total_seconds() / 3600.0
+        except (ValueError, AttributeError):
+            when, age_h = None, None
+
+        reported = str(data.get("status", "unknown"))
+        detail   = str(data.get("detail", ""))
+        payload  = {
+            "path": str(path),
+            "reported_status": reported,
+            "detail": detail,
+            "finished_at": finished,
+            "age_hours": round(age_h, 1) if age_h is not None else None,
+            "artifact": data.get("artifact", ""),
+            "bytes": data.get("bytes", 0),
+        }
+
+        # The last run failing is worse than it being old: it means backups
+        # are actively broken now, not merely overdue.
+        if reported != "ok":
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="fail", started_at=t0, finished_at=utcnow(),
+                summary=f"last backup FAILED: {detail or 'no detail'}",
+                payload=payload,
+                metrics={"backup_age_hours": age_h} if age_h is not None else {},
+            )
+
+        if age_h is None:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="warn", started_at=t0, finished_at=utcnow(),
+                summary=f"backup status has an unreadable timestamp: {finished!r}",
+                payload=payload,
+            )
+
+        if age_h >= BACKUP_FAIL_AGE_H:
+            status, msg = "fail", f"no successful backup for {age_h:.0f}h"
+        elif age_h >= BACKUP_WARN_AGE_H:
+            status, msg = "warn", f"last backup was {age_h:.0f}h ago — a run has been missed"
+        else:
+            status, msg = "pass", f"last backup {age_h:.1f}h ago ({detail})"
+
+        return CheckResult(
+            check_id=self.id, target=self.target, stage=self.stage,
+            status=status, started_at=t0, finished_at=utcnow(),
+            summary=msg, payload=payload,
+            metrics={"backup_age_hours": age_h,
+                     "backup_bytes": float(data.get("bytes", 0) or 0)},
+        )

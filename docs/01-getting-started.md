@@ -126,7 +126,7 @@ step is required. Watch the backend come online:
 docker logs -f sentinel-backend
 ```
 
-When you see `scheduler started with 43 checks (max topological rank 2)`
+When you see `scheduler started with 44 checks (max topological rank 2)`
 the first wave of probes is firing — that's typically 5-10 seconds
 after the container starts.
 

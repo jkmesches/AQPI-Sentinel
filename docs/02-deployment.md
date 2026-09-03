@@ -596,6 +596,92 @@ yet — go back to its section above.
 
 ---
 
+## 9b. Backups, and moving existing data
+
+### Backups are not automatic
+
+Nothing takes a backup until you install the cron job. On the docker host:
+
+```bash
+0 8 * * * SENTINEL_BACKUP_DIR=/var/backups/sentinel \
+          /srv/sentinel/ops/backup.sh >> /var/log/sentinel-backup.log 2>&1
+```
+
+Validate the configuration first, which writes nothing:
+
+```bash
+SENTINEL_BACKUP_DIR=/var/backups/sentinel bash ops/backup.sh --check
+```
+
+Schedule it **earlier** than `SENTINEL_RETENTION_HOUR_UTC` (default 09:00 UTC)
+so a backup always precedes the sweep that deletes rows. Every setting is
+documented in the header of `ops/backup.sh`; the important ones are
+`SENTINEL_BACKUP_DIR`, `SENTINEL_BACKUP_KEEP` (must be ≥ 1), and
+`SENTINEL_BACKUP_REQUIRE_MOUNT` (refuses to write unless the destination is a
+real mountpoint, so a failed network mount cannot quietly fill the local disk).
+
+The script fails safely: it writes to a `.part` file and renames only after
+verifying the dump decompresses **and contains the Sentinel schema**, and it
+prunes old dumps only after a good one exists. A failed run can never leave
+you with fewer backups than you started with.
+
+### Making a silent backup failure loud
+
+A cron backup fails into a log nobody reads, and the first sign is needing
+one. `backup.sh` records the outcome of every run — success or failure — to
+`status.json`, and the `layer0.self.backup` check reads it and alarms when
+backups go stale (warn at 36 h, fail at 72 h) or when the last run failed.
+
+To enable it, point `SENTINEL_BACKUP_PATH` at the same absolute host path the
+cron job writes to, so the backend can see it read-only:
+
+```bash
+SENTINEL_BACKUP_PATH=/var/backups/sentinel     # in ops/.env
+```
+
+Without it the check reports `skip` — "not configured" — which is
+deliberately distinct from a failure, so an unconfigured optional feature
+never trains anyone to ignore a red cell.
+
+### Moving data from an existing deployment
+
+To carry history over to a new install, export from the old host and import
+into the new one:
+
+```bash
+# on the OLD host
+bash ops/export-data.sh -o /tmp
+rsync -av --partial /tmp/sentinel-export-<stamp>/ user@newhost:/tmp/sentinel-export-<stamp>/
+
+# on the NEW host
+bash ops/import-data.sh /tmp/sentinel-export-<stamp>
+docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env restart backend
+```
+
+The bundle carries a `manifest.json` with per-table row counts and a SHA-256
+of the dump. `import-data.sh` verifies the checksum **before** touching the
+database, then re-counts every table after restoring and compares. A transfer
+that lost rows aborts rather than quietly becoming a smaller dataset that
+looks fine.
+
+It also refuses to overwrite a database that already holds data unless you
+pass `--force` and type the database name. Restoring over populated tables is
+not a merge — it collides on primary keys and leaves neither the old data nor
+the new. Empty tables from a first boot are cleared automatically, since
+nothing is lost.
+
+**The image archive moves separately.** It is content-addressed, so rsync is
+the right tool — transfers resume and files already present are skipped:
+
+```bash
+rsync -av --partial --info=progress2 /path/to/archive/ user@newhost:/path/to/archive/
+```
+
+It is also optional. Sentinel runs fine without it; you lose the ability to
+view the images behind past verdicts, not any current monitoring.
+
+---
+
 ## 10. Building from source
 
 The GHCR pull path is what you want most of the time. Source builds
