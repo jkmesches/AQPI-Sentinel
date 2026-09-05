@@ -34,6 +34,8 @@ glossary defines the vocabulary; this doc records the policy.
 |---|---|---|---|
 | `layer0.net.internet` | Both HTTP probes fail | `fail` | Action |
 | `layer0.net.dns` | All DNS probes fail | `fail` | Action |
+| `layer0.net.radardisplay_tls` | radar-display's certificate fails verification | `fail` | Action |
+| `layer0.net.radardisplay_tls` | …expires within 14 days | `warn` | Attention |
 | `layer0.origin.alive` | `/api/radar-status/` not 200/JSON | `fail` | Action |
 | `layer0.website.public` | `/public` missing SSR markers | `fail` | Action |
 | `layer0.website.root_notfound` | Not-found markers absent | `warn` | Attention |
