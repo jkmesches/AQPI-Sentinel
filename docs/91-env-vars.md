@@ -37,6 +37,27 @@ inside Postgres.
 | `SENTINEL_ARCHIVE_ENABLED` | no | `1` | Persist L4 captured images. `0` to disable. |
 | `SENTINEL_ARCHIVE_ROOT` | no | `/data/archive` | Mount path. Volume-mapped from `sentinel_archive`. |
 | `SENTINEL_ARCHIVE_RETENTION_DAYS` | no | (blank = permanent) | Delete archived PNGs older than N days. |
+| `SENTINEL_PREWARM_ENABLED` | no | `0` | Continuously capture **every** published moment and tilt, rather than only what someone has looked at. See the warning below before enabling. |
+| `SENTINEL_PREWARM_INTERVAL_S` | no | `300` | Seconds between sweeps of all streams. Must stay below the origin's rolling-window length or frames are missed permanently — radar-display keeps 7 frames at ~140 s (~16 min). |
+| `SENTINEL_PREWARM_CONCURRENCY` | no | `3` | Simultaneous in-flight prewarm fetches, bounded independently of operator traffic. |
+
+!!! warning "`SENTINEL_PREWARM_ENABLED` is the only setting that creates upstream load nobody asked for"
+    Every other request Sentinel makes is a scheduled check or an operator
+    looking at something. Prewarm is neither, so it ships off.
+
+    Measured on the reference deployment (2026-09-05), enabling it takes the
+    archive from **~4,000 images/day to ~49,000**, and disk from ~280 MB/day
+    to **~1.1 GB/day** — about 34 GB/month, or 12 years on a 4.9 TB share. The
+    request load is roughly 8/min against radarca and 33/min against
+    radar-display.
+
+    Both are someone else's production systems, and radarca is slow even when
+    idle (p50 3.4 s, p90 8.3 s). Prewarm reuses the same LRU, archive and
+    single-flight as operator traffic, so a stream it already holds costs
+    nothing — steady-state cost is one fetch per genuinely new frame, not one
+    per sweep. Watch `prewarm.fetched` vs `prewarm.already_had` in
+    `/api/_debug/stats`: a sweep that is mostly `fetched` means the interval
+    is too long for the origin's window and frames are being lost.
 
 ---
 

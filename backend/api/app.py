@@ -207,9 +207,19 @@ async def lifespan(app: FastAPI):
     app.state.context = ctx
     app.state.engine = engine
     app.state.retention = retention
+
+    # Background capture of every moment + tilt. Off unless
+    # SENTINEL_PREWARM_ENABLED=1. Started last, and only after app.state is
+    # fully populated, because it reaches back through the proxy's
+    # _serve_source and would otherwise race the attributes it needs.
+    from ..prewarm import Prewarmer
+    prewarm = Prewarmer(app)
+    await prewarm.start()
+    app.state.prewarm = prewarm
     try:
         yield
     finally:
+        await prewarm.stop()
         await retention.stop()
         await sched.stop()
         await engine.stop()

@@ -37,6 +37,9 @@ class Settings:
     admin_password: str
     admin_display_name: str
     public_url: str                        # dashboard URL embedded in alert emails (empty = omit)
+    prewarm_enabled: bool                  # background capture of every moment + tilt
+    prewarm_interval_s: int                # seconds between sweeps of all streams
+    prewarm_concurrency: int               # simultaneous in-flight prewarm fetches
 
 
 def _load() -> Settings:
@@ -58,6 +61,19 @@ def _load() -> Settings:
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
         api_port=int(os.environ.get("SENTINEL_API_PORT", "8000")),
         log_level=os.environ.get("SENTINEL_LOG_LEVEL", "INFO"),
+        # Prewarm is OFF by default. It is the only thing in Sentinel that
+        # generates upstream traffic no operator asked for, and the increase is
+        # not marginal: measured on the reference deployment it takes the
+        # archive from ~4k images/day to ~49k, and adds sustained request load
+        # against two origins (one of which, radarca, is someone else's slow
+        # production research system). That is a decision for whoever runs the
+        # instance, not a default they inherit.
+        prewarm_enabled=os.environ.get("SENTINEL_PREWARM_ENABLED", "0") in ("1", "true", "yes"),
+        # One sweep visits every stream once. 300 s keeps tilts complete: their
+        # rolling window is 7 frames x ~140 s (~16 min), so a sweep every 5
+        # minutes cannot miss a frame even if one sweep is skipped entirely.
+        prewarm_interval_s=int(os.environ.get("SENTINEL_PREWARM_INTERVAL_S", "300")),
+        prewarm_concurrency=int(os.environ.get("SENTINEL_PREWARM_CONCURRENCY", "3")),
         archive_enabled=os.environ.get("SENTINEL_ARCHIVE_ENABLED", "1") not in ("0", "false", "no"),
         archive_root=Path(os.environ.get("SENTINEL_ARCHIVE_ROOT", str(data_dir / "archive"))).resolve(),
         archive_retention_days=retention,
