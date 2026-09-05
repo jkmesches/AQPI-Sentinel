@@ -837,6 +837,60 @@ def _tilt_source_key(radar: str, el: int, moment: str, ts_utc) -> str:
             f"{ts_utc.strftime('%Y%m%dT%H%M%SZ')}.png")
 
 
+# How far from the requested instant an archived frame may be and still count
+# as "what it looked like then". Frames land every ~140 s, so in continuous
+# coverage the nearest is always well inside this; the bound only matters
+# across a gap, where returning an hour-old frame would be a quiet lie.
+_TILT_NEAREST_TOLERANCE_S = 600
+
+
+async def _nearest_archived_tilt(pool, radar: str, el: int, moment: str, target):
+    """Archive key of the frame nearest ``target``, or None.
+
+    Needed because tilt frames are keyed by capture instant and captures land
+    on the origin's own ~140 s cadence, so an exact-second key almost never
+    matches what a scrubber asks for. Without this the archive-only path could
+    only answer requests that named a capture second exactly — which made the
+    "archive reaches back past the live window" behaviour true in storage and
+    useless in practice.
+
+    The embedded timestamp is fixed-width and UTC, so lexical order is
+    chronological order and the two candidates either side of the target can be
+    found with plain index range scans.
+    """
+    if pool is None:
+        return None
+    prefix = f"{_RD_SOURCE_PREFIX}{radar}/el_{el}/{moment}/"
+    key = f"{prefix}{target.strftime('%Y%m%dT%H%M%SZ')}.png"
+    rows = await pool.fetch(
+        """
+        (SELECT source FROM image_index
+          WHERE source LIKE $1 || '%' AND source <= $2
+          ORDER BY source DESC LIMIT 1)
+        UNION ALL
+        (SELECT source FROM image_index
+          WHERE source LIKE $1 || '%' AND source > $2
+          ORDER BY source ASC LIMIT 1)
+        """,
+        prefix, key,
+    )
+    best, best_delta = None, None
+    for r in rows:
+        src = r["source"]
+        stamp = src.rsplit("/", 1)[-1].removesuffix(".png")
+        try:
+            when = _dt.datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(
+                tzinfo=_dt.timezone.utc)
+        except ValueError:
+            continue
+        delta = abs((when - target).total_seconds())
+        if best_delta is None or delta < best_delta:
+            best, best_delta = (src, when), delta
+    if best is None or best_delta > _TILT_NEAREST_TOLERANCE_S:
+        return None
+    return best
+
+
 # Short-TTL memo of the per-(radar, el, moment) frame list. One tilt_steps
 # call is 7 JSON fetches; without this, every image request would repeat them.
 # Frames advance every ~140 s, so 45 s of staleness costs at most a slightly
@@ -949,7 +1003,18 @@ async def tilt_image(radar: str, el: int, moment: str, request: Request,
         if best is not None and abs((best["ts_utc"] - target).total_seconds()) <= 90:
             ts_utc, frame, archive_only = best["ts_utc"], best["frame"], False
         else:
-            ts_utc, archive_only = target, True
+            # Outside the live window the archive is the only possible source,
+            # and it holds frames on the origin's cadence rather than on the
+            # second the caller happened to ask for — so resolve to the nearest
+            # captured frame instead of demanding an exact match.
+            store = getattr(request.app.state, "store", None)
+            hit = await _nearest_archived_tilt(
+                store.pool if store else None, radar, el, moment, target)
+            if hit is None:
+                raise HTTPException(
+                    404, f"no archived {moment} frame for {radar} el_{el} near {time}")
+            _src, ts_utc = hit
+            archive_only = True
     else:
         if frame < 0 or frame >= _TILT_FRAMES:
             raise HTTPException(400, f"frame out of range (0..{_TILT_FRAMES - 1})")
