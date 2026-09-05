@@ -88,6 +88,11 @@ services:
       SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
       # Public-facing dashboard URL embedded in alert emails.
       SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-}
+      # Continuous capture of every moment + tilt. Off unless set to 1; see
+      # docs/91-env-vars.md for the measured cost before enabling.
+      SENTINEL_PREWARM_ENABLED:     ${SENTINEL_PREWARM_ENABLED:-0}
+      SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
+      SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
     volumes:
       # Both accept either a named volume (bare name, the dev default) or a
       # host path (leading slash → bind mount). Production points these at the

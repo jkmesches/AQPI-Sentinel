@@ -113,6 +113,16 @@ export const api = {
 	history:       (id: string, n = 50) => get<CheckRun[]>(`/api/checks/${id}/history?limit=${n}`),
 	metric:        (id: string, m: string, n = 60) =>
 		get<{ ts: string; value: number }[]>(`/api/checks/${id}/metrics?metric=${m}&limit=${n}`),
+	// Many series in one request, optionally only samples newer than `since`.
+	// Used by the sparkline refresh on every poll tick — see
+	// SentinelState.refreshSparklinesIncremental for why polling is required
+	// rather than relying on the WebSocket.
+	metricsRecent: (series: string[], since?: string, limit = 40) =>
+		get<Record<string, { ts: string; value: number }[]>>(
+			`/api/checks/-/metrics_recent?series=${encodeURIComponent(series.join(','))}` +
+			(since ? `&since=${encodeURIComponent(since)}` : '') +
+			`&limit=${limit}`
+		),
 	alarms:        (status = 'open')  => get<Alarm[]>(`/api/alarms?status=${status}&limit=200`),
 	alarm:         (id: number)       => get<Alarm & { ack: { acked_by: string; acked_at: string; note: string } | null; notifications: unknown[] }>(`/api/alarms/${id}`),
 	ack:           (id: number, body: { note?: string } = {}) =>

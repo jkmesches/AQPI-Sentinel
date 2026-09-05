@@ -182,18 +182,24 @@ class Store:
         return [dict(r) for r in rows]
 
     async def metric_series(
-        self, check_id: str, target: str, metric: str, limit: int = 500
+        self, check_id: str, target: str, metric: str, limit: int = 500,
+        since=None,
     ) -> list[dict[str, Any]]:
+        """Newest-first metric samples. ``since`` returns only newer ones,
+        which is what the dashboard's incremental sparkline refresh uses —
+        re-sending the whole window every poll would be most of a megabyte
+        per tab per minute for data the client already holds."""
         assert self.pool is not None
         rows = await self.pool.fetch(
             """
             SELECT ts, value
             FROM metric_samples
             WHERE check_id = $1 AND target = $2 AND metric = $3
+              AND ($5::timestamptz IS NULL OR ts > $5)
             ORDER BY ts DESC
             LIMIT $4
             """,
-            check_id, target, metric, limit,
+            check_id, target, metric, limit, since,
         )
         return [{"ts": r["ts"], "value": r["value"]} for r in rows]
 

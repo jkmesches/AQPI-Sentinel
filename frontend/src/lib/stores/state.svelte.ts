@@ -98,19 +98,95 @@ class SentinelState {
 		this.pulseTick = upd;
 	}
 
-	async refreshSparklines() {
-		if (!this.rollup) return;
-		// Fire-and-forget per check; each result lands incrementally so the UI
-		// can render the sparklines that *did* arrive without waiting on stragglers.
+	/** The (check, metric) pairs the dashboard draws sparklines for. */
+	private sparklineSeries(): { check_id: string; metric: string }[] {
 		const wanted: { check_id: string; metric: string }[] = [];
-		for (const r of this.rollup.stages?.L2 ?? []) {
+		for (const r of this.rollup?.stages?.L2 ?? []) {
 			wanted.push({ check_id: r.check_id, metric: 'images_Reflectivity' });
 		}
-		for (const r of this.rollup.stages?.L1 ?? []) {
+		for (const r of this.rollup?.stages?.L1 ?? []) {
 			if (r.check_id.startsWith('layer1.product.')) {
 				wanted.push({ check_id: r.check_id, metric: 'age_s' });
 			}
 		}
+		return wanted;
+	}
+
+	/**
+	 * Pull metric samples newer than what we already hold, and append.
+	 *
+	 * Load-bearing, and not an optimization. Sparklines were seeded once at
+	 * page load and thereafter fed only by WebSocket `run` events — which the
+	 * backend broadcasts ONLY when a check's status CHANGES. On a healthy
+	 * system that is almost never: 104 of 2,698 runs over two hours on
+	 * production, 3.85%. The other 96% of samples never reached the browser.
+	 *
+	 * Meanwhile Sparkline advances its own `now` every 5s, so the window kept
+	 * sliding while nothing new arrived: the trace drained away from the right
+	 * and eventually emptied, on checks that were perfectly healthy. That is
+	 * precisely the shape the component uses to mean "this upstream stopped"
+	 * — the signal it was rewritten to show after the 2026-05-19 outage — so
+	 * the bug did not merely blank a decoration, it manufactured the alarming
+	 * appearance it exists to convey.
+	 *
+	 * Polling here rather than broadcasting every run is deliberate: streaming
+	 * all runs is what wedged the tab at ~30 events/minute, which is why the
+	 * transition-only filter exists in the first place.
+	 */
+	async refreshSparklinesIncremental() {
+		if (!this.rollup) return;
+		const series = this.sparklineSeries();
+		if (!series.length) return;
+		const keys = series.map(({ check_id, metric }) => `${check_id}|${metric}`);
+
+		// One `since` for the whole batch: the oldest per-series high-water
+		// mark, so no series is asked for less than it needs. Falling back to
+		// a short lookback (not "everything") keeps the first incremental call
+		// cheap when a series is still empty.
+		let since: number | undefined;
+		for (const k of keys) {
+			const arr = this.metrics[k];
+			const newest = arr?.length ? arr[arr.length - 1].ts : undefined;
+			if (newest === undefined) continue;
+			since = since === undefined ? newest : Math.min(since, newest);
+		}
+		const sinceIso = new Date(since ?? Date.now() - 30 * 60_000).toISOString();
+
+		try {
+			const got = await api.metricsRecent(keys, sinceIso);
+			const next = { ...this.metrics };
+			let added = 0;
+			for (const [k, pts] of Object.entries(got ?? {})) {
+				if (!pts?.length) continue;
+				const arr = (next[k] ?? []).slice();
+				const have = new Set(arr.map((p) => p.ts));
+				// Server returns newest-first; append oldest-first so the array
+				// stays chronological, which the renderer assumes.
+				for (const p of [...pts].reverse()) {
+					const ts = Date.parse(p.ts);
+					if (!Number.isFinite(ts) || !Number.isFinite(p.value)) continue;
+					// De-dupe against the WebSocket, which may already have
+					// delivered this exact sample on a status transition.
+					if (have.has(ts)) continue;
+					have.add(ts);
+					arr.push({ ts, value: p.value });
+					added++;
+				}
+				arr.sort((a, b) => a.ts - b.ts);
+				while (arr.length > 240) arr.shift();
+				next[k] = arr;
+			}
+			if (added) this.metrics = next;
+		} catch {
+			/* transient; the next tick tries again */
+		}
+	}
+
+	async refreshSparklines() {
+		if (!this.rollup) return;
+		// Fire-and-forget per check; each result lands incrementally so the UI
+		// can render the sparklines that *did* arrive without waiting on stragglers.
+		const wanted = this.sparklineSeries();
 		for (const { check_id, metric } of wanted) {
 			// 90 samples seeds a 30-minute window even for L1 checks at 30s
 			// cadence with some headroom; L2 at 5-10 min cadence uses fewer.
@@ -320,7 +396,10 @@ class SentinelState {
 					this.stopTimer();
 				} else {
 					if (diag.poll) this.startTimer();
-					this.refresh();
+					// A hidden tab drops WS run events entirely, so on return
+					// the sparklines may be missing an arbitrary stretch. Catch
+					// up on the samples rather than only the statuses.
+					void this.refresh().then(() => this.refreshSparklinesIncremental());
 				}
 			};
 			document.addEventListener('visibilitychange', this.visibilityHandler);
@@ -342,7 +421,12 @@ class SentinelState {
 
 	private startTimer() {
 		if (this.timer) return;
-		this.timer = setInterval(() => this.refresh(), this.intervalMs);
+		this.timer = setInterval(() => {
+			// Sparklines ride the existing status tick. Without this they are
+			// only ever seeded once and then starve — see
+			// refreshSparklinesIncremental.
+			void this.refresh().then(() => this.refreshSparklinesIncremental());
+		}, this.intervalMs);
 	}
 	private stopTimer() {
 		if (this.timer) {
