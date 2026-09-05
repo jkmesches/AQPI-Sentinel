@@ -747,24 +747,40 @@ async def stream_data(comid: str, kind: str, ts: str, request: Request):
 # georeferenced PPI PNG plus a radar_plot_<n>.json carrying the center
 # lat/lon, MaxRange, and scan angle.
 #
-# We proxy it (a) to dodge CORS and (b) because radar-display's TLS cert
-# is currently EXPIRED — a dedicated verify=False client handles that
-# host ONLY, leaving full TLS verification on every other upstream call.
+# We proxy it to dodge CORS. Historically also to work around an EXPIRED
+# TLS certificate on that host, which is why this client exists separately
+# at all.
 # ----------------------------------------------------------------------
+
+import os as _os
 
 import httpx as _httpx
 
 _RD_BASE = "https://radardisplay.engr.colostate.edu"
-# Lazily-built client that skips cert verification — scoped to the
-# radar-display host (expired cert as of 2026-05). Do NOT route other
-# upstream traffic through this.
+
+# === TLS verification is ON again as of 2026-09-05 ===
+#
+# radar-display's certificate expired in 2026-05 and this client was created
+# with verify=False to keep tilt imagery working. The certificate was renewed
+# on 2026-07-14 (valid to 2026-10-12) and a verified request now returns 200 —
+# so the workaround outlived its cause by roughly seven weeks, unnoticed,
+# because nothing was watching for the condition to clear. A disabled safety
+# check with no expiry is indistinguishable from a permanent one.
+#
+# layer0.net.radardisplay_tls now verifies the certificate on a schedule and
+# warns before it lapses, so the next expiry is caught in advance rather than
+# discovered by every tilt request failing at once. If it does lapse and an
+# operator needs imagery back immediately, SENTINEL_RD_VERIFY_TLS=0 restores
+# the old behaviour — deliberately an env var, so the choice is visible in the
+# deployment rather than buried in a source file.
+_RD_VERIFY = _os.environ.get("SENTINEL_RD_VERIFY_TLS", "1") not in ("0", "false", "no")
 _rd_client_inst: "_httpx.AsyncClient | None" = None
 
 
 def _rd_client() -> "_httpx.AsyncClient":
     global _rd_client_inst
     if _rd_client_inst is None:
-        _rd_client_inst = _httpx.AsyncClient(verify=False, timeout=12.0)
+        _rd_client_inst = _httpx.AsyncClient(verify=_RD_VERIFY, timeout=12.0)
     return _rd_client_inst
 
 
