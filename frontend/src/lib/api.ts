@@ -82,6 +82,10 @@ export interface TimelineCell {
 	n_fail?: number;
 	n_error?: number;
 	n_warn?: number;
+	/** Skipped runs in the bucket. Distinct from pass: the check ran and
+	 *  declined to judge. Absent from servers older than 2026-09-05, which
+	 *  skipFraction treats as "unknown", not as zero-skip. */
+	n_skip?: number;
 }
 export interface TimelineBucket { ts: string; cells: Record<string, TimelineCell> }
 export interface TimelinePage {

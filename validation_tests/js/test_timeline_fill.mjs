@@ -19,7 +19,7 @@
  * here instead.
  */
 export function runTests(mod) {
-	const { cellFill, badFraction, cellRatioText, MIN_BAD_PX, STATUS_BG } = mod;
+	const { cellFill, badFraction, skipFraction, cellRatioText, MIN_BAD_PX, STATUS_BG } = mod;
 	const failures = [];
 	const check = (label, cond, detail = '') => {
 		console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${label}${detail ? '  — ' + detail : ''}`);
@@ -33,6 +33,22 @@ export function runTests(mod) {
 		if (!css.startsWith('linear-gradient')) return 100;   // flat colour = solid
 		const m = css.match(/0 ([\d.]+)%/);
 		return m ? parseFloat(m[1]) : NaN;
+	};
+	/**
+	 * Height of the band drawn in a SPECIFIC colour.
+	 *
+	 * bandPct alone is not enough once a cell can hold more than two colours:
+	 * it matches whichever band starts at 0, so a gradient whose bad band had
+	 * vanished and left grey at the bottom still reported "100%". A mutation
+	 * that let skips squeeze the bad band out of existence passed the whole
+	 * suite because of exactly that.
+	 */
+	const colourPct = (css, colour) => {
+		if (!css.startsWith('linear-gradient')) return css === colour ? 100 : 0;
+		const esc = colour.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const m = css.match(new RegExp(esc + ' (?:0|([\\d.]+)%) ([\\d.]+)%'));
+		if (!m) return 0;
+		return parseFloat(m[2]) - (m[1] ? parseFloat(m[1]) : 0);
 	};
 
 	// ---- 1. the load-bearing floor ---------------------------------------
@@ -92,11 +108,75 @@ export function runTests(mod) {
 	      badFraction(cell('fail', 10, { n_fail: 99 })) === 1,
 	      String(badFraction(cell('fail', 10, { n_fail: 99 }))));
 
-	// ---- 5. non-defect statuses stay flat --------------------------------
+	// ---- 5. non-defect statuses stay flat when that is all they are ------
 	for (const st of ['pass', 'skip', 'unknown']) {
-		check(`${st} is a flat colour`,
+		check(`${st} with nothing mixed in is a flat colour`,
 		      cellFill(cell(st, 720), st, H) === STATUS_BG[st]);
 	}
+
+	// ---- 5b. SKIPS ARE NOT PASSES ----------------------------------------
+	// A skip means the check ran and declined to judge — usually a cascade
+	// demote while an upstream was unhealthy. Painting it green asserts we
+	// looked and found nothing wrong. Measured over 24h at 1h grain, 141 of
+	// 1,093 buckets held a skip; 59 drew as solid green and 2 as a green
+	// remainder, so a blind spot was indistinguishable from a healthy hour.
+	const greyOf = (css) => css.includes(STATUS_BG['skip']);
+
+	// The dominant case: worst status is `pass` (pass outranks skip), so the
+	// cell used to be drawn as one flat green block with the skips erased.
+	const mixed = cellFill(cell('pass', 100, { n_skip: 40 }), 'pass', H);
+	check('a pass bucket containing skips is not solid green',
+	      mixed !== STATUS_BG['pass'], mixed);
+	check('...and shows grey for the skipped share', greyOf(mixed), mixed);
+	check('...and still shows green for the share that really passed',
+	      mixed.includes(STATUS_BG['pass']), mixed);
+
+	// The second case: the remainder above a bad band was hard-coded to pass.
+	const badMix = cellFill(cell('fail', 100, { n_fail: 20, n_skip: 60 }), 'fail', H);
+	check('the remainder above a bad band is not assumed to be pass',
+	      greyOf(badMix), badMix);
+	check('a bad band still starts at the bottom of the cell',
+	      bandPct(badMix) > 0 && bandPct(badMix) < 100, `${bandPct(badMix)}%`);
+
+	// An outage must stay visible even when most of the bucket is skipped —
+	// skips yield to the bad band, never the reverse.
+	const rareBad = cellFill(cell('fail', 1000, { n_fail: 1, n_skip: 999 }), 'fail', H);
+	// Assert on the FAIL colour specifically. Measuring "the band starting at
+	// 0" would accept a cell whose bad band had been squeezed out entirely,
+	// leaving grey at the bottom — which is the failure this pins.
+	check('one failure among 999 skips still draws its floor',
+	      (colourPct(rareBad, STATUS_BG['fail']) / 100) * H >= MIN_BAD_PX - 0.001,
+	      `${((colourPct(rareBad, STATUS_BG['fail']) / 100) * H).toFixed(2)}px of fail`);
+	check('...and the cell still contains the fail colour at all',
+	      rareBad.includes(STATUS_BG['fail']), rareBad);
+	check('...without pushing the cell past 100%',
+	      !/(\d{3,}(\.\d+)?)%/.test(rareBad.replace(/100%/g, '')), rareBad);
+
+	// All-skip stays flat grey whichever way it is described.
+	check('an all-skip bucket is flat grey',
+	      cellFill(cell('skip', 50, { n_skip: 50 }), 'skip', H) === STATUS_BG['skip']);
+
+	// Ambiguity resolves OPPOSITE to badFraction: grey means "no data", so
+	// inventing it would be its own lie. Absent counts must not grey a cell.
+	check('skipFraction is 0 when the server sent no count',
+	      skipFraction(cell('pass', 720)) === 0);
+	check('...except on a skip-status cell, which can only be all skips',
+	      skipFraction(cell('skip', 720)) === 1);
+	check('a pre-counts pass cell stays flat green',
+	      cellFill(cell('pass', 720), 'pass', H) === STATUS_BG['pass']);
+	check('skipFraction never exceeds 1',
+	      skipFraction(cell('pass', 10, { n_skip: 99 })) === 1);
+	check('skipFraction ignores a negative count',
+	      skipFraction(cell('pass', 10, { n_skip: -5 })) === 0);
+	check('skipFraction on an empty bucket is 0', skipFraction(undefined) === 0);
+
+	// Proportional, like the bad band.
+	const q1 = cellFill(cell('pass', 100, { n_skip: 25 }), 'pass', 40);
+	const q3 = cellFill(cell('pass', 100, { n_skip: 75 }), 'pass', 40);
+	const greyPct = (css) => colourPct(css, STATUS_BG['skip']);
+	check('the grey band grows with the skip share',
+	      greyPct(q3) > greyPct(q1),
+	      `25%->${greyPct(q1).toFixed(0)}%, 75%->${greyPct(q3).toFixed(0)}%`);
 	check('empty bucket contributes no fill', badFraction(undefined) === 0);
 	check('zero-run bucket contributes no fill', badFraction(cell('fail', 0)) === 0);
 
