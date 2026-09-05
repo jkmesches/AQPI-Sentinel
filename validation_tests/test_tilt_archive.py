@@ -26,6 +26,7 @@ keeps 7 frames (~16 min). Anything older exists only in our copy, and asking
 upstream for it is guaranteed to fail, so those requests must never be made.
 """
 from __future__ import annotations
+import asyncio
 import datetime as dt
 import os
 import sys
@@ -38,6 +39,9 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 from backend.api.routes.upstream import (            # noqa: E402
     _RD_TZ, _rd_parse_ts, _tilt_source_key, _TILT_FRAMES, _TILT_MOMENTS,
     _TILT_RADARS,
+)
+from backend.api.routes.upstream import (            # noqa: E402
+    _TILT_NEAREST_TOLERANCE_S, _nearest_archived_tilt,
 )
 from backend.prewarm import moment_streams, tilt_streams  # noqa: E402
 
@@ -117,6 +121,72 @@ def main() -> int:
           len(set(ms)) == len(ms) and len(set(ts)) == len(ts))
     check("CBAND has no tilts (radar-display serves X-band only)",
           not any(r == "CBAND" for r, _, _ in ts))
+
+    print("archive-only retrieval:")
+    # Frames are archived on the ORIGIN's ~140s cadence, not on the second a
+    # scrubber happens to ask for. The first version of this path built an
+    # exact-second key, so it could only ever answer a request that named a
+    # capture instant precisely — the archive held the history and the
+    # retrieval path could not reach it. Verified against production: a
+    # request 40 minutes back returned 404 while the frames existed.
+    stamps = ["20260905T204815Z", "20260905T205034Z", "20260905T205255Z",
+              "20260905T205516Z", "20260905T205736Z", "20260905T205956Z"]
+    rows = [{"source": f"radar_display/XSCR/el_1/reflectivity/{t}.png"} for t in stamps]
+
+    class FakePool:
+        def __init__(self, rows):
+            self.rows = rows
+            self.queries = 0
+
+        async def fetch(self, sql, prefix, key):
+            self.queries += 1
+            # Mimic the two index range scans: nearest at-or-before, nearest
+            # after. Lexical order is chronological because the stamp is
+            # fixed-width UTC — which is the property the SQL relies on.
+            match = sorted(r["source"] for r in self.rows
+                           if r["source"].startswith(prefix))
+            before = [x for x in match if x <= key]
+            after = [x for x in match if x > key]
+            out = []
+            if before:
+                out.append({"source": before[-1]})
+            if after:
+                out.append({"source": after[0]})
+            return out
+
+    async def nearest(when_iso):
+        target = dt.datetime.fromisoformat(when_iso)
+        return await _nearest_archived_tilt(
+            FakePool(rows), "XSCR", 1, "reflectivity", target)
+
+    got = asyncio.run(nearest("2026-09-05T20:53:20+00:00"))
+    check("a time between two frames resolves to the nearer one",
+          got is not None and got[0].endswith("20260905T205255Z.png"),
+          got[0] if got else "None")
+
+    got = asyncio.run(nearest("2026-09-05T20:54:30+00:00"))
+    check("...and to the later one when that is nearer",
+          got is not None and got[0].endswith("20260905T205516Z.png"),
+          got[0] if got else "None")
+
+    got = asyncio.run(nearest("2026-09-05T20:48:15+00:00"))
+    check("an exact capture instant still resolves to itself",
+          got is not None and got[0].endswith("20260905T204815Z.png"),
+          got[0] if got else "None")
+
+    # Beyond the tolerance the honest answer is "we do not have that", not the
+    # closest thing lying around — a frame an hour off is not what was asked.
+    far = asyncio.run(nearest("2026-09-05T18:00:00+00:00"))
+    check("a request far outside the archive returns nothing", far is None,
+          str(far))
+    edge = asyncio.run(nearest(
+        (dt.datetime(2026, 9, 5, 20, 59, 56, tzinfo=dt.timezone.utc)
+         + dt.timedelta(seconds=_TILT_NEAREST_TOLERANCE_S + 60)).isoformat()))
+    check("...including just past the tolerance", edge is None, str(edge))
+
+    check("no pool means no answer, not a crash",
+          asyncio.run(_nearest_archived_tilt(None, "XSCR", 1, "reflectivity",
+                                             dt.datetime.now(dt.timezone.utc))) is None)
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall tilt-archive assertions passed")

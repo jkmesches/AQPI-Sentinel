@@ -28,6 +28,27 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-05
+
+### Fixed
+
+- **Historical tilt lookups could not reach the archive they were stored in.**
+  `tilt_image.png?time=<ISO>` built an exact-second archive key, but frames are
+  captured on radar-display's own ~140 s cadence — so a request could only
+  succeed if it named a capture instant precisely. Verified against production
+  immediately after the v0.3.0 deploy: a request 40 minutes back returned 404
+  while the frames plainly existed (`20:59:56`, `20:57:36`, `20:55:16`, …).
+
+  The storage side of "the archive is deeper than the origin" was working; the
+  retrieval side was not, which made the claim true and useless at once.
+  Archive-only requests now resolve to the nearest captured frame within 10
+  minutes, and return 404 beyond that rather than serving something
+  arbitrarily stale as though it were what was asked for. The frame actually
+  served is reported in `x-tilt-ts`.
+
+  Confirmed live: 20, 30 and 45 minutes back all resolve from disk with no
+  upstream request; two days back still 404s.
+
 ## [0.3.0] — 2026-09-05
 
 Archive-completeness release, plus three surfaces that were reporting health
@@ -938,7 +959,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...v0.2.1
