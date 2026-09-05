@@ -28,6 +28,19 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-05
+
+Backup-integrity release. v0.2.0 hardened `ops/backup.sh` and, in the same
+commit, changed the defaults it ran with — so the new guard began refusing to
+write to a destination that commit had just repointed at local disk. Nightly
+backups aborted for two days on the reference deployment and nothing said so,
+because the check built to announce exactly that was never wired up.
+
+**Upgrade if you take backups.** The mount-guard defaults changed, and the
+freshness check now needs a directory mounted at `/data/backups` to work at
+all. Existing dumps are unaffected — nothing in this release touches, moves or
+prunes them differently.
+
 ### Fixed
 
 - **Nightly backups had been aborting since 2026-09-03.** Hardening the backup
@@ -742,7 +755,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.1...v0.1.2
