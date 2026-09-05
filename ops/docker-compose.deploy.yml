@@ -114,6 +114,11 @@ services:
       SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
       SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
       SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-${SENTINEL_SITE_ADDRESS:-}}
+      # Continuous capture of every moment + tilt. Off unless set to 1; see
+      # docs/91-env-vars.md for the measured cost before enabling.
+      SENTINEL_PREWARM_ENABLED:     ${SENTINEL_PREWARM_ENABLED:-0}
+      SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
+      SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
     volumes:
       # Archived L4 images. Point SENTINEL_ARCHIVE_PATH at a large disk or a
       # network mount if you keep images for long: this grows roughly 7 GB a

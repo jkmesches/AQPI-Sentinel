@@ -58,6 +58,11 @@ services:
       SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
       SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
       SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-}
+      # Continuous capture of every moment + tilt. Off unless set to 1; see
+      # docs/91-env-vars.md for the measured cost before enabling.
+      SENTINEL_PREWARM_ENABLED:     ${SENTINEL_PREWARM_ENABLED:-0}
+      SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
+      SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
     volumes:
       - sentinel_archive:/data/archive
       # Read-only view of the host directory ops/backup.sh writes to, so

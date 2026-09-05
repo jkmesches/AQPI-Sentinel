@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sparklines drained away while an operator watched a healthy system.** They
+  were seeded once at page load and thereafter fed only by WebSocket `run`
+  events — which the backend broadcasts **only when a check's status
+  changes**. On a healthy system that is almost never. Measured on production:
+
+  | | |
+  |---|---|
+  | Runs in 2 h | 2,698 |
+  | Of those, status changes (i.e. broadcast) | 104 — **3.85%** |
+  | Live WS capture, 120 s | 2 `run` events, **4 metric samples** total |
+
+  With ~18 sparklines on the page, most received nothing at all. Meanwhile
+  `Sparkline` advances its own `now` every 5 s, so the window kept sliding
+  while no samples arrived: the trace drained from the right and eventually
+  emptied.
+
+  That is worse than a blank decoration. An emptying right edge is exactly
+  the shape the component uses to mean *"this upstream has stopped"* — the
+  signal it was rewritten to show after the 2026-05-19 outage, where a frozen
+  trace fooled the operator. The bug made healthy checks wear the appearance
+  of dead ones, and it looked most convincing precisely when someone sat and
+  watched, which is when they were most likely to believe it.
+
+  Fixed by polling, not by broadcasting more: streaming every run is what
+  wedged the browser tab at ~30 events/minute, which is why the
+  transition-only filter exists. New `GET /api/checks/-/metrics_recent`
+  returns many series in one request, with `since` so a steady-state poll
+  carries a handful of points rather than the whole window, and the dashboard
+  refreshes sparklines on the existing status tick and on tab re-focus.
+  Samples already delivered by the WebSocket are de-duplicated by timestamp.
+
 ### Added
 
 - **Tilt imagery is now cached and archived like everything else.** The
