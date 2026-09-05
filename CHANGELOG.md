@@ -18,9 +18,11 @@ Sentinel uses `vMAJOR.MINOR.PATCH`:
 Pre-1.0 the major stays at 0; minor bumps signal feature drops, patch
 bumps signal fixes.
 
-GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
-`ghcr.io/jkmesches/sentinel-{backend,frontend}:v0.1.0` plus floating
-`:0.1`, `:0`, and `:latest`.
+GHCR images are tagged correspondingly, **without the leading `v`** —
+`docker/metadata-action` strips it. Pushing the git tag `v0.1.0` publishes
+`ghcr.io/jkmesches/sentinel-{backend,frontend}:0.1.0` plus floating
+`:0.1`, `:0`, and `:latest`. Pulling `:v0.1.0` fails with `manifest
+unknown`.
 
 ---
 
