@@ -127,7 +127,27 @@ Layer-by-layer:
 2. **Did a route match?** `/admin/alerts` → look at each routing
    rule's match block. Remember: **first match wins**. If a
    too-broad rule above your target rule matched first, the target
-   rule never fires.
+   rule never fires. Also remember there is **no implicit catch-all** —
+   an alarm matching no route is silently dropped, so a route table
+   without a final `match: {}` rule notifies for nothing else.
+
+    A fast, decisive check for "did *anything* dispatch": `SELECT
+    max(sent_at) FROM notification_log;`. Every send and every failed
+    send writes a row here. If that timestamp is old while alarms are
+    opening, the failure is at step 2 or 3, not in SMTP — skip
+    straight there.
+
+    !!! bug "Routes keyed on `status_at_open` never matched before v0.2.1"
+        `status_at_open` lives in the alarm's payload, and the
+        dispatch path used to match only against the row's columns, so
+        such a route matched while deciding whether to open the alarm
+        and then matched nothing when it came time to notify. There is
+        no error and no log line — `route is None` is read as "nothing
+        configured". One production instance ran a single
+        `{status_at_open: error}` route and dispatched **zero**
+        notifications for 537 matching alarms. If you are on an older
+        build and `notification_log` is empty, this is the first thing
+        to check.
 3. **Did the policy fire?** Each escalation policy step has its own
    recipients + delay. If you're missing the step-0 notification,
    step 0's recipients are wrong. If step-1 didn't fire 15 minutes
@@ -150,6 +170,51 @@ Layer-by-layer:
    deferred=N` for every push attempt. Grep them. For email,
    bump `SENTINEL_LOG_LEVEL=DEBUG` and replay; the SMTP exchange
    prints in full.
+
+### "An alarm keeps re-opening for something that has been down for weeks"
+
+Symptom: a target you already know is broken — and have already
+acknowledged — announces itself again every few hours, as a *new*
+alarm each time, with escalation starting over from step 1.
+
+This was a bug, fixed in v0.2.1. If you are on an older build, the
+diagnosis is one query — look at what actually closed each alarm:
+
+```sql
+SELECT a.id,
+       a.opened_at,
+       a.closed_at,
+       (SELECT r.status || ':' || coalesce(r.payload->>'reason', '-')
+          FROM check_runs r
+         WHERE r.check_id = a.check_id
+           AND r.target   = a.target
+           AND r.finished_at = a.closed_at
+         LIMIT 1) AS closed_by
+FROM alarms a
+WHERE a.check_id = 'layer2.radar.XEBY'
+  AND a.opened_at > now() - interval '7 days'
+ORDER BY a.opened_at DESC;
+```
+
+If `closed_by` reads `skip:upstream_unhealthy` rather than `pass:-`,
+the alarm was never resolved — a [cascade
+demote](92-glossary.md#stale-skip-vs-cascade-skip-vs-intrinsic-skip)
+was being read as a recovery. The target then failed again, re-armed
+the hold-down, and opened a fresh alarm. Web push fires on
+`alarm_open`, so every lap was another notification.
+
+The ratio is the tell, and it is why this only ever gets noticed on
+long-dead targets: a check that genuinely recovers sometimes shows a
+handful of false closes out of many, while one that never recovers has
+**every** close falsified.
+
+It also quietly destroys acks — `alarm_acks` references a specific
+`alarm_id`, so each re-open arrives unacked no matter how many times
+you acknowledged its predecessor.
+
+**Fix:** upgrade to v0.2.1 or later. There is no workaround on an
+older build other than a silence, because the ack cannot survive the
+close.
 
 ### "Push notifications stopped arriving on my phone"
 

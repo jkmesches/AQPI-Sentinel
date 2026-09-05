@@ -86,10 +86,11 @@ export const FAQ: FaqItem[] = [
 					['warn', 'Degraded, not broken', 'Declared DOWN but data still flowing'],
 					['fail', '**The monitored thing is broken**', 'Radar declared UP, no scans'],
 					['error', '**We could not determine its state**', 'Upstream API timed out'],
-					['skip', 'Deliberately not evaluated', 'Suppressed by an upstream failure or a silence']
+					['skip', 'Deliberately not evaluated', 'Suppressed by an upstream failure, or nothing to assess']
 				]
 			},
-			{ kind: 'note', text: '`fail` is a statement about radarca. `error` is a statement about *our visibility*. Treat a screen full of `error` as "Sentinel is flying blind", not "everything is down". These were rendered in the same red until August 2026, which made ~1,500 upstream API timeouts a day read as radar outages.' }
+			{ kind: 'note', text: '`fail` is a statement about radarca. `error` is a statement about *our visibility*. Treat a screen full of `error` as "Sentinel is flying blind", not "everything is down". These were rendered in the same red until August 2026, which made ~1,500 upstream API timeouts a day read as radar outages.' },
+			{ kind: 'p', text: '`skip` comes in two flavours that look identical on the timeline. Most are **cascade skips**: when one upstream thing breaks, Sentinel stops reporting its own opinion about everything downstream, so a single origin fault does not paint thirty cells red. That is a refusal to guess, *not* a clean bill of health — a skip never resolves an open alarm, and the previous verdict stands until a real result replaces it. The other flavour is an **intrinsic skip**, where the check ran and genuinely had nothing to assess; that one does count as "nothing wrong". The drilldown tells you which.' }
 		]
 	},
 	{
@@ -160,8 +161,9 @@ export const FAQ: FaqItem[] = [
 				]
 			},
 			{ kind: 'p', text: 'Recipients, escalation steps and on-call schedules live under Admin → Alerts and Admin → Groups, including recurring quiet hours and per-device routing on mobile.' },
-			{ kind: 'p', text: 'For planned work use a **silence** rather than muting a check permanently — silenced alarms still appear on the dashboard and in the record, they just stop paging.' },
-			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. Two of the largest sources of false alarms found so far were a stale threshold and a colour that made "couldn\'t measure" look identical to "broken".' }
+			{ kind: 'p', text: '**To stop being paged for something you already know about, acknowledge it.** An ack stops every channel for that alarm — email, console, webhook, and any repeat — and it silences it for the whole team, not just you, because whoever acks is taking ownership of it. Un-acking resumes paging.' },
+			{ kind: 'p', text: 'For planned work use a **silence** rather than muting a check permanently — silenced alarms still appear on the dashboard and in the record, they just stop paging. Prefer a silence over an ack when you know the window in advance, because a silence covers the check regardless of how the underlying alarm comes and goes.' },
+			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. The three largest sources of false alarms found so far were a stale threshold, a colour that made "couldn\'t measure" look identical to "broken", and — until v0.2.1 — a bug that let a permanently-down radar re-announce itself every few hours because an upstream blip had been mistaken for a recovery.' }
 		]
 	},
 	{

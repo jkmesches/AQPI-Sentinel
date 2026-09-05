@@ -36,9 +36,17 @@ Vocabulary:
 - **Check run** — one tick of one monitor. Produces a `CheckResult`
   with a status (`pass`, `warn`, `fail`, `error`, `skip`).
 - **Alarm** — a row in the `alarms` table opened when a check
-  returns a non-`pass`/non-`skip` status. Has its own severity
-  (`warn` or `critical`) which is derived from the underlying status
-  and can be promoted by duration.
+  returns a non-`pass`/non-`skip` status, and closed when it returns
+  to `pass`. Has its own severity (`warn` or `critical`) which is
+  derived from the underlying status and can be promoted by duration.
+  A **cascade skip** — the gray cell you see downstream of a broken
+  dependency — neither opens nor closes an alarm: it means "we
+  declined to judge", so the last real verdict stands.
+- **Ack** — "seen it, stop telling me". Stops every channel for that
+  alarm including repeats, and applies to the whole team rather than
+  just the person who clicked it. An ack attaches to *that alarm*, so
+  it ends when the alarm closes; for a window you can predict, a
+  **silence** is the better instrument.
 - **Route** — a rule in `/admin/alerts` that maps "alarms matching X"
   to "send through escalation policy Y".
 - **Policy** — an ordered list of escalation steps. Step 0 fires
@@ -283,11 +291,26 @@ conditions), and a `then` block (which policy to invoke).
 |---|---|
 | Policy | The escalation policy below. Pick from the dropdown. |
 | Severity floor | Bump the alarm's effective severity if it's lower (`warn` → `critical` on this route). |
-| Repeat every | Re-fire after this many minutes if still open + unacked. Blank = no repeat. |
+| Repeat every | Re-fire the same step for as long as the alarm is open + unacked. Accepts `30s`, `15m`, `1h`, `2d`, or a bare number of seconds. **Blank = no repeat.** |
 | Group by | Which alarm fields to coalesce on. e.g. `stage,target` collapses a flapping product to one email rather than three. |
 
 **First match wins.** Order rules from most-specific to least. The
-top rule that matches is the one that fires.
+top rule that matches is the one that fires. There is **no implicit
+catch-all** — an alarm that matches no rule notifies nobody, so if you
+want a backstop, add a final rule with an empty match block.
+
+!!! tip "Pick *repeat every* against how long the alarm will realistically stay open"
+    A repeat re-sends a step that already fired; it does not advance
+    escalation. Thirty minutes is reasonable for something you expect
+    to fix within the hour, and is 336 emails for a radar that is down
+    for a week — where the second message already told the reader
+    everything the 336th will. Blank is a legitimate and often correct
+    answer: notify once, then let the dashboard carry the state.
+
+    Two things bound repeats in practice. An **ack** stops them
+    entirely and applies team-wide. A **silence** stops them for a
+    planned window and survives the alarm closing and re-opening,
+    which an ack does not.
 
 ### Recipient table
 
