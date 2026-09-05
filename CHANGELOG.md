@@ -30,6 +30,27 @@ unknown`.
 
 ### Fixed
 
+- **Un-acking an alarm did not restore push paging.** `is_acked()` filters
+  `revoked_at IS NULL`, but the deferred-push liveness re-check did a bare
+  `EXISTS` on `alarm_acks`. An ack revoked during the delay window still read
+  as acked, so the operator asked to be paged again and nothing arrived. The
+  two paths now agree.
+
+  Ack semantics are otherwise confirmed correct and are now covered by tests:
+  `alarm_acks` is keyed on `alarm_id` with no user scoping, so an ack by
+  anyone silences that alarm for everyone; and `engine._process` checks
+  `is_acked` *before* resolving a route, so an acked alarm dispatches nothing
+  through email, console or webhook — including `repeat_interval` re-sends,
+  regardless of severity.
+
+  Worth knowing, because it is not obvious: an ack binds to the alarm ROW,
+  not to the check/target. Anything that closes and re-opens an alarm
+  discards it. Production had acked `layer2.radar.XEBY` twice (alarms 27484
+  and 27386); both were closed by a demoted skip, and all five subsequent
+  re-opens arrived unacked and paged again. That is fixed upstream by the
+  demoted-skip change above — with the alarm staying a single row, the ack
+  now sticks.
+
 - **A route keyed on `status_at_open` matched at open time and silently
   matched nothing at dispatch time.** `status_at_open` is written into the
   `alarms.payload` JSONB, but `_matches` does a flat `alarm.get(k)`. The two

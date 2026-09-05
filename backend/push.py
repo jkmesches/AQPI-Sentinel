@@ -295,7 +295,9 @@ async def _send_delayed(pool, subscription: dict, payload: dict, vapid: dict, de
                 """
                 SELECT
                     a.closed_at,
-                    EXISTS(SELECT 1 FROM alarm_acks WHERE alarm_id = a.id) AS acked
+                    EXISTS(SELECT 1 FROM alarm_acks
+                            WHERE alarm_id = a.id
+                              AND revoked_at IS NULL) AS acked
                 FROM alarms a
                 WHERE a.id = $1
                 """,
