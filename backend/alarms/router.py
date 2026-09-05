@@ -67,6 +67,38 @@ def _matches(matchers: dict[str, str], alarm: dict) -> bool:
     return True
 
 
+def flatten_alarm(alarm: dict) -> dict:
+    """Give an ``alarms`` row the flat shape route matchers expect.
+
+    ``status_at_open`` is written into the payload JSONB at open time, but
+    routes match it as a top-level key — which is also how ``evaluate()``
+    passes it when resolving the hold-down. The two call sites disagreed:
+    a route keyed on ``status_at_open`` matched at open time and then
+    silently matched NOTHING at dispatch time, because ``_matches`` does a
+    flat ``alarm.get(k)`` and the row keeps it one level down.
+
+    The failure is invisible from the outside — no error, no log line, just
+    a route that never fires. Production ran a single ``{status_at_open:
+    error}`` route and sent zero notifications for 537 matching alarms.
+
+    Returns a shallow copy; the row is left alone. Top-level keys win, so a
+    real column always beats a payload key of the same name.
+    """
+    payload = alarm.get("payload")
+    if isinstance(payload, str):  # defensive: un-decoded JSONB
+        import json
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            payload = None
+    if not isinstance(payload, dict):
+        return alarm
+    merged = {k: v for k, v in payload.items() if k not in alarm}
+    if not merged:
+        return alarm
+    return {**merged, **alarm}
+
+
 def _max_sev(a: str, b: str | None) -> str:
     if not b:
         return a
@@ -79,6 +111,7 @@ class Router:
 
     # --------------- matching -----------------------------------------
     def match(self, alarm: dict, ctx: dict[str, Any]) -> Route | None:
+        alarm = flatten_alarm(alarm)
         for r in self.cfg.routes:
             if not _matches(r.match, alarm):
                 continue
@@ -91,6 +124,7 @@ class Router:
     def compute_severity(
         self, alarm: dict, route: Route | None, now: datetime
     ) -> str:
+        alarm = flatten_alarm(alarm)
         sev = severity_for_status(alarm.get("status_at_open", "warn"))
         opened: datetime = alarm["opened_at"]
         # Duration-based promotion: long-running fail/error → critical.
