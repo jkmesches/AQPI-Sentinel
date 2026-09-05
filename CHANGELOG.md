@@ -28,6 +28,16 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-09-05
+
+Alert-fidelity release. Three bugs that all pointed the same way: Sentinel
+was reporting recoveries that had not happened, and re-announcing outages it
+had already told you about. The lab team flagged alert frequency as their
+main concern before deploying, and this is the answer to it.
+
+Nothing here changes what Sentinel *detects* — every check, threshold and
+timeline cell is untouched. It changes what counts as news.
+
 ### Fixed
 
 - **Un-acking an alarm did not restore push paging.** `is_acked()` filters
@@ -684,7 +694,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.0...v0.1.1
