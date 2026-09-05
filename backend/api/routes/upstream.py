@@ -2,7 +2,9 @@
 can use them as MapLibre raster sources without CORS issues."""
 from __future__ import annotations
 import asyncio as _asyncio
+import datetime as _dt
 import time as _time_mod
+from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -166,7 +168,8 @@ _UPSTREAM_SEM = _asyncio.Semaphore(6)
 # browser-side request count can't distinguish a network fetch from an HTTP
 # cache hit, so this is the only honest way to see what the map actually
 # costs the backend.
-_PROXY_HITS: dict[str, int] = {"product_image": 0, "xband_scan": 0, "image_by_source": 0}
+_PROXY_HITS: dict[str, int] = {"product_image": 0, "xband_scan": 0,
+                               "image_by_source": 0, "tilt_image": 0}
 
 _PD_TTL_S = 90.0
 _PD_CACHE: dict[str, tuple[float, list]] = {}
@@ -325,7 +328,9 @@ async def image_by_source(source: str, request: Request):
     )
 
 
-async def _serve_source(app, ctx, source: str) -> tuple[bytes, str, str]:
+async def _serve_source(app, ctx, source: str, fetcher=None,
+                        origin_url: str | None = None,
+                        archive_only: bool = False) -> tuple[bytes, str, str]:
     """Resolve one upstream image path to bytes, cheapest source first.
 
     Order: in-process LRU -> local archive -> upstream.
@@ -358,34 +363,52 @@ async def _serve_source(app, ctx, source: str) -> tuple[bytes, str, str]:
                 _IMAGE_CACHE.popitem(last=False)
             return body, ct, "disk"
 
+    # A frame that has aged out of the origin's rolling window exists only in
+    # our archive; there is no URL left to fetch it from. Say so rather than
+    # asking upstream for something it cannot have.
+    if archive_only:
+        raise HTTPException(404, f"{source} is not in the archive")
+
     exp = _NEG_CACHE.get(source)
     if exp is not None:
         if exp > _time_mod.monotonic():
             raise HTTPException(
-                502, f"upstream imageData unavailable for {source} (negative-cached)"
+                502, f"upstream image unavailable for {source} (negative-cached)"
             )
         _NEG_CACHE.pop(source, None)
 
     task = _INFLIGHT.get(source)
     if task is None:
-        task = _asyncio.create_task(_fetch_image_upstream(ctx, pool, source))
+        task = _asyncio.create_task(
+            _fetch_image_upstream(ctx, pool, source, fetcher, origin_url))
         _INFLIGHT[source] = task
         task.add_done_callback(lambda t, k=source: _INFLIGHT.pop(k, None))
     body, ct = await _asyncio.shield(task)
     return body, ct, "upstream"
 
 
-async def _fetch_image_upstream(ctx, pool, source: str) -> tuple[bytes, str]:
-    """Fetch one image from radarca, populate caches, archive it.
+async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,
+                                origin_url: str | None = None) -> tuple[bytes, str]:
+    """Fetch one image, populate caches, archive it.
 
-    Runs under _UPSTREAM_SEM so a scrub can't open an unbounded number of
-    concurrent connections against a slow origin.
+    ``fetcher`` lets a second origin reuse every protection built around this
+    path — the LRU, the single-flight, the negative cache and the archive are
+    all keyed on the LOGICAL source string, so they do not care where the
+    bytes came from. Default (None) is radarca's imageData, under
+    _UPSTREAM_SEM so a scrub can't open an unbounded number of concurrent
+    connections against a slow origin. Callers supplying a fetcher are
+    responsible for their own origin's concurrency cap, because the right
+    limit differs per upstream.
     """
-    async with _UPSTREAM_SEM:
-        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
+    if fetcher is None:
+        async with _UPSTREAM_SEM:
+            ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData", params={"file": source})
+        origin_url = f"{SETTINGS.base}/api/imageData?file={source}"
+    else:
+        ir = await fetcher()
     if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/"):
         _NEG_CACHE[source] = _time_mod.monotonic() + _NEG_TTL_S
-        raise HTTPException(502, f"upstream imageData HTTP {ir.status_code}")
+        raise HTTPException(502, f"upstream image HTTP {ir.status_code} for {source}")
     body = ir.content
     ct = ir.headers.get("content-type", "image/png")
     _IMAGE_CACHE[source] = (body, ct)
@@ -398,7 +421,7 @@ async def _fetch_image_upstream(ctx, pool, source: str) -> tuple[bytes, str]:
             _archive_save(
                 pool, SETTINGS.archive_root,
                 source=source, content=body, content_type=ct,
-                origin_url=f"{SETTINGS.base}/api/imageData?file={source}",
+                origin_url=origin_url,
             )
         )
     return body, ct
@@ -751,6 +774,90 @@ _TILT_RADARS = {"XEBY", "XSCR", "XSCV", "XSCW", "XSWR"}
 _TILT_MOMENTS = {"reflectivity", "velocity", "copolarcorrelation"}
 _TILT_FRAMES = 7  # _0.._6
 
+# radar-display gets its own concurrency cap. It is a different origin from
+# radarca with different characteristics — small files, fast responses
+# (~40 ms observed) — so it tolerates more parallelism, but "more" is not
+# "unbounded": tilt_steps alone fans out to 7 JSON fetches per call, and the
+# prewarmer walks 60 streams.
+_RD_SEM = _asyncio.Semaphore(6)
+
+# === Load-bearing: radar-display stamps frames in MOUNTAIN time ===
+#
+# The JSON `Time.Value` is a naive string like "Sat, 05 Sep 2026 13:54:35"
+# with no offset and no zone name. It is NOT UTC and it is not the radars'
+# own local time either — the radars are in California, but radar-display is
+# hosted at CSU, so the stamps are America/Denver. Verified 2026-09-05: frame
+# 0 read 13:56:55 while UTC was 19:58:02 and Denver was 13:58:02.
+#
+# This matters because the archive keys tilt frames by their capture time. A
+# naive parse would file every frame 6-7 hours out, and the error would change
+# twice a year with DST, so the archive would be quietly wrong in a way that
+# looks like a clock problem rather than a parsing one.
+_RD_TZ = _ZoneInfo("America/Denver")
+_RD_TS_FMT = "%a, %d %b %Y %H:%M:%S"
+_RD_SOURCE_PREFIX = "radar_display/"
+
+
+def _rd_parse_ts(raw: str | None):
+    """radar-display's naive Mountain-time stamp -> aware UTC datetime."""
+    if not raw:
+        return None
+    try:
+        naive = _dt.datetime.strptime(raw.strip(), _RD_TS_FMT)
+    except (ValueError, TypeError):
+        return None
+    return naive.replace(tzinfo=_RD_TZ).astimezone(_dt.timezone.utc)
+
+
+def _tilt_source_key(radar: str, el: int, moment: str, ts_utc) -> str:
+    """Logical archive key for one tilt frame.
+
+    Keyed by CAPTURE TIME, never by frame index. The frame index is a
+    position in a rolling 7-deep window that shifts every ~140 s, so
+    `..._0.png` names a different image minute to minute — keying on it would
+    make the archive collide with itself and make history unqueryable.
+    """
+    return (f"{_RD_SOURCE_PREFIX}{radar}/el_{el}/{moment}/"
+            f"{ts_utc.strftime('%Y%m%dT%H%M%SZ')}.png")
+
+
+# Short-TTL memo of the per-(radar, el, moment) frame list. One tilt_steps
+# call is 7 JSON fetches; without this, every image request would repeat them.
+# Frames advance every ~140 s, so 45 s of staleness costs at most a slightly
+# late newest-frame while collapsing a scrub into one metadata pass.
+_TILT_TTL_S = 45.0
+_TILT_CACHE: dict[str, tuple[float, list]] = {}
+
+
+async def _tilt_steps_raw(radar: str, el: int, moment: str) -> list[dict]:
+    """Frame list for one tilt: [{frame, ts, ts_utc}], newest first."""
+    key = f"{radar}/{el}/{moment}"
+    hit = _TILT_CACHE.get(key)
+    now = _time_mod.monotonic()
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    async def _fetch(frame: int):
+        url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_{frame}.json"
+        try:
+            async with _RD_SEM:
+                r = await _rd_client().get(url)
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception:
+            return None
+
+    results = await _asyncio.gather(*[_fetch(f) for f in range(_TILT_FRAMES)])
+    steps = []
+    for f, j in enumerate(results):
+        if j is None:
+            continue
+        raw = (j.get("Time", {}) or {}).get("Value")
+        steps.append({"frame": f, "ts": raw, "ts_utc": _rd_parse_ts(raw), "_raw": j})
+    _TILT_CACHE[key] = (now + _TILT_TTL_S, steps)
+    return steps
+
 
 def _tilt_guard(radar: str, el: int, moment: str) -> None:
     if radar not in _TILT_RADARS:
@@ -765,32 +872,15 @@ def _tilt_guard(radar: str, el: int, moment: str) -> None:
 async def tilt_steps(radar: str, el: int, moment: str):
     """Metadata + per-frame timestamps for a (radar, elevation) tilt.
 
-    Fetches all `_TILT_FRAMES` radar_plot_<n>.json files in parallel
-    (frame 0 = newest). The center/range/angle are taken from frame 0
-    (static per radar+elevation); each step carries its own timestamp so
-    the frontend can label + scrub the loop.
+    Frame 0 is newest. Each step carries both the origin's raw stamp and the
+    UTC instant it denotes, so the frontend can label and scrub the loop
+    without needing to know that radar-display reports Mountain time.
     """
     _tilt_guard(radar, el, moment)
-
-    async def _fetch(frame: int):
-        url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_{frame}.json"
-        try:
-            r = await _rd_client().get(url)
-            if r.status_code != 200:
-                return None
-            return r.json()
-        except Exception:
-            return None
-
-    results = await _asyncio.gather(*[_fetch(f) for f in range(_TILT_FRAMES)])
-    newest = results[0]
-    if newest is None:
+    steps = await _tilt_steps_raw(radar, el, moment)
+    if not steps:
         raise HTTPException(502, "radar-display returned no tilt frames")
-    steps = [
-        {"frame": f, "ts": (j.get("Time", {}) or {}).get("Value")}
-        for f, j in enumerate(results)
-        if j is not None
-    ]
+    newest = steps[0]["_raw"]
     return {
         "radar": radar,
         "el": el,
@@ -798,25 +888,86 @@ async def tilt_steps(radar: str, el: int, moment: str):
         "center": [newest["Longitude"]["Value"], newest["Latitude"]["Value"]],
         "range_km": newest["MaxRange"]["Value"],
         "angle": newest["Scan"]["Angle"]["Value"],
-        "steps": steps,
+        "steps": [
+            {"frame": st["frame"], "ts": st["ts"],
+             "ts_utc": st["ts_utc"].isoformat() if st["ts_utc"] else None}
+            for st in steps
+        ],
     }
 
 
 @router.get("/tilt_image.png")
-async def tilt_image(radar: str, el: int, moment: str, frame: int = 0):
-    """Proxy a single per-elevation PPI PNG (frame 0 = newest)."""
+async def tilt_image(radar: str, el: int, moment: str, request: Request,
+                     frame: int = 0, time: str | None = None):
+    """One per-elevation PPI PNG, served cheapest-source-first.
+
+    Until v0.2.3 this went straight to radar-display on every request with
+    `cache-control: no-store` and none of the protections the radarca image
+    paths have had since 2026-08-27 — no LRU, no single-flight, no negative
+    cache, no concurrency cap, no archive. Scrubbing a tilt loop is exactly
+    the workload those were built for, against an origin that had none of them.
+
+    With `time=<ISO>`, returns the frame nearest that instant. Because every
+    frame we serve is archived, this reaches back past radar-display's own
+    7-frame (~16 min) window: the archive is deeper than the origin. A frame
+    outside the live window is served from the archive or 404s — never
+    re-requested upstream, because no URL still names it.
+    """
     _tilt_guard(radar, el, moment)
-    if frame < 0 or frame >= _TILT_FRAMES:
-        raise HTTPException(400, f"frame out of range (0..{_TILT_FRAMES - 1})")
+    _PROXY_HITS["tilt_image"] += 1
+    ctx = request.app.state.context
+
+    if time is not None:
+        try:
+            target = _dt.datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, f"bad time: {time}")
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=_dt.timezone.utc)
+        steps = await _tilt_steps_raw(radar, el, moment)
+        live = [st for st in steps if st["ts_utc"] is not None]
+        best = min(live, key=lambda st: abs((st["ts_utc"] - target).total_seconds()),
+                   default=None)
+        # Inside the live window we can still fetch it; outside, the archive is
+        # the only possible source, so snap the key to the requested instant.
+        if best is not None and abs((best["ts_utc"] - target).total_seconds()) <= 90:
+            ts_utc, frame, archive_only = best["ts_utc"], best["frame"], False
+        else:
+            ts_utc, archive_only = target, True
+    else:
+        if frame < 0 or frame >= _TILT_FRAMES:
+            raise HTTPException(400, f"frame out of range (0..{_TILT_FRAMES - 1})")
+        steps = await _tilt_steps_raw(radar, el, moment)
+        match = next((st for st in steps if st["frame"] == frame), None)
+        if match is None or match["ts_utc"] is None:
+            raise HTTPException(
+                502, f"no timestamp for {radar} el_{el} {moment} frame {frame}")
+        ts_utc, archive_only = match["ts_utc"], False
+
+    source = _tilt_source_key(radar, el, moment, ts_utc)
     url = f"{_RD_BASE}/{radar}/images/el_{el}/{moment}_{frame}.png"
-    try:
-        r = await _rd_client().get(url)
-    except Exception as e:
-        raise HTTPException(502, f"radar-display unavailable: {humanize_error(e)}")
-    if r.status_code != 200:
-        raise HTTPException(502, f"radar-display returned HTTP {r.status_code}")
+
+    async def _fetch():
+        async with _RD_SEM:
+            try:
+                return await _rd_client().get(url)
+            except Exception as e:
+                raise HTTPException(
+                    502, f"radar-display unavailable: {humanize_error(e)}")
+
+    body, ct, prov = await _serve_source(
+        request.app, ctx, source, fetcher=_fetch, origin_url=url,
+        archive_only=archive_only,
+    )
     return Response(
-        content=r.content,
-        media_type="image/png",
-        headers={"cache-control": "no-store", "x-tilt-angle-el": str(el)},
+        content=body,
+        media_type=ct,
+        headers={
+            # Frame bytes are immutable once captured — the key is the capture
+            # instant, not a rolling index — so the browser may keep them.
+            "cache-control": "public, max-age=300",
+            "x-tilt-angle-el": str(el),
+            "x-tilt-ts": ts_utc.isoformat(),
+            "x-sentinel-cache": prov,
+        },
     )

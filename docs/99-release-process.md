@@ -21,8 +21,30 @@ patch bumps signal fixes.
 
 ## Cutting a release
 
-The process is intentionally light — three files to update + a tag
-push.
+The process is intentionally light — two files to update + a tag push.
+
+### 0. Bump `backend/_version.py`
+
+```python
+__version__ = "X.Y.Z"     # no leading v
+```
+
+**Do this first, because nothing enforces it.** The version is served at
+`/api/version` and rendered in the frontend footer; it is the only way to ask
+a running instance what it is without reading its source. Nothing in CI
+compares it to the tag, so a release that skips this ships a build that
+misreports itself — and the misreport is silent and long-lived.
+
+That is not hypothetical: v0.2.1 and v0.2.2 were both cut without it and both
+reported `0.2.0`. The step existed only in `_version.py`'s own docstring,
+which pointed at *this* document, which did not mention it — each file
+deferring to the other.
+
+Sanity check after deploying:
+
+```bash
+curl -s https://<host>/api/version     # {"version":"X.Y.Z"}
+```
 
 ### 1. Update CHANGELOG.md
 

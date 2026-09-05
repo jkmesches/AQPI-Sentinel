@@ -88,6 +88,23 @@ async def stats(request: Request):
     from .upstream import _PROXY_HITS
     http_stats["proxy_hits"] = dict(_PROXY_HITS)
 
+    # Prewarm ---------------------------------------------------------
+    # `fetched` vs `already_had` is the number that matters: it says what
+    # fraction of a sweep actually costs an upstream request. In steady state
+    # this should be small — one fetch per genuinely new frame — and a sweep
+    # that is mostly `fetched` means the interval is too long for the origin's
+    # rolling window and frames are being missed.
+    pre = getattr(app.state, "prewarm", None)
+    out_prewarm: dict[str, object] = {"enabled": False}
+    if pre is not None:
+        from ...config import SETTINGS as _S
+        out_prewarm = {
+            "enabled":     _S.prewarm_enabled,
+            "interval_s":  _S.prewarm_interval_s,
+            "concurrency": _S.prewarm_concurrency,
+            **pre.stats,
+        }
+
     # WebSocket clients -----------------------------------------------
     ws_state: dict[str, object] = {"available": False}
     ws = getattr(app.state, "ws", None)
@@ -142,4 +159,5 @@ async def stats(request: Request):
         "scheduler":        sched_state,
         "network_monitor":  net_state,
         "image_cache":      image_cache,
+        "prewarm":          out_prewarm,
     }

@@ -28,6 +28,65 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **Tilt imagery is now cached and archived like everything else.** The
+  per-elevation PPI stack from radar-display went straight upstream on every
+  request with `cache-control: no-store` and none of the protections the
+  radarca image paths have had since 2026-08-27 — no LRU, no single-flight, no
+  negative cache, no concurrency cap and no archive. Scrubbing a tilt loop is
+  exactly the workload those were built for. `tilt_image.png` now resolves
+  through the same `_serve_source` ladder (LRU → archive → upstream) and
+  reports its provenance in `x-sentinel-cache`.
+
+  Two things about tilts made this more than a wiring change:
+
+  - **radar-display stamps frames in Mountain time.** `Time.Value` is a naive
+    string with no offset and no zone — and it is neither UTC nor the radars'
+    own Pacific: the radars are in California, but radar-display is hosted at
+    CSU. Verified live, frame 0 read `13:56:55` while UTC was `19:58:02`. A
+    naive parse files every frame 6–7 hours out, with the error moving twice a
+    year with DST.
+  - **Frame indices are positions, not identities.** `..._0.png` means
+    "newest" and the window shifts every ~140 s, so the same URL names a
+    different image minute to minute. Archive keys are derived from capture
+    time instead, which is also what makes history queryable.
+
+  Because every served frame is archived, `tilt_image.png?time=<ISO>` reaches
+  back past radar-display's own 7-frame (~16 min) window — **the archive is
+  now deeper than the origin.** Frames outside the live window are served from
+  the archive or 404; they are never re-requested upstream, because no URL
+  still names them.
+
+- **`SENTINEL_PREWARM_ENABLED` — continuous capture of every moment and
+  tilt.** The archive was demand-driven, so it was dense in Reflectivity and
+  empty elsewhere: in the 7 days to 2026-09-05 it gained 19,540 Reflectivity
+  frames against 36 Velocity, 35 ZDR, 35 PhiDP and 1 RhoHV. The moments an
+  operator would most want to compare against reflectivity were precisely the
+  ones not kept, and the first look at any of them was also the slowest.
+
+  A sweep walks 25 moment streams (X-band ×4, CBAND ×5) and 60 tilt streams
+  (5 radars × 4 elevations × 3 moments), skipping combinations that do not
+  exist upstream — X-band publishes no RhoHV, and requesting it anyway would
+  404 five streams on every sweep forever.
+
+  **It ships off.** It is the only thing in Sentinel that generates upstream
+  traffic nobody asked for, and the increase is not marginal: ~4,000 →
+  ~49,000 images/day, ~280 MB → ~1.1 GB/day, against two systems belonging to
+  other people. It reuses the same LRU, archive and single-flight as operator
+  traffic, so steady-state cost is one fetch per genuinely new frame rather
+  than one per sweep. `prewarm.fetched` vs `prewarm.already_had` in
+  `/api/_debug/stats` shows whether that is holding.
+
+### Fixed
+
+- **`/api/version` reported `0.2.0` on v0.2.1 and v0.2.2.** Nothing in CI
+  compares `backend/_version.py` to the tag, and the release process never
+  mentioned bumping it — the step lived only in `_version.py`'s own docstring,
+  which pointed at the release doc, which pointed back. Both releases shipped
+  a build that misreported itself. The step is now step 0 of the documented
+  process, with the reason it is easy to miss.
+
 ## [0.2.2] — 2026-09-05
 
 Backup-integrity release. v0.2.0 hardened `ops/backup.sh` and, in the same
