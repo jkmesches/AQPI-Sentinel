@@ -22,6 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
 from ..registry import CHECKS, all_stages
+from .._version import __version__
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None):
             json.dumps({
                 "type": "hello",
                 "sentinel": {
-                    "version": "0.1.0",
+                    "version": __version__,
                     "checks": len(CHECKS),
                     "stages": sorted(all_stages()),
                     "at": datetime.now(timezone.utc).isoformat(),

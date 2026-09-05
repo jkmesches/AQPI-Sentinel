@@ -35,7 +35,10 @@
 	// products. Source of truth: backend/checks/imaging.py.
 	const EXTENT_LARGE = { west: -124.005, east: -121.195, south: 36.5, north: 39.505 };
 
-	let mapDiv: HTMLDivElement;
+	// $state because it is a bind:this target — Svelte 5 warns otherwise, and
+	// the non-reactive form would silently stop working if anything ever came
+	// to depend on the element being swapped.
+	let mapDiv: HTMLDivElement | undefined = $state();
 	let map: any = null;
 	let maplibregl: any = null;
 	// Tapping a radar pin should do what tapping its row in the list does —

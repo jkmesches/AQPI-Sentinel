@@ -54,6 +54,11 @@ services:
       SENTINEL_ARCHIVE_ENABLED: "1"
       SENTINEL_ARCHIVE_ROOT:    /data/archive
       SENTINEL_ARCHIVE_RETENTION_DAYS: ${SENTINEL_ARCHIVE_RETENTION_DAYS:-}
+      # Rows older than this are exported to /data/cold as compressed CSV and
+      # then dropped from the live tables. Unset = keep everything forever.
+      SENTINEL_DB_RETENTION_DAYS: ${SENTINEL_DB_RETENTION_DAYS:-}
+      SENTINEL_COLD_ROOT:       /data/cold
+      SENTINEL_RETENTION_HOUR_UTC: ${SENTINEL_RETENTION_HOUR_UTC:-9}
       SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}
       SENTINEL_ADMIN_PASSWORD:     ${SENTINEL_ADMIN_PASSWORD:-}
       SENTINEL_ADMIN_DISPLAY_NAME: ${SENTINEL_ADMIN_DISPLAY_NAME:-}
@@ -64,7 +69,21 @@ services:
       SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
       SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
     volumes:
-      - sentinel_archive:/data/archive
+      # === Load-bearing: these accept a HOST PATH, not just a volume name ===
+      #
+      # A bare name is a named volume; a leading slash is a bind mount. This
+      # file used to hard-code `sentinel_archive`, with no way to point it
+      # anywhere — while claiming in its header to mirror prod.yml exactly.
+      # Switching a production host from prod.yml to this one therefore
+      # detached the real archive silently: the container came up healthy,
+      # served an empty gallery, and began writing new images to the container
+      # disk while 22GB sat unreferenced on the NFS share. Nothing errored,
+      # because an empty archive is indistinguishable from a new one.
+      #
+      # Set SENTINEL_ARCHIVE_HOST_PATH / SENTINEL_COLD_HOST_PATH to the same
+      # values prod.yml uses on that host.
+      - ${SENTINEL_ARCHIVE_HOST_PATH:-sentinel_archive}:/data/archive
+      - ${SENTINEL_COLD_HOST_PATH:-sentinel_cold}:/data/cold
       # Read-only view of the host directory ops/backup.sh writes to, so
       # layer0.self.backup can read status.json and alarm when the nightly dump
       # goes stale or starts failing. Point SENTINEL_BACKUP_HOST_PATH at the
@@ -95,6 +114,8 @@ volumes:
     name: sentinel_pgdata
   sentinel_archive:
     name: sentinel_archive
+  sentinel_cold:
+    name: sentinel_cold
   sentinel_backups:
 
 networks:

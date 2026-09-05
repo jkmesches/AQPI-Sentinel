@@ -30,6 +30,46 @@ unknown`.
 
 ### Fixed
 
+- **`docker-compose.ghcr.yml` promised parity with `prod.yml` and did not have
+  it.** Its header invites an operator to switch between building locally and
+  pulling images by changing the `-f` argument alone. But it hard-coded
+  `sentinel_archive:/data/archive` with no host-path indirection, while
+  production points that at an NFS share holding 22 GB of imagery — so the
+  switch would have attached an empty named volume instead. The stack comes up
+  healthy, the gallery is empty, and new captures land on the container disk
+  while the real archive sits unreferenced. Nothing errors, because a fresh
+  archive and a detached one are indistinguishable. It was also missing
+  `/data/cold` and all three retention variables, so the offload that keeps
+  the hot database bounded would have silently stopped.
+
+  `validation_tests/test_compose_parity.py` now enforces the claim: matching
+  environment keys, matching mount points, and no mount pinned where the other
+  file takes a host path.
+
+- **radar-display TLS verification is back on.** The client was created with
+  `verify=False` in 2026-05 for an expired certificate. That certificate was
+  renewed on 2026-07-14 and is valid to 2026-10-12 — a verified request
+  returns 200 — so the workaround outlived its cause by about seven weeks
+  without anyone noticing, because nothing was watching for the condition to
+  clear. A disabled safety check with no expiry is indistinguishable from a
+  permanent one.
+
+  New `layer0.net.radardisplay_tls` verifies the certificate hourly, warns 14
+  days before expiry and fails once it lapses, so the next renewal is seen
+  coming instead of arriving as every tilt request failing at once.
+  `SENTINEL_RD_VERIFY_TLS=0` restores the old behaviour if it does lapse —
+  an env var rather than a source edit, so the choice stays visible in the
+  deployment.
+
+- **The WebSocket `hello` frame reported `0.1.0`,** hard-coded and unrelated
+  to `_version.py`. It now reports the real version, which was the third
+  independent copy of that string found in two days.
+
+- Two Svelte 5 reactivity warnings: `mapDiv` is now `$state` (a `bind:this`
+  target), and `ReportExportModal`'s intentional initial-value capture is
+  annotated rather than left looking accidental — an `$effect` re-syncs the
+  props on open, which is the only moment new defaults should win.
+
 - **Skips rendered as green on the bucketed timeline.** Two separate paths,
   both asserting we had checked and found nothing wrong when in fact we had
   declined to judge:
