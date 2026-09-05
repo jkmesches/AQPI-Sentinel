@@ -142,11 +142,22 @@ class AlarmEngine:
     # ------------------------------------------------------------------
     async def evaluate(self, result):
         existing = await self.store.find_open_alarm(result.check_id, result.target)
-        # Treat skip the same as pass for alarm bookkeeping. A check that
-        # returns skip ran but couldn't make a meaningful assessment
-        # (e.g. a forecast product whose only differentiating sub-checks
-        # are themselves skip-eligible). It's not a problem state, so we
-        # close any existing alarm and don't open a new one.
+        # An INCONCLUSIVE skip is not news. The scheduler demotes fail/error
+        # to skip when an upstream dependency is unhealthy (or our own DNS /
+        # uplink is down) so the dashboard doesn't go all-red over one fault
+        # — but that is a decision not to judge, not an observation of
+        # recovery. Closing on it is actively harmful: for a target that is
+        # permanently down, every upstream blip closes the alarm, the next
+        # real fail opens a NEW one, and escalation restarts from step 1.
+        # Leave the alarm exactly as it is and wait for a real verdict.
+        if sup_lib.is_inconclusive(result.status, result.payload):
+            return
+
+        # Treat an INTRINSIC skip the same as pass for alarm bookkeeping. A
+        # check that returns skip ran but couldn't make a meaningful
+        # assessment (e.g. a forecast product whose only differentiating
+        # sub-checks are themselves skip-eligible). It's not a problem
+        # state, so we close any existing alarm and don't open a new one.
         if result.status in ("pass", "skip"):
             if existing:
                 await self.store.close_alarm(existing["id"], when=result.finished_at)
@@ -258,10 +269,16 @@ class AlarmEngine:
                 log.exception("processing alarm %s", alarm.get("id"))
 
     async def _close_stale_acked(self, now: datetime) -> None:
-        """Close ACKed alarms whose underlying check has been pass/skip
-        for AUTOCLOSE_CLEAN_S. Single SQL pass; emits alarm_close for
-        each so the UI updates."""
+        """Close ACKed alarms whose underlying check has been cleanly
+        pass/skip for AUTOCLOSE_CLEAN_S. Single SQL pass; emits alarm_close
+        for each so the UI updates.
+
+        "Cleanly" excludes inconclusive skips (see alarms.suppression): a
+        window of demoted skips means we stopped judging, not that the
+        target recovered, and must not be enough to retire an alarm.
+        """
         pool = self.store.pool
+        inconclusive = list(sup_lib.INCONCLUSIVE_SKIP_REASONS)
         # Note: alarm_acks may have multiple rows per alarm (re-acks). The
         # EXISTS subquery just checks "ever acked."
         rows = await pool.fetch(
@@ -276,16 +293,21 @@ class AlarmEngine:
                 WHERE r.check_id = a.check_id
                   AND r.target   = a.target
                   AND r.finished_at > now() - interval '{self.AUTOCLOSE_CLEAN_S} seconds'
-                  AND r.status NOT IN ('pass', 'skip')
+                  AND (r.status NOT IN ('pass', 'skip')
+                       OR (r.status = 'skip'
+                           AND coalesce(r.payload->>'reason', '') = ANY($1::text[])))
               )
               AND EXISTS (
                 SELECT 1 FROM check_runs r
                 WHERE r.check_id = a.check_id
                   AND r.target   = a.target
                   AND r.finished_at > now() - interval '{self.AUTOCLOSE_CLEAN_S} seconds'
-                  AND r.status IN ('pass', 'skip')
+                  AND (r.status = 'pass'
+                       OR (r.status = 'skip'
+                           AND coalesce(r.payload->>'reason', '') <> ALL($1::text[])))
               )
-            """
+            """,
+            inconclusive,
         )
         for row in rows:
             await self.store.close_alarm(row["id"], when=now)

@@ -10,6 +10,7 @@ from typing import Any
 
 import asyncpg
 
+from ..alarms.suppression import INCONCLUSIVE_SKIP_REASONS
 from ..checks.base import CheckResult
 
 log = logging.getLogger(__name__)
@@ -250,6 +251,12 @@ class Store:
         hold-down survives restarts, which is exactly when a genuine outage is
         most likely to be in progress.
 
+        An INCONCLUSIVE skip does not break the streak. The scheduler demotes
+        fail/error to skip when a dependency is unhealthy; treating that as a
+        good run would restart the hold-down clock every time an upstream
+        blipped, so a permanently-broken target re-qualifies for a brand-new
+        alarm a few minutes after every blip. See alarms.suppression.
+
         Served by idx_run_check_finished (check_id, finished_at DESC).
         """
         assert self.pool is not None
@@ -261,10 +268,13 @@ class Store:
               AND finished_at > coalesce(
                     (SELECT max(finished_at) FROM check_runs
                      WHERE check_id = $1 AND target = $2
-                       AND status IN ('pass', 'skip')),
+                       AND (status = 'pass'
+                            OR (status = 'skip'
+                                AND coalesce(payload->>'reason', '')
+                                      <> ALL($3::text[])))),
                     '-infinity'::timestamptz)
             """,
-            check_id, target,
+            check_id, target, list(INCONCLUSIVE_SKIP_REASONS),
         )
         return row["started"] if row else None
 

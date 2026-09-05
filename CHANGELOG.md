@@ -26,6 +26,50 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ## [Unreleased]
 
+### Fixed
+
+- **A target that never recovers was re-alerting every few hours.** The
+  scheduler demotes `fail`/`error` to `skip` when a dependency is unhealthy,
+  so one upstream fault doesn't paint 37 downstream cells red. Three places
+  then read that row as *good news*: `evaluate()` closed the alarm,
+  `non_pass_streak_start()` reset the hold-down clock, and the stale-ACK sweep
+  counted it as a clean run. A demoted skip is a decision **not to judge**,
+  not an observation of recovery.
+
+  The result was a cycle that looked exactly like flapping on things that were
+  not flapping at all: alarm opens → upstream blips → alarm *closes*
+  ("resolved!") → blip ends → hold-down re-arms from zero → a brand-new alarm
+  opens and escalation restarts at step 1. Because Web Push fires on
+  `alarm_open`, every lap through that loop was another notification.
+
+  Measured over the 7 days to 2026-09-05, on targets that never came back:
+
+  | check | alarms opened | closes caused by a demoted skip |
+  |---|---|---|
+  | `layer2.radar.XEBY` | 18 | 17 of 17 |
+  | `layer1.product.water_depth` | 3 | 2 of 2 |
+  | `layer1.product.max_water_depth` | 3 | 2 of 2 |
+  | `layer1.product.water_level` | 3 | 1 of 1 |
+
+  Not one of those closes was an actual `pass`. XEBY had been continuously
+  non-pass since **2026-07-18** — seven weeks — while the hold-down query
+  believed its problem had started 21 hours ago, because a dependency blip had
+  reset the clock. Fleet-wide there were 3,274 demoted skips in the window.
+
+  The ratio is the tell: a check that genuinely recovers sometimes has a low
+  false-close rate (`XSCW` 6 of 93), while a permanently-down target has
+  **100%** of its closes falsified. So the noise landed exactly where it was
+  least informative and least welcome — on the things the operator already
+  knew were broken.
+
+  Recovery latency is unchanged. A `pass` still closes instantly, and so does
+  an *intrinsic* skip — a check that ran and legitimately had nothing to
+  assess. Only the three demote reasons (`upstream_unhealthy`,
+  `local_dns_error`, `local_network_offline`) are now inconclusive, and they
+  are declared once in `alarms.suppression` with a test asserting the
+  scheduler still emits exactly those strings.
+
+
 ## [0.2.0] — 2026-09-03
 
 Deployability release. v0.1.x was a system its author could run; this is
