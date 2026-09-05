@@ -28,6 +28,25 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-05
+
+Archive-completeness release, plus three surfaces that were reporting health
+they had not observed.
+
+Sentinel kept only what someone had looked at, so the archive was dense in
+Reflectivity and nearly empty everywhere else, and per-elevation tilt imagery
+was never stored at all. It now captures every published moment and tilt, and
+the tilt archive reaches further back than the origin's own 16-minute window.
+
+The rest of the release is a single recurring mistake in three places: a skip
+is not a pass, an unfed sparkline is not a stopped upstream, and an empty
+volume is not an empty archive. Each looked like health.
+
+**Upgrading:** `SENTINEL_PREWARM_ENABLED` is off by default and should stay
+off unless you have read its cost in `docs/91-env-vars.md`. If you deploy from
+`docker-compose.ghcr.yml`, re-read your `SENTINEL_ARCHIVE_HOST_PATH` before
+restarting — that file could not previously express it.
+
 ### Fixed
 
 - **`docker-compose.ghcr.yml` promised parity with `prod.yml` and did not have
@@ -919,7 +938,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.1.2...v0.2.0
