@@ -41,8 +41,14 @@ The code lives in `backend/alarms/`:
 
 1. **Check.run() returns a non-pass CheckResult.**
 2. **`Engine.evaluate(result)`** is called by the scheduler:
-   - If `result.status in (pass, skip)` and an alarm is open for
-     this check_id+target, close it.
+   - If the run is an **inconclusive skip** (`payload.reason` is one
+     of `upstream_unhealthy`, `local_dns_error`,
+     `local_network_offline`), do nothing at all. The check declined
+     to judge, so any open alarm is left exactly as it is and no new
+     one opens. See [Inconclusive skips](#inconclusive-skips-are-not-recovery).
+   - If `result.status` is `pass`, or an **intrinsic** skip (the check
+     ran and legitimately had nothing to assess), and an alarm is open
+     for this check_id+target, close it.
    - Otherwise, compute the initial severity from the status
      (`severity_for_status`), compute suppression (any unhealthy
      ancestor in `depends_on`?), and `store.open_alarm(...)`.
@@ -52,11 +58,14 @@ The code lives in `backend/alarms/`:
    - `_web_push` → per-device push subscriptions (severity-floor +
      pattern-filter + schedule-gated).
    - Custom sinks you add via `engine.add_listener(...)`.
-4. **`Engine._tick()` runs every `TICK_S` (default 30s)**:
+4. **`Engine._tick()` runs every `TICK_S` (default 15s)**:
    - Walks every open alarm.
    - Updates the latest_status cache (used by suppression).
    - Computes current severity (factoring duration-based
-     auto-promotion from `warn` → `critical` after 30 min).
+     auto-promotion from `warn` → `critical` after
+     `PROMOTE_AFTER_S`, hard-coded at 30 min). This reads
+     `status_at_open`, which lives in the alarm's payload — see the
+     shape note under [Routes and policies](#routes-and-policies).
    - Matches the alarm against the route table; finds the policy.
    - Determines the next-step time (`policy.steps[next].delay_s`
      after the previous step fired).
@@ -66,9 +75,23 @@ The code lives in `backend/alarms/`:
    group's schedule), dedupes emails across overlapping groups +
    direct recipients in the step, and fires each configured sink.
 6. **Ack closes the loop** — an acked alarm stops repeating even
-   if it's still open. Unack resumes.
-7. **Close** happens automatically when the check returns
-   pass/skip, OR explicitly via the UI / API.
+   if it's still open. `_process` checks `is_acked` *before* it
+   resolves a route, so an acked alarm dispatches nothing on any
+   channel at any severity, `repeat_interval` re-sends included.
+   Unack resumes.
+
+    !!! warning "An ack binds to the alarm row, not to the check"
+        `alarm_acks.alarm_id` references one specific alarm. Anything
+        that closes and re-opens an alarm therefore **discards the
+        ack**, and the replacement pages again. Before v0.2.1 a
+        cascade demote closed alarms, so an ack on a permanently-down
+        target was routinely destroyed within hours — production had
+        acked `layer2.radar.XEBY` twice and every one of the five
+        subsequent re-opens arrived unacked.
+
+7. **Close** happens automatically when the check returns `pass` or
+   an intrinsic skip, OR explicitly via the UI / API. An inconclusive
+   skip does *not* close an alarm.
 
 ---
 
@@ -94,6 +117,32 @@ routes:
 that matches (first-match-wins). The `ctx` dict carries
 duration-since-open + peer-counts for the `when` conditions.
 
+**Matchable keys are the `alarms` row's columns, plus its payload.**
+`check_id`, `target`, `stage` and `severity` are real columns;
+`status_at_open` lives inside the `payload` JSONB. `flatten_alarm()`
+merges the payload underneath the row before matching, so both are
+addressable by the same flat name. Columns win, so a stale payload can
+never steer a route keyed on `stage` or `severity`.
+
+!!! warning "A route that matches at open time may not have matched at dispatch time (fixed in v0.2.1)"
+    Before v0.2.1 the flatten did not happen. `evaluate()` built a flat
+    dict to resolve the hold-down, so a route keyed on `status_at_open`
+    matched there; `_process()` passed the raw row, so the same route
+    matched **nothing** when it came time to notify. `_process` reads
+    `route is None` as "nothing configured" and returns — no error, no
+    warning, no log line. The only symptom is an empty
+    `notification_log`, which reads like "quiet week" rather than
+    "broken router".
+
+    Production ran a single `{status_at_open: error}` route: 537
+    matching alarms opened in seven days and **zero** notifications
+    were dispatched. `compute_severity` reads the same field, so
+    duration-promotion to `critical` was dead for the same reason.
+
+    **On upgrading past v0.2.1, re-read your route table before
+    restarting.** Any route keyed on `status_at_open` has been inert
+    and starts firing — `repeat_interval` included.
+
 A **policy** is an ordered list of escalation steps:
 
 ```yaml
@@ -110,6 +159,29 @@ policies:
 Steps fire in order if the alarm is still open + unacked when each
 delay elapses. `delay_s` is **between steps**, measured from when
 the previous step fired.
+
+### `repeat_interval`
+
+Per-route, optional, no default. It re-sends a step that has already
+fired, for as long as the alarm stays open; it does **not** advance
+escalation. Timed per `(alarm_id, step_idx)` off the last send in
+`notification_log`, and checked once per `TICK_S`, so a repeat lands
+within ~15s of becoming due.
+
+**Blank means never.** `_process` does `if not route.repeat_interval_s:
+continue` — the step fires once for that alarm and never again. So
+"tell me once, then leave me alone until it closes" needs no code
+change, just an empty field. The admin UI at `/admin/alerts` exposes
+it per route as **repeat every** (placeholder `1h (blank = no
+repeat)`); it accepts `30s`, `15m`, `1h`, `2d`, or a bare number of
+seconds.
+
+Choose it against how long the alarm will plausibly stay open. A
+30-minute repeat on a target that is down for a week is 336 emails,
+and the second one has already told the reader everything the
+336th will. Two things bound that in practice — an **ack** stops
+repeats entirely (and, since v0.2.1, survives long enough to be
+worth placing), and a **silence** stops them for a planned window.
 
 ---
 
@@ -151,7 +223,7 @@ failures), at different layers:
 **Cascade demote** (`backend/scheduler.py`) acts at the **check
 result** layer. If an ancestor is unhealthy, the downstream's
 fail/error is rewritten to skip before it ever reaches the engine.
-No alarm opens.
+No alarm opens — and, since v0.2.1, no alarm *closes* either.
 
 **Suppression** (`backend/alarms/suppression.py`) acts at the
 **alarm** layer. If an alarm somehow does open for a downstream
@@ -161,6 +233,42 @@ the field — suppressed alarms don't escalate; no email, no push.
 
 In normal operation, cascade demote handles everything and
 suppression is a no-op. The latter exists for the edge cases.
+
+### Inconclusive skips are not recovery
+
+A cascade demote means **"we declined to judge"**, not "the target is
+healthy". The distinction is invisible in the timeline — both render
+as a gray skip cell — but it is load-bearing for the alarm engine,
+and getting it wrong inverts the noise the demote exists to prevent.
+
+Three consumers have to know the difference, and they read it through
+`alarms.suppression.is_inconclusive()`:
+
+| Consumer | If it treats a demote as healthy |
+|---|---|
+| `engine.evaluate()` | Closes the alarm — the dashboard reports a recovery that did not happen. |
+| `store.non_pass_streak_start()` | Re-arms the hold-down from zero, so the target re-qualifies for a **new** alarm minutes later. |
+| `engine._close_stale_acked()` | Counts a demote window as clean and retires an acked alarm that is still broken. |
+
+Together those produced a loop that looked exactly like flapping on
+things that were not flapping: alarm opens → an upstream blips → the
+alarm closes → the blip ends → the hold-down re-arms → a fresh alarm
+opens and escalation restarts at step 1. Because web push fires on
+`alarm_open`, every lap was another notification about a state that
+had never changed.
+
+The tell is the ratio. A check that genuinely recovers now and then
+has a low false-close rate; a permanently-down target has **100%** of
+its closes falsified. In the seven days to 2026-09-05, `XEBY` opened
+18 alarms and 17 of its 17 closes were cascade demotes — not one was
+a real `pass`, and the radar had been continuously non-pass since
+2026-07-18.
+
+If you add a new demote reason in the scheduler, add it to
+`INCONCLUSIVE_SKIP_REASONS` in the same commit.
+`validation_tests/test_alarm_inconclusive_skip.py` drives the real
+scheduler paths and will fail if a producer emits a reason the engine
+does not recognise.
 
 ---
 

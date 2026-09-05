@@ -80,11 +80,20 @@ made ~1,500 upstream API timeouts a day read as radar outages.
 | **warn** | Degraded, not broken | Declared DOWN but data still flowing |
 | **fail** | **The monitored thing is broken** | Radar declared UP, no scans |
 | **error** | **We could not determine its state** | Upstream API timed out |
-| **skip** | Deliberately not evaluated | Suppressed by an upstream failure or a silence |
+| **skip** | Deliberately not evaluated | Suppressed by an upstream failure, or nothing to assess |
 
 `fail` is a statement about radarca. `error` is a statement about *our
 visibility*. Treat a screen full of `error` as "Sentinel is flying blind,"
 not "everything is down."
+
+`skip` comes in two flavours that look identical on the timeline. Most are
+**cascade skips**: when one upstream thing breaks, Sentinel stops reporting
+its own opinion about everything downstream, so a single origin fault doesn't
+paint thirty cells red. That is a refusal to guess, *not* a clean bill of
+health — a skip never resolves an open alarm, and the previous verdict
+stands until a real check result replaces it. The other flavour is an
+**intrinsic skip**, where the check ran and genuinely had nothing to assess;
+that one does count as "nothing wrong". The drilldown tells you which.
 
 ## 6. How do you decide a radar is down?
 
@@ -184,12 +193,23 @@ Recipients, escalation steps and on-call schedules live under `/admin/alerts`
 and `/admin/groups`, including recurring quiet hours and per-device routing on
 mobile.
 
+**To stop being paged for something you already know about, acknowledge it.**
+An ack stops every channel for that alarm — email, console, webhook, and any
+repeat — and it silences it for the whole team, not just you, because whoever
+acks is taking ownership of it. Un-acking resumes paging.
+
 For planned work, use a **silence** (`/admin/silences`) rather than muting a
 check permanently — silenced alarms still appear on the dashboard and in the
-record, they just stop paging. If you are seeing noise you believe is wrong,
-that is worth reporting rather than silencing: two of the largest sources of
-false alarms found so far were a stale threshold and a colour that made
-"couldn't measure" look identical to "broken."
+record, they just stop paging. Prefer a silence over an ack when you know the
+window in advance, because a silence covers the check regardless of how the
+underlying alarm comes and goes.
+
+If you are seeing noise you believe is wrong, that is worth reporting rather
+than silencing: the three largest sources of false alarms found so far were a
+stale threshold, a colour that made "couldn't measure" look identical to
+"broken", and — until v0.2.1 — a bug that let a permanently-down radar
+re-announce itself every few hours because an upstream blip had been mistaken
+for a recovery.
 
 ---
 

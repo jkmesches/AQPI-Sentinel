@@ -307,12 +307,20 @@ Three reasons a check can be `status=skip`. They look identical in
 the timeline grid — the drilldown's `payload.reason` distinguishes
 them:
 
-| `payload.reason` | Means |
-|---|---|
-| `upstream_unhealthy` | [Cascade demote](#cascade-demote) — an ancestor was unhealthy at this run's `finished_at`. |
-| `local_dns_error` | Local DNS resolution flake. Detected via `_is_local_dns_error` or `_summary_looks_like_dns`. |
-| `local_network_offline` | Network monitor said the host's own internet was down. |
-| (not set) | Intrinsic skip — the check legitimately couldn't assess (forecast products skipping step-count sub-checks, etc.). |
+| `payload.reason` | Means | Effect on an open alarm |
+|---|---|---|
+| `upstream_unhealthy` | [Cascade demote](#cascade-demote) — an ancestor was unhealthy at this run's `finished_at`. | **None** — inconclusive |
+| `local_dns_error` | Local DNS resolution flake. Detected via `_is_local_dns_error` or `_summary_looks_like_dns`. | **None** — inconclusive |
+| `local_network_offline` | Network monitor said the host's own internet was down. | **None** — inconclusive |
+| (not set) | Intrinsic skip — the check legitimately couldn't assess (forecast products skipping step-count sub-checks, etc.). | **Closes it** |
+
+The first three are **inconclusive**: the check declined to judge, so
+the previous verdict still stands and an open alarm is left alone. The
+fourth is a real observation that nothing is wrong. Treating an
+inconclusive skip as recovery makes a permanently-down target
+re-alert every few hours — see
+[Inconclusive skips](16-alarm-engine.md#inconclusive-skips-are-not-recovery).
+The set lives in `alarms.suppression.INCONCLUSIVE_SKIP_REASONS`.
 
 On `/m/uptime`, cascade-demoted cells get a small `↑` badge to
 distinguish them from intrinsic skips at a glance.
@@ -330,13 +338,31 @@ The alarm lifecycle:
   row per ack event, supports unack-and-re-ack).
 - **Unacked** — a previously-acked alarm got un-acked. Repeats
   resume. Used when an ack was premature.
-- **Closed** — the underlying check returned to `pass`/`skip`. The
-  alarm's `closed_at` is set. Closed alarms keep their history
-  visible in `/history` but stop participating in routing.
+- **Closed** — the underlying check returned to `pass` or an
+  *intrinsic* skip. The alarm's `closed_at` is set. Closed alarms
+  keep their history visible in `/history` but stop participating in
+  routing. An inconclusive skip does not close an alarm.
 
-Acks are user-specific (the row records `acked_by`). One ack
-silences the alarm for everyone, not just the acker — this is
-intentional; the operator who acks is "owning" it.
+The row records `acked_by`, but the ack is **not** scoped to that
+user: `alarm_acks` is keyed on `alarm_id` alone, so one ack silences
+the alarm for everyone. That is intentional — the operator who acks
+is "owning" it.
+
+An ack suppresses every channel. `engine._process` checks `is_acked`
+before it resolves a route, so an acked alarm dispatches nothing on
+email, console or webhook at any severity, `repeat_interval` re-sends
+included. Web push fires only on `alarm_open` so it never repeats;
+its deferred send re-checks the ack (and, since v0.2.1, respects a
+revocation, so un-acking really does restore paging).
+
+!!! warning "An ack binds to the alarm row, not to the check"
+    Anything that closes and re-opens an alarm discards the ack, and
+    the replacement pages again. This is why acking a
+    known-down target used to have no lasting effect: a cascade
+    demote closed the alarm within hours and the next one arrived
+    clean. Fixed in v0.2.1. To suppress something for a *planned*
+    window regardless of alarm churn, use a
+    [silence](#silence) instead.
 
 ---
 
