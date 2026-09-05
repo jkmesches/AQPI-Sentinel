@@ -229,6 +229,12 @@ async def history_timeline(
         "  COUNT(*) FILTER (WHERE status = 'fail')  AS n_fail, "
         "  COUNT(*) FILTER (WHERE status = 'error') AS n_error, "
         "  COUNT(*) FILTER (WHERE status = 'warn')  AS n_warn, "
+        # Skips are counted for the same reason the others are, but the
+        # consequence is different: without this the client cannot tell a
+        # bucket's non-defect remainder apart from PASS, so it assumed pass and
+        # painted skips green — asserting we checked and found nothing wrong,
+        # when in fact we declined to judge. See timelineFill.ts.
+        "  COUNT(*) FILTER (WHERE status = 'skip')  AS n_skip, "
         "  COUNT(*) AS n "
         "FROM check_runs "
         "WHERE " + " AND ".join(where) + " "
@@ -266,6 +272,7 @@ async def history_timeline(
         cell["n_fail"] = int(r["n_fail"] or 0)
         cell["n_error"] = int(r["n_error"] or 0)
         cell["n_warn"] = int(r["n_warn"] or 0)
+        cell["n_skip"] = int(r["n_skip"] or 0)
         # Only emit `reason` when it's load-bearing — the field is omitted
         # for vanilla skips so the JSON stays small over the wire.
         if r.get("any_upstream"):

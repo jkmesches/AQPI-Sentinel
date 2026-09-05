@@ -38,7 +38,9 @@ export const STATUS_WORD: Record<string, string> = {
 	pass: 'PASS', warn: 'WARN', fail: 'FAIL', error: 'ERROR', skip: 'SKIP', unknown: '—'
 };
 
-/** Statuses that are not a defect, so the cell is drawn as one flat colour. */
+/** Statuses that are not a defect. These contribute no bad band of their own,
+ *  but a cell at one of them is still drawn from its composition — a bucket of
+ *  passes AND skips is not a flat green cell. */
 const FLAT_STATUSES = new Set(['pass', 'skip', 'unknown']);
 
 /**
@@ -77,21 +79,86 @@ export function badFraction(cell: TimelineCell | undefined): number {
 }
 
 /**
- * CSS `background` for one cell: a full-saturation band of `st` sized by its
- * share of the bucket, over the pass colour. `h` is the drawn cell height in
- * px, which is what makes the MIN_BAD_PX floor meaningful.
+ * Share of the bucket that was SKIPPED, 0..1.
+ *
+ * A skip is not a pass. The check ran and declined to return a verdict —
+ * usually because an upstream dependency was unhealthy and the scheduler
+ * demoted a real fail/error to skip so one fault would not paint every
+ * downstream cell red. Drawing that as pass asserts we looked and found
+ * nothing wrong, which is the opposite of what happened.
+ *
+ * Unlike badFraction, ambiguity here resolves to ZERO, not one. Guessing high
+ * would grey out cells we have no evidence about, and grey is the colour that
+ * says "no data" — inventing it would be its own lie. The one exception is a
+ * cell whose own status is `skip`: `pass` outranks `skip` when picking a
+ * bucket's worst status, so a skip-status cell can only mean every run in it
+ * skipped, even from a server too old to send the count.
+ */
+export function skipFraction(cell: TimelineCell | undefined): number {
+	if (!cell || !cell.n) return 0;
+	const s = cell.n_skip;
+	if (s === undefined) return cell.status === 'skip' ? 1 : 0;
+	if (s <= 0) return 0;
+	return Math.min(1, s / cell.n);
+}
+
+/**
+ * CSS `background` for one cell, drawn from the bucket's composition.
+ *
+ * Bottom to top: the bad band (the cell's own defect status), then skips, then
+ * passes. `h` is the drawn cell height in px, which is what makes the
+ * MIN_BAD_PX floor meaningful.
+ *
+ * The skip band is why this is not simply "bad over pass". Until 2026-09-05
+ * the remainder above the bad band was hard-coded to the pass colour, and any
+ * cell whose worst status was `pass` was drawn as one flat green block. Both
+ * cases painted skips green. Measured over 24h at 1h grain: 141 of 1,093
+ * buckets contained a skip, 59 of them rendered as solid green and 2 more as a
+ * green remainder — so a bucket where we had stopped being able to see
+ * anything looked exactly like one we had checked and found healthy. That is
+ * the same mistake the alarm engine was making by closing alarms on demoted
+ * skips, and it is worse on the timeline, because the grid is what an operator
+ * scans to decide whether to look closer at all.
  */
 export function cellFill(cell: TimelineCell | undefined, st: string, h: number): string {
 	const bad = STATUS_BG[st] ?? 'transparent';
-	if (FLAT_STATUSES.has(st)) return bad;
-	const frac = badFraction(cell);
-	if (frac >= 1) return bad;
-	// Floor the band so a rare failure stays visible at any row height, then
-	// clamp — on a very short row the floor alone can exceed the cell.
-	const px = Math.max(MIN_BAD_PX, Math.round(frac * h));
-	const pct = Math.min(100, (px / Math.max(h, 1)) * 100);
-	if (pct >= 100) return bad;
-	return `linear-gradient(to top, ${bad} 0 ${pct}%, ${STATUS_BG['pass']} ${pct}% 100%)`;
+	if (st === 'unknown') return bad;
+
+	const isDefect = !FLAT_STATUSES.has(st);
+	const badFrac = isDefect ? badFraction(cell) : 0;
+	if (badFrac >= 1) return bad;
+
+	const skipFrac = skipFraction(cell);
+	if (!isDefect && skipFrac >= 1) return STATUS_BG['skip'];
+	if (badFrac <= 0 && skipFrac <= 0) return STATUS_BG[st] ?? STATUS_BG['pass'];
+
+	// Floor the bad band so a rare failure stays visible at any row height,
+	// then clamp — on a very short row the floor alone can exceed the cell.
+	let badPx = badFrac > 0 ? Math.max(MIN_BAD_PX, Math.round(badFrac * h)) : 0;
+	if (badPx > h) badPx = h;
+	// Skips yield to the bad band, never the other way round: an outage must
+	// stay visible even in a bucket that is mostly skipped.
+	let skipPx = Math.round(skipFrac * h);
+	if (badPx + skipPx > h) skipPx = Math.max(0, h - badPx);
+
+	const span = Math.max(h, 1);
+	const badPct = (badPx / span) * 100;
+	const skipPct = (skipPx / span) * 100;
+	if (badPct >= 100) return bad;
+
+	const stops: string[] = [];
+	let cursor = 0;
+	if (badPx > 0) {
+		stops.push(`${bad} 0 ${badPct}%`);
+		cursor = badPct;
+	}
+	if (skipPx > 0) {
+		const start = cursor === 0 ? '0' : `${cursor}%`;
+		cursor += skipPct;
+		stops.push(`${STATUS_BG['skip']} ${start} ${cursor}%`);
+	}
+	if (cursor < 100) stops.push(`${STATUS_BG['pass']} ${cursor}% 100%`);
+	return `linear-gradient(to top, ${stops.join(', ')})`;
 }
 
 /** Tooltip text carrying the same figures the fill encodes. */

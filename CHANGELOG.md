@@ -30,6 +30,38 @@ unknown`.
 
 ### Fixed
 
+- **Skips rendered as green on the bucketed timeline.** Two separate paths,
+  both asserting we had checked and found nothing wrong when in fact we had
+  declined to judge:
+
+  - `cellFill` hard-coded the remainder above a defect band to the pass
+    colour, so a bucket that was 20% fail and 60% skip drew 20% red over 80%
+    green.
+  - `pass` outranks `skip` when picking a bucket's worst status, and `pass`
+    was in `FLAT_STATUSES`, so any bucket containing even one pass was drawn
+    as a single flat green block with its skips erased entirely. This was the
+    common case.
+
+  Measured over 24 h at 1 h grain: 141 of 1,093 buckets contained a skip; 59
+  rendered as solid green and 2 more as a green remainder. A real example from
+  production — `layer0.origin.latency`, 45 runs of which **33 were skipped** —
+  drew as `var(--color-ok)`, indistinguishable from a fully healthy hour.
+
+  Cells are now drawn from their composition: the defect band at the bottom,
+  then skips in grey, then the share that really passed. The server sends
+  `n_skip` alongside the existing per-status counts to make that possible.
+
+  This is the same mistake the alarm engine was making by closing alarms on
+  demoted skips, and it matters more here — the grid is what an operator scans
+  to decide whether to look closer at all, so a blind spot that looks healthy
+  is the one thing it must never draw.
+
+  Ambiguity resolves the opposite way from `badFraction`: a server too old to
+  send `n_skip` greys nothing, because grey means "no data" and inventing it
+  would be its own lie. The exception is a `skip`-status cell, which can only
+  mean every run skipped. Skips also yield to the bad band rather than the
+  reverse, so one failure among 999 skips still draws its `MIN_BAD_PX` floor.
+
 - **Sparklines drained away while an operator watched a healthy system.** They
   were seeded once at page load and thereafter fed only by WebSocket `run`
   events — which the backend broadcasts **only when a check's status
