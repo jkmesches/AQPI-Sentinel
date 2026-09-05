@@ -60,6 +60,12 @@ services:
       SENTINEL_PUBLIC_URL:         ${SENTINEL_PUBLIC_URL:-}
     volumes:
       - sentinel_archive:/data/archive
+      # Read-only view of the host directory ops/backup.sh writes to, so
+      # layer0.self.backup can read status.json and alarm when the nightly dump
+      # goes stale or starts failing. Point SENTINEL_BACKUP_HOST_PATH at the
+      # same absolute path as the cron job's SENTINEL_BACKUP_DIR. Left unset,
+      # the check reports "backup monitoring not configured" and stays silent.
+      - ${SENTINEL_BACKUP_HOST_PATH:-sentinel_backups}:/data/backups:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
@@ -84,6 +90,7 @@ volumes:
     name: sentinel_pgdata
   sentinel_archive:
     name: sentinel_archive
+  sentinel_backups:
 
 networks:
   sentinel:
