@@ -626,23 +626,54 @@ yet — go back to its section above.
 
 Nothing takes a backup until you install the cron job. On the docker host:
 
+Pick the line that matches where your dumps live.
+
+**Local disk** — simplest, and fine when the host itself is backed up:
+
 ```bash
-0 8 * * * SENTINEL_BACKUP_DIR=/var/backups/sentinel \
+0 8 * * * /srv/sentinel/ops/backup.sh >> /var/log/sentinel-backup.log 2>&1
+```
+
+**A network share or separate volume** — recommended:
+
+```bash
+0 8 * * * SENTINEL_BACKUP_DIR=/mnt/backups/sentinel \
           /srv/sentinel/ops/backup.sh >> /var/log/sentinel-backup.log 2>&1
 ```
 
-Validate the configuration first, which writes nothing:
+The difference is not only the path. Naming `SENTINEL_BACKUP_DIR` also **arms
+the mount guard**: the script then refuses to run unless the dumps land on a
+mounted volume rather than the root disk. That is what you want for a share —
+if it silently detaches, the path is still a writable local directory and
+nightly dumps would fill the very disk the share exists to protect. Taking the
+default is itself the decision to use local disk, so the guard stays off.
+Override either way with `SENTINEL_BACKUP_REQUIRE_MOUNT`.
+
+You do **not** need to name the mountpoint. The guard works out which
+filesystem the directory lands on, so a dump directory nested inside a share
+is handled correctly.
+
+Validate the configuration first. This writes nothing — in particular it does
+not touch `status.json`, so a config check can never be mistaken for a
+successful backup:
 
 ```bash
-SENTINEL_BACKUP_DIR=/var/backups/sentinel bash ops/backup.sh --check
+SENTINEL_BACKUP_DIR=/mnt/backups/sentinel bash ops/backup.sh --check
 ```
 
 Schedule it **earlier** than `SENTINEL_RETENTION_HOUR_UTC` (default 09:00 UTC)
 so a backup always precedes the sweep that deletes rows. Every setting is
 documented in the header of `ops/backup.sh`; the important ones are
 `SENTINEL_BACKUP_DIR`, `SENTINEL_BACKUP_KEEP` (must be ≥ 1), and
-`SENTINEL_BACKUP_REQUIRE_MOUNT` (refuses to write unless the destination is a
-real mountpoint, so a failed network mount cannot quietly fill the local disk).
+`SENTINEL_BACKUP_REQUIRE_MOUNT`.
+
+!!! warning "Put the configuration in the cron line, not in your head"
+    This bit the reference deployment. The cron line carried no environment
+    and relied on the script's defaults; when those defaults changed, backups
+    aborted every night for two days and nothing said so. `crontab -l` should
+    show you exactly where dumps go without your having to read the script.
+    And configure the freshness check below — that is the part that tells you
+    when the arrangement stops working.
 
 The script fails safely: it writes to a `.part` file and renames only after
 verifying the dump decompresses **and contains the Sentinel schema**, and it

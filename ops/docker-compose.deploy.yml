@@ -121,6 +121,12 @@ services:
       - ${SENTINEL_ARCHIVE_PATH:-sentinel_archive}:/data/archive
       # Offloaded rows aged out of Postgres by the retention sweep.
       - ${SENTINEL_COLD_PATH:-sentinel_cold}:/data/cold
+      # Read-only view of the host directory the nightly backup writes to, so
+      # layer0.self.backup can read status.json and tell you when backups go
+      # stale or start failing. Set SENTINEL_BACKUP_PATH to the same path as
+      # the cron's SENTINEL_BACKUP_DIR. Left unset, the check reports "backup
+      # monitoring not configured" and stays quiet.
+      - ${SENTINEL_BACKUP_PATH:-sentinel_backups}:/data/backups:ro
       # Read-only view of where ops/backup.sh writes, so layer0.self.backup
       # can see status.json and alarm when backups go stale or start failing.
       # Read-only on purpose: the backend must never be able to modify or

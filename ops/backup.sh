@@ -24,12 +24,18 @@
 #                                 default: sentinel-postgres
 #   POSTGRES_USER / POSTGRES_DB   database identity
 #                                 default: sentinel / sentinel
-#   SENTINEL_BACKUP_REQUIRE_MOUNT 1 = refuse to run unless MOUNT_ROOT is a
-#                                 real mountpoint. Set 0 only if backups are
-#                                 deliberately on local disk.
-#                                 default: 1
+#   SENTINEL_BACKUP_REQUIRE_MOUNT 1 = refuse to run unless the dumps land on a
+#                                 mounted volume rather than the root disk.
+#                                 default: 1 when SENTINEL_BACKUP_DIR is set
+#                                 (you pointed us at storage — we verify it is
+#                                 attached), 0 when it is not (the local
+#                                 default IS a choice to use local disk).
 #   SENTINEL_BACKUP_MOUNT_ROOT    the mountpoint to require
-#                                 default: the value of SENTINEL_BACKUP_DIR
+#                                 default: the filesystem SENTINEL_BACKUP_DIR
+#                                 lands on. NOT the directory itself — a share
+#                                 is mounted at a root and dumps live in a
+#                                 subdirectory, so the dump directory is almost
+#                                 never a mountpoint of its own.
 #   SENTINEL_BACKUP_MIN_FREE_MB   abort if the destination has less free space
 #                                 than this. default: 2048
 #   SENTINEL_BACKUP_MIN_BYTES     crude floor for a zero-length/header-only
@@ -54,8 +60,27 @@ KEEP="${SENTINEL_BACKUP_KEEP:-14}"
 CONTAINER="${SENTINEL_PG_CONTAINER:-sentinel-postgres}"
 PGUSER="${POSTGRES_USER:-sentinel}"
 PGDB="${POSTGRES_DB:-sentinel}"
-REQUIRE_MOUNT="${SENTINEL_BACKUP_REQUIRE_MOUNT:-1}"
-MOUNT_ROOT="${SENTINEL_BACKUP_MOUNT_ROOT:-$DEST}"
+# Require a real mount only when the operator pointed us somewhere. Taking
+# the built-in local default IS the choice to keep dumps on local disk, so
+# demanding a mountpoint there makes a fresh install abort every night with
+# nothing configured wrong. Set the variable explicitly to override either way.
+if [ -n "${SENTINEL_BACKUP_DIR:-}" ]; then
+    REQUIRE_MOUNT="${SENTINEL_BACKUP_REQUIRE_MOUNT:-1}"
+else
+    REQUIRE_MOUNT="${SENTINEL_BACKUP_REQUIRE_MOUNT:-0}"
+fi
+
+# The mountpoint to verify. Defaulting this to $DEST was wrong: shares are
+# mounted at a root and dumps live in a subdirectory beneath it, so the
+# directory you name is almost never itself a mountpoint. Walk up to the
+# filesystem $DEST actually lands on. $DEST may not exist yet — the guard runs
+# before mkdir — so start from its deepest existing ancestor.
+enclosing_mountpoint() {
+    local p="$1"
+    while [ ! -e "$p" ] && [ "$p" != "/" ]; do p="$(dirname "$p")"; done
+    df -P "$p" 2>/dev/null | awk 'NR==2{print $6}'
+}
+MOUNT_ROOT="${SENTINEL_BACKUP_MOUNT_ROOT:-$(enclosing_mountpoint "$DEST")}"
 MIN_FREE_MB="${SENTINEL_BACKUP_MIN_FREE_MB:-2048}"
 MIN_BYTES="${SENTINEL_BACKUP_MIN_BYTES:-512}"
 STATUS_FILE="${SENTINEL_BACKUP_STATUS_FILE:-$DEST/status.json}"
@@ -87,8 +112,22 @@ err()  { echo "[$(date -uIs)] $*" >&2; }
 # unexpected abort under `set -e`, which is precisely the case a hand-placed
 # "write success" line at the bottom would miss.
 STATUS="failed"; DETAIL="aborted before completion"; BYTES=0; ARTIFACT=""
+# status.json records BACKUP ATTEMPTS, and nothing else. `--check` sets this to
+# 0 so a config check cannot masquerade as a dump.
+#
+# It did, until 2026-09-05. --check exits through the same EXIT trap, so it
+# wrote status=ok with a fresh finished_at and an empty artifact — and
+# layer0.self.backup, which keys on status + age, reported "last backup 0.0h
+# ago". Running the documented config-validation command silently reset the
+# staleness clock, so an operator checking their config while real backups
+# were failing would be told everything was fine indefinitely.
+# Decided here, before the EXIT trap is armed, so it also holds when a
+# --check ABORTS on bad config: that is still not a backup attempt, and
+# recording it as a failed dump would misreport what happened.
+if [ "${1:-}" = "--check" ]; then WRITE_STATUS=0; else WRITE_STATUS=1; fi
 write_status() {
     local rc=$?
+    [ "$WRITE_STATUS" = "1" ] || return 0
     [ "$rc" -eq 0 ] && [ "$STATUS" = "failed" ] && { STATUS="ok"; DETAIL="completed"; }
     mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null || true
     cat > "$STATUS_FILE.part" 2>/dev/null <<JSON || return 0
@@ -127,8 +166,18 @@ docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true \
     || die "container '$CONTAINER' is not running" \
         "Set SENTINEL_PG_CONTAINER if your container has another name."
 
-if [ "$REQUIRE_MOUNT" = "1" ] && ! mountpoint -q "$MOUNT_ROOT" 2>/dev/null; then
-    die "$MOUNT_ROOT is not a mountpoint — refusing to write backups there" \
+# "/" counts as a mountpoint, so testing that alone would let a detached
+# share pass silently — the whole failure this guards against. Landing on the
+# root filesystem is exactly the thing we refuse.
+if [ "$REQUIRE_MOUNT" = "1" ]; then
+    if [ "$MOUNT_ROOT" = "/" ]; then
+        why="$DEST is on the root filesystem, not a mounted volume"
+    elif ! mountpoint -q "$MOUNT_ROOT" 2>/dev/null; then
+        why="$MOUNT_ROOT is not a mountpoint"
+    else
+        why=""
+    fi
+    [ -z "$why" ] || die "$why — refusing to write backups there" \
         "If the share failed to attach, the path is still a writable local" \
         "directory and nightly dumps would quietly fill the disk this exists" \
         "to protect. Mount it, or set SENTINEL_BACKUP_REQUIRE_MOUNT=0 to" \
@@ -146,7 +195,6 @@ if [ -n "$free_mb" ] && [ "$free_mb" -lt "$MIN_FREE_MB" ]; then
 fi
 
 if [ "${1:-}" = "--check" ]; then
-    STATUS="ok"; DETAIL="config check only, nothing written"
     log "config OK: dest=$DEST keep=$KEEP container=$CONTAINER db=$PGDB free=${free_mb}MB"
     log "--check specified; not taking a backup."
     exit 0
