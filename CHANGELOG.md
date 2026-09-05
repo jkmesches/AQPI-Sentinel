@@ -28,6 +28,30 @@ GHCR images are tagged correspondingly: pushing `v0.1.0` publishes
 
 ### Fixed
 
+- **A route keyed on `status_at_open` matched at open time and silently
+  matched nothing at dispatch time.** `status_at_open` is written into the
+  `alarms.payload` JSONB, but `_matches` does a flat `alarm.get(k)`. The two
+  call sites disagreed about shape: `evaluate()` builds a flat dict to resolve
+  the hold-down (matched correctly), while `_process()` passes the alarms row
+  straight through (never matched). `_process` reads `route is None` as "no
+  route configured" and returns, so the failure had no error, no warning and
+  no log line — the only symptom was an empty `notification_log`.
+
+  Production is configured with exactly one route, `{status_at_open: error}`.
+  537 matching alarms opened in the 7 days to 2026-09-05 and **zero**
+  notifications were dispatched; the newest row in `notification_log` predates
+  the config change by months. `compute_severity` reads the same field, so
+  duration-promotion to `critical` was dead for the same reason.
+
+  Row and payload are now merged into the match shape once, in
+  `flatten_alarm`. Real columns win over payload keys of the same name, so a
+  stale payload can never steer a route keyed on `stage` or `severity`.
+
+  **Operators upgrading past this fix should re-read their routes before
+  restarting.** Any route keyed on `status_at_open` has been inert and starts
+  firing — including its `repeat_interval`, which for a long-running outage
+  means one notification per interval for as long as the alarm stays open.
+
 - **A target that never recovers was re-alerting every few hours.** The
   scheduler demotes `fail`/`error` to `skip` when a dependency is unhealthy,
   so one upstream fault doesn't paint 37 downstream cells red. Three places
