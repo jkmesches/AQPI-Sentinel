@@ -28,6 +28,54 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nightly backups had been aborting since 2026-09-03.** Hardening the backup
+  script in v0.2.0 moved `SENTINEL_BACKUP_DIR`'s default from the NFS share to
+  `/var/backups/sentinel`, and `SENTINEL_BACKUP_MOUNT_ROOT`'s default from the
+  share to `$DEST`. The cron line carried no environment and relied entirely on
+  those defaults, so from the moment the change deployed the mount guard
+  correctly refused to write to a non-mount — a path the same commit had just
+  repointed at local disk. The guard worked exactly as designed; the defaults
+  it was paired with did not. Two nights of backups were lost.
+
+  Three things were wrong, and each would have caused this alone:
+
+  - **`MOUNT_ROOT` defaulted to `$DEST`.** A share is mounted at a root and
+    dumps live in a subdirectory beneath it, so the directory you name is
+    almost never a mountpoint itself. It now resolves the filesystem `$DEST`
+    actually lands on, and rejects the root filesystem explicitly — `/` is a
+    mountpoint, so testing for one is not enough to catch a detached share.
+  - **The guard was armed by default while the default destination was local
+    disk.** Those two defaults contradict each other: a fresh install would
+    abort every night with nothing misconfigured. Naming a directory now means
+    "verify my storage is attached"; taking the default means "local disk is
+    fine".
+  - **`--check` wrote `status.json`.** It exits through the same `EXIT` trap
+    that records outcomes, so the documented config-validation command wrote
+    `status=ok` with a fresh timestamp and an empty artifact — and
+    `layer0.self.backup`, which keys on status and age, reported *"last backup
+    0.0h ago"*. Running `--check` reset the staleness clock, so an operator
+    validating their config while real backups failed would have been told
+    everything was fine indefinitely. `status.json` now records backup
+    attempts only.
+
+- **`layer0.self.backup` was watching nothing.** The check exists to make
+  exactly this failure loud, and reported `skip — backup monitoring not
+  configured` throughout, because no compose file mounted the backup directory
+  at `/data/backups`. Both deploy stacks now bind it read-only via
+  `SENTINEL_BACKUP_HOST_PATH` / `SENTINEL_BACKUP_PATH`, and the shipped example
+  env files say to set it to the same path as the cron job.
+
+  The `.env.deploy.example` cron recipe was also self-defeating under the new
+  rule — it named `/var/backups/sentinel` explicitly, which arms the guard on a
+  root-filesystem path. Rewritten to show the local-disk and network-share
+  forms separately.
+
+- **`ops/backup.sh` now has tests.** `validation_tests/test_backup_guard.sh`
+  covers the guard matrix and the status-file discipline, and is verified to
+  fail against each of the three regressions above.
+
 ## [0.2.1] — 2026-09-05
 
 Alert-fidelity release. Three bugs that all pointed the same way: Sentinel

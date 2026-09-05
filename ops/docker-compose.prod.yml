@@ -95,6 +95,13 @@ services:
       # container disk: SENTINEL_ARCHIVE_HOST_PATH=/mnt/aqpi-data/archive
       - ${SENTINEL_ARCHIVE_HOST_PATH:-sentinel_archive}:/data/archive
       - ${SENTINEL_COLD_HOST_PATH:-sentinel_cold}:/data/cold
+      # Read-only view of the host's backup directory so layer0.self.backup can
+      # read status.json and alarm when the nightly dump goes stale or starts
+      # failing. Without it the check reports "backup monitoring not
+      # configured" and a broken backup is discovered only when one is needed —
+      # which is exactly how a two-day gap went unnoticed on 2026-09-05.
+      # Point this at the same path as the cron's SENTINEL_BACKUP_DIR.
+      - ${SENTINEL_BACKUP_HOST_PATH:-sentinel_backups}:/data/backups:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     logging: *default-logging
@@ -127,6 +134,10 @@ services:
 volumes:
   sentinel_pgdata:
     name: sentinel_pgdata
+  # Fallback so the compose file is valid when SENTINEL_BACKUP_HOST_PATH is
+  # unset; a deploy that backs up to the host should point that at the real
+  # directory instead, or the check sees an empty volume and stays silent.
+  sentinel_backups:
   # Fallbacks for dev / any deploy that hasn't set the *_HOST_PATH vars.
   # Production overrides both to bind mounts; these then go unused (the old
   # sentinel_archive volume is retained as the migration rollback).
