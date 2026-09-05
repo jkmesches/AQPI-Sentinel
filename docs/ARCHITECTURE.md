@@ -501,12 +501,15 @@ empty cells during a partial fill are normal.
 | `GET /api/alarms[?status=open]` | Open / closed alarms |
 | `POST /api/alarms/{id}/ack` / `unack` | Ack / unack |
 | `GET /api/checks` | Registry (used by the admin routing-rule dropdowns) |
+| `GET /api/checks/{id}/metrics?metric=&limit=&since=` | One metric series, newest first |
+| `GET /api/checks/-/metrics_recent?series=a\|b,c\|d&since=` | Many series in one request. The dashboard polls this to keep sparklines fed: WebSocket `run` events fire only on a status CHANGE (3.85% of runs, measured), so sparklines seeded at page load would otherwise starve and drain away on healthy checks |
 | `GET /api/history/{alarms,checks}` | List with multi-select filters (comma-sep values via `ANY($n::text[])`) |
 | `GET /api/history/timeline` | Bucketed state-over-time grid |
 | `GET /api/history/runs` | Full payload + artifacts for one (check_id, target) window |
 | `GET /api/history/export.csv` | Detail-row CSV honouring every filter |
 | `GET /api/history/report.csv` | Long-format bucketed CSV — Timeline → Export Report dialog |
 | `GET /api/upstream/{product_steps,product_image.png,radar_steps,xband_scan.png,image_by_source.png}` | Thin proxy to radarca with archive fall-through |
+| `GET /api/upstream/{tilt_steps,tilt_image.png}` | Per-elevation PPI stack from **radar-display**, a second origin. Same LRU → archive → upstream ladder; `tilt_image.png?time=` resolves from the archive, which reaches back past radar-display's own 7-frame (~16 min) window |
 | `GET /api/silences` / `POST` / `PUT /{sid}` / `DELETE /{sid}` | Silence CRUD; PUT for edit |
 | `GET /api/admin/groups` etc. | Full group CRUD + `/preview` (next on-windows) |
 | `GET/PUT /api/admin/thresholds` | Threshold blob editor |
@@ -514,7 +517,8 @@ empty cells during a partial fill are normal.
 | `GET/POST/PUT /api/admin/alerts` | Alert routing config |
 | `GET /api/users` | List (extended with `groups[]` per row) |
 | `GET /api/push/{vapid_public,subscribe,unsubscribe,status,subscriptions,subscriptions/{id}/routing}` | Web Push |
-| `GET /api/ws[?token=…]` | WebSocket stream (transition events only) |
+| `GET /api/ws[?token=…]` | WebSocket stream (**transition events only** — see `metrics_recent` above for why sparklines cannot rely on it) |
+| `GET /api/version` | The running build's version. The only way to ask an instance what it is without reading its source |
 | `GET /api/_debug/stats` | Runtime diagnostic snapshot |
 
 OpenAPI is live at `http://localhost:8000/docs` (Swagger UI) and

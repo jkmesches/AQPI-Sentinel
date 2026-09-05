@@ -178,20 +178,25 @@ gives you a quick read on the upgrade risk:
 **Standard upgrade procedure:**
 
 ```bash
+# Set this once — everything below uses it, so there is no version to
+# forget in the middle. The git tag carries a leading v; the image tag
+# does not (see 99-release-process.md).
+VER=0.3.1
+
 # Read the CHANGELOG between your current version and the target.
-gh release view v0.2.0 --repo jkmesches/AQPI-Sentinel
+gh release view "v$VER" --repo jkmesches/AQPI-Sentinel
 
 # Pull the new tag.
-SENTINEL_TAG=0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=$VER docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod pull
 
 # Check what changed in the env example — new variables may have
 # appeared with sensible defaults you might want to override.
 diff ops/.env.prod.example <(curl -fsSL \
-    "https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/v0.2.0/ops/.env.prod.example")
+    "https://raw.githubusercontent.com/jkmesches/AQPI-Sentinel/v$VER/ops/.env.prod.example")
 
 # Apply.
-SENTINEL_TAG=0.2.0 docker compose -f ops/docker-compose.ghcr.yml \
+SENTINEL_TAG=$VER docker compose -f ops/docker-compose.ghcr.yml \
     --env-file ops/.env.prod up -d
 
 # Verify.

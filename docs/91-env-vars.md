@@ -40,6 +40,8 @@ inside Postgres.
 | `SENTINEL_PREWARM_ENABLED` | no | `0` | Continuously capture **every** published moment and tilt, rather than only what someone has looked at. See the warning below before enabling. |
 | `SENTINEL_PREWARM_INTERVAL_S` | no | `300` | Seconds between sweeps of all streams. Must stay below the origin's rolling-window length or frames are missed permanently — radar-display keeps 7 frames at ~140 s (~16 min). |
 | `SENTINEL_PREWARM_CONCURRENCY` | no | `3` | Simultaneous in-flight prewarm fetches, bounded independently of operator traffic. |
+| `SENTINEL_BACKUP_HOST_PATH` | no | `sentinel_backups` | Host directory `ops/backup.sh` writes to, mounted read-only at `/data/backups` so `layer0.self.backup` can watch freshness. Set it to the same absolute path as the cron's `SENTINEL_BACKUP_DIR`; left unset the check reports "backup monitoring not configured" and stays silent. (`SENTINEL_BACKUP_PATH` on the deploy stack.) |
+| `SENTINEL_RD_VERIFY_TLS` | no | `1` | TLS verification for radar-display, the origin serving per-elevation tilt imagery. Its certificate expired in 2026-05 and verification was disabled to keep imagery working; the certificate was renewed 2026-07-14, so verification is on again. Set `0` **only** if it lapses again and you need tilts back before it is fixed — `layer0.net.radardisplay_tls` will be failing while that is true. |
 
 !!! warning "`SENTINEL_PREWARM_ENABLED` is the only setting that creates upstream load nobody asked for"
     Every other request Sentinel makes is a scheduled check or an operator

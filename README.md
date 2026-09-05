@@ -12,13 +12,14 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 ## Status
 
-**v0.2.0** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
+**v0.3.1** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
 
-- **44 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
-- **18-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
+- **45 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
+- **21-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
 - **Alarm engine** with routes, groups (schedule-gated bundles of users), escalation policies, acks, silences, dependency-graph suppression, and per-step recipient dedup.
 - **Three-tier severity model** (v0.1.2): `info` = attention-required, `warn` = broken (action required), `critical` = sustained outage. Auto-promotes `warn → critical` after 30 minutes.
 - **Web Push** with per-device routing (severity floor, pattern matching, async delay, on-duty schedule, quiet hours). Smart-delay drops the push if the alarm resolves or is acked first.
+- **Content-addressed image archive** — every frame Sentinel serves is stored and de-duplicated by SHA-256, so scrubbing history costs the upstream nothing. Optional prewarm (`SENTINEL_PREWARM_ENABLED`, off by default) captures *every* published moment and per-elevation tilt rather than only what someone has looked at; for tilts the archive reaches further back than the origin's own 16-minute window.
 - **Mobile PWA** (`/m/*`) — install on iPhone Safari; 4-tab bottom nav (Status / Timeline / Alarms / More) with composites + playback, ack/unack, dedicated push-routing editor.
 
 ## How it works
