@@ -38,6 +38,12 @@
 				</a>
 				<a
 					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
+					href="/admin/digest"
+				>
+					Daily report
+				</a>
+				<a
+					class="px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-default)] hover:text-[var(--color-bright)]"
 					href="/admin/silences"
 				>
 					Silences
