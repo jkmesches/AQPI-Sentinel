@@ -28,6 +28,57 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **Daily activity report** (`/admin/digest`, off by default). One email each
+  morning covering the previous 24 hours, with a row for every radar and every
+  product, and a link from each row to the checks behind it.
+
+  Organised by **subject, not by alarm**, which is the whole point. An
+  alarm-centric summary of 2026-09-08 would have opened with "nothing needs
+  attention" — every open alarm was acknowledged — while XSWR sat at 58.3%
+  availability after a continuous 9 h 16 m outage with no open alarm at all.
+  For the same reason an acknowledgement never removes a row: an ack means a
+  human has seen it, not that it stopped happening.
+
+  Every figure is stated in the terms an operator uses:
+
+  - **Durations, not run counts.** "273 failed checks" says nothing, and
+    calling them "missed scans" would be false — a failed check is not a
+    missed scan.
+  - **Sustained outages and momentary blips counted separately.** Grouping
+    consecutive failures naively made XSCV look like it had 19 outages on a
+    day it was fine; they were 19 isolated single-run blips totalling zero
+    minutes.
+  - **No internal vocabulary.** `GHOST_UP` reads as "reported online but sent
+    nothing", matching the glosses already in `docs/04-faq.md`.
+  - **Availability counts only runs that returned a verdict**, with the share
+    excluded disclosed on the report — the same distinction between "we
+    checked and it's fine" and "we stopped being able to see" that this
+    release series has been correcting elsewhere.
+
+  Config (recipients, hour, timezone, whether to include products) lives in
+  `settings.digest` and is editable from the admin UI, so the lab can set it
+  up without a redeploy. The daily send fires on a wall-clock hour in the
+  configured zone rather than a 24 h interval, so deploys cannot make it drift
+  or double-send, and the DST boundary cannot move it.
+
+  A **test copy can be sent to one address** from the admin page — deliberately
+  never the configured recipient list, so an operator can see the thing before
+  the recipients do. Also renders a live preview without sending.
+
+  `GET /api/report/daily` returns the same computed result as JSON, so the
+  email and any other surface can never disagree about a number, and the tests
+  assert against data rather than rendered text.
+
+- **HTML email** support in `send_transactional`, as multipart/alternative
+  with the text part first. The digest template is single-column table layout
+  with inline styles, a dark-mode block, a small-screen block, and bars drawn
+  as background-coloured table cells rather than images or Unicode blocks —
+  images are blocked by default in most clients and block glyphs render
+  inconsistently. Kept to ~52 KB because Gmail clips a body over ~102 KB and
+  would silently truncate the tail of the report.
+
 ## [0.3.1] — 2026-09-05
 
 ### Fixed

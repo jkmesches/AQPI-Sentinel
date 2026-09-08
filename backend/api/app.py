@@ -17,6 +17,7 @@ from ..db.store import Store
 from ..registry import CHECKS, all_stages
 from ..scheduler import Scheduler
 from .routes import admin as admin_routes
+from .routes import digest as digest_routes
 from .routes import alarms as alarms_routes
 from .routes import auth as auth_routes
 from .routes import checks as checks_routes
@@ -216,9 +217,19 @@ async def lifespan(app: FastAPI):
     prewarm = Prewarmer(app)
     await prewarm.start()
     app.state.prewarm = prewarm
+
+    # Daily activity report. Config lives in settings.digest so the admin UI
+    # can change the hour or the recipients without a redeploy; disabled until
+    # someone gives it a recipient.
+    from ..digest import DigestTask
+    from .routes.digest import load_config as _digest_cfg
+    digest = DigestTask(app, await _digest_cfg(store.pool))
+    await digest.start()
+    app.state.digest = digest
     try:
         yield
     finally:
+        await digest.stop()
         await prewarm.stop()
         await retention.stop()
         await sched.stop()
@@ -300,6 +311,8 @@ def create_app() -> FastAPI:
     app.include_router(users_routes.router)
     app.include_router(users_routes.public_router)
     app.include_router(push_routes.router)
+    app.include_router(digest_routes.router)
+    app.include_router(digest_routes.admin_router)
     app.include_router(ws_router)
 
     @app.get("/")

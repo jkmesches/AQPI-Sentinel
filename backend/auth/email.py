@@ -70,9 +70,15 @@ def to_alerts_smtp_dict(cfg: dict) -> dict:
 
 
 async def send_transactional(
-    pool, *, to: str, subject: str, body: str,
+    pool, *, to: str, subject: str, body: str, html: str | None = None,
 ) -> tuple[bool, str | None]:
-    """Send a plain-text email via the saved SMTP config.
+    """Send an email via the saved SMTP config.
+
+    ``body`` is the plain-text part and is never optional: it is what a text
+    client, a screen reader, and a phone's notification preview actually show,
+    and some corporate gateways strip the HTML alternative entirely. When
+    ``html`` is given the message becomes multipart/alternative with the text
+    part first, which is the ordering clients use to pick a part.
 
     Returns ``(delivered, error_message)``. ``(False, "SMTP not configured")``
     when there's no usable settings.smtp row — callers should treat that as
@@ -86,6 +92,8 @@ async def send_transactional(
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     use_tls = bool(cfg.get("use_tls", False))
     use_starttls = bool(cfg.get("use_starttls", not use_tls))
     try:
