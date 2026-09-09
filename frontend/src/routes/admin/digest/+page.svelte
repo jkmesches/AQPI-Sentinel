@@ -153,7 +153,7 @@
 					id="dg-to"
 					bind:value={recipientsText}
 					rows="3"
-					placeholder="chandra@colostate.edu"
+					placeholder="ops@example.edu"
 					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
 				></textarea>
 				<div class="text-[11px] text-[var(--color-muted)] pt-1">

@@ -1,0 +1,15 @@
+AQPI Sentinel
+Copyright 2026 Joseph Mesches
+
+This product includes software developed by Joseph Mesches.
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+------------------------------------------------------------------------
+Third-party components are distributed under their own licences. Python
+dependencies are pinned in requirements.lock.txt; JavaScript dependencies
+in frontend/package-lock.json.
+
+Sentinel monitors, and is not affiliated with or endorsed by, the AQPI
+radar network, Colorado State University, or the operators of
+radarca.engr.colostate.edu. It reads only their public web endpoints.

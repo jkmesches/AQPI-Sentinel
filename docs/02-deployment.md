@@ -85,20 +85,31 @@ one-line change in `.env.prod` (`SENTINEL_TAG=0.2.0`), followed by
 `docker compose pull && up -d`. Pulling `latest` to test something,
 then forgetting to pin back, is the most common foot-shoot.
 
-### Private vs public packages
+### Public packages, and when you still need a token
 
-Both the repository and the packages are **private**, and they
-stay that way: Sentinel is proprietary and permission to deploy is
-granted per-party in writing (see [`LICENSE`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/LICENSE)).
-Every host that pulls therefore has to authenticate.
+Sentinel is [Apache-2.0](https://github.com/jkmesches/AQPI-Sentinel/blob/main/LICENSE)
+and the repository is public, so the published images are public
+too. `docker compose pull` works with no login and no GitHub
+account:
 
-!!! warning "Do not make the packages public"
-    Anonymous pulls would let anyone run the images regardless of
-    whether they hold permission, which is the thing the licence
-    exists to control. Public packages are the wrong answer here
-    even though they are the more convenient one.
+```bash
+SENTINEL_TAG=0.4.0 docker compose -f ops/docker-compose.ghcr.yml \
+    --env-file ops/.env.prod pull
+```
 
-#### If you own the repository
+That is the whole story for a normal deployment. The rest of this
+section applies only if you are running a **private fork** and have
+made your own packages private.
+
+!!! note "It used to be the other way round"
+    Before v0.4.0 the project was proprietary and the packages were
+    private, so every host needed a `read:packages` token and an
+    explicit grant. If you are following older notes and hitting
+    `manifest unknown` or `unauthorized`, check the tag first — the
+    image tag has **no leading `v`** (the git tag `v0.4.0` publishes
+    `0.4.0`), and that error is what a wrong tag looks like.
+
+#### If your fork's packages are private
 
 1. Generate a [Personal Access Token](https://github.com/settings/tokens)
    (Classic) with **only** the `read:packages` scope.
@@ -111,27 +122,15 @@ Every host that pulls therefore has to authenticate.
    configured credential helper). Subsequent `docker compose pull`
    calls authenticate automatically.
 
-#### If you are deploying someone else's instance
-
-A token only ever carries **its own owner's** access, so you cannot
-authenticate to a private package you have not been granted. The
-`docker login` above will succeed and the pull will still fail with
-`manifest unknown` or `unauthorized` — which reads like a wrong tag
-rather than a permissions problem, so check this first.
-
-The owner grants access one of two ways:
-
-- **Package access** — the package's own settings carry a list of
-  users and teams with read access. This is the narrower grant: it
-  gives you the images without the source.
-- **Repository collaborator** — a package linked to a private repo
-  inherits that repo's access, so adding you as a collaborator also
-  grants the pull. Broader, since it includes the code.
-
-Either way **you** then create your own `read:packages` token and
-run the `docker login` above with your own username. Never share the
-owner's token: it cannot be scoped to one package, and revoking it
-breaks every host that used it.
+A token only ever carries **its own owner's** access, so a user
+cannot authenticate to a private package they have not been granted.
+The `docker login` will succeed and the pull will still fail, which
+reads like a wrong tag rather than a permissions problem. Grant
+access either at the package (images only) or by adding a repository
+collaborator (images plus source); either way each person creates
+their own token rather than sharing one, since a `read:packages`
+token cannot be scoped to a single package and revoking it breaks
+every host that used it.
 
 **Rotating the PAT.** Generate a new token, run `docker login` again
 to overwrite the saved credentials, then revoke the old token. No
