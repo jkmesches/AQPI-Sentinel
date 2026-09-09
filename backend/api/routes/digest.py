@@ -48,6 +48,9 @@ async def load_config(pool) -> dict:
     if row and row["value"]:
         val = row["value"]
         if isinstance(val, str):
+            # A row written by a version that double-encoded on save. Kept so
+            # an existing deployment keeps its recipients across the upgrade
+            # instead of silently reverting to the disabled defaults.
             import json
             val = json.loads(val)
         if isinstance(val, dict):
@@ -104,15 +107,20 @@ async def put_config(request: Request,
     if cfg.get("enabled") and not cfg["recipients"]:
         raise HTTPException(400, "enable the digest only once it has a recipient")
 
-    import json
+    # Pass the dict, NOT json.dumps(cfg) — the pool installs a jsonb codec, so
+    # dumping first stores a jsonb STRING where every other settings row is a
+    # jsonb OBJECT. See the same warning in admin.py's put_setting. It reads
+    # back fine (load_config below unwraps it), which is why it survived; what
+    # it breaks is SQL — `value->>'enabled'` on such a row is NULL, so the row
+    # cannot be inspected or queried like its neighbours.
     await request.app.state.store.pool.execute(
         """
         INSERT INTO settings (key, value, updated_at, updated_by)
-        VALUES ($1, $2::jsonb, now(), $3)
+        VALUES ($1, $2, now(), $3)
         ON CONFLICT (key) DO UPDATE
           SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by
         """,
-        _digest.SETTINGS_KEY, json.dumps(cfg), user.get("email", "admin"),
+        _digest.SETTINGS_KEY, cfg, user.get("email", "admin"),
     )
     task = getattr(request.app.state, "digest", None)
     if task is not None:

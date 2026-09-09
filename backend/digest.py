@@ -605,7 +605,21 @@ class DigestTask:
     the DST boundaries — the same class of bug as radar-display's Mountain
     timestamps, and just as invisible until someone notices the mail arrives
     at the wrong time.
+
+    That guard is PERSISTED, not held in memory. A restart inside the send
+    hour would otherwise re-send: the tick runs every five minutes, so a
+    deploy at 07:20 finds hour == 7 and no record of having sent, and every
+    recipient gets the report twice. Held in memory the claim was worth
+    exactly as much as the process's uptime, which is the one thing a deploy
+    takes away.
+
+    The claim is made BEFORE sending and conditionally, in one statement, so
+    the failure mode is a skipped report rather than a duplicate one — the
+    right way round for mail that goes to a mailing list — and so two backends
+    against one database cannot both win the day.
     """
+
+    STATE_KEY = "digest_state"
 
     def __init__(self, app, cfg: dict | None = None):
         self.app = app
@@ -613,7 +627,9 @@ class DigestTask:
         if cfg:
             self.cfg.update(cfg)
         self._task = None
-        self._last_sent_date = None
+        # Set when the schedule changes under us; the next tick releases the
+        # persisted claim so moving the hour forward still sends today.
+        self._release_claim = False
         self.last_result: dict | None = None
 
     def reload(self, cfg: dict) -> None:
@@ -622,9 +638,11 @@ class DigestTask:
         self.cfg = dict(DEFAULTS)
         self.cfg.update(cfg or {})
         if was != (self.cfg.get("enabled"), self.cfg.get("hour"), self.cfg.get("tz")):
-            # Don't carry a "already sent today" flag across a schedule change,
-            # or moving the hour forward silently skips today's report.
-            self._last_sent_date = None
+            # Don't carry a "already sent today" claim across a schedule
+            # change, or moving the hour forward silently skips today's
+            # report. Deferred to the next tick because reload() is called
+            # from a request handler and must not block on the database.
+            self._release_claim = True
         log.info("digest: config reloaded — enabled=%s %02d:00 %s -> %d recipient(s)",
                  self.cfg.get("enabled"), int(self.cfg.get("hour", 7)),
                  self.cfg.get("tz"), len(self.cfg.get("recipients") or []))
@@ -669,12 +687,55 @@ class DigestTask:
                       self.cfg.get("tz"))
             return
         now_local = datetime.now(timezone.utc).astimezone(zone)
+        pool = self.app.state.store.pool
+        if self._release_claim:
+            self._release_claim = False
+            await self._release(pool)
         if now_local.hour != int(self.cfg.get("hour", 7)):
             return
-        if self._last_sent_date == now_local.date():
+        if not await self._claim(pool, now_local.date().isoformat()):
             return
-        self._last_sent_date = now_local.date()
         await self.send(recipients)
+
+    async def _claim(self, pool, day: str) -> bool:
+        """Claim `day` as sent, returning False if it was already claimed.
+
+        One statement, so the check and the write cannot be separated by a
+        restart or by a second backend. The conditional DO UPDATE is what
+        makes it a claim rather than a read-then-write: a conflicting row
+        whose date already equals `day` matches no WHERE, updates nothing,
+        and returns nothing.
+        """
+        try:
+            row = await pool.fetchrow(
+                """
+                INSERT INTO settings (key, value, updated_at, updated_by)
+                VALUES ($1, jsonb_build_object('last_sent_date', $2::text),
+                        now(), 'digest')
+                ON CONFLICT (key) DO UPDATE
+                   SET value = jsonb_build_object('last_sent_date', $2::text),
+                       updated_at = now(), updated_by = 'digest'
+                 WHERE settings.value->>'last_sent_date' IS DISTINCT FROM $2::text
+                RETURNING key
+                """,
+                self.STATE_KEY, day,
+            )
+        except Exception:
+            # A database that cannot record the claim cannot be trusted not to
+            # send twice, so don't send. Louder than a duplicate would be, and
+            # the report is a day's summary — missing one is recoverable from
+            # /api/report/daily, an unwanted second copy to a mailing list is
+            # not.
+            log.exception("digest: could not claim %s — not sending", day)
+            return False
+        return row is not None
+
+    async def _release(self, pool) -> None:
+        try:
+            await pool.execute("DELETE FROM settings WHERE key = $1",
+                               self.STATE_KEY)
+        except Exception:
+            log.exception("digest: could not release the send claim")
 
     async def send(self, recipients: list[str]) -> dict:
         from .auth.email import send_transactional
