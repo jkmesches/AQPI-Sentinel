@@ -28,6 +28,53 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-09-09
+
+### Fixed
+
+- **A restart inside the send hour re-sent the daily report to every
+  recipient.** The "already sent today" guard lived in memory, the tick runs
+  every five minutes, and the report is now enabled with four real recipients —
+  so a deploy at 07:20 would find `hour == 7`, no memory of having sent, and
+  mail the professor a second copy. v0.4.0's notes claimed deploys "cannot make
+  it drift or double-send"; that was true of drift and of the DST boundary, and
+  false of the restart, which is the one that actually happens.
+
+  The guard is now a row in `settings.digest_state`, claimed **before** the
+  send and in a single conditional statement:
+
+  ```sql
+  INSERT INTO settings (key, value, …) VALUES ('digest_state', …)
+  ON CONFLICT (key) DO UPDATE SET value = …
+   WHERE settings.value->>'last_sent_date' IS DISTINCT FROM $2
+  RETURNING key
+  ```
+
+  No row returned means someone already claimed the day. Claiming first means
+  the failure mode is a missing report, recoverable from
+  `GET /api/report/daily`, rather than a duplicate to a mailing list, which is
+  not recoverable at all. A database that cannot record the claim does not
+  send. Verified against Postgres, not only against a stub: first claim wins,
+  same-day re-claim returns nothing, next day wins.
+
+  A schedule change still releases the claim, so moving the hour forward sends
+  today rather than skipping it — and the test for that now uses a fresh task
+  per case, because asserting the flag on a task whose previous line had
+  already set it passes no matter what the code does.
+
+- **`settings.digest` was stored as a jsonb string, not a jsonb object.** The
+  digest's save path passed `json.dumps(cfg)` to a `$2::jsonb` parameter on a
+  pool that already installs a jsonb codec, so the value was encoded twice —
+  the exact pitfall `admin.py` carries a six-line warning about. It read back
+  correctly, which is why it survived review; what it broke was SQL, and it
+  broke it silently. `value->>'enabled'` on that row is NULL, so the row cannot
+  be inspected or queried like its four neighbours — found while verifying
+  something else and getting an empty result instead of an answer.
+
+  New saves write a real object. The loader still unwraps a string, so an
+  existing deployment keeps its recipients across the upgrade instead of
+  quietly reverting to the disabled defaults.
+
 ## [0.4.1] — 2026-09-09
 
 ### Fixed
