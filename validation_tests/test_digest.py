@@ -33,8 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 from backend.digest import (                                   # noqa: E402
-    DEFAULTS, Subject, avail_color, bar_cells, describe, evidence_url,
-    render_text, spark, subject_line,
+    DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
+    evidence_url, render_text, spark, subject_line,
 )
 
 failures: list[str] = []
@@ -57,6 +57,48 @@ def ep(seconds: float, runs: int = 5) -> dict:
     now = datetime.now(timezone.utc)
     return {"started": now, "ended": now + timedelta(seconds=seconds),
             "seconds": seconds, "runs": runs}
+
+
+class FakePool:
+    """Records statements and replays a scripted answer for the claim.
+
+    Deliberately does NOT emulate ON CONFLICT — emulating Postgres here would
+    only test the emulation. What it tests is the decision the task makes given
+    an answer: claim won -> send, claim lost -> silent, claim raised -> silent.
+    The SQL's own semantics are asserted by shape below and exercised against a
+    real database by ops when the digest runs.
+    """
+
+    def __init__(self, claim_result="won", fail=False):
+        self.claim_result = claim_result
+        self.fail = fail
+        self.statements: list[str] = []
+
+    async def fetchrow(self, sql, *args):
+        self.statements.append(sql)
+        if self.fail:
+            raise RuntimeError("connection reset")
+        return {"key": args[0]} if self.claim_result == "won" else None
+
+    async def execute(self, sql, *args):
+        self.statements.append(sql)
+
+
+class FakeApp:
+    def __init__(self, pool):
+        self.state = type("S", (), {"store": type("T", (), {"pool": pool})()})()
+
+
+def tick(cfg, pool, *, sent: list) -> None:
+    """Run one _tick with send() stubbed, at the configured hour."""
+    import asyncio
+    task = DigestTask(FakeApp(pool), cfg)
+
+    async def _send(recipients):
+        sent.append(list(recipients))
+    task.send = _send
+    asyncio.run(task._tick())
+    return task
 
 
 def main() -> int:
@@ -167,6 +209,80 @@ def main() -> int:
     check("the coverage caveat is stated, not implied",
           "could not be judged" in txt)
     check("defaults ship disabled", DEFAULTS["enabled"] is False)
+
+    # --- the daily send claim ------------------------------------------------
+    # A restart inside the send hour used to re-send: the guard was in memory,
+    # the tick runs every 5 minutes, and a deploy at 07:20 sees hour == 7 with
+    # no memory of having sent. Every recipient gets the report twice.
+    hour = datetime.now(timezone.utc).astimezone(
+        __import__("zoneinfo").ZoneInfo("America/Denver")).hour
+    cfg = {"enabled": True, "recipients": ["a@example.com"], "hour": hour,
+           "tz": "America/Denver", "products": False}
+
+    sent: list = []
+    pool = FakePool(claim_result="won")
+    tick(cfg, pool, sent=sent)
+    check("sends when the day is unclaimed", sent == [["a@example.com"]], repr(sent))
+
+    sent = []
+    tick(cfg, FakePool(claim_result="lost"), sent=sent)
+    check("a second process in the same hour sends nothing", sent == [])
+
+    sent = []
+    tick(cfg, FakePool(fail=True), sent=sent)
+    check("an unrecordable claim sends nothing rather than risking a duplicate",
+          sent == [])
+
+    sent = []
+    tick({**cfg, "hour": (hour + 12) % 24}, FakePool(claim_result="won"), sent=sent)
+    check("sends nothing outside the configured hour", sent == [])
+
+    sent = []
+    off = tick({**cfg, "enabled": False}, FakePool(claim_result="won"), sent=sent)
+    check("disabled sends nothing and does not touch the database",
+          sent == [] and off.app.state.store.pool.statements == [])
+
+    sent = []
+    norecip = FakePool(claim_result="won")
+    tick({**cfg, "recipients": []}, norecip, sent=sent)
+    check("no recipients claims nothing", sent == [] and norecip.statements == [])
+
+    # The claim must be one statement, and conditional. Two statements — read
+    # then write — is the bug with extra steps, and an unconditional DO UPDATE
+    # always returns a row, so every tick in the hour would "win".
+    claim_sql = FakePool(claim_result="won")
+    tick(cfg, claim_sql, sent=[])
+    sql = " ".join(claim_sql.statements[-1].split())
+    check("the claim is a single INSERT ... ON CONFLICT",
+          sql.count(";") == 0 and "INSERT INTO settings" in sql
+          and "ON CONFLICT" in sql)
+    check("the claim is conditional, so a re-claim returns no row",
+          "IS DISTINCT FROM" in sql and "RETURNING" in sql)
+    check("the claim is stored under its own key, not the config row",
+          DigestTask.STATE_KEY != "digest"
+          and DigestTask.STATE_KEY == "digest_state")
+
+    # A schedule change has to release the claim, or moving the hour forward
+    # skips today entirely.
+    released = FakePool(claim_result="won")
+    t2 = DigestTask(FakeApp(released), cfg)
+    t2.reload({**cfg, "hour": (hour + 1) % 24})
+    check("a schedule change queues a release", t2._release_claim is True)
+
+    # Each of these needs a FRESH task. Re-using t2 would assert True against a
+    # flag the previous line had already set, which passes whatever reload does.
+    for label, change in (("re-saving the same schedule", {}),
+                          ("a recipient-only change", {"recipients": ["b@example.com"]}),
+                          ("toggling products", {"products": True})):
+        fresh = DigestTask(FakeApp(released), cfg)
+        fresh.reload({**cfg, **change})
+        check(f"{label} does not release the claim", fresh._release_claim is False)
+
+    for label, change in (("disabling", {"enabled": False}),
+                          ("a timezone change", {"tz": "UTC"})):
+        fresh = DigestTask(FakeApp(released), cfg)
+        fresh.reload({**cfg, **change})
+        check(f"{label} releases the claim", fresh._release_claim is True)
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall digest assertions passed")
