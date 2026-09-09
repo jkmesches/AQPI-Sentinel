@@ -141,7 +141,7 @@ if docker info >/dev/null 2>&1; then
     if docker manifest inspect "$ref" >/dev/null 2>&1; then
       ok "can pull $ref"
     else
-      bad "cannot pull $ref. The packages are private by design (Sentinel is proprietary; deployment is permitted per-party in writing). Ask the owner to grant your GitHub account read access to the package, then authenticate with YOUR OWN token: echo \$GHCR_PAT | docker login ghcr.io -u <your-github-username> --password-stdin   (read:packages scope is enough). A token only carries its own owner's access, so login can succeed and the pull still fail if the grant is missing. No GitHub account? Build from source with ops/docker-compose.prod.yml."
+      bad "cannot pull $ref. Check the tag exists (note: the image tag has NO leading v — the git tag v0.4.0 publishes 0.4.0). If the packages are private on this instance, authenticate first: echo \$GHCR_PAT | docker login ghcr.io -u <your-github-username> --password-stdin   (read:packages scope is enough). You can always build from source instead with ops/docker-compose.prod.yml."
     fi
   done
 fi
