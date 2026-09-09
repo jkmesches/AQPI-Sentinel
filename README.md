@@ -135,8 +135,12 @@ One file under `backend/checks/`, a `@register` line at the bottom, optionally a
 different upstream, [`docs/06-porting-to-other-upstreams.md`](docs/06-porting-to-other-upstreams.md)
 is the map of what's generic and what is radar-specific.
 
-AQPI Sentinel is the sole and exclusive intellectual property of Joseph Mesches, created independently and without obligation, contract, or attribution to any other person or institution. It is **not** a work product of, nor the intellectual property of, Colorado State University, the CSU CHILL National Radar Facility, Dr. V. Chandrasekar or his lab, the AQPI program, or any affiliated organization. References to those names describe the public monitoring target, not ownership or sponsorship.
-
-No license is granted to use, copy, modify, distribute, host, or deploy the Software. Use requires the author's prior written permission — essentially closed source.
+Copyright 2026 Joseph Mesches. Written independently, with no obligation,
+contract, or attribution to any other person or institution. Sentinel is **not**
+a work product of Colorado State University, the CSU CHILL National Radar
+Facility, Dr. V. Chandrasekar or their lab, or the AQPI program, and is not
+affiliated with or endorsed by any of them. It reads only their public web
+endpoints; references to those names describe the monitoring target, not
+ownership or sponsorship. See [`NOTICE`](NOTICE).
 
 Built by [Joseph Mesches](https://github.com/jkmesches).

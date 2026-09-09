@@ -116,6 +116,7 @@ nav:
       - Severity audit: 93-severity-audit.md
       - Environment variables: 91-env-vars.md
       - Release process: 99-release-process.md
+      - Security policy: security.md
       - Changelog: changelog.md
   - Background:
       - Implementation plan: radarca-implementation-plan.md

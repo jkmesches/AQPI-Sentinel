@@ -6,7 +6,7 @@ This product includes software developed by Joseph Mesches.
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
 ------------------------------------------------------------------------
-Third-party components are distributed under their own licences. Python
+Third-party components are distributed under their own licenses. Python
 dependencies are pinned in requirements.lock.txt; JavaScript dependencies
 in frontend/package-lock.json.
 

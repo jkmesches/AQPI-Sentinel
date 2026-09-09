@@ -127,7 +127,7 @@ async def send_test(request: Request,
     """Send one copy of the current report to ONE address.
 
     Deliberately not "send to the recipient list": the point of a test is to
-    see the thing yourself before Professor Chandra does. Defaults to the
+    see the thing yourself before the recipients do. Defaults to the
     address of the admin who clicked, and never touches the configured
     recipients even when the digest is enabled.
     """
