@@ -771,7 +771,7 @@ _RD_BASE = "https://radardisplay.engr.colostate.edu"
 # warns before it lapses, so the next expiry is caught in advance rather than
 # discovered by every tilt request failing at once. If it does lapse and an
 # operator needs imagery back immediately, SENTINEL_RD_VERIFY_TLS=0 restores
-# the old behaviour — deliberately an env var, so the choice is visible in the
+# the old behavior — deliberately an env var, so the choice is visible in the
 # deployment rather than buried in a source file.
 _RD_VERIFY = _os.environ.get("SENTINEL_RD_VERIFY_TLS", "1") not in ("0", "false", "no")
 _rd_client_inst: "_httpx.AsyncClient | None" = None
@@ -791,7 +791,7 @@ _TILT_MOMENTS = {"reflectivity", "velocity", "copolarcorrelation"}
 _TILT_FRAMES = 7  # _0.._6
 
 # radar-display gets its own concurrency cap. It is a different origin from
-# radarca with different characteristics — small files, fast responses
+# radarca with different characteriztics — small files, fast responses
 # (~40 ms observed) — so it tolerates more parallelism, but "more" is not
 # "unbounded": tilt_steps alone fans out to 7 JSON fetches per call, and the
 # prewarmer walks 60 streams.
@@ -851,7 +851,7 @@ async def _nearest_archived_tilt(pool, radar: str, el: int, moment: str, target)
     on the origin's own ~140 s cadence, so an exact-second key almost never
     matches what a scrubber asks for. Without this the archive-only path could
     only answer requests that named a capture second exactly — which made the
-    "archive reaches back past the live window" behaviour true in storage and
+    "archive reaches back past the live window" behavior true in storage and
     useless in practice.
 
     The embedded timestamp is fixed-width and UTC, so lexical order is

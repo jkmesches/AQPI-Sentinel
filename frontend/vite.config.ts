@@ -8,7 +8,7 @@ export default defineConfig({
 			// === DO NOT REMOVE `ws: true` ===
 			//
 			// Required for Vite's dev proxy to handle WebSocket upgrades on
-			// `/api/ws`. Without it Vite's behaviour for WS routes is
+			// `/api/ws`. Without it Vite's behavior for WS routes is
 			// undefined — connections appear to succeed at handshake but
 			// get tangled with Vite's HMR-WebSocket internals, causing slow
 			// memory growth in long-lived dev tabs (~10-15 min until the

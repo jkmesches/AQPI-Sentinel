@@ -76,7 +76,7 @@ export interface TimelineCell {
 	 *    because the upstream API errored or timed out. This is a gap in our
 	 *    visibility, NOT evidence the monitored thing is broken. */
 	reason?: 'upstream_unhealthy' | 'upstream_api';
-	/** Per-status run counts within the bucket. The cell's COLOUR comes from
+	/** Per-status run counts within the bucket. The cell's COLOR comes from
 	 *  the worst status present; these say how MUCH of the bucket was at that
 	 *  status, which is what stops coarse grains reading as uniformly broken. */
 	n_fail?: number;

@@ -459,7 +459,7 @@
 	// chosen per-grain so labels stay readable (no overlap) regardless of how
 	// many buckets are loaded. Without this, grains >=1h render every column
 	// with a label, and at the ~10-12px column width they collide into mush.
-	// Edges (first/last bucket) are NOT force-labelled — they tend to crowd
+	// Edges (first/last bucket) are NOT force-labeled — they tend to crowd
 	// the nearest cadence label, and the cell-level tooltip plus the cadence
 	// label within a few cells gives enough orientation.
 	function isMajorTick(iso: string, _bi: number, _total: number): boolean {
@@ -801,10 +801,10 @@
 					{@const isLast = bi === orderedBuckets.length - 1}
 					<!-- "Most recent" = the newest bucket regardless of sort
 					     direction (rightmost in asc, leftmost in desc).
-					     Always labelled + bold so the eye anchors on "now". -->
+					     Always labeled + bold so the eye anchors on "now". -->
 					{@const isNewest = sortOrder === 'asc' ? isLast : bi === 0}
 					{@const major = isNewest || isMajorTick(b.ts, bi, orderedBuckets.length)}
-					<!-- Labelled cells need to paint AFTER neighbours so their
+					<!-- Labeled cells need to paint AFTER neighbors so their
 					     overflowing label isn't clipped by the next cell's
 					     opaque background. Bump z-index on major cells; bump
 					     further on the newest cell so its bold label always
@@ -817,8 +817,8 @@
 						{#if major}
 							<!-- Inline time + (newest-only) NOW pill, single line so
 							     the header's 32 px height has no vertical clipping.
-							     Background colour matches the canvas so the label
-							     covers any vertical rule lines from neighbouring
+							     Background color matches the canvas so the label
+							     covers any vertical rule lines from neighboring
 							     cells beneath. -->
 							<span
 								class="absolute bottom-1 whitespace-nowrap inline-flex items-center gap-1 tracking-tight text-[var(--color-bright)] {isNewest ? 'font-bold' : 'font-medium'}"
@@ -881,7 +881,7 @@
 										`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 										``,
 										`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Cell fill: the coloured band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
+										`Cell fill: the colored band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
 										`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 									].join('\n')}
 								>
@@ -923,7 +923,7 @@
 								`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
 								``,
 								`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Cell fill: the coloured band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
+										`Cell fill: the colored band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
 								`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
 							].join('\n')}
 						>
@@ -1234,9 +1234,9 @@
 	/* === Load-bearing perf hint. DO NOT DELETE. ===
 	 *
 	 * The body cells are layout-independent islands — nothing inside any
-	 * one cell influences its neighbours' size or position. `contain:
+	 * one cell influences its neighbors' size or position. `contain:
 	 * layout style paint` tells the browser that explicitly so it can
-	 * skip restyle/reflow on neighbours when one changes (live update,
+	 * skip restyle/reflow on neighbors when one changes (live update,
 	 * hover, etc.) and so scroll events don't force a full display-list
 	 * rebuild for the whole grid.
 	 *

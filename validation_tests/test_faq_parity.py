@@ -24,7 +24,7 @@ DOCS = ROOT / "docs" / "04-faq.md"
 APP = ROOT / "frontend" / "src" / "lib" / "faq.ts"
 
 
-def normalise(q: str) -> str:
+def normalize(q: str) -> str:
     """Compare on meaning, not punctuation/escaping/markup."""
     q = q.replace("\\'", "'").replace("\\`", "`")
     q = re.sub(r"[`*_]", "", q)
@@ -34,13 +34,13 @@ def normalise(q: str) -> str:
 
 def docs_questions() -> list[str]:
     # "## 7. Why is one radar's threshold different from another's?"
-    return [normalise(m) for m in
+    return [normalize(m) for m in
             re.findall(r"^##\s+\d+\.\s+(.+?)\s*$", DOCS.read_text(), re.M)]
 
 
 def app_questions() -> list[str]:
     # "\t\tq: 'Why is one radar\'s threshold different from another\'s?',"
-    return [normalise(m) for m in
+    return [normalize(m) for m in
             re.findall(r"^\t\tq:\s*'(.*)',\s*$", APP.read_text(), re.M)]
 
 

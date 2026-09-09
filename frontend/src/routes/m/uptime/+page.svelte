@@ -13,7 +13,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket } from '$lib/api';
-	// Same encoding as the desktop timeline: colour is the worst status in the
+	// Same encoding as the desktop timeline: color is the worst status in the
 	// bucket, fill height is how much of it was at that status. Shared rather
 	// than reimplemented so the two surfaces cannot drift into disagreeing
 	// about what a cell means — see $lib/timelineFill.

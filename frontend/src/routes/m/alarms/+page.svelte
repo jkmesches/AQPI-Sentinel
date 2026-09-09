@@ -57,7 +57,7 @@
 		try {
 			await api.unack(id);
 			await sentinel.refresh();
-			banner = { kind: 'ok', text: 'acknowledgement removed' };
+			banner = { kind: 'ok', text: 'acknowledgment removed' };
 		} catch (e) {
 			banner = { kind: 'err', text: (e as Error).message };
 		} finally {

@@ -238,7 +238,7 @@ if ! dump_has_schema "$out.part"; then
 fi
 
 # Crude floor, kept only to catch a zero-length or header-only file that
-# somehow satisfied the grep. Not a judgement about database size.
+# somehow satisfied the grep. Not a judgment about database size.
 [ "$BYTES" -lt "$MIN_BYTES" ] && { rm -f "$out.part"; die "dump is only ${BYTES} bytes"; }
 
 mv "$out.part" "$out"

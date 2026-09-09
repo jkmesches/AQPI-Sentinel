@@ -748,7 +748,7 @@
 		// given index maps to a new ts, so the URL changes and we cannot
 		// serve a stale frame under a shifted index.
 		//
-		// _forceBuster (30s-quantised, bumped by pokeOverlays) still forces a
+		// _forceBuster (30s-quantized, bumped by pokeOverlays) still forces a
 		// genuine refresh of the live frame — same mechanism as xbandScanUrl.
 		const cq = new URLSearchParams({ product_id: composite, step: String(stepIdx) });
 		const cts = steps[stepIdx]?.ts;
@@ -1841,7 +1841,7 @@
 			// (a step change, the 120s refresher, a theme swap).
 			//
 			// This was latent for months and only started reproducing on
-			// 2026-08-27, when memoising /product_steps took it from ~3s
+			// 2026-08-27, when memoizing /product_steps took it from ~3s
 			// (upstream fetch) to ~1.5ms and loadComposite began winning the
 			// race routinely. Making an API fast is exactly the kind of change
 			// that converts a rare race into a permanent bug, so re-issue the
@@ -1955,7 +1955,7 @@
 	<div class="relative flex-1">
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 
-		<!-- Stale-composite banner. Deliberately centred over the map rather
+		<!-- Stale-composite banner. Deliberately centerd over the map rather
 		     than tucked in a corner: the failure this guards against is an
 		     operator reading a 50-day-old inundation frame as current, and a
 		     subtle marker would not stop that. Non-interactive so it never

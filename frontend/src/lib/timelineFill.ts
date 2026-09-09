@@ -1,8 +1,8 @@
 /**
- * Timeline cell encoding: colour = worst status, FILL HEIGHT = how much.
+ * Timeline cell encoding: color = worst status, FILL HEIGHT = how much.
  *
  * A monitoring grid must never hide a failure, so worst-of-bunch still decides
- * a cell's colour — any red at all means something failed in that window. But
+ * a cell's color — any red at all means something failed in that window. But
  * worst-of alone gets more pessimistic as the grain coarsens. Measured over 7
  * days, inside cells drawn as bad:
  *
@@ -17,8 +17,8 @@
  *
  * Proportional fill instead. The bad portion is a full-saturation band rising
  * from the bottom of the cell, sized by its share of the bucket; the remainder
- * is the pass colour. The eye reads length as quantity, which is the thing
- * being encoded, and a colour kept at full saturation never turns to mud.
+ * is the pass color. The eye reads length as quantity, which is the thing
+ * being encoded, and a color kept at full saturation never turns to mud.
  *
  * Lives here rather than inline in the route so the invariants below can be
  * tested — see validation_tests/js/test_timeline_fill.mjs.
@@ -88,7 +88,7 @@ export function badFraction(cell: TimelineCell | undefined): number {
  * nothing wrong, which is the opposite of what happened.
  *
  * Unlike badFraction, ambiguity here resolves to ZERO, not one. Guessing high
- * would grey out cells we have no evidence about, and grey is the colour that
+ * would gray out cells we have no evidence about, and gray is the color that
  * says "no data" — inventing it would be its own lie. The one exception is a
  * cell whose own status is `skip`: `pass` outranks `skip` when picking a
  * bucket's worst status, so a skip-status cell can only mean every run in it
@@ -110,7 +110,7 @@ export function skipFraction(cell: TimelineCell | undefined): number {
  * MIN_BAD_PX floor meaningful.
  *
  * The skip band is why this is not simply "bad over pass". Until 2026-09-05
- * the remainder above the bad band was hard-coded to the pass colour, and any
+ * the remainder above the bad band was hard-coded to the pass color, and any
  * cell whose worst status was `pass` was drawn as one flat green block. Both
  * cases painted skips green. Measured over 24h at 1h grain: 141 of 1,093
  * buckets contained a skip, 59 of them rendered as solid green and 2 more as a

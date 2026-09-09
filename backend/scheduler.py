@@ -114,7 +114,7 @@ def _find_unhealthy_ancestor(
 # read timeouts in the first 79 requests (11%, against a historical 0.1-1.2%)
 # purely because everything fired at once. radarca answers a sequential probe
 # in 17.9s worst-case but blows past 40s under a concurrent burst during one of
-# its slow episodes, so our own synchronisation is what converts its slowness
+# its slow episodes, so our own synchronization is what converts its slowness
 # into our timeouts.
 #
 # JITTER_FRAC is a fraction of each check's own cadence, so a 60s check is

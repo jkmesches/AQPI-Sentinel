@@ -79,7 +79,7 @@ async def test_sampling_cadence(canary) -> None:
     First hour of live data: 13 samples, exactly ONE inside an episode minute,
     and the largest reading landed ~10s before an episode rather than during
     it. A flat 300s sampler catches one second in every 300 while episodes last
-    about a minute, so it characterises the baseline and misses the tail it was
+    about a minute, so it characterizes the baseline and misses the tail it was
     built to measure. These assertions pin the fix.
     """
     import backend.checks.layer0_latency as LC

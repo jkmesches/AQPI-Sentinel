@@ -133,7 +133,7 @@ class Silence(BaseModel):
 # Applied to any route that does not set its own hold_down. Five minutes is
 # where the measured curve flattens: it removes 92% of alarms while keeping
 # every one that lasted long enough for a person to act on. Set to "0" to
-# restore the old open-on-first-failure behaviour.
+# restore the old open-on-first-failure behavior.
 DEFAULT_HOLD_DOWN = "5m"
 
 

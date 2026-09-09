@@ -9,7 +9,7 @@
 # a full disk three months later.
 #
 # Exit 0 = safe to deploy. Exit 1 = a blocker. Warnings never fail the run;
-# they are judgement calls only the operator can make.
+# they are judgment calls only the operator can make.
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
@@ -18,7 +18,7 @@ ENV_FILE="${1:-ops/.env}"
 COMPOSE="ops/docker-compose.deploy.yml"
 FAIL=0; WARN=0
 
-# Colour only when attached to a terminal, so piping to a file stays readable.
+# Color only when attached to a terminal, so piping to a file stays readable.
 if [ -t 1 ]; then R=$'\033[31m'; Y=$'\033[33m'; G=$'\033[32m'; B=$'\033[1m'; N=$'\033[0m'
 else R=""; Y=""; G=""; B=""; N=""; fi
 

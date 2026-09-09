@@ -143,9 +143,9 @@ def main() -> int:
     check("spark renders one block per bucket", len(spark([50] * 8)) == 8)
     check("a bucket with no checks is not drawn as zero",
           spark([None]) == "·", spark([None]))
-    check("colour tracks severity",
+    check("color tracks severity",
           avail_color(100) != avail_color(60) != avail_color(0))
-    check("no data has its own colour", avail_color(None) == "#d1d5db")
+    check("no data has its own color", avail_color(None) == "#d1d5db")
     check("bar_cells always yields 8 swatches", len(bar_cells([])) == 8)
     check("every swatch carries a tooltip",
           all(c["title"] for c in bar_cells([10, None, 99] + [50] * 5)))

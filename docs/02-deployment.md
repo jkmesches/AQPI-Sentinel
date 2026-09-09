@@ -188,7 +188,7 @@ docker compose -f ops/docker-compose.deploy.yml --env-file ops/.env ps
 expensive to diagnose later: missing password, busy port, unreachable
 GHCR package, a port accidentally left in `SENTINEL_SITE_ADDRESS`,
 retention disabled, insufficient disk. Blockers exit non-zero;
-judgement calls are warnings.
+judgment calls are warnings.
 
 ---
 

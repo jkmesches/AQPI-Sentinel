@@ -7,8 +7,8 @@ NOT the question "what alarms fired", and the difference is not cosmetic.
 An alarm-centric summary of 2026-09-05 would have opened with "nothing needs
 attention": every open alarm was acknowledged. Meanwhile XSWR had been offline
 for a continuous 9 h 14 m — 58% availability for the day — and had no open
-alarm at report time. Organising by subject surfaces it; organising by alarm
-hides it. For the same reason an acknowledgement never removes anything from
+alarm at report time. Organizing by subject surfaces it; organizing by alarm
+hides it. For the same reason an acknowledgment never removes anything from
 this report: an ack means "a human has seen it", not "it stopped happening".
 
 === Load-bearing: three ways this report could quietly lie ===
@@ -512,9 +512,9 @@ def subject_line(data: dict) -> str:
 #     legible everywhere without them.
 #   * No external images. Most clients block them by default, so a bar chart
 #     made of images would simply be missing — the bars are table cells with
-#     background colours instead, which always render. Unicode blocks (▇█)
+#     background colors instead, which always render. Unicode blocks (▇█)
 #     were the other option and they render inconsistently across fonts.
-#   * Colour never carries meaning alone — every row states its percentage and
+#   * Color never carries meaning alone — every row states its percentage and
 #     its description in words.
 
 _C_OK, _C_WARN, _C_BAD, _C_NONE = "#16a34a", "#d97706", "#dc2626", "#d1d5db"
@@ -533,7 +533,7 @@ def avail_color(pct: float | None) -> str:
 
 
 def bar_cells(buckets: list[float | None]) -> list[dict]:
-    """Eight colour swatches with a per-cell tooltip."""
+    """Eight color swatches with a per-cell tooltip."""
     out = []
     for i, b in enumerate(buckets or [None] * 8):
         out.append({

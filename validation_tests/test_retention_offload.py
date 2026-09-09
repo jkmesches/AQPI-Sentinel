@@ -1,6 +1,6 @@
 """Retention offload — safety tests for the one code path that deletes data.
 
-Unlike its neighbours in this directory, this test probes our own database
+Unlike its neighbors in this directory, this test probes our own database
 rather than radarca. It needs a Postgres it is allowed to DROP TABLE in, so
 it refuses to run against anything but an explicitly-named scratch database.
 

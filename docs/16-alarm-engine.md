@@ -268,7 +268,7 @@ If you add a new demote reason in the scheduler, add it to
 `INCONCLUSIVE_SKIP_REASONS` in the same commit.
 `validation_tests/test_alarm_inconclusive_skip.py` drives the real
 scheduler paths and will fail if a producer emits a reason the engine
-does not recognise.
+does not recognize.
 
 ---
 

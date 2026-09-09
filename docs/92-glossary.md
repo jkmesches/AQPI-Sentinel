@@ -326,7 +326,7 @@ On `/m/uptime`, cascade-demoted cells get a small `↑` badge to
 distinguish them from intrinsic skips at a glance.
 
 On the bucketed timeline, a cell is drawn from its **composition**, not just
-its worst status: the defect band at the bottom, then skips in grey, then the
+its worst status: the defect band at the bottom, then skips in gray, then the
 share that really passed. `/api/history/timeline` sends `n_fail`, `n_error`,
 `n_warn` and `n_skip` alongside `n` to make that possible. Before v0.3.0 the
 remainder above a defect band was assumed to be `pass`, and any bucket whose

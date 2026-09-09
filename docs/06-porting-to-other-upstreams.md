@@ -153,7 +153,7 @@ the check.
 `backend/checks/layer4_image.py` does coverage / autocorrelation /
 content-extent on PNG snapshots. Reusable for any visual-data
 upstream where coverage matters; the thresholds in `config.py` will
-need re-calibration for your imagery's characteristics.
+need re-calibration for your imagery's characteriztics.
 
 ---
 
@@ -220,7 +220,7 @@ files in sync.
 ## Step 7: re-baseline thresholds
 
 The default thresholds in `config.py` are tuned to radarca's
-characteristics. For a different upstream:
+characteriztics. For a different upstream:
 
 1. Run Sentinel against your upstream with permissive defaults
    (e.g. `max_freshness_s = 3600`, `silent_fail_s = 1800`).

@@ -28,7 +28,7 @@
 		targetOptions?: { value: string; label: string; hint?: string }[];
 	} = $props();
 
-	// These initialisers intentionally capture only the FIRST value of each
+	// These initializers intentionally capture only the FIRST value of each
 	// prop: the modal owns its own editable copy once open, so re-deriving
 	// them would discard whatever the operator had typed. The $effect below
 	// re-syncs from the props each time the modal is re-opened, which is the

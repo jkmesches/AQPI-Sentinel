@@ -12,7 +12,7 @@
  *    outlive the things they name — a radar is decommissioned, a product is
  *    renamed, a release changes the vocabulary. So nothing is trusted on the
  *    way in: values are validated against what the caller says currently
- *    exists, and anything unrecognised falls back to a default rather than
+ *    exists, and anything unrecognized falls back to a default rather than
  *    being handed to MapLibre. A stale preference must degrade to a working
  *    map, never to a broken one.
  *

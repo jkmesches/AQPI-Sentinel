@@ -291,7 +291,7 @@
 							type="button"
 							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
 							onclick={() => unack(a.id)}
-							title="undo acknowledgement"
+							title="undo acknowledgment"
 						>
 							unack
 						</button>

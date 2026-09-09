@@ -4,7 +4,7 @@ A long-lived background task that pings two external "always-up" endpoints
 (Google's `generate_204` and Cloudflare's `cdn-cgi/trace`) on a short
 interval. The result is consulted by the scheduler so that when the host
 itself loses internet, the radarca checks aren't blamed (and don't alarm) —
-they're skipped with a "local network offline" reason and render as grey
+they're skipped with a "local network offline" reason and render as gray
 "no data" cells in the timeline.
 
 Two probes (Google + Cloudflare) are used so a single-vendor outage doesn't

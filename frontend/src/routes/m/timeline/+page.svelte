@@ -320,7 +320,7 @@
 		<!-- Drilldown nav: from a Timeline event the user wants either
 		     the longitudinal pattern (Uptime, focus mode) or the raw runs
 		     forensic view (History, ±1h around the event). The previous
-		     button labelled "Open in History" actually re-loaded Timeline
+		     button labeled "Open in History" actually re-loaded Timeline
 		     filtered to this check — same view, same data — which is what
 		     the user was confused by. We drop that self-filter button. -->
 		<div class="mt-5 grid grid-cols-2 gap-2">

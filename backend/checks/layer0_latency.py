@@ -14,7 +14,7 @@ in the stack that can answer "how long would that request have taken?".
 
 Cost is deliberately trivial: one request every five minutes, never
 concurrent with itself. That is ~288 uncensored samples a day, which is ample
-to characterise a tail, against a fleet that already issues tens of thousands.
+to characterize a tail, against a fleet that already issues tens of thousands.
 
 It does NOT alarm on slowness. A slow-but-successful response is precisely the
 thing being measured, and turning it into a page would re-import the noise
@@ -56,13 +56,13 @@ from .transports.http import DEFAULT_TIMEOUT_S
 # a sample is only lost if upstream has genuinely stopped answering.
 CANARY_TIMEOUT_S = 75.0
 
-# === Load-bearing: sample where the interesting behaviour is ===
+# === Load-bearing: sample where the interesting behavior is ===
 #
 # The first version sampled every 300s flat, and the first hour of data showed
 # why that is not enough. Episodes last about a minute; a 300s sampler catches
 # one second in every 300, so of 13 samples exactly one landed inside an
 # episode minute — and the largest reading (19.5s) fell ~10s BEFORE an episode
-# rather than during it. The canary characterised the baseline well and almost
+# rather than during it. The canary characterized the baseline well and almost
 # entirely missed the regime that produces the timeouts, which is the regime it
 # was built to measure.
 #

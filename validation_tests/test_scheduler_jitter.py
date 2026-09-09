@@ -8,7 +8,7 @@ Both come from the 2026-08-31 deploy. Restarting Sentinel put 9 read timeouts
 in the first 79 requests — 11%, against a historical 0.1-1.2% — because every
 check fired at once. radarca answers a sequential probe in 17.9s worst-case
 but goes past 40s under a concurrent burst during one of its slow episodes, so
-our own synchronisation is what turns its slowness into our timeouts.
+our own synchronization is what turns its slowness into our timeouts.
 
 The failure mode a naive fix has is subtle: adding jitter that is not
 zero-mean silently stretches every cadence, so the whole fleet quietly runs
