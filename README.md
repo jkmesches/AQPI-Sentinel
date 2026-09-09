@@ -12,7 +12,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 ## Status
 
-**v0.3.1** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Tagged container images published to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`).
+**v0.4.0** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
 
 - **45 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
 - **21-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
@@ -20,6 +20,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 - **Three-tier severity model** (v0.1.2): `info` = attention-required, `warn` = broken (action required), `critical` = sustained outage. Auto-promotes `warn → critical` after 30 minutes.
 - **Web Push** with per-device routing (severity floor, pattern matching, async delay, on-duty schedule, quiet hours). Smart-delay drops the push if the alarm resolves or is acked first.
 - **Content-addressed image archive** — every frame Sentinel serves is stored and de-duplicated by SHA-256, so scrubbing history costs the upstream nothing. Optional prewarm (`SENTINEL_PREWARM_ENABLED`, off by default) captures *every* published moment and per-elevation tilt rather than only what someone has looked at; for tilts the archive reaches further back than the origin's own 16-minute window.
+- **Daily activity report** — one email each morning covering the previous 24 hours, with a row per radar and per product and a link from every row to the checks behind it. Organized by subject rather than by alarm, so a radar that was down all night still appears even when nobody opened an alarm for it. Off by default; configured at `/admin/digest`.
 - **Mobile PWA** (`/m/*`) — install on iPhone Safari; 4-tab bottom nav (Status / Timeline / Alarms / More) with composites + playback, ack/unack, dedicated push-routing editor.
 
 ## How it works

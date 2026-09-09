@@ -8,4 +8,4 @@ Keep the format `MAJOR.MINOR.PATCH` (no leading `v`). The /api
 endpoint and the frontend render add the `v` prefix for display.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

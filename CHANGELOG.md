@@ -28,17 +28,37 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-09
+
+Reporting release, and the release that opens the source.
+
+Sentinel has always been able to answer "is anything wrong right now". It could
+not answer "how did the network do yesterday" without someone driving the UI,
+which meant nobody asked. The daily report answers it by radar and by product,
+unprompted, every morning.
+
+Alongside that, the project is now Apache-2.0 and the repository is public, so
+the lab can deploy from GHCR without a token and adapt the code to its own
+upstream.
+
+**Upgrading:** nothing breaks and no migration is needed. The report is off
+until you enable it at `/admin/digest`, and it needs two things that are easy
+to have already: SMTP configured at `/admin/email`, and `SENTINEL_PUBLIC_URL`
+set — without the latter the report still sends, but every evidence link is
+omitted, which removes the one thing that makes a claim checkable. Send
+yourself a test copy from the admin page before adding recipients.
+
 ### Added
 
 - **Daily activity report** (`/admin/digest`, off by default). One email each
   morning covering the previous 24 hours, with a row for every radar and every
   product, and a link from each row to the checks behind it.
 
-  Organised by **subject, not by alarm**, which is the whole point. An
+  Organized by **subject, not by alarm**, which is the whole point. An
   alarm-centric summary of 2026-09-08 would have opened with "nothing needs
   attention" — every open alarm was acknowledged — while XSWR sat at 58.3%
   availability after a continuous 9 h 16 m outage with no open alarm at all.
-  For the same reason an acknowledgement never removes a row: an ack means a
+  For the same reason an acknowledgment never removes a row: an ack means a
   human has seen it, not that it stopped happening.
 
   Every figure is stated in the terms an operator uses:
@@ -74,10 +94,47 @@ unknown`.
 - **HTML email** support in `send_transactional`, as multipart/alternative
   with the text part first. The digest template is single-column table layout
   with inline styles, a dark-mode block, a small-screen block, and bars drawn
-  as background-coloured table cells rather than images or Unicode blocks —
+  as background-colored table cells rather than images or Unicode blocks —
   images are blocked by default in most clients and block glyphs render
   inconsistently. Kept to ~52 KB because Gmail clips a body over ~102 KB and
   would silently truncate the tail of the report.
+
+### Changed
+
+- **License: proprietary → Apache-2.0, and the repository is public.** The
+  previous license granted nothing, which made the deployment docs contradict
+  the intent: they explain how to run Sentinel against your own radar network,
+  and the license forbade it.
+
+  Apache rather than MIT for the explicit patent grant and the trademark
+  reservation — both worth having if an institution adopts the code. `NOTICE`
+  carries the attribution and states plainly that Sentinel monitors, and is not
+  affiliated with, the AQPI network or Colorado State University.
+
+- **GHCR packages are public,** so `docker compose pull` works with no login.
+  `docs/02-deployment.md` previously warned operators *not* to make the
+  packages public and documented a PAT with `read:packages` as the required
+  path; that advice is now exactly backwards and is rewritten. The token path
+  is kept for anyone running a private fork, which is the only case that still
+  needs it, and `ops/preflight.sh` no longer reports privacy as intentional.
+
+### Security
+
+- **Redacted an email address left legible in a screenshot.**
+  `docs/images/admin-audit.png` had ~26 rows of the audit log blurred and the
+  last row missed — a full address, readable, at the bottom edge. Caught in the
+  pre-publication audit; a public repository makes every commit permanent, so
+  this had to be right before the flip rather than after.
+
+  Also replaced a real person's address used as an input placeholder in the
+  digest admin page with `ops@example.edu`.
+
+  The rest of the audit was clean: no credentials in history, no key material
+  in the tree (VAPID keys are generated at runtime into the database), no
+  private addresses, internal hostnames or NFS paths, and CI using only the
+  auto-provided `GITHUB_TOKEN`. The scan was validated against a known control
+  string first — a malformed search returns zero hits and looks identical to a
+  clean result.
 
 ## [0.3.1] — 2026-09-05
 
@@ -148,7 +205,7 @@ restarting — that file could not previously express it.
   New `layer0.net.radardisplay_tls` verifies the certificate hourly, warns 14
   days before expiry and fails once it lapses, so the next renewal is seen
   coming instead of arriving as every tilt request failing at once.
-  `SENTINEL_RD_VERIFY_TLS=0` restores the old behaviour if it does lapse —
+  `SENTINEL_RD_VERIFY_TLS=0` restores the old behavior if it does lapse —
   an env var rather than a source edit, so the choice stays visible in the
   deployment.
 
@@ -166,7 +223,7 @@ restarting — that file could not previously express it.
   declined to judge:
 
   - `cellFill` hard-coded the remainder above a defect band to the pass
-    colour, so a bucket that was 20% fail and 60% skip drew 20% red over 80%
+    color, so a bucket that was 20% fail and 60% skip drew 20% red over 80%
     green.
   - `pass` outranks `skip` when picking a bucket's worst status, and `pass`
     was in `FLAT_STATUSES`, so any bucket containing even one pass was drawn
@@ -179,7 +236,7 @@ restarting — that file could not previously express it.
   drew as `var(--color-ok)`, indistinguishable from a fully healthy hour.
 
   Cells are now drawn from their composition: the defect band at the bottom,
-  then skips in grey, then the share that really passed. The server sends
+  then skips in gray, then the share that really passed. The server sends
   `n_skip` alongside the existing per-status counts to make that possible.
 
   This is the same mistake the alarm engine was making by closing alarms on
@@ -188,7 +245,7 @@ restarting — that file could not previously express it.
   is the one thing it must never draw.
 
   Ambiguity resolves the opposite way from `badFraction`: a server too old to
-  send `n_skip` greys nothing, because grey means "no data" and inventing it
+  send `n_skip` grays nothing, because gray means "no data" and inventing it
   would be its own lie. The exception is a `skip`-status cell, which can only
   mean every run skipped. Skips also yield to the bad band rather than the
   reverse, so one failure among 999 skips still draws its `MIN_BAD_PX` floor.
@@ -495,7 +552,7 @@ against an outside operator who has none of the context.
   720 suffice — so one slow response produced six simultaneous "radar
   unreachable" errors. Now a single short-TTL, single-flight memo shared across
   the fleet. Also, `_declared()` returned `None` both when the API failed *and*
-  when it answered fine but omitted a radar, labelling both "radar-status API
+  when it answered fine but omitted a radar, labeling both "radar-status API
   unreachable"; those are now distinct messages.
 
   **`error` was rendered as `fail`.** Both ranked equally in the history
