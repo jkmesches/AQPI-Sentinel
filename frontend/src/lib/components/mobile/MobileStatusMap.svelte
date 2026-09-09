@@ -1,7 +1,7 @@
 <script lang="ts">
 	/** Mobile status map.
 	 *
-	 *  Shows the X-band radar network with status-coloured icons (red center
+	 *  Shows the X-band radar network with status-colored icons (red center
 	 *  + yellow halo for ghost-up; full red for hard down). Now also carries
 	 *  a compact composite picker + playback strip so the operator can scrub
 	 *  through historical radar imagery on phone without bouncing to the
@@ -44,7 +44,7 @@
 	// Tapping a radar pin should do what tapping its row in the list does —
 	// open that radar's drilldown. The mobile map has no per-radar image
 	// overlays (it shows status pins plus one composite raster), so the
-	// desktop's toggle-overlay behaviour would be invisible here.
+	// desktop's toggle-overlay behavior would be invisible here.
 	// Tapping a radar toggles its overlay, mirroring desktop. Multiple radars
 	// can be active at once. Showing any radar hides the composite: the two
 	// draw over the same ground and a regional composite on top of a
@@ -60,7 +60,7 @@
 	// correct; the update just needs to be idempotent.
 	const _appliedUrl = new Map<string, string>();
 
-	// Same extent math as the desktop map — km offsets from the radar centre.
+	// Same extent math as the desktop map — km offsets from the radar center.
 	function radarExtent(r: RadarMeta) {
 		const km = r.range_m / 1000;
 		const dLat = km / 111;

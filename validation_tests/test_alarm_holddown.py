@@ -151,11 +151,11 @@ async def main() -> int:
     check("a failed streak lookup still opens the alarm (fails OPEN)",
           len(st.opened) == 1, f"{len(st.opened)} opened")
 
-    # --- hold_down: 0 restores the old behaviour ---------------------------
+    # --- hold_down: 0 restores the old behavior ---------------------------
     cfg = AlertsConfig(routes=[Route(match={}, policy="standard")], hold_down="0")
     st = FakeStore(streak_start=now - timedelta(seconds=1))
     await make_engine(st, cfg).evaluate(result())
-    check("hold_down 0 opens on the first bad run (old behaviour)",
+    check("hold_down 0 opens on the first bad run (old behavior)",
           len(st.opened) == 1)
 
     # --- no streak recorded at all -----------------------------------------

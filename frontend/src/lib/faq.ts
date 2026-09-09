@@ -53,7 +53,7 @@ export const FAQ: FaqItem[] = [
 		q: 'How often does it check, and does that load your servers?',
 		blocks: [
 			{ kind: 'p', text: 'Cadences run from 30 s (is the internet up) to 1 h (slow forecast products); most radar and product checks run every **120 s**. Total outbound traffic is roughly **30 requests/minute**.' },
-			{ kind: 'p', text: 'We actively work to keep that low. All six radar checks used to fetch `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and now share one memoised fetch per cycle. If our traffic is ever a problem, tell us: the cadences are configuration, not architecture.' }
+			{ kind: 'p', text: 'We actively work to keep that low. All six radar checks used to fetch `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and now share one memoized fetch per cycle. If our traffic is ever a problem, tell us: the cadences are configuration, not architecture.' }
 		]
 	},
 	{
@@ -132,7 +132,7 @@ export const FAQ: FaqItem[] = [
 		blocks: [
 			{ kind: 'p', text: 'Almost certainly one. Radars at Santa Cruz, Sonoma, East Bay, Santa Clara and Sierra do not fail in the same second.' },
 			{ kind: 'p', text: 'Measured over 14 days, **80%** of all `GHOST_UP` readings happened while four or five radars were silent simultaneously; only **3%** were isolated to one radar. The clearest case: four sites entered `GHOST_UP` at `2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54` — sub-second alignment, 79 hours apart.' },
-			{ kind: 'p', text: 'Sentinel now runs a fleet-correlation check that recognises this shape and raises **one** systemic alarm instead of five, while still showing each radar\'s individual verdict. An isolated single-radar failure is unaffected and still pages normally.' },
+			{ kind: 'p', text: 'Sentinel now runs a fleet-correlation check that recognizes this shape and raises **one** systemic alarm instead of five, while still showing each radar\'s individual verdict. An isolated single-radar failure is unaffected and still pages normally.' },
 			{ kind: 'note', text: 'That 79-hour episode was a **real** data outage. The correlation logic makes the count accurate, not the problem smaller.' }
 		]
 	},
@@ -163,7 +163,7 @@ export const FAQ: FaqItem[] = [
 			{ kind: 'p', text: 'Recipients, escalation steps and on-call schedules live under Admin → Alerts and Admin → Groups, including recurring quiet hours and per-device routing on mobile.' },
 			{ kind: 'p', text: '**To stop being paged for something you already know about, acknowledge it.** An ack stops every channel for that alarm — email, console, webhook, and any repeat — and it silences it for the whole team, not just you, because whoever acks is taking ownership of it. Un-acking resumes paging.' },
 			{ kind: 'p', text: 'For planned work use a **silence** rather than muting a check permanently — silenced alarms still appear on the dashboard and in the record, they just stop paging. Prefer a silence over an ack when you know the window in advance, because a silence covers the check regardless of how the underlying alarm comes and goes.' },
-			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. The three largest sources of false alarms found so far were a stale threshold, a colour that made "couldn\'t measure" look identical to "broken", and — until v0.2.1 — a bug that let a permanently-down radar re-announce itself every few hours because an upstream blip had been mistaken for a recovery.' }
+			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. The three largest sources of false alarms found so far were a stale threshold, a color that made "couldn\'t measure" look identical to "broken", and — until v0.2.1 — a bug that let a permanently-down radar re-announce itself every few hours because an upstream blip had been mistaken for a recovery.' }
 		]
 	},
 	{
@@ -178,13 +178,13 @@ export const FAQ: FaqItem[] = [
 					['1. Resolve', 'Ask radarca which scan is *latest* — `xbandRadarImages` for a radar, `productDetail` for a mosaic product.'],
 					['2. Fetch', 'Pull the PNG bytes. This is the only upstream request the image checks make.'],
 					['3. Archive', 'Hash the bytes with SHA-256 and store them content-addressed. Identical bytes are stored once.'],
-					['4. Tier 1', 'Measure the frame — coverage, intensity, structure, perceptual hash. No judgement yet.'],
+					['4. Tier 1', 'Measure the frame — coverage, intensity, structure, perceptual hash. No judgment yet.'],
 					['5. Tier 2', 'Run the pathology detectors against those pixels.'],
 					['6. Compare', 'Check the perceptual hash against the previous run to catch a stuck feed.'],
 					['7. Verdict', 'Take the worst sub-verdict. Anything not on the OK list becomes a `warn`.']
 				]
 			},
-			{ kind: 'p', text: 'Separating step 4 from step 5 is deliberate. Tier 1 records **what the frame is**, and is threshold-free; Tier 2 decides **whether that is a problem**, and every threshold lives there. When a threshold turns out to be wrong we can re-run the judgement over stored measurements without re-fetching a single image from radarca.' },
+			{ kind: 'p', text: 'Separating step 4 from step 5 is deliberate. Tier 1 records **what the frame is**, and is threshold-free; Tier 2 decides **whether that is a problem**, and every threshold lives there. When a threshold turns out to be wrong we can re-run the judgment over stored measurements without re-fetching a single image from radarca.' },
 			{ kind: 'note', text: 'Image checks emit `warn`, never `fail`. A strange-looking frame is a reason to go and look, not a claim that the product is broken — Sentinel cannot tell an artifact from genuinely unusual weather.' }
 		]
 	},
@@ -200,7 +200,7 @@ export const FAQ: FaqItem[] = [
 					['Coverage %', 'Share of the canvas carrying data. Drives most of the suppression logic below.'],
 					['Mean / std intensity', 'Brightest channel per active pixel — overall level and spread.'],
 					['Top-3 intensity bins', 'Where the intensity histogram piles up, in 16 buckets.'],
-					['Horizontal autocorrelation', 'Whether neighbouring pixels agree. Structured weather correlates; noise does not.'],
+					['Horizontal autocorrelation', 'Whether neighboring pixels agree. Structured weather correlates; noise does not.'],
 					['Perceptual hash', '16×16 pHash. Two frames with the same hash are visually identical.'],
 					['SHA-256 + byte size', 'Exact identity of the file, for the archive and for dedup.']
 				]
@@ -210,14 +210,14 @@ export const FAQ: FaqItem[] = [
 				kind: 'table',
 				head: ['Detector', 'Trips when', 'Catches'],
 				rows: [
-					['Saturation', 'One quantised colour holds >40% of active pixels', 'A frame collapsed to a single value — a stuck colour map or an encoder fault.'],
-					['Speckle', '>35% of active pixels have no active 4-neighbour', 'Noise dressed as data: isolated pixels with no structure.'],
-					['Range ring', 'Peak ring deviation >0.80× the median across 50 polar bins', 'Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only; mosaics have no radar-centred geometry.'],
+					['Saturation', 'One quantized color holds >40% of active pixels', 'A frame collapsed to a single value — a stuck color map or an encoder fault.'],
+					['Speckle', '>35% of active pixels have no active 4-neighbor', 'Noise dressed as data: isolated pixels with no structure.'],
+					['Range ring', 'Peak ring deviation >0.80× the median across 50 polar bins', 'Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only; mosaics have no radar-centerd geometry.'],
 					['Frozen frame', 'pHash identical to the previous run', 'A feed that is publishing but no longer changing.']
 				]
 			},
 			{ kind: 'p', text: 'Product checks also test the image at Layer 1, separately and more cheaply: that it exists and is really a PNG, that it is not implausibly small for that product, and that its bytes hash to a recorded value.' },
-			{ kind: 'note', text: 'The saturation threshold is per product, not global. Forecast fields such as water depth encode a scalar with a thresholded colour ramp and legitimately sit above 40% in normal operation; radar reflectivity does not.' }
+			{ kind: 'note', text: 'The saturation threshold is per product, not global. Forecast fields such as water depth encode a scalar with a thresholded color ramp and legitimately sit above 40% in normal operation; radar reflectivity does not.' }
 		]
 	},
 	{

@@ -185,7 +185,7 @@ class AlarmEngine:
                 )
             except Exception:
                 # Never let a hold-down lookup swallow a real alarm. Failing
-                # open here means at worst the old, noisier behaviour.
+                # open here means at worst the old, noisier behavior.
                 log.exception("hold-down lookup failed for %s; opening anyway",
                               result.check_id)
                 started = None

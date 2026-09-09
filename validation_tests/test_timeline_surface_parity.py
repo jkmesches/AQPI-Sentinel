@@ -4,11 +4,11 @@ Run directly (no DB, no network):
 
     python validation_tests/test_timeline_surface_parity.py
 
-Both surfaces draw the same thing: a bucket of check runs, coloured by the
+Both surfaces draw the same thing: a bucket of check runs, colored by the
 worst status in it and filled in proportion to how much of it was at that
 status. They are separate Svelte routes, so nothing stops one from being
 updated and the other left behind — which is exactly what happened. The
-proportional-fill encoding shipped on desktop while mobile kept a flat colour
+proportional-fill encoding shipped on desktop while mobile kept a flat color
 and its own private STATUS_BG, so for a while the same bucket looked like a
 total outage on a phone and a thin sliver on a laptop.
 
@@ -17,7 +17,7 @@ symptom is two people looking at the same incident and disagreeing about how
 bad it was.
 
 So this asserts the mechanism rather than the appearance: both surfaces must
-import the shared encoding, and neither may define a competing colour map or
+import the shared encoding, and neither may define a competing color map or
 inline the fill logic itself. Appearance is checked by the unit tests over
 $lib/timelineFill; this checks that both pages actually use it.
 """
@@ -63,12 +63,12 @@ def main() -> int:
         check(f"{name} draws cells with cellFill()",
               re.search(r"\bcellFill\s*\(", src) is not None)
 
-        # A private colour table is how the two drifted apart the first time:
+        # A private color table is how the two drifted apart the first time:
         # mobile had its own, missing `unknown`, and updating one did nothing
         # to the other.
         check(f"{name} defines no competing STATUS_BG",
               re.search(r"const\s+STATUS_BG\s*(?::|=)", src) is None,
-              "found a local status colour map")
+              "found a local status color map")
 
         # Re-implementing the fill inline would pass the import check above
         # while still drifting, so look for the giveaway.

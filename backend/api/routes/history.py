@@ -224,7 +224,7 @@ async def history_timeline(
         # severity. Worst-of-bunch alone gets increasingly pessimistic as the
         # grain coarsens: measured over 7 days, a red cell is 76.5% bad at 5m
         # but only 27.6% bad at 1d, where a single bad run in ~1000 painted a
-        # whole day red. Severity still decides the colour; these decide how
+        # whole day red. Severity still decides the color; these decide how
         # strongly it is drawn.
         "  COUNT(*) FILTER (WHERE status = 'fail')  AS n_fail, "
         "  COUNT(*) FILTER (WHERE status = 'error') AS n_error, "

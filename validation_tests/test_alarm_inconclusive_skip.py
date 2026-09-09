@@ -165,7 +165,7 @@ async def main() -> int:
         id = "layer2.radar.XEBY"
         target = "XEBY"
     demoted = sch._maybe_demote_for_unhealthy_dep(_Chk(), result(status="fail"))
-    check("scheduler's upstream demote is recognised as inconclusive",
+    check("scheduler's upstream demote is recognized as inconclusive",
           sup.is_inconclusive(demoted.status, demoted.payload),
           f"status={demoted.status} reason={(demoted.payload or {}).get('reason')!r}")
 
@@ -178,7 +178,7 @@ async def main() -> int:
         network = _Net()
     sch.ctx = _Ctx()
     off = sch._maybe_downgrade_for_network(_Chk(), result(status="fail"))
-    check("scheduler's offline demote is recognised as inconclusive",
+    check("scheduler's offline demote is recognized as inconclusive",
           sup.is_inconclusive(off.status, off.payload),
           f"status={off.status} reason={(off.payload or {}).get('reason')!r}")
 
@@ -187,7 +187,7 @@ async def main() -> int:
     # Only asserts the marker path when the summary actually trips the
     # detector; the point is the reason string, not the detector itself.
     if dns.status == "skip":
-        check("scheduler's DNS demote is recognised as inconclusive",
+        check("scheduler's DNS demote is recognized as inconclusive",
               sup.is_inconclusive(dns.status, dns.payload),
               f"reason={(dns.payload or {}).get('reason')!r}")
     else:

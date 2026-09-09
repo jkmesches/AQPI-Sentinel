@@ -63,7 +63,7 @@ export function mergeTimelines(tsLists: (string | null)[][]): TimelineStep[] {
 
 	// Collapse runs of near-simultaneous instants to their midpoint, so the
 	// merged step sits between the radars that produced it rather than
-	// favouring whichever happened to scan first.
+	// favoring whichever happened to scan first.
 	const merged: number[] = [];
 	let bucket: number[] = [epochs[0]];
 	for (let i = 1; i < epochs.length; i++) {

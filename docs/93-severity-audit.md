@@ -15,7 +15,7 @@ glossary defines the vocabulary; this doc records the policy.
 > `error` means the check could not determine its state (upstream API timeout,
 > probe crash). Until 2026-08-25 both were painted the same red and summed into
 > one "F" counter, which made ~1,500 upstream API timeouts/day read as radar
-> outages. `error` now has its own colour and its own counter.
+> outages. `error` now has its own color and its own counter.
 | **Attention required** | Degraded but not broken. Surfaces on the dashboard, doesn't page by default. | `warn` |
 | **Useful to watch** | Healthy or out-of-scope. | `pass`, `skip` |
 

@@ -122,7 +122,7 @@ When a check enters `fail`, every check whose `depends_on` transitively includes
 
 ### 3.5 Alerting engine
 
-Sits between `CheckResult` transitions and the sinks. Rules-driven, declarative, hot-reloadable. Supports severity-based routing, time-based escalation, duration-based severity promotion, user-defined conditional predicates, acknowledgements, and scheduled silences. Full detail in §14.
+Sits between `CheckResult` transitions and the sinks. Rules-driven, declarative, hot-reloadable. Supports severity-based routing, time-based escalation, duration-based severity promotion, user-defined conditional predicates, acknowledgments, and scheduled silences. Full detail in §14.
 
 ### 3.6 History service
 
@@ -387,7 +387,7 @@ GET  /api/checks/{id}/history?since=...   → time-bounded history
 GET  /api/checks/{id}/metrics?metric=...&since=...
                                           → time-series for charts
 
-# alarms + acknowledgement + silences (see §14)
+# alarms + acknowledgment + silences (see §14)
 GET  /api/alarms?status=open|closed|silenced|all
 GET  /api/alarms/{id}                     → full record + suppression chain + ack state
 POST /api/alarms/{id}/ack                 → {user, note}; pauses escalation
@@ -790,7 +790,7 @@ If you want different choices on any of these, the plan absorbs them without res
 
 ## 14. Alerting subsystem (targeted email + escalation)
 
-Routes `CheckResult` transitions to people via a configurable rules engine. Inspired by Alertmanager but lighter; declarative YAML, hot-reloadable, with first-class acknowledgements and conditional predicates.
+Routes `CheckResult` transitions to people via a configurable rules engine. Inspired by Alertmanager but lighter; declarative YAML, hot-reloadable, with first-class acknowledgments and conditional predicates.
 
 ### 14.1 Pipeline
 
@@ -917,7 +917,7 @@ The "30 min" auto-promotion is the **duration-based** escalation. The `when:` cl
 
 These three knobs compose. Example: an L2 single-radar outage starts as `warn` → chat-only. If it lasts 30 min, it promotes to `critical` and the catch-all route stops matching (a higher-priority route does). If two radars are down, the `pair_outage` condition kicks in immediately at `critical`. If acked, escalation pauses regardless.
 
-### 14.4 Acknowledgements & silences
+### 14.4 Acknowledgments & silences
 
 - `POST /api/alarms/{id}/ack` — `{user, note}` recorded; pauses pending escalation steps for the alarm's lifetime.
 - Ack auto-expires when the alarm closes; it must be re-acked if the alarm re-opens.

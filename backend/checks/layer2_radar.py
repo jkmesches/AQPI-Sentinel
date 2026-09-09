@@ -129,7 +129,7 @@ XBAND_FLEET = frozenset(r for r in RADAR_FOLDER if r != "CBAND")
 FLEET_CHECK_ID = "layer2.xband.fleet"
 
 # 4 of 5, not all 5: a genuinely-broken radar during a systemic event should
-# not stop us recognising the systemic event.
+# not stop us recognizing the systemic event.
 FLEET_SYSTEMIC_MIN = 4
 
 # Which verdicts count toward a systemic diagnosis. Deliberately NOT
@@ -240,7 +240,7 @@ class Layer2RadarReconcile(Check):
 
     # X-band members additionally depend on the fleet check (set in __init__)
     # so that a fleet-wide event suppresses the five per-radar alarms in
-    # favour of one systemic alarm. See Layer2XbandFleet.
+    # favor of one systemic alarm. See Layer2XbandFleet.
 
     def __init__(self, radar_id: str):
         self.radar_id = radar_id

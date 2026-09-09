@@ -4,7 +4,7 @@
  * tab idle until the combination that doesn't freeze identifies the
  * culprit.
  *
- * Recognised flags (comma-separated under `?diag=`):
+ * Recognized flags (comma-separated under `?diag=`):
  *   no-ws        — disable the WebSocket live-push subscription
  *   no-poll      — disable the 5s polling refresh
  *   no-map       — don't render MapView at all

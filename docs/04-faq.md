@@ -48,7 +48,7 @@ roughly **30 requests/minute**.
 
 We actively work to keep that low. All six radar checks used to fetch
 `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and
-now share one memoised fetch per cycle. If our traffic is ever a problem for
+now share one memoized fetch per cycle. If our traffic is ever a problem for
 you, tell us; the cadences are configuration, not architecture.
 
 ## 4. What do the five stages mean?
@@ -153,7 +153,7 @@ were isolated to one radar. The clearest case: four sites entered `GHOST_UP`
 at `2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54` — sub-second
 alignment, 79 hours apart.
 
-Sentinel now runs a fleet-correlation check that recognises this shape and
+Sentinel now runs a fleet-correlation check that recognizes this shape and
 raises **one** systemic alarm instead of five, while still showing each
 radar's individual verdict. An isolated single-radar failure is unaffected and
 still pages normally.
@@ -206,7 +206,7 @@ underlying alarm comes and goes.
 
 If you are seeing noise you believe is wrong, that is worth reporting rather
 than silencing: the three largest sources of false alarms found so far were a
-stale threshold, a colour that made "couldn't measure" look identical to
+stale threshold, a color that made "couldn't measure" look identical to
 "broken", and — until v0.2.1 — a bug that let a permanently-down radar
 re-announce itself every few hours because an upstream blip had been mistaken
 for a recovery.
@@ -222,7 +222,7 @@ Seven steps, every cycle, for each X-band radar and each mosaic product.
 | 1. Resolve | Ask radarca which scan is *latest* — `xbandRadarImages` for a radar, `productDetail` for a mosaic product. |
 | 2. Fetch | Pull the PNG bytes. This is the only upstream request the image checks make. |
 | 3. Archive | Hash the bytes with SHA-256 and store them content-addressed. Identical bytes are stored once. |
-| 4. Tier 1 | Measure the frame — coverage, intensity, structure, perceptual hash. No judgement yet. |
+| 4. Tier 1 | Measure the frame — coverage, intensity, structure, perceptual hash. No judgment yet. |
 | 5. Tier 2 | Run the pathology detectors against those pixels. |
 | 6. Compare | Check the perceptual hash against the previous run to catch a stuck feed. |
 | 7. Verdict | Take the worst sub-verdict. Anything not on the OK list becomes a `warn`. |
@@ -232,7 +232,7 @@ records what the frame is** and is threshold-free. **Tier 2 decides whether
 that is a problem**, and every tunable number lives there.
 
 The payoff is that when a threshold turns out to be wrong — which has happened
-more than once — the judgement can be re-run over stored measurements without
+more than once — the judgment can be re-run over stored measurements without
 re-fetching a single image from radarca. That is how 13,575 rows were corrected
 in August without adding any upstream load.
 
@@ -256,23 +256,23 @@ recorded for every frame, whether or not anything is wrong:
 | Coverage % | Share of the canvas carrying data. Drives most of the suppression logic in §13. |
 | Mean / std intensity | Brightest channel per active pixel — overall level and spread. |
 | Top-3 intensity bins | Where the intensity histogram piles up, in 16 buckets. |
-| Horizontal autocorrelation | Whether neighbouring pixels agree. Structured weather correlates; noise does not. |
+| Horizontal autocorrelation | Whether neighboring pixels agree. Structured weather correlates; noise does not. |
 | Perceptual hash | 16×16 pHash. Two frames with the same hash are visually identical. |
 | SHA-256 + byte size | Exact identity of the file, for the archive and for dedup. |
 
-### Tier 2 — judgement
+### Tier 2 — judgment
 
 Four detectors, each with a tunable threshold:
 
 | Detector | Trips when | What it catches |
 |---|---|---|
-| **Saturation** | One quantised colour holds >40% of active pixels | A frame collapsed to a single value — a stuck colour map or an encoder fault. |
-| **Speckle** | >35% of active pixels have no active 4-neighbour | Noise dressed as data: isolated pixels with no structure. |
-| **Range ring** | Peak ring deviation >0.80× the median across 50 polar bins | Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only: mosaics have no radar-centred geometry. |
+| **Saturation** | One quantized color holds >40% of active pixels | A frame collapsed to a single value — a stuck color map or an encoder fault. |
+| **Speckle** | >35% of active pixels have no active 4-neighbor | Noise dressed as data: isolated pixels with no structure. |
+| **Range ring** | Peak ring deviation >0.80× the median across 50 polar bins | Concentric artifacts on an X-band disc — a calibration or clutter-filter signature. X-band only: mosaics have no radar-centerd geometry. |
 | **Frozen frame** | pHash identical to the previous run | A feed that is still publishing but no longer changing. |
 
 The saturation threshold is **per product, not global**. Forecast fields such
-as water depth encode a scalar with a thresholded colour ramp and legitimately
+as water depth encode a scalar with a thresholded color ramp and legitimately
 sit above 40% in normal operation; radar reflectivity does not. A single global
 number would either miss real saturation on radar or cry wolf on every forecast
 frame.
@@ -317,7 +317,7 @@ FROZEN. Reprocessing the history with the source comparison in place took the
 FROZEN count from **13,837 to 263** (August 2026); it stands at 265 today, the
 difference being two genuine ones since.
 
-The lesson generalises: a detector that cannot tell "nothing changed" from
+The lesson generalizes: a detector that cannot tell "nothing changed" from
 "nothing new arrived" will confidently report a fault that does not exist.
 
 !!! note

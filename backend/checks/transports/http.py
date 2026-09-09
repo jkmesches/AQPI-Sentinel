@@ -194,7 +194,7 @@ class HttpClient:
 
     @staticmethod
     async def _backoff(attempt: int) -> None:
-        # Jitter so six radar checks retrying the same URL don't resynchronise
+        # Jitter so six radar checks retrying the same URL don't resynchronize
         # into a thundering herd against an already-slow upstream.
         await asyncio.sleep(RETRY_BACKOFF_S * (attempt + 1) * (0.5 + random.random()))
 

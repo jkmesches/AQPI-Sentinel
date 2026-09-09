@@ -7,7 +7,7 @@ Run directly (no DB, no network):
 Ack is the operator saying "seen it, stop telling me". It is stored per
 ALARM ROW in alarm_acks, keyed on alarm_id with no user scoping — so an ack
 by anyone silences that alarm for everyone, which is the intended shared-
-ownership behaviour for a team on one rotation.
+ownership behavior for a team on one rotation.
 
 Three separate paths can notify, and ack has to hold on all of them:
 
