@@ -28,6 +28,40 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-09
+
+### Fixed
+
+- **The README granted the Apache-2.0 licence and denied it, four lines
+  apart.** v0.4.0's rewrite replaced the paragraph under `## License` and left
+  the two beneath it, so the section read "Use it, run it, modify it, ship it"
+  and then "No license is granted to use, copy, modify, distribute, host, or
+  deploy the Software … essentially closed source."
+
+  Worth a patch release rather than a quiet fix on `main`: the README is the
+  first thing a reader checks before deciding whether they may run this, and a
+  contradiction there resolves to "no" whatever `LICENSE` says. It survived the
+  pre-publication audit because the search was for the word "proprietary",
+  which the old text never used.
+
+  The disclaimer those paragraphs also carried is kept and now matches
+  `NOTICE`: written independently, not a work product of CSU, the CHILL
+  facility, Dr. Chandrasekar's lab or the AQPI program, and not endorsed by
+  them. That is a statement of fact, not a licence term.
+
+### Added
+
+- **`SECURITY.md`**, so vulnerability reports arrive privately instead of as
+  public issues. It puts the monitored upstream explicitly out of scope —
+  Sentinel reads CSU's public endpoints, and demonstrating a Sentinel bug by
+  probing them is not in bounds — and draws the line that matters for this
+  project: a deployment's own misconfiguration is out of scope, but Sentinel
+  making such a mistake easy to commit *silently* is in scope and wanted.
+  Rendered into the docs site as **Reference → Security policy**.
+
+- `docs/index.md` states the licence. The docs site is a separate front door
+  and never mentioned it.
+
 ## [0.4.0] — 2026-09-09
 
 Reporting release, and the release that opens the source.
