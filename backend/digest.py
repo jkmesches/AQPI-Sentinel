@@ -417,12 +417,29 @@ def spark(buckets: list[float | None]) -> str:
 
 
 def evidence_url(public_url: str, check_id: str, target: str,
-                 since: str, until: str) -> str | None:
+                 since: str, until: str,
+                 status: str = "fail,error,warn,skip") -> str | None:
     """Deep link to the runs behind a row.
 
     Every declaration in the report links to the filtered history view that
     produced it, so a reader can check a claim rather than trust it. /history
     already accepts exactly these filters.
+
+    The link carries a status filter, and must. A product check runs every
+    ~60 s, so the 24 h window behind one of these rows holds ~1,440 runs while
+    /history renders the newest 500 — meaning the link opened on the last ~8
+    hours of the window and, on 2026-09-11, showed every one of qpe_15min,
+    qpe_1hr, precip_rate_radar and comp_ref as unbroken green while the report
+    correctly said 99.5-99.8%. All fourteen of their non-passing runs were in
+    the truncated older end. The evidence link disproved the report.
+
+    Only non-nominal rows are linked (render_text and the template both list
+    perfect subjects as a collapsed "N nominal" line), so every link is
+    attached to a claim about something going wrong, and "every run that was
+    not a pass" is exactly the set that claim is about. Inconclusive skips are
+    included even though availability excludes them from its denominator:
+    they are still not passes, the reader can see the reason on each row, and
+    the report discloses the conclusive share separately.
     """
     if not public_url:
         return None
@@ -437,7 +454,8 @@ def evidence_url(public_url: str, check_id: str, target: str,
 
     return (f"{public_url}/history?check_id={quote(check_id, safe='')}"
             f"&target={quote(target, safe='')}"
-            f"&since={_short(since)}&until={_short(until)}&tab=checks")
+            f"&since={_short(since)}&until={_short(until)}&tab=checks"
+            f"&status={quote(status, safe=',')}")
 
 
 def _rows(data: dict, kind: str) -> list[dict]:

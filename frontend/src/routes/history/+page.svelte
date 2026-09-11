@@ -21,6 +21,8 @@
 	let checkId = $state('');           // optional deeplink narrowing
 	let severities = $state<string[]>([]);
 	let statuses = $state<string[]>([]);
+	let totalMatching = $state(0);
+	let truncated = $state(false);
 	let rows = $state<any[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -100,6 +102,9 @@
 			const r = await fetch(`/api/history/${tab}?${params}`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			rows = await r.json();
+			const tot = r.headers.get('X-Total-Matching');
+			totalMatching = tot ? Number(tot) : rows.length;
+			truncated = r.headers.get('X-Truncated') === '1';
 		} catch (e) {
 			error = (e as Error).message;
 			rows = [];
@@ -140,6 +145,14 @@
 		}
 		const dtab = q.get('tab');
 		if (dtab === 'alarms' || dtab === 'checks') tab = dtab;
+		// The daily report links here to evidence a claim about non-passing
+		// runs. Without this the filter was dropped and the reader landed on
+		// 500 rows of mostly-passing history with the handful that mattered
+		// somewhere off the bottom — which reads as "the report was wrong".
+		const dstatus = q.get('status');
+		if (dstatus) statuses = dstatus.split(',').filter(Boolean);
+		const dsev = q.get('severity');
+		if (dsev) severities = dsev.split(',').filter(Boolean);
 	}
 
 	onMount(() => {
@@ -229,6 +242,23 @@
 			{#if error}<span class="text-[var(--color-fail)]">  {error}</span>{/if}
 		</span>
 	</header>
+
+	<!--
+		A capped list must say so. Newest-first means the cut falls at the START
+		of the window, so a 24 h filter can render 500 passing rows and hide
+		every failure — which is exactly how the daily report's evidence links
+		came to contradict the report.
+	-->
+	{#if truncated}
+		<div
+			class="border-b border-[var(--color-border)] bg-[var(--color-warn-bg,transparent)] px-4 py-1.5 text-[11px] text-[var(--color-warn)]"
+		>
+			Showing the newest {rows.length.toLocaleString()} of
+			{totalMatching.toLocaleString()} matching runs — the older
+			{(totalMatching - rows.length).toLocaleString()} are not on this page.
+			Narrow the window, or filter by status, to see them.
+		</div>
+	{/if}
 
 	<!-- TABS -->
 	<nav class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[11px] uppercase tracking-wider">
