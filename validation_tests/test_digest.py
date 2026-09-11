@@ -284,6 +284,26 @@ def main() -> int:
         fresh.reload({**cfg, **change})
         check(f"{label} releases the claim", fresh._release_claim is True)
 
+    # --- evidence links ------------------------------------------------------
+    # 2026-09-11: the report said qpe_15min/qpe_1hr/precip_rate_radar/comp_ref
+    # were 99.5-99.8% over 24 h and every evidence link opened on a page of
+    # unbroken green. These products run every ~60 s (~1,437 runs per window),
+    # /history renders the newest 500, and all 19 non-passing runs were in the
+    # truncated older end. The link disproved the claim it was meant to support.
+    ev = evidence_url("https://s.example", "layer1.product.qpe_15min", "qpe_15min",
+                      "2026-09-10T13:00:00+00:00", "2026-09-11T13:00:00+00:00")
+    check("the evidence link filters to non-passing runs",
+          "status=fail,error,warn,skip" in ev, ev)
+    check("...and keeps the window and the subject",
+          "check_id=layer1.product.qpe_15min" in ev
+          and "since=2026-09-10T13:00:00Z" in ev
+          and "until=2026-09-11T13:00:00Z" in ev, ev)
+    check("...and stays short enough to read in the plain-text part",
+          len(ev) < 200, f"{len(ev)} chars")
+    check("no public_url means no link rather than a broken one",
+          evidence_url("", "layer1.product.qpe_15min", "qpe_15min",
+                       "2026-09-10T13:00:00+00:00", "2026-09-11T13:00:00+00:00") is None)
+
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall digest assertions passed")
     return 1 if failures else 0

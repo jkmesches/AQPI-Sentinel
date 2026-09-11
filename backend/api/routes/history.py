@@ -112,6 +112,7 @@ async def history_alarms(
 @router.get("/checks")
 async def history_checks(
     request: Request,
+    response: Response,
     since: str | None = None, until: str | None = None,
     stage: str | None = None, target: str | None = None,
     check_id: str | None = None,
@@ -141,6 +142,21 @@ async def history_checks(
         + f" ORDER BY finished_at DESC LIMIT ${len(args)}"
     )
     rows = await pool.fetch(sql, *args)
+
+    # Say when the answer is partial. A product check runs every ~60 s, so a
+    # 24 h window holds ~1,440 runs and ANY limit below that silently drops the
+    # older end — newest-first, so what goes missing is the start of the window.
+    # That turned the daily report's evidence links into contradictions: the
+    # report said qpe_15min was 99.5% over 24 h, the link showed the newest 500
+    # runs (~8 h), every one of them passing, and nothing on the page admitted
+    # that 938 runs had been cut. A truncated list that looks complete is worse
+    # than an error, because the reader acts on it.
+    total = len(rows)
+    if len(rows) >= limit:
+        count_sql = "SELECT count(*) FROM check_runs WHERE " + " AND ".join(where)
+        total = await pool.fetchval(count_sql, *args[:-1])
+    response.headers["X-Total-Matching"] = str(total)
+    response.headers["X-Truncated"] = "1" if total > len(rows) else "0"
     return [_ser_run(dict(r)) for r in rows]
 
 
