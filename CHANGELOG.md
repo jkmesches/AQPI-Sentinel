@@ -28,6 +28,76 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-09-11
+
+### Fixed
+
+- **Forecast parity warned on 78% of runs and flapped alarms, for something
+  that was never a fault.** `fcst_temp` warned on 265 of 341 runs over seven
+  days and opened 25 alarms that all auto-closed, while the condition behind
+  them had not changed since at least 2026-09-04.
+
+  The upstream stitches a short-range and a long-range block into one manifest
+  and re-lists the long-range block. Captured from production on 2026-09-11,
+  `temperature/details_F.json` held **129 entries for 73 distinct files**:
+
+  ```
+  pos[  0.. 18]  step  0..18   ts 09-11T19:00 .. 09-12T13:00
+  pos[ 19.. 73]  step 18..72   ts 09-12T14:00 .. 09-16T21:00
+  pos[ 74..128]  step 18..72   ts 09-12T14:00 .. 09-16T21:00   ← verbatim replay
+  ```
+
+  The old rule — every index is the previous plus one — read each replay as
+  steps served out of order. Across the week the same manifest appeared at 19,
+  74, 129, 187 and 243 entries, one more replay each time, and the mismatch
+  count tracked the replay count exactly: 0, 1, 2, 3, 4. It also flapped: the
+  short 19-entry form is clean and passes, the long form warned, and the
+  upstream alternates between them roughly every half hour.
+
+  `classify_step_sequence()` now judges the sequence as a whole and separates
+  two questions the old rule conflated:
+
+  | Condition | Verdict |
+  |---|---|
+  | A step missing from the range | `warn` |
+  | Time not advancing on first occurrence | `warn` |
+  | Time out of order inside one block | `warn` |
+  | A republished block disagreeing about the times | `warn` |
+  | The same forecast time listed twice | reported, `pass` |
+  | One file carrying two times where blocks join | reported, `pass` |
+
+  The last row is the judgment call. At the seam a single file carries two
+  forecast times — `step18.png` at both 13:00 and 14:00 — so one of those hours
+  displays its neighbor's image. That is a real upstream defect, and it does
+  not set the verdict, because the index in these filenames is a position
+  within its own block rather than a global identity: the same lesson the tilt
+  archive taught, where a frame index names a slot and not a frame.
+
+  Being permissive here has an obvious failure mode, and the test found it:
+  the first version accepted *any* re-listing, including a block republishing
+  the same steps with different timestamps — the upstream giving two different
+  answers, which is precisely what must not be swallowed. A republished block
+  must now either match what came before or overlap by at most one index at
+  the join.
+
+- **Nothing is silenced into invisibility.** The summary carries `rep=` and
+  `seam=`, the payload keeps `blocks` / `repeated_entries` / `steps_multi_ts` /
+  `defects`, and the timeline drilldown — which rendered parity *only* when the
+  verdict was not `pass`, so this would have disappeared from the UI the moment
+  it stopped alarming — now states both in plain language regardless of verdict.
+
+- `docs/ARCHITECTURE.md`'s L3B section documented the old rule and still
+  claimed the verdict was `fail` on mismatch, which v0.1.2 changed to `warn`.
+
+### Added
+
+- `validation_tests/test_forecast_parity.py`, run against four manifests
+  captured from production rather than hand-written ones — the shape that broke
+  this is the shape that matters, and an invented fixture is one that agrees
+  with its author. Fixtures live in `validation_tests/fixtures/` because
+  `samples/` is gitignored, and a test whose inputs are not in the repo passes
+  only on the machine that wrote it.
+
 ## [0.4.2] — 2026-09-09
 
 ### Fixed
