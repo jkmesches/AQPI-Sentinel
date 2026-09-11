@@ -326,13 +326,24 @@ On `/m/uptime`, cascade-demoted cells get a small `↑` badge to
 distinguish them from intrinsic skips at a glance.
 
 On the bucketed timeline, a cell is drawn from its **composition**, not just
-its worst status: the defect band at the bottom, then skips in gray, then the
-share that really passed. `/api/history/timeline` sends `n_fail`, `n_error`,
-`n_warn` and `n_skip` alongside `n` to make that possible. Before v0.3.0 the
-remainder above a defect band was assumed to be `pass`, and any bucket whose
-worst status was `pass` was drawn as one flat green block — so a bucket where
-we had stopped being able to see anything looked exactly like a healthy one.
-Measured over 24 h at 1 h grain, 59 of 1,093 buckets were affected.
+its worst status: bottom to top, `fail`, `error`, `warn`, then skips in gray,
+then only the share that really passed. `/api/history/timeline` sends `n_fail`,
+`n_error`, `n_warn` and `n_skip` alongside `n` to make that possible.
+
+The remainder above a band was assumed to be `pass` twice, and it was wrong
+both times. Before v0.3.0 any bucket whose worst status was `pass` drew as one
+flat green block, so skips were painted green — a bucket where we had stopped
+being able to see anything looked exactly like a healthy one (59 of 1,093
+buckets at 1 h grain). Before v0.4.4 the assumption survived one band higher
+up: a cell whose worst status was `fail` drew its fail band, its skip band,
+and then everything left over in green, **including the runs that errored**.
+XEBY on 2026-09-11 had 673 `fail`, 23 `error`, 20 `skip` and not one `pass` in
+24 hours, yet every one of its cells drew part green.
+
+Each defect band has a `MIN_BAD_PX` floor so a rare one stays visible; `pass`
+is the one band with **no** floor, because rounding a 1% healthy share up to a
+visible slice would make an almost-entirely-broken cell read as less broken.
+Ambiguity resolves toward showing the defect, never toward showing health.
 
 ---
 

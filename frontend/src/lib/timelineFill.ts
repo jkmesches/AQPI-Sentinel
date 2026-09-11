@@ -102,64 +102,125 @@ export function skipFraction(cell: TimelineCell | undefined): number {
 	return Math.min(1, s / cell.n);
 }
 
+/** Defect statuses, most severe first. Order is the drawing order from the
+ *  bottom of the cell, and it matches the server's worst_rank: fail outranks
+ *  error ("the monitored thing is broken" is a stronger statement than "our
+ *  probe could not determine its state"), which outranks warn. */
+const DEFECT_ORDER = ['fail', 'error', 'warn'] as const;
+
+/** Per-status run count from the bucket, or undefined if the server did not
+ *  send it. */
+function countOf(cell: TimelineCell, st: string): number | undefined {
+	switch (st) {
+		case 'fail':  return cell.n_fail;
+		case 'error': return cell.n_error;
+		case 'warn':  return cell.n_warn;
+		case 'skip':  return cell.n_skip;
+		default:      return undefined;
+	}
+}
+
 /**
- * CSS `background` for one cell, drawn from the bucket's composition.
+ * CSS `background` for one cell, drawn from the bucket's FULL composition.
  *
- * Bottom to top: the bad band (the cell's own defect status), then skips, then
- * passes. `h` is the drawn cell height in px, which is what makes the
- * MIN_BAD_PX floor meaningful.
+ * Bottom to top, in severity order: fail, error, warn, skip, and only then the
+ * share that actually passed. `h` is the drawn cell height in px, which is what
+ * makes the MIN_BAD_PX floor meaningful.
  *
- * The skip band is why this is not simply "bad over pass". Until 2026-09-05
- * the remainder above the bad band was hard-coded to the pass color, and any
- * cell whose worst status was `pass` was drawn as one flat green block. Both
- * cases painted skips green. Measured over 24h at 1h grain: 141 of 1,093
- * buckets contained a skip, 59 of them rendered as solid green and 2 more as a
- * green remainder — so a bucket where we had stopped being able to see
- * anything looked exactly like one we had checked and found healthy. That is
- * the same mistake the alarm engine was making by closing alarms on demoted
- * skips, and it is worse on the timeline, because the grid is what an operator
- * scans to decide whether to look closer at all.
+ * Every band is drawn because the remainder is not knowable from the worst
+ * status alone, and assuming it was cost us the same bug twice.
+ *
+ * The first time, until 2026-09-05, the remainder above the bad band was
+ * hard-coded to the pass color and any cell whose worst status was `pass` was
+ * drawn as one flat green block — so skips were painted green. Measured at the
+ * time: 141 of 1,093 buckets held a skip, 59 drew as solid green.
+ *
+ * The second time is the same assumption surviving in the band above: a cell
+ * whose worst status is `fail` drew its fail band, its skip band, and then
+ * everything left over in green — including the runs that ERRORED. XEBY on
+ * 2026-09-11 is the case in point: 673 fail, 23 error, 20 skip and **not one
+ * pass** in 24 hours, yet its 22:00 bucket (12 fail, 2 error, 1 skip of 15)
+ * drew about an eighth of its height green. A radar that has been down for
+ * weeks showed green for the runs where the probe itself failed.
+ *
+ * So: no status is inferred from another's absence. A band is drawn only for
+ * runs the server actually counted, and the green at the top is what is left
+ * after every counted status has taken its share — which on XEBY is nothing.
  */
 export function cellFill(cell: TimelineCell | undefined, st: string, h: number): string {
-	const bad = STATUS_BG[st] ?? 'transparent';
-	if (st === 'unknown') return bad;
+	const own = STATUS_BG[st] ?? 'transparent';
+	if (st === 'unknown' || !cell || !cell.n) return own;
 
+	// Ambiguity still resolves toward visibility: a server too old to send the
+	// counts, or a payload that contradicts itself, fills the cell with its own
+	// status rather than inventing a composition.
 	const isDefect = !FLAT_STATUSES.has(st);
-	const badFrac = isDefect ? badFraction(cell) : 0;
-	if (badFrac >= 1) return bad;
-
-	const skipFrac = skipFraction(cell);
-	if (!isDefect && skipFrac >= 1) return STATUS_BG['skip'];
-	if (badFrac <= 0 && skipFrac <= 0) return STATUS_BG[st] ?? STATUS_BG['pass'];
-
-	// Floor the bad band so a rare failure stays visible at any row height,
-	// then clamp — on a very short row the floor alone can exceed the cell.
-	let badPx = badFrac > 0 ? Math.max(MIN_BAD_PX, Math.round(badFrac * h)) : 0;
-	if (badPx > h) badPx = h;
-	// Skips yield to the bad band, never the other way round: an outage must
-	// stay visible even in a bucket that is mostly skipped.
-	let skipPx = Math.round(skipFrac * h);
-	if (badPx + skipPx > h) skipPx = Math.max(0, h - badPx);
+	if (isDefect && badFraction(cell) >= 1) return own;
 
 	const span = Math.max(h, 1);
-	const badPct = (badPx / span) * 100;
-	const skipPct = (skipPx / span) * 100;
-	if (badPct >= 100) return bad;
+
+	// Every status that actually occurred gets a band. Collected first, sized
+	// second: sizing as we go let the most severe band eat the cell and drop
+	// the rest, which is how one error among 999 fails disappeared entirely —
+	// the same "guess low and it vanishes" failure MIN_BAD_PX exists to stop,
+	// just applied to the band above the floor instead of the floor itself.
+	const parts: Array<{ color: string; share: number; min: number }> = [];
+	let defectShare = 0;
+	for (const d of DEFECT_ORDER) {
+		const c = countOf(cell, d);
+		if (!c || c <= 0) continue;
+		const share = Math.min(1, c / cell.n);
+		defectShare += share;
+		parts.push({ color: STATUS_BG[d], share, min: MIN_BAD_PX });
+	}
+	const skipShare = skipFraction(cell);
+	// 1px, not MIN_BAD_PX: grey means "we did not judge", which must stay
+	// visible but must never crowd out a defect that did happen.
+	if (skipShare > 0) parts.push({ color: STATUS_BG['skip'], share: skipShare, min: 1 });
+	// Pass gets NO floor, unlike every band below it. A floor here would round
+	// a 1.1% healthy share up to a visible slice and make an almost-entirely
+	// broken cell read as less broken — over-reporting health, which is the one
+	// direction this encoding must never fail in. Green appears only when there
+	// is enough green to earn a pixel on its own.
+	const passShare = Math.max(0, 1 - defectShare - skipShare);
+	if (passShare > 0) parts.push({ color: STATUS_BG['pass'], share: passShare, min: 0 });
+
+	if (!parts.length) return STATUS_BG[st] ?? STATUS_BG['pass'];
+	if (parts.length === 1) return parts[0].color;
+
+	// Too short to show every band honestly — fall back to the worst status
+	// filling the cell. Over-reporting severity is the safe direction; the
+	// alternative is silently dropping whichever band did not fit.
+	const floor = parts.reduce((a, p) => a + p.min, 0);
+	if (floor > span) return own;
+
+	const px = parts.map((p) => Math.max(p.min, Math.round(p.share * span)));
+	// Shave the largest band(s) until it fits, never below their floors, so
+	// what gets squeezed is the share that has pixels to spare rather than the
+	// rare defect that has none.
+	let total = px.reduce((a, b) => a + b, 0);
+	while (total > span) {
+		let bi = -1;
+		for (let i = 0; i < px.length; i++) {
+			if (px[i] > parts[i].min && (bi === -1 || px[i] > px[bi])) bi = i;
+		}
+		if (bi === -1) break;
+		px[bi] -= 1;
+		total -= 1;
+	}
 
 	const stops: string[] = [];
 	let cursor = 0;
-	if (badPx > 0) {
-		stops.push(`${bad} 0 ${badPct}%`);
-		cursor = badPct;
+	for (let i = 0; i < parts.length; i++) {
+		if (px[i] <= 0) continue;
+		const startPct = cursor;
+		cursor += (px[i] / span) * 100;
+		stops.push(`${parts[i].color} ${startPct === 0 ? '0' : `${startPct}%`} ${Math.min(100, cursor)}%`);
 	}
-	if (skipPx > 0) {
-		const start = cursor === 0 ? '0' : `${cursor}%`;
-		cursor += skipPct;
-		stops.push(`${STATUS_BG['skip']} ${start} ${cursor}%`);
-	}
-	if (cursor < 100) stops.push(`${STATUS_BG['pass']} ${cursor}% 100%`);
+	if (stops.length === 1) return parts.find((p) => stops[0].startsWith(p.color))?.color ?? own;
 	return `linear-gradient(to top, ${stops.join(', ')})`;
 }
+
 
 /** Tooltip text carrying the same figures the fill encodes. */
 export function cellRatioText(cell: TimelineCell | undefined): string {
