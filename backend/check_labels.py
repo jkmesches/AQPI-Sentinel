@@ -57,6 +57,12 @@ def _product(target: str) -> str:
     return _PRODUCTS.get(target) or _title(target)
 
 
+def product_label(product_id: str) -> str:
+    """Public name for one product id. Same table the check labels use, so the
+    daily report cannot drift from the dashboard."""
+    return _product(product_id)
+
+
 def pretty_check_label(check_id: str | None, target: str = "") -> str:
     """Return a friendly name for a (check_id, target) pair. Falls back
     to a cleaned-up version of the target when no specific match is
