@@ -424,7 +424,17 @@ L1 product result. It picks one of two parsers per step:
   whose filenames encode a time — `comp_ref` → `20260518_0028.png`,
   X-band → `scwa_CorrReflectivity_20260518-2336.png`, QPE →
   `…_20260518_193000_rainfall.nc.png`. Compared against the manifest's
-  `timestamp` field (±60 s tolerance).
+  `timestamp` field (±60 s tolerance), and then the sequence as a whole
+  is judged by `classify_timestamp_sequence()` — a duplicated row agrees
+  with itself, so the per-entry comparison alone is blind to a repeat.
+  A duplicate entry, one image under two timestamps, or time running
+  backwards all `warn` here.
+
+  That is the **opposite** policy from the step-index mode below, on
+  purpose. In the forecast products repeats are the upstream's normal
+  structure and alarming on them is crying wolf; in the observed
+  products no repeat has ever been seen (~41,000 runs to 2026-09-11),
+  so one appearing is news.
 - **Step-sequence shape** (`parse_filename_step_idx`) for forecast
   products whose filenames encode a step index —
   `C_hrrr_<prod>_step<N>.png`. The starting index varies by product

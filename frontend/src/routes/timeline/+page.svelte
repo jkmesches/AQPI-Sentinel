@@ -368,6 +368,8 @@
 				out.push(`Manifest lists ${p.parity.repeated_entries} forecast time(s) more than once (${p.parity.blocks} blocks) — upstream re-publishes its long-range block.`);
 			if (p.parity && p.parity.steps_multi_ts)
 				out.push(`${p.parity.steps_multi_ts} step file(s) carry two forecast times, where the short- and long-range blocks join.`);
+			if (p.parity && p.parity.files_multi_ts)
+				out.push(`${p.parity.files_multi_ts} image(s) listed under more than one timestamp.`);
 			if (p.sub_status) {
 				const failing = Object.entries(p.sub_status).filter(
 					([, v]) => v !== 'pass'
