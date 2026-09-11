@@ -181,7 +181,7 @@ gives you a quick read on the upgrade risk:
 # Set this once — everything below uses it, so there is no version to
 # forget in the middle. The git tag carries a leading v; the image tag
 # does not (see 99-release-process.md).
-VER=0.4.3
+VER=0.4.4
 
 # Read the CHANGELOG between your current version and the target.
 gh release view "v$VER" --repo jkmesches/AQPI-Sentinel
