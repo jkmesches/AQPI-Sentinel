@@ -61,7 +61,7 @@ Per-product sub-check verdicts, folded with `worst_of()`:
 | `F_image_exists` | Latest image 404 | `fail` | Action |
 | `G_image_size` | PNG smaller than threshold | `warn` | Attention |
 | `H_image_hash` | (always pass — records sha256) | `pass` | — |
-| `parity` | Filename↔manifest disagreement / non-contiguous step indices | `warn` | Attention |
+| `parity` | Filename↔manifest disagreement / missing or misordered forecast steps | `warn` | Attention |
 
 Parity was reclassified from `fail` → `warn` in v0.1.2. Upstream
 HRRR pipeline glitches (duplicate or out-of-order step files) are

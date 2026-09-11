@@ -360,6 +360,14 @@
 				out.push(`Stream parity ${p.parity.verdict}: ${p.parity.mismatches} mismatch(es), ${p.parity.unparseable} unparseable.`);
 				if (p.parity.first_mismatch) out.push(`First mismatch: ${JSON.stringify(p.parity.first_mismatch)}.`);
 			}
+			// Shown even when parity passes. The upstream re-lists its long-range
+			// forecast block, which is untidy but not wrong, so it no longer sets
+			// the verdict — and a condition that stops setting a verdict stops
+			// being visible anywhere unless something says it out loud.
+			if (p.parity && p.parity.repeated_entries)
+				out.push(`Manifest lists ${p.parity.repeated_entries} forecast time(s) more than once (${p.parity.blocks} blocks) — upstream re-publishes its long-range block.`);
+			if (p.parity && p.parity.steps_multi_ts)
+				out.push(`${p.parity.steps_multi_ts} step file(s) carry two forecast times, where the short- and long-range blocks join.`);
 			if (p.sub_status) {
 				const failing = Object.entries(p.sub_status).filter(
 					([, v]) => v !== 'pass'

@@ -235,7 +235,7 @@ class Layer1ProductCheck(Check):
         matched = unparseable = mismatches = 0
         ts_checked = step_checked = 0
         first_mismatch = None
-        prev_step_idx: int | None = None
+        step_entries: list[tuple[int, Any]] = []
         for idx, s in enumerate(steps):
             name = s["imageName"]
             f_ts = parse_filename_ts(name)
@@ -257,34 +257,29 @@ class Layer1ProductCheck(Check):
             f_idx = parse_filename_step_idx(name)
             if f_idx is not None:
                 step_checked += 1
-                # First step parsed: nothing to compare to yet. Subsequent
-                # steps must be prev + 1 — gaps / duplicates / out-of-order
-                # all surface as mismatches.
-                if prev_step_idx is None:
-                    matched += 1
-                elif f_idx == prev_step_idx + 1:
-                    matched += 1
-                else:
-                    mismatches += 1
-                    if first_mismatch is None:
-                        first_mismatch = {
-                            "mode": "step_index",
-                            "imageName": name,
-                            "filename_step": f_idx,
-                            "expected_step": prev_step_idx + 1,
-                            "manifest_pos":  idx,
-                        }
-                prev_step_idx = f_idx
+                # Collected, not judged. A step index means nothing on its own
+                # — only the shape of the whole sequence says whether the
+                # forecast is intact — so the verdict is computed after the
+                # scan by classify_step_sequence().
+                step_entries.append((f_idx, s["timestamp"]))
                 continue
             unparseable += 1
+
+        # Step-index products are judged on the shape of the whole sequence.
+        seq = classify_step_sequence(step_entries) if step_entries else None
+        if seq:
+            mismatches += len(seq["defects"])
+            matched += seq["entries"] - len(seq["defects"])
+            if seq["first_defect"] and first_mismatch is None:
+                first_mismatch = {"mode": "step_index", **seq["first_defect"]}
 
         if matched + mismatches == 0:
             parity_verdict = "skip"           # nothing parseable to compare
         elif mismatches:
-            # Upstream HRRR pipeline glitches (duplicate or out-of-order
-            # step files) used to mark this as fail. They're data-quality
-            # issues, not service outages — the product is still serving,
-            # the manifest just has a hiccup. warn matches the v0.1.2
+            # Upstream HRRR pipeline glitches (a dropped forecast hour, steps
+            # served out of order) used to mark this as fail. They're
+            # data-quality issues, not service outages — the product is still
+            # serving, the manifest just has a hiccup. warn matches the v0.1.2
             # severity reshape ("requires attention", not "broken").
             parity_verdict = "warn"
         else:
@@ -312,9 +307,20 @@ class Layer1ProductCheck(Check):
             "step_checked": step_checked,
             "first_mismatch": first_mismatch,
         }
+        if seq:
+            # Reported, never alarmed — see classify_step_sequence. Kept in the
+            # payload so the drilldown, /api/report/daily and any later
+            # analysis can see the upstream's stitching rather than infer it
+            # from a verdict that no longer mentions it.
+            payload["parity"].update({
+                "blocks":           seq["blocks"],
+                "repeated_entries": seq["repeated_entries"],
+                "steps_multi_ts":   seq["steps_multi_ts"],
+                "defects":          seq["defects"],
+            })
 
         summary = _summarize(sub, age_s, n, ir.status_code if ir else None,
-                             cfg["unit"])
+                             cfg["unit"], parity=payload["parity"])
         return _final(self, t0, {**sub, "parity": parity_verdict}, payload, metrics,
                       summary=summary)
 
@@ -322,6 +328,137 @@ class Layer1ProductCheck(Check):
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+
+
+def classify_step_sequence(entries: list[tuple[int, Any]]) -> dict:
+    """Judge a forecast manifest whose filenames encode a step index.
+
+    `entries` is [(step_index, timestamp)] in manifest order.
+
+    The upstream stitches its short-range and long-range blocks into one
+    list, and re-lists the long-range block one or more times. Measured on
+    2026-09-11, `temperature/details_F.json` held 129 entries for 73 distinct
+    step files: steps 0-18, then 18-72, then 18-72 again byte-identically.
+    Over seven days the same manifest was served at 19, 74, 129, 187 and 243
+    entries, one more replay each time.
+
+    The original rule — every index must be the previous plus one — called
+    every one of those a mismatch, so the check warned on 78% of runs and
+    flapped pass/warn as the upstream alternated between its short and long
+    forms, opening and auto-closing 25 alarms in a week. A condition that has
+    been continuously true since at least 2026-09-04 should not page anyone
+    25 times; that is the boy-who-cried-wolf shape.
+
+    So this separates two questions the old rule conflated:
+
+      Is the forecast data intact?  Every step present with no gap, and
+      timestamps advancing. A dropped or reordered step is what parity exists
+      to catch, and it still WARNS.
+
+      Is the list tidy?  Repeats and the one-index overlap where the two
+      blocks meet. Real, permanent, and not something an operator can act on
+      per-occurrence. COUNTED and reported, never alarmed.
+
+    The overlap deserves a word, because it is the one judgment call here.
+    At the seam a single step file carries two forecast times — on 2026-09-11,
+    `step18.png` was listed at both 13:00 and 14:00 — so one of those two
+    hours displays its neighbour's image. That is a genuine, if small, upstream
+    defect. It is reported in `steps_multi_ts` and stated in the summary, and
+    it does not set the verdict, because the index in these filenames is a
+    position within its own block rather than a global identity — the same
+    lesson the tilt archive taught, where a frame index names a slot and not a
+    frame. Asserting across blocks asserts something the upstream never said.
+    """
+    out: dict[str, Any] = {
+        "entries": len(entries), "blocks": 0, "repeated_entries": 0,
+        "steps_multi_ts": 0, "defects": [], "first_defect": None,
+    }
+    if not entries:
+        return out
+
+    idxs = [e[0] for e in entries]
+    tss = [e[1] for e in entries]
+
+    # Maximal runs of +1. Each is one contiguous block as the upstream
+    # published it; the boundaries are where it stitched or replayed.
+    blocks: list[tuple[int, int]] = []
+    start = 0
+    for i in range(1, len(idxs) + 1):
+        if i == len(idxs) or idxs[i] != idxs[i - 1] + 1:
+            blocks.append((start, i - 1))
+            start = i
+    out["blocks"] = len(blocks)
+
+    def defect(kind: str, pos: int, detail: dict) -> None:
+        out["defects"].append(kind)
+        if out["first_defect"] is None:
+            out["first_defect"] = {"kind": kind, "manifest_pos": pos, **detail}
+
+    # (1) Every step present. A hole means the pipeline dropped a forecast
+    # hour, which no amount of re-listing can explain away.
+    distinct = sorted(set(idxs))
+    for a, b in zip(distinct, distinct[1:]):
+        if b != a + 1:
+            defect("missing_steps", idxs.index(b),
+                   {"after_step": a, "next_step": b, "missing": b - a - 1})
+            break
+
+    # (2) Time advances. Checked on FIRST occurrence of each timestamp, so a
+    # replay of an earlier block is not mistaken for time running backwards —
+    # that is exactly the confusion the old rule made.
+    seen: set = set()
+    firsts: list[tuple[int, Any]] = []
+    for pos, t in enumerate(tss):
+        if t not in seen:
+            seen.add(t)
+            firsts.append((pos, t))
+    for (_, a), (pos_b, b) in zip(firsts, firsts[1:]):
+        if b <= a:
+            defect("time_not_advancing", pos_b, {"prev_ts": str(a), "ts": str(b)})
+            break
+
+    # (3) Each block internally ordered in time as well as in index.
+    for a, b in blocks:
+        bad = next((p for p in range(a + 1, b + 1) if tss[p] <= tss[p - 1]), None)
+        if bad is not None:
+            defect("block_time_disorder", bad,
+                   {"prev_ts": str(tss[bad - 1]), "ts": str(tss[bad])})
+            break
+
+    # (4) A block that re-publishes steps already published must either say
+    # exactly what the first publication said, or be a continuation that
+    # merely overlaps it at the join. Anything else is the upstream giving two
+    # different answers for the same forecast step, and no amount of "it's
+    # just a repeat" makes that benign — it is the one case the permissive
+    # rule below must not swallow.
+    #
+    # Production's seam overlaps by exactly one index: the long-range block
+    # opens on step18, which the short-range block closed on, with the next
+    # hour's timestamp. Two or more re-listed indices carrying times never
+    # seen before is a different model run being appended, not a join.
+    pairs_seen: set = set()
+    idx_seen: set = set()
+    for bi, (a, b) in enumerate(blocks):
+        pairs = [(idxs[p], tss[p]) for p in range(a, b + 1)]
+        if bi:
+            fresh = [pr for pr in pairs if pr not in pairs_seen]
+            if fresh:                                   # not a verbatim replay
+                clashes = [i for i, ts in fresh if i in idx_seen]
+                if len(clashes) > 1:
+                    defect("conflicting_republish", a,
+                           {"steps": clashes[:5], "n_steps": len(clashes)})
+                    break
+        pairs_seen.update(pairs)
+        idx_seen.update(i for i, _ in pairs)
+
+    # Reported, not alarmed.
+    out["repeated_entries"] = len(tss) - len(set(tss))
+    by_idx: dict[int, set] = {}
+    for i, t in entries:
+        by_idx.setdefault(i, set()).add(t)
+    out["steps_multi_ts"] = sum(1 for v in by_idx.values() if len(v) > 1)
+    return out
+
 
 def _fmt_age(total: float) -> str:
     """Compact compound: 47s | 12m | 1h23m | 6d12h37m. Signed."""
@@ -343,10 +480,20 @@ def _fmt_age(total: float) -> str:
 
 
 def _summarize(sub: dict[str, str], age_s: float, n: int, image_http: int | None,
-               unit: str) -> str:
+               unit: str, parity: dict | None = None) -> str:
     failures = [k for k, v in sub.items() if v in ("fail", "error")]
     warnings = [k for k, v in sub.items() if v == "warn"]
     base = f"n={n}  age={_fmt_age(age_s)}  img={image_http}"
+    # A manifest that lists the same forecast time more than once is no longer
+    # a warn (see classify_step_sequence), so the summary has to say it —
+    # otherwise the condition becomes invisible the moment it stops alarming,
+    # which is how a silenced problem turns into a forgotten one.
+    if parity:
+        rep, multi = parity.get("repeated_entries", 0), parity.get("steps_multi_ts", 0)
+        if rep:
+            base += f"  rep={rep}"
+        if multi:
+            base += f"  seam={multi}"
     if failures:
         return f"{base}  fail={failures}"
     if warnings:

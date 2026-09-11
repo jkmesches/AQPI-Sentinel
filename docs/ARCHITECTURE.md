@@ -425,18 +425,34 @@ L1 product result. It picks one of two parsers per step:
   X-band → `scwa_CorrReflectivity_20260518-2336.png`, QPE →
   `…_20260518_193000_rainfall.nc.png`. Compared against the manifest's
   `timestamp` field (±60 s tolerance).
-- **Step-index contiguity** (`parse_filename_step_idx`) for forecast
+- **Step-sequence shape** (`parse_filename_step_idx`) for forecast
   products whose filenames encode a step index —
   `C_hrrr_<prod>_step<N>.png`. The starting index varies by product
   (`fcst_total_precip` starts at step0, `fcst_precip_rate` at step1),
-  so position-in-manifest isn't a meaningful invariant. We verify
-  monotonic contiguity instead: every step's parsed index = previous + 1.
-  Catches gaps, duplicates, out-of-order serving.
+  so position-in-manifest isn't a meaningful invariant. The whole
+  sequence is classified at once by `classify_step_sequence()`, which
+  separates **data integrity** from **listing hygiene**:
+
+  | Condition | Verdict |
+  |---|---|
+  | A step index missing from the range (`missing_steps`) | `warn` |
+  | Timestamps not advancing on first occurrence (`time_not_advancing`) | `warn` |
+  | Timestamps out of order inside one block (`block_time_disorder`) | `warn` |
+  | A re-published block disagreeing about the times (`conflicting_republish`) | `warn` |
+  | The same forecast time listed twice (`repeated_entries`) | reported, `pass` |
+  | One step file carrying two times at a block join (`steps_multi_ts`) | reported, `pass` |
+
+  The last two are the upstream's block stitching: it concatenates a
+  short-range and a long-range block and re-lists the long-range one,
+  so `temperature/details_F.json` has been served at 19, 74, 129, 187
+  and 243 entries for the same 73 distinct files. Treating each replay
+  as a mismatch made this check warn on 78% of runs and flap alarms;
+  see the v0.4.3 CHANGELOG entry.
 
 Each step lands in exactly one bucket; mode is reported in
 `payload.parity.mode` (`timestamp` / `step_index` / `mixed` / `none`).
-Verdict: `skip` when neither parser fires, `fail` on any mismatch,
-`pass` otherwise.
+Verdict: `skip` when neither parser fires, `warn` on any defect
+(`fail` before v0.1.2), `pass` otherwise.
 
 ### DNS-flake demote (two-path)
 
