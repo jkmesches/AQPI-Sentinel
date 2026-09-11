@@ -82,7 +82,11 @@
                 </td>
                 <td align="right" valign="middle" style="white-space:nowrap;">
                   <!-- 8 swatches = the shape of the day -->
-                  <table role="presentation" cellpadding="0" cellspacing="2" border="0" class="hide-xs" style="display:inline-block;vertical-align:middle;"><tr>{% for c in bar_cells(r.buckets) %}<td title="{{ c.title }}" width="9" height="16" style="width:9px;height:16px;background:{{ c.color }};border-radius:2px;font-size:0;line-height:0;">&nbsp;</td>{% endfor %}</tr></table>
+                  {# Each swatch is a stack, not a flat colour — the same encoding as a timeline
+   cell: fail, error, warn, skip, then the share that really passed. Nested
+   background-coloured rows rather than a CSS gradient, because Outlook renders
+   through Word and gradients do not survive it. #}
+<table role="presentation" cellpadding="0" cellspacing="2" border="0" class="hide-xs" style="display:inline-block;vertical-align:middle;"><tr>{% for c in bar_cells(r.buckets) %}<td title="{{ c.title }}" width="9" height="16" bgcolor="{{ c.solid }}" style="width:9px;height:16px;{% if c.css %}background:{{ c.css }};{% endif %}border-radius:2px;font-size:0;line-height:0;">&nbsp;</td>{% endfor %}</tr></table>
                   <span style="display:inline-block;vertical-align:middle;padding-left:10px;
                                font:700 15px/1.3 {{ F }};
                                color:{{ avail_color(r.availability) }};">
