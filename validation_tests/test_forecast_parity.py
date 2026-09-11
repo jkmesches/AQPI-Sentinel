@@ -33,7 +33,10 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 from backend.checks.layer1_product import classify_step_sequence   # noqa: E402
 
-SAMPLES = Path(__file__).resolve().parent / "samples" / "forecast_manifests"
+# fixtures/, not samples/ — samples/ is gitignored as regenerable binary
+# artifacts, and a test whose inputs are not in the repo is a test that
+# passes only on the machine that wrote it.
+SAMPLES = Path(__file__).resolve().parent / "fixtures" / "forecast_manifests"
 
 failures: list[str] = []
 
