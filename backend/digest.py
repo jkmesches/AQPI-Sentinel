@@ -284,7 +284,12 @@ async def _buckets(pool, since, until, like: str, strip: str,
         """
         SELECT check_id,
                floor(extract(epoch from (finished_at - $1)) / $4)::int AS b,
-               count(*) FILTER (WHERE status = 'pass')  AS n_pass,
+               count(*)                                        AS n,
+               count(*) FILTER (WHERE status = 'pass')         AS n_pass,
+               count(*) FILTER (WHERE status = 'fail')         AS n_fail,
+               count(*) FILTER (WHERE status = 'error')        AS n_error,
+               count(*) FILTER (WHERE status = 'warn')         AS n_warn,
+               count(*) FILTER (WHERE status = 'skip')         AS n_skip,
                count(*) FILTER (WHERE NOT (status = 'skip'
                                  AND payload->>'reason' = ANY($5::text[]))) AS judged
         FROM check_runs
@@ -293,13 +298,21 @@ async def _buckets(pool, since, until, like: str, strip: str,
         """,
         since, until, like, span, list(INCONCLUSIVE_SKIP_REASONS),
     )
-    out: dict[str, list[float | None]] = {}
+    out: dict[str, list[dict | None]] = {}
     for r in rows:
         key = r["check_id"].replace(strip, "")
         arr = out.setdefault(key, [None] * n_buckets)
         idx = min(max(int(r["b"]), 0), n_buckets - 1)
         judged = int(r["judged"] or 0)
-        arr[idx] = (100.0 * int(r["n_pass"] or 0) / judged) if judged else None
+        arr[idx] = {
+            "avail": (100.0 * int(r["n_pass"] or 0) / judged) if judged else None,
+            "n":      int(r["n"] or 0),
+            "n_pass": int(r["n_pass"] or 0),
+            "n_fail": int(r["n_fail"] or 0),
+            "n_error": int(r["n_error"] or 0),
+            "n_warn": int(r["n_warn"] or 0),
+            "n_skip": int(r["n_skip"] or 0),
+        }
     return out
 
 
@@ -407,13 +420,28 @@ async def compute(pool, *, since: datetime, until: datetime,
 _BLOCKS = "▁▂▃▄▅▆▇█"
 
 
-def spark(buckets: list[float | None]) -> str:
+def _avail_of(b) -> float | None:
+    """Availability out of a bucket. Tolerates the bare float the buckets used
+    to be, so a caller holding an older payload still renders."""
+    if b is None:
+        return None
+    return b.get("avail") if isinstance(b, dict) else b
+
+
+def spark(buckets) -> str:
+    """Block glyphs whose HEIGHT is the share that passed.
+
+    Same quantity as the green portion of a timeline cell, so the text part of
+    the email and the grid agree: a full block is an hour with nothing wrong,
+    an empty one is an hour where nothing passed.
+    """
     out = []
     for b in buckets or []:
-        if b is None:
+        a = _avail_of(b)
+        if a is None:
             out.append("·")            # nothing ran — not the same as 0%
         else:
-            out.append(_BLOCKS[min(7, max(0, int(b / 100 * 7 + 0.5)))])
+            out.append(_BLOCKS[min(7, max(0, int(a / 100 * 7 + 0.5)))])
     return "".join(out) or "·" * 8
 
 
@@ -584,7 +612,19 @@ def subject_line(data: dict) -> str:
 #   * Color never carries meaning alone — every row states its percentage and
 #     its description in words.
 
-_C_OK, _C_WARN, _C_BAD, _C_NONE = "#16a34a", "#d97706", "#dc2626", "#d1d5db"
+# The timeline's LIGHT-theme palette, verbatim from frontend/src/app.css. Email
+# renders on a light ground, so the light theme is the right one to mirror, and
+# mirroring it is the point: a reader who opens the grid after reading the
+# report must not have to translate. Two of these had already drifted — the
+# report was using #d97706 / #dc2626 where the grid uses #9a6905 / #B91C1C —
+# and `error` had no colour here at all, so the one status with its own hue on
+# the grid was being folded into a percentage.
+_C_OK    = "#16a34a"    # --color-ok      green-600
+_C_WARN  = "#9a6905"    # --color-warn    deep gold
+_C_BAD   = "#B91C1C"    # --color-fail    red-700
+_C_ERROR = "#6D28D9"    # --color-error   violet-700
+_C_SKIP  = "#6f7568"    # --color-faint   "we declined to judge"
+_C_NONE  = "#d1d5db"    # nothing ran at all
 
 
 def avail_color(pct: float | None) -> str:
@@ -599,13 +639,106 @@ def avail_color(pct: float | None) -> str:
     return _C_BAD
 
 
-def bar_cells(buckets: list[float | None]) -> list[dict]:
-    """Eight color swatches with a per-cell tooltip."""
+# Bottom-up severity order, identical to the timeline's DEFECT_ORDER.
+_BAR_PX = 16          # swatch height, matching the template's height="16"
+_BAR_MIN_PX = 3       # the report's MIN_BAD_PX — a rare defect must stay visible
+
+
+def bar_bands(bucket) -> list[dict]:
+    """One swatch's stacked bands, TOP-first for HTML table rows.
+
+    The same encoding as a timeline cell: fail, error, warn, skip and then the
+    share that really passed, each sized by its share of the bucket. The grid
+    draws bottom-up with a CSS gradient; email cannot use gradients reliably
+    (Outlook renders through Word), so the swatch is a nested table of
+    background-coloured rows and the order is reversed to suit.
+
+    Defect bands carry a floor so one failure in a busy bucket still shows.
+    `pass` deliberately has none — rounding a 1% healthy share up to a visible
+    slice would make an almost-entirely-broken swatch read as less broken,
+    which is the one direction this must never fail in. Same asymmetry, and the
+    same reason, as timelineFill.ts.
+    """
+    if not bucket or not (bucket.get("n") if isinstance(bucket, dict) else 0):
+        return [{"color": _C_NONE, "px": _BAR_PX}]
+    n = bucket["n"]
+    parts: list[tuple[str, float, int]] = []      # (color, share, min_px)
+    for key, color in (("n_fail", _C_BAD), ("n_error", _C_ERROR),
+                       ("n_warn", _C_WARN), ("n_skip", _C_SKIP)):
+        c = int(bucket.get(key) or 0)
+        if c > 0:
+            parts.append((color, min(1.0, c / n), _BAR_MIN_PX if key != "n_skip" else 1))
+    used_share = sum(s for _, s, _ in parts)
+    if 1.0 - used_share > 0:
+        parts.append((_C_OK, 1.0 - used_share, 0))
+
+    if len(parts) == 1:
+        return [{"color": parts[0][0], "px": _BAR_PX}]
+
+    px = [max(m, round(s * _BAR_PX)) for _, s, m in parts]
+    total = sum(px)
+    while total > _BAR_PX:
+        bi = -1
+        for i, (_, _, m) in enumerate(parts):
+            if px[i] > m and (bi == -1 or px[i] > px[bi]):
+                bi = i
+        if bi == -1:
+            break
+        px[bi] -= 1
+        total -= 1
+    # Reverse: HTML rows paint top-down, the encoding stacks bottom-up.
+    return [{"color": c, "px": q}
+            for (c, _, _), q in zip(reversed(parts), reversed(px)) if q > 0]
+
+
+def bar_css(bands: list[dict]) -> str:
+    """The stack as one `linear-gradient`, bottom-up like the grid draws it.
+
+    A nested table of coloured rows renders everywhere but costs ~100 bytes a
+    band, and real buckets average two and a half — measured against production
+    it took the email from 46 KB to 91 KB, inside 11 KB of Gmail's ~102 KB clip
+    threshold, which a busier day would have crossed. A clipped report loses its
+    tail silently, so the size is a correctness constraint, not a nicety.
+
+    One gradient per swatch instead, with `bgcolor` carrying the most severe
+    colour as the fallback. Outlook renders through Word and ignores the
+    gradient, so it shows a solid worst-status swatch — which is exactly the
+    grid's own "colour = worst status" rule, just without the density. Every
+    other client gets the full composition.
+    """
+    if len(bands) <= 1:
+        return ""
+    stops, cursor = [], 0.0
+    for b in reversed(bands):                    # reversed: gradient runs bottom-up
+        start = cursor
+        cursor += (b["px"] / _BAR_PX) * 100
+        stops.append(f'{b["color"]} {start:.0f}% {min(100, round(cursor))}%')
+    return "linear-gradient(to top," + ",".join(stops) + ")"
+
+
+def bar_cells(buckets) -> list[dict]:
+    """Eight swatches, each carrying its bands and a tooltip."""
     out = []
-    for i, b in enumerate(buckets or [None] * 8):
+    for b in (buckets or [None] * 8):
+        a = _avail_of(b)
+        if b is None:
+            title = "no checks"
+        else:
+            bits = [f"{a:.0f}% healthy"] if a is not None else ["not judged"]
+            for label, key in (("fail", "n_fail"), ("error", "n_error"),
+                               ("warn", "n_warn"), ("skip", "n_skip")):
+                c = int(b.get(key) or 0) if isinstance(b, dict) else 0
+                if c:
+                    bits.append(f"{c} {label}")
+            title = " · ".join(bits)
+        bands = bar_bands(b)
         out.append({
-            "color": avail_color(b),
-            "title": "no checks" if b is None else f"{b:.0f}% healthy",
+            "color": avail_color(a),
+            "bands": bands,
+            # Most severe colour = the last band, since bands run top-down.
+            "solid": bands[-1]["color"],
+            "css":   bar_css(bands),
+            "title": title,
         })
     return out
 

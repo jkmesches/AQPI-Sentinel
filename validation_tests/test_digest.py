@@ -35,6 +35,8 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 from backend.digest import (                                   # noqa: E402
     DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
     evidence_url, render_text, spark, subject_line, subject_name, subject_title,
+    bar_bands, bar_css, render_html, _BAR_PX,
+    _C_OK, _C_WARN, _C_BAD, _C_ERROR, _C_SKIP, _C_NONE,
 )
 
 failures: list[str] = []
@@ -283,6 +285,104 @@ def main() -> int:
         fresh = DigestTask(FakeApp(released), cfg)
         fresh.reload({**cfg, **change})
         check(f"{label} releases the claim", fresh._release_claim is True)
+
+    # --- swatches use the timeline's encoding ---------------------------------
+    # A reader who opens the grid after reading the report must not have to
+    # translate. Same palette, same stack: fail, error, warn, skip, then the
+    # share that really passed.
+    def stack(b):
+        return [(x["color"], x["px"]) for x in bar_bands(b)]
+
+    check("the palette is the grid's light theme, verbatim",
+          (_C_OK, _C_WARN, _C_BAD, _C_ERROR) ==
+          ("#16a34a", "#9a6905", "#B91C1C", "#6D28D9"))
+
+    allpass = stack({"n": 30, "n_pass": 30, "avail": 100.0})
+    check("an untroubled bucket is one solid green swatch",
+          allpass == [(_C_OK, _BAR_PX)], str(allpass))
+
+    # XEBY 22:00 on 2026-09-11: 12 fail, 2 error, 1 skip, no passes.
+    xeby = stack({"n": 15, "n_pass": 0, "n_fail": 12, "n_error": 2, "n_skip": 1})
+    check("a bucket with no passing runs shows no green",
+          all(c != _C_OK for c, _ in xeby), str(xeby))
+    check("...and shows its errors in the grid's violet",
+          any(c == _C_ERROR for c, _ in xeby), str(xeby))
+    check("...stacked most-severe LAST, because HTML rows paint top-down",
+          xeby[-1][0] == _C_BAD, str(xeby))
+
+    rare = stack({"n": 30, "n_pass": 29, "n_error": 1})
+    check("one error in thirty runs still earns a visible band",
+          any(c == _C_ERROR and px >= 3 for c, px in rare), str(rare))
+    almost = stack({"n": 720, "n_pass": 1, "n_fail": 719})
+    check("a 0.1% healthy share earns no green pixel",
+          all(c != _C_OK for c, _ in almost), str(almost))
+
+    check("an all-skip bucket is grey, not green",
+          stack({"n": 10, "n_skip": 10}) == [(_C_SKIP, _BAR_PX)])
+    check("a bucket with no runs is the no-data grey",
+          stack(None) == [(_C_NONE, _BAR_PX)])
+
+    for label, b in (("mixed", {"n": 15, "n_pass": 0, "n_fail": 12, "n_error": 2, "n_skip": 1}),
+                     ("warn", {"n": 20, "n_pass": 10, "n_warn": 10}),
+                     ("rare", {"n": 720, "n_pass": 719, "n_error": 1})):
+        tot = sum(px for _, px in stack(b))
+        check(f"the {label} swatch fills exactly {_BAR_PX}px", tot == _BAR_PX, str(tot))
+
+    # spark stays the share that PASSED — the same quantity as the green part
+    # of a cell — so the text and HTML halves of one email cannot disagree.
+    check("spark reads availability off the bucket",
+          spark([{"avail": 100.0, "n": 5}, {"avail": 0.0, "n": 5}, None]) == "█▁·",
+          spark([{"avail": 100.0, "n": 5}, {"avail": 0.0, "n": 5}, None]))
+    check("spark still tolerates a bare float bucket",
+          spark([100.0, 0.0, None]) == "█▁·", spark([100.0, 0.0, None]))
+
+    # The gradient is the same stack, bottom-up, with bgcolor carrying the most
+    # severe colour so Outlook — which renders through Word and drops the
+    # gradient — still shows the grid's "colour = worst status".
+    css = bar_css(bar_bands({"n": 15, "n_pass": 0, "n_fail": 12, "n_error": 2, "n_skip": 1}))
+    check("the gradient runs bottom-up from the most severe",
+          css.startswith("linear-gradient(to top,#B91C1C"), css)
+    check("...and ends at exactly 100%", css.rstrip(")").endswith("100%"), css)
+    check("a single-band swatch needs no gradient at all",
+          bar_css(bar_bands({"n": 5, "n_pass": 5})) == "")
+
+    # --- size is a correctness constraint ------------------------------------
+    # Gmail clips a body over ~102 KB and drops the tail silently, so a report
+    # that grows past it loses its own conclusion. Rendering the swatches as
+    # nested colour rows took production's email from 46 KB to 91 KB — inside
+    # 11 KB of the threshold, which a busier day would have crossed.
+    def row(k, kind):
+        return {"key": k, "kind": kind, "name": "A Long Enough Site Name",
+                "availability": 42.5, "description": "offline 9h 16m across 4 outages, "
+                "longest 1h 06m · also brief, 26m total · 7 checks: reported online "
+                "but sent nothing",
+                "buckets": [{"avail": 10.0, "n": 30, "n_pass": 3, "n_fail": 20,
+                             "n_error": 4, "n_warn": 2, "n_skip": 1}] * 8}
+    worst = {
+        "window_label": "Fri 11 Sep 07:00 MDT",
+        "since": "2026-09-10T13:00:00+00:00", "until": "2026-09-11T13:00:00+00:00",
+        "runs": 31986, "conclusive_pct": 99.4, "inconclusive": 183,
+        "radars":   [row(f"XR{i:02d}", "radar") for i in range(6)],
+        "products": [row(f"product_number_{i:02d}", "product") for i in range(13)],
+    }
+    worst_size = len(render_html(worst, "https://aqpi.local.shirejoe.com"))
+    check("even an everything-is-broken report stays under Gmail's clip",
+          worst_size < 95_000, f"{worst_size:,} bytes (clip at ~102,400)")
+
+    # The worst case alone is a weak guard: production's real report doubled
+    # from 46 KB to 91 KB and would still have passed it. A typical day —
+    # roughly what 2026-09-11 looked like, 14 subjects worth listing — is the
+    # number that actually moves when the markup regresses.
+    typical = dict(worst,
+                   radars=worst["radars"][:6], products=worst["products"][:8])
+    typical_size = len(render_html(typical, "https://aqpi.local.shirejoe.com"))
+    # 75 KB, not 60: this fixture is harsher than a real day — every bucket is
+    # a five-colour mix and every description runs to its full length. The same
+    # report rendered against production on 2026-09-11 was 51.7 KB. The guard
+    # is sized to catch a doubling of the markup, which is the regression that
+    # actually happened, not to pin the exact byte count.
+    check("a typical day's report stays small",
+          typical_size < 75_000, f"{typical_size:,} bytes (prod measured 51.7 KB)")
 
     # --- names -------------------------------------------------------------
     # "XSWR" tells you nothing unless you have five X-band call signs
