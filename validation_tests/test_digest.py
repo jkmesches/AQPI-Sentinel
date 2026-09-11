@@ -34,7 +34,7 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 from backend.digest import (                                   # noqa: E402
     DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
-    evidence_url, render_text, spark, subject_line,
+    evidence_url, render_text, spark, subject_line, subject_name, subject_title,
 )
 
 failures: list[str] = []
@@ -283,6 +283,37 @@ def main() -> int:
         fresh = DigestTask(FakeApp(released), cfg)
         fresh.reload({**cfg, **change})
         check(f"{label} releases the claim", fresh._release_claim is True)
+
+    # --- names -------------------------------------------------------------
+    # "XSWR" tells you nothing unless you have five X-band call signs
+    # memorised. The names come from the two tables that already hold this
+    # vocabulary — RADAR_META and check_labels — so the report cannot drift
+    # from the dashboard, which is the surface where a drift would go longest
+    # without being noticed.
+    check("a radar carries its site name", subject_title("radar", "XSWR") == "XSWR · Sawyer Ridge",
+          subject_title("radar", "XSWR"))
+    check("a product carries its product name",
+          subject_title("product", "fcst_temp") == "fcst_temp · Forecast — Temperature",
+          subject_title("product", "fcst_temp"))
+    check("a NEXRAD named after itself is not repeated",
+          subject_title("radar", "KBBX") == "KBBX", subject_title("radar", "KBBX"))
+    check("an unknown subject degrades to its id rather than blank",
+          subject_title("radar", "XNEW") == "XNEW" and subject_name("radar", "XNEW") == "")
+    check("every X-band site resolves",
+          all(subject_name("radar", r) for r in ("XSCV", "XSCW", "XSCR", "XEBY", "XSWR", "CBAND")))
+
+    # The rendered text must actually show them — the helper being right is not
+    # the same as the report using it.
+    rendered = render_text({
+        "window_label": "Fri 11 Sep 07:00 MDT", "since": "2026-09-10T13:00:00+00:00",
+        "until": "2026-09-11T13:00:00+00:00", "runs": 0, "conclusive_pct": 100.0,
+        "inconclusive": 0,
+        "radars": [{"key": "XSWR", "kind": "radar", "name": "Sawyer Ridge",
+                    "availability": 58.3, "buckets": [], "description": "offline 9h 16m"}],
+        "products": [],
+    })
+    check("the rendered report names the site", "Sawyer Ridge" in rendered,
+          [l for l in rendered.splitlines() if "XSWR" in l])
 
     # --- evidence links ------------------------------------------------------
     # 2026-09-11: the report said qpe_15min/qpe_1hr/precip_rate_radar/comp_ref

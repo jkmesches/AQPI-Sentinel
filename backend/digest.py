@@ -351,6 +351,7 @@ async def compute(pool, *, since: datetime, until: datetime,
             out.append({
                 "key":            key,
                 "kind":           kind,
+                "name":           subject_name(kind, key),
                 "availability":   sub.availability,
                 "judged":         sub.judged,
                 "inconclusive":   sub.inconclusive,
@@ -414,6 +415,42 @@ def spark(buckets: list[float | None]) -> str:
         else:
             out.append(_BLOCKS[min(7, max(0, int(b / 100 * 7 + 0.5)))])
     return "".join(out) or "·" * 8
+
+
+def subject_name(kind: str, key: str) -> str:
+    """The human name for a radar or product, or "" when there isn't one.
+
+    Sourced from the two places that already hold this vocabulary rather than
+    from a third copy: RADAR_META for sites, check_labels for products. The
+    module docstring in check_labels is explicit that emails, push payloads and
+    both UIs must share one vocabulary, and a report that invented its own
+    would be the surface where a drift is least likely to be noticed — nobody
+    diffs yesterday's email against the dashboard.
+
+    Imported inside the function because backend.api.routes.radars builds an
+    APIRouter at import time, and digest.py is imported by check code paths
+    that have no business pulling in the API layer.
+    """
+    if kind == "radar":
+        try:
+            from .api.routes.radars import RADAR_META
+        except Exception:                                  # pragma: no cover
+            return ""
+        name = (RADAR_META.get(key) or {}).get("name") or ""
+        # KBBX and friends are named after themselves in RADAR_META; repeating
+        # the id as its own name reads like a bug in the report.
+        return "" if name == key else name
+    from .check_labels import product_label
+    name = product_label(key)
+    return "" if name == key else name
+
+
+def subject_title(kind: str, key: str) -> str:
+    """`XSWR · Sawyer Ridge` — id first, because the id is what appears in
+    alarms, check ids and the evidence links, and the name is what tells a
+    reader which hillside that is."""
+    name = subject_name(kind, key)
+    return f"{key} · {name}" if name else key
 
 
 def evidence_url(public_url: str, check_id: str, target: str,
@@ -480,15 +517,27 @@ def render_text(data: dict, public_url: str = "") -> str:
         nominal = [r for r in rows if r["availability"] is not None
                    and r["availability"] >= 99.95]
         listed = [r for r in rows if r not in nominal]
-        w = max([len(r["key"]) for r in listed] or [10])
-        L.append(f"{heading:<{w + 2}} {'shape':<8} {'avail':>6}   what happened")
+        # Two lines per subject rather than one wide row. Adding the name to
+        # the aligned column pushed it past 100 characters — `fcst_total_precip_cum
+        # · Forecast — Cumulative Precipitation` is 57 on its own — and the
+        # text part is what a phone shows when it cannot render the HTML, so it
+        # has to stay inside a narrow screen.
+        L.append(heading)
         for r in listed:
-            av = "  n/a" if r["availability"] is None else f"{r['availability']:5.1f}%"
-            L.append(f"  {r['key']:<{w}} {spark(r['buckets'])} {av}   {r['description']}")
+            av = "n/a" if r["availability"] is None else f"{r['availability']:.1f}%"
+            # `kind` from the section being rendered, not from the row: the
+            # section always knows it, and requiring every caller to carry it
+            # on each row made render_text throw on a payload that was
+            # otherwise complete.
+            L.append(f"  {subject_title(kind, r['key'])}")
+            L.append(f"    {spark(r['buckets'])}  {av:>6}  {r['description']}")
             url = evidence_url(public_url, f"{prefix}{r['key']}", r["key"], since, until)
             if url:
-                L.append(f"{'':<{w + 3}}{url}")
+                L.append(f"    {url}")
         if nominal:
+            # Ids only here. These are the rows with nothing to report, and
+            # spelling out six site names to say "nothing happened" buries the
+            # rows that do need reading.
             names = ", ".join(r["key"] for r in nominal)
             L.append(f"  {len(nominal)} nominal: {names}")
         L.append("")
