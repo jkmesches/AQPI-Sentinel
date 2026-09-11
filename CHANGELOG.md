@@ -28,6 +28,100 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-09-11
+
+Everything in this release is one mistake in five places: **inferring a status
+from another one's absence.** A remainder assumed to be `pass`, a manifest
+assumed clean because nothing was watching it, an evidence link assumed to show
+what the claim was about.
+
+### Fixed
+
+- **Errors rendered as green on the bucketed timeline.** The same assumption
+  the v0.3.0 skip fix corrected, surviving one band higher up: that fix added a
+  grey band for skips but left the band *above* it hard-coded to the pass
+  color, so a cell whose worst status was `fail` drew its fail band, its skip
+  band, and then everything left over in green — **including the runs that
+  errored**.
+
+  XEBY on 2026-09-11 logged 673 `fail`, 23 `error`, 20 `skip` and **not one
+  `pass`** in 24 hours, and every one of its cells drew part green. A radar
+  down for weeks showed healthy for the runs where the probe itself failed.
+
+  Cells are now composed from every status: `fail`, `error`, `warn`, `skip`,
+  then only what genuinely remains. Two details the tests forced:
+
+  - Sizing bands while walking them let the most severe eat the cell and drop
+    the rest — one error among 999 fails vanished, the same "guess low and it
+    disappears" failure `MIN_BAD_PX` exists to prevent, moved up a band. Bands
+    are collected first and sized second, and when they do not fit, pixels come
+    off the **largest** band down to its floor.
+  - `pass` is the one band with **no** floor. Giving it one drew a cell that
+    was 98.9% failing at 93.75% — rounding a 1.1% healthy share up to a visible
+    slice. Defects keep their floors; health has to earn its pixel.
+
+- **The daily report's evidence links appeared to disprove the report.** It
+  said `qpe_15min`, `qpe_1hr`, `precip_rate_radar` and `comp_ref` were
+  99.5–99.8% over 24 h; "See the checks behind this" showed unbroken green for
+  all four. The report was right and the link was wrong, which is the worse way
+  round — the reader's correct conclusion is that the numbers are junk.
+
+  These products run every ~60 s, so the window holds ~1,437 runs while
+  `/history` renders the newest 500, and `ORDER BY finished_at DESC` puts the
+  cut at the *start* of the window. All 19 non-passing runs were in the
+  truncated end, and nothing on the page said it had been truncated.
+
+  | Product | Runs | Non-pass | Shown |
+  |---|---|---|---|
+  | `comp_ref` | 1,436 | 3 | **0** |
+  | `precip_rate_radar` | 1,436 | 4 | **0** |
+  | `qpe_15min` | 1,438 | 7 | **0** |
+  | `qpe_1hr` | 1,437 | 5 | **0** |
+
+  Fixed at all three layers: the link now carries `status=fail,error,warn,skip`
+  (only non-nominal rows are ever linked, so every link hangs off a claim about
+  something going wrong); `/history` was silently **dropping** the `status`
+  deeplink parameter, so the filter would have been ignored even once sent; and
+  `/api/history/checks` returns `X-Total-Matching` / `X-Truncated` so the page
+  can say "showing the newest 500 of 1,438". That last one matters beyond the
+  report — anyone filtering a wide window by hand was getting a truncated
+  answer with nothing saying so.
+
+- **Forecast parity warned on 78% of runs for something that was never a
+  fault**, and the observed products were not checked for it at all. See
+  [0.4.3] for the first half; this release adds
+  `classify_timestamp_sequence()`, so a duplicated entry, one image under two
+  timestamps, or time running backwards now warns on the observed products
+  too. Its policy is deliberately the **opposite** of the forecast one: there,
+  repeats are the upstream's normal structure and alarming on them is crying
+  wolf; here, none has ever been seen in ~41,000 runs, so one appearing is
+  news. The test asserts that asymmetry so nobody harmonizes the two
+  classifiers and silently reopens the blind spot.
+
+### Changed
+
+- **The report names its subjects**: `XSWR · Sawyer Ridge`, `fcst_temp ·
+  Forecast — Temperature`. Id first — it is what appears in alarms, check ids
+  and the evidence link — and the name second, for readers who have not
+  memorized five X-band call signs. Names come from `RADAR_META` and
+  `check_labels`, the two tables that already hold this vocabulary, so the
+  report cannot drift from the dashboard.
+
+- **The report's swatches use the timeline's palette and encoding.** They were
+  colored by availability percentage on a separate ramp while the grid colors
+  by status composition, so the same hour read two ways. Two colors had drifted
+  outright (`#d97706`/`#dc2626` vs `#9a6905`/`#B91C1C`) and `error` had no
+  color here at all.
+
+  Each swatch is now the same stack as a timeline cell. Rendering that as
+  nested color rows cost ~100 bytes a band and took the email from 46 KB to
+  **91 KB** against production — inside 11 KB of Gmail's ~102 KB clip
+  threshold, and a clipped report loses its conclusion silently. It is one
+  `linear-gradient` per swatch instead, with `bgcolor` carrying the most severe
+  color so Outlook (which renders through Word) degrades to a solid
+  worst-status swatch — the grid's own rule, minus the density. Back to
+  51.7 KB.
+
 ## [0.4.3] — 2026-09-11
 
 ### Fixed
