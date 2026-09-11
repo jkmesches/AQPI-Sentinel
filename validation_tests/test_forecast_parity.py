@@ -31,7 +31,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
-from backend.checks.layer1_product import classify_step_sequence   # noqa: E402
+from backend.checks.layer1_product import (                        # noqa: E402
+    classify_step_sequence, classify_timestamp_sequence,
+)
 
 # fixtures/, not samples/ — samples/ is gitignored as regenerable binary
 # artifacts, and a test whose inputs are not in the repo is a test that
@@ -136,6 +138,48 @@ def main() -> int:
         rr = classify_step_sequence(seq)
         check(f"the {label}-entry shape does not warn",
               rr["defects"] == [], f"{rr['defects']} blocks={rr['blocks']}")
+
+    print("\n=== timestamp mode: the blind spot, now watched ===")
+    # The per-entry parity check cannot see any of these: a duplicated row
+    # agrees with itself, so both copies "match" and it reports a clean sweep.
+    def ts_entries(*pairs):
+        return [(n, __import__("datetime").datetime.fromisoformat(x)) for n, x in pairs]
+
+    clean = ts_entries(("a_20260911_0000.png", "2026-09-11T00:00:00"),
+                       ("a_20260911_0015.png", "2026-09-11T00:15:00"),
+                       ("a_20260911_0030.png", "2026-09-11T00:30:00"))
+    rc = classify_timestamp_sequence(clean)
+    check("a normal observed manifest is clean",
+          rc["defects"] == [] and rc["repeated_entries"] == 0, str(rc["defects"]))
+
+    dup = clean + [clean[1]]
+    rd = classify_timestamp_sequence(dup)
+    check("the same frame listed twice is a defect HERE (unlike forecasts)",
+          "duplicate_entry" in rd["defects"], str(rd["defects"]))
+    check("...and is counted", rd["repeated_entries"] == 1, str(rd["repeated_entries"]))
+
+    seam = clean + ts_entries(("a_20260911_0015.png", "2026-09-11T00:45:00"))
+    rsm = classify_timestamp_sequence(seam)
+    check("one file under two times is a defect here",
+          "file_under_two_times" in rsm["defects"], str(rsm["defects"]))
+    check("...and is counted", rsm["files_multi_ts"] == 1, str(rsm["files_multi_ts"]))
+
+    back = ts_entries(("a_20260911_0000.png", "2026-09-11T00:00:00"),
+                      ("a_20260911_0030.png", "2026-09-11T00:30:00"),
+                      ("a_20260911_0015.png", "2026-09-11T00:15:00"))
+    rbk = classify_timestamp_sequence(back)
+    check("time running backwards is a defect",
+          "time_not_advancing" in rbk["defects"], str(rbk["defects"]))
+
+    check("an empty timestamp manifest is clean",
+          classify_timestamp_sequence([])["defects"] == [])
+
+    # The asymmetry between the two classifiers is deliberate; assert it so a
+    # later reader does not "harmonise" them and silently reopen the blind spot.
+    fc_repeat = synth((0, 4, 0)) + synth((0, 4, 0))
+    check("forecast repeats stay benign while observed repeats do not",
+          classify_step_sequence(fc_repeat)["defects"] == []
+          and classify_timestamp_sequence(dup)["defects"] != [])
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall forecast-parity assertions passed")

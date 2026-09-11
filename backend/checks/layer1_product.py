@@ -236,12 +236,14 @@ class Layer1ProductCheck(Check):
         ts_checked = step_checked = 0
         first_mismatch = None
         step_entries: list[tuple[int, Any]] = []
+        ts_entries: list[tuple[str, Any]] = []
         for idx, s in enumerate(steps):
             name = s["imageName"]
             f_ts = parse_filename_ts(name)
             if f_ts is not None:
                 ts_checked += 1
                 a_ts = parse_api_ts(s["timestamp"])
+                ts_entries.append((name, a_ts))
                 if abs((a_ts - f_ts).total_seconds()) <= 60:
                     matched += 1
                 else:
@@ -265,7 +267,16 @@ class Layer1ProductCheck(Check):
                 continue
             unparseable += 1
 
-        # Step-index products are judged on the shape of the whole sequence.
+        # Both modes are judged on the shape of the whole sequence as well as
+        # entry by entry. The per-entry comparison above cannot see a repeat:
+        # a duplicated row agrees with itself, so both copies "match".
+        tseq = classify_timestamp_sequence(ts_entries) if ts_entries else None
+        if tseq:
+            mismatches += len(tseq["defects"])
+            matched += max(0, tseq["entries"] - len(tseq["defects"]))
+            if tseq["first_defect"] and first_mismatch is None:
+                first_mismatch = {"mode": "timestamp", **tseq["first_defect"]}
+
         seq = classify_step_sequence(step_entries) if step_entries else None
         if seq:
             mismatches += len(seq["defects"])
@@ -318,6 +329,12 @@ class Layer1ProductCheck(Check):
                 "steps_multi_ts":   seq["steps_multi_ts"],
                 "defects":          seq["defects"],
             })
+        if tseq:
+            payload["parity"].update({
+                "repeated_entries": tseq["repeated_entries"],
+                "files_multi_ts":   tseq["files_multi_ts"],
+                "defects":          tseq["defects"],
+            })
 
         summary = _summarize(sub, age_s, n, ir.status_code if ir else None,
                              cfg["unit"], parity=payload["parity"])
@@ -328,6 +345,93 @@ class Layer1ProductCheck(Check):
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+
+
+def classify_timestamp_sequence(entries: list[tuple[str, Any]]) -> dict:
+    """Judge an observed-product manifest whose filenames encode a timestamp.
+
+    The per-entry parity check upstream of this one compares each filename's
+    embedded time against the `timestamp` the manifest gives that same row. It
+    is blind, by construction, to the failure the forecast products exhibit: a
+    duplicated row agrees with itself, so both copies match and the manifest
+    can list the same frame twice — or replay a whole block — while parity
+    reports a clean sweep. That blind spot was the reason "zero parity warns on
+    ~41,000 observed-product runs" could not be read as "this never happens
+    here"; it only meant nothing was looking.
+
+    Now something looks. The policy here is deliberately the OPPOSITE of
+    classify_step_sequence's, and the asymmetry is the point rather than an
+    inconsistency:
+
+      In the forecast products, repeats are the upstream's normal structure —
+      it stitches a short-range and a long-range block and re-lists one of
+      them, continuously, for weeks. Alarming on that is crying wolf.
+
+      Here, repeats have never been observed. Across ~41,000 runs over seven
+      days no observed or hydrology manifest exceeded its window size, and 42
+      manifests sampled directly on 2026-09-11 had entries, distinct files and
+      distinct timestamps all equal. A repeat appearing in comp_ref or qpe_15min
+      would therefore be NEW, and news is exactly what should warn.
+
+    If that judgment turns out to be wrong — if these products start repeating
+    routinely the way the forecast ones do — the fix is to move the condition
+    into the reported-not-alarmed set, not to widen the tolerance until the
+    check says nothing. The counts are recorded either way.
+    """
+    out: dict[str, Any] = {
+        "entries": len(entries), "repeated_entries": 0, "files_multi_ts": 0,
+        "defects": [], "first_defect": None,
+    }
+    if not entries:
+        return out
+
+    names = [e[0] for e in entries]
+    tss = [e[1] for e in entries]
+
+    def defect(kind: str, pos: int, detail: dict) -> None:
+        out["defects"].append(kind)
+        if out["first_defect"] is None:
+            out["first_defect"] = {"kind": kind, "manifest_pos": pos, **detail}
+
+    # The same frame listed twice. Whichever copy the viewer lands on, one slot
+    # in the sequence is not showing what it claims to.
+    seen_pairs: dict[tuple, int] = {}
+    for pos, pair in enumerate(entries):
+        if pair in seen_pairs:
+            defect("duplicate_entry", pos,
+                   {"imageName": pair[0], "ts": str(pair[1]),
+                    "first_seen_pos": seen_pairs[pair]})
+            break
+        seen_pairs[pair] = pos
+
+    # One file under two different times — the forecast seam, if it ever
+    # reached these products.
+    by_name: dict[str, set] = {}
+    for n, ts in entries:
+        by_name.setdefault(n, set()).add(ts)
+    multi = {n: v for n, v in by_name.items() if len(v) > 1}
+    out["files_multi_ts"] = len(multi)
+    if multi:
+        n = next(iter(multi))
+        defect("file_under_two_times", names.index(n),
+               {"imageName": n, "times": sorted(str(x) for x in multi[n])[:3]})
+
+    # Time must advance. Checked on first occurrence so a replayed block is
+    # reported as the repeat it is rather than as time running backwards.
+    seen: set = set()
+    firsts: list[tuple[int, Any]] = []
+    for pos, ts in enumerate(tss):
+        if ts not in seen:
+            seen.add(ts)
+            firsts.append((pos, ts))
+    for (_, a), (pos_b, b) in zip(firsts, firsts[1:]):
+        if b <= a:
+            defect("time_not_advancing", pos_b,
+                   {"prev_ts": str(a), "ts": str(b)})
+            break
+
+    out["repeated_entries"] = len(tss) - len(set(tss))
+    return out
 
 
 def classify_step_sequence(entries: list[tuple[int, Any]]) -> dict:
@@ -489,7 +593,8 @@ def _summarize(sub: dict[str, str], age_s: float, n: int, image_http: int | None
     # otherwise the condition becomes invisible the moment it stops alarming,
     # which is how a silenced problem turns into a forgotten one.
     if parity:
-        rep, multi = parity.get("repeated_entries", 0), parity.get("steps_multi_ts", 0)
+        rep = parity.get("repeated_entries", 0)
+        multi = parity.get("steps_multi_ts", 0) or parity.get("files_multi_ts", 0)
         if rep:
             base += f"  rep={rep}"
         if multi:
