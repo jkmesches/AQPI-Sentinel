@@ -81,17 +81,25 @@
                   {% if url %}</a>{% endif %}
                 </td>
                 <td align="right" valign="middle" style="white-space:nowrap;">
-                  <!-- 8 swatches = the shape of the day -->
-                  {# Each swatch is a stack, not a flat colour — the same encoding as a timeline
-   cell: fail, error, warn, skip, then the share that really passed. Nested
-   background-coloured rows rather than a CSS gradient, because Outlook renders
-   through Word and gradients do not survive it. #}
-<table role="presentation" cellpadding="0" cellspacing="2" border="0" class="hide-xs" style="display:inline-block;vertical-align:middle;"><tr>{% for c in bar_cells(r.buckets) %}<td title="{{ c.title }}" width="9" height="16" bgcolor="{{ c.solid }}" style="width:9px;height:16px;{% if c.css %}background:{{ c.css }};{% endif %}border-radius:2px;font-size:0;line-height:0;">&nbsp;</td>{% endfor %}</tr></table>
-                  <span style="display:inline-block;vertical-align:middle;padding-left:10px;
-                               font:700 15px/1.3 {{ F }};
-                               color:{{ avail_color(r.availability) }};">
-                    {% if r.availability is none %}n/a{% else %}{{ '%.1f'|format(r.availability) }}%{% endif %}
-                  </span>
+                  {# Swatches and the percentage sit in one table row rather than
+                     two inline-blocks. Outlook renders through Word, which does
+                     not implement display:inline-block: a nested table falls to
+                     its own line and padding on a span is dropped, so the strip
+                     detached from the number and lost its gap. Table cells are
+                     the only horizontal layout primitive Word honours. #}
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr>
+                    <td valign="middle" class="hide-xs">
+                      {# One gradient per swatch, with bgcolor carrying the most
+                         severe colour. Word drops the gradient and shows that
+                         solid colour — the grid's own "colour = worst status"
+                         rule, minus the density. Every other client gets the
+                         full composition. #}
+                      <table role="presentation" cellpadding="0" cellspacing="2" border="0"><tr>{% for c in bar_cells(r.buckets) %}<td title="{{ c.title }}" width="9" height="16" bgcolor="{{ c.solid }}" style="width:9px;height:16px;{% if c.css %}background:{{ c.css }};{% endif %}border-radius:2px;font-size:0;line-height:0;">&nbsp;</td>{% endfor %}</tr></table>
+                    </td>
+                    <td valign="middle" style="padding-left:10px;font:700 15px/1.3 {{ F }};color:{{ avail_color(r.availability) }};">
+                      {% if r.availability is none %}n/a{% else %}{{ '%.1f'|format(r.availability) }}%{% endif %}
+                    </td>
+                  </tr></table>
                 </td>
               </tr>
             </table>
@@ -100,8 +108,10 @@
               {{ r.description }}
             </div>
             {% if url %}
-            <div style="padding-top:8px;">
-              <a href="{{ url }}" style="font:500 13px/1 {{ F }};color:#2563eb;text-decoration:none;display:inline-block;padding:6px 0;">
+            {# Padding lives on the div, not the inline <a> — Word drops the
+               latter, which left the link crowding the description. #}
+            <div style="padding:14px 0 6px;">
+              <a href="{{ url }}" style="font:500 13px/1 {{ F }};color:#2563eb;text-decoration:none;">
                 See the checks behind this &rarr;
               </a>
             </div>
@@ -111,7 +121,9 @@
 
           {% if sec.nominal %}
           <tr><td style="padding:12px 16px;{% if sec.rows %}border-top:1px solid #e5e7eb;{% endif %}" class="rule">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:8px;background:#16a34a;"></span>
+            {# A span with width/height is ignored by Word — the dot vanished.
+               A one-cell table is the portable way to draw a coloured box. #}
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="left" style="margin-right:6px;"><tr><td width="8" height="8" bgcolor="#16a34a" style="width:8px;height:8px;border-radius:8px;font-size:0;line-height:0;">&nbsp;</td></tr></table>
             <span class="t-mute" style="font:400 14px/1.5 {{ F }};color:#4b5563;padding-left:6px;">
               {{ sec.nominal|length }} nominal —
               {% for n in sec.nominal %}{{ n.key }}{% if not loop.last %}, {% endif %}{% endfor %}
@@ -137,9 +149,14 @@
 
       {% if public_url %}
       <tr><td class="pad" style="padding:14px 24px 0;">
-        <a href="{{ public_url }}/timeline" style="font:600 14px/1 {{ F }};color:#ffffff;background:#111827;text-decoration:none;border-radius:8px;display:inline-block;padding:12px 18px;">
-          Open the dashboard
-        </a>
+        {# Padding on an inline <a> is ignored by Word, so the button rendered
+           as bare text. The padding goes on a table cell instead, which Word
+           does honour, and the <a> just fills it. #}
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td bgcolor="#111827" style="background:#111827;border-radius:8px;padding:12px 18px;">
+            <a href="{{ public_url }}/timeline" style="font:600 14px/1 {{ F }};color:#ffffff;text-decoration:none;">Open the dashboard</a>
+          </td>
+        </tr></table>
       </td></tr>
       {% endif %}
 
