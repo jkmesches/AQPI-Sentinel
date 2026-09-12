@@ -28,6 +28,32 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-09-12
+
+### Fixed
+
+- **The daily report laid itself out with `display:inline-block`, which Outlook
+  does not implement.** Outlook renders through Word; the template used
+  inline-block in four places with no `mso` conditionals to compensate, so the
+  email came apart there while looking correct in Gmail.
+
+  | Element | What Outlook did |
+  |---|---|
+  | Swatch strip (`<table display:inline-block>`) | Nested tables are block-level in Word — the strip dropped to its own line, away from the percentage |
+  | Availability `%` (`<span>` + `padding-left`) | Padding on an inline element is dropped — no gap |
+  | "N nominal" dot (`<span>` + width/height) | Both ignored on a span — the dot was absent |
+  | "Open the dashboard" (`<a>` + padding) | Padding on an inline `<a>` is dropped — bare text, no button |
+
+  All four are table cells now, the only horizontal layout primitive Word
+  honors: swatches and percentage share one two-cell row, the dot is a one-cell
+  table, and the button's padding sits on a `<td bgcolor>` with the `<a>`
+  filling it. `display:inline-block` no longer appears in the rendered output.
+
+  The swatches themselves still degrade deliberately: Word has no CSS
+  gradients, so it shows the `bgcolor` fallback — a solid swatch in the worst
+  status color, which is the grid's own "color = worst status" rule without the
+  density. Every other client gets the full composition.
+
 ## [0.4.4] — 2026-09-11
 
 Everything in this release is one mistake in five places: **inferring a status
