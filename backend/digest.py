@@ -727,6 +727,43 @@ def bar_bands(bucket) -> list[dict]:
             for (c, _, _), q in zip(reversed(parts), reversed(px)) if q > 0]
 
 
+def blend_color(bucket) -> str:
+    """One colour for a bin, mixed from what actually happened in it.
+
+    The compact fallback used a four-step ramp on the bin's availability, which
+    could not tell a bin that was 40% WARN from one that was 40% FAIL — both
+    landed on the same gold. Mixing the status colours in proportion says which
+    it was: a mostly-passing bin with a little fail leans green-with-red in it,
+    a mostly-failing one leans red.
+
+    Straight weighted average in sRGB. Perceptually it is not the most
+    sophisticated blend available, but it is monotone — more fail always moves
+    the swatch toward red — and monotone is the property a reader relies on.
+
+    Note what this deliberately does NOT do: it does not floor the failing
+    share the way the stacked bars do. A bin that is 1% fail blends to very
+    nearly green. That is the honest consequence of asking one colour to carry
+    a proportion, and it is why the stacked form is the default and this is the
+    fallback — not the other way round.
+    """
+    if not bucket or not (bucket.get("n") if isinstance(bucket, dict) else 0):
+        return _C_NONE
+    n = bucket["n"]
+    parts = ((_C_BAD, int(bucket.get("n_fail") or 0)),
+             (_C_WARN, int(bucket.get("n_warn") or 0)),
+             (_C_OK, int(bucket.get("n_pass") or 0)))
+    tot = sum(c for _, c in parts)
+    if not tot:
+        return _C_NONE
+    r = g = b = 0.0
+    for hexc, count in parts:
+        w = count / tot
+        r += int(hexc[1:3], 16) * w
+        g += int(hexc[3:5], 16) * w
+        b += int(hexc[5:7], 16) * w
+    return f"#{round(r):02x}{round(g):02x}{round(b):02x}"
+
+
 def bar_cells(buckets) -> list[dict]:
     """Eight swatches, each carrying its bands and a tooltip."""
     out = []
@@ -746,21 +783,56 @@ def bar_cells(buckets) -> list[dict]:
             if ex:
                 bits.append(f"{ex} not counted")
             title = " · ".join(bits)
+        bands = bar_bands(b)
         out.append({
-            # Used only by the compact fallback below: one colour for the whole
-            # bin, on the availability ramp rather than its worst status.
-            "color": avail_color(a),
-            "bands": bar_bands(b),
-            "title": title,
+            # Used only by the compact fallback: one colour for the whole bin,
+            # mixed from its composition rather than stepped off its
+            # availability, so 40% warn and 40% fail no longer look identical.
+            "color": blend_color(b),
+            "bands": bands,
+            # Only where it says something the swatch does not: a plain
+            # single-status bin is already its own answer, and 152 tooltips
+            # cost ~6 KB against a budget that decides whether the bars stay
+            # proportional at all.
+            #
+            # The exceptions are the bins whose colour is ambiguous. A bin with
+            # excluded runs, and a grey bin with no verdict at all, both need
+            # words — grey otherwise cannot be told apart from a slice where
+            # nothing ran, which is a different statement. Dropping those was
+            # the first version of this trim and it undid a property added two
+            # releases ago.
+            "title": title if (len(bands) > 1
+                               or (isinstance(b, dict)
+                                   and (b.get("n_excluded") or not b.get("n")))
+                               or b is None) else "",
         })
     return out
 
 
-# Rendered HTML above this is re-rendered with compact swatches. Gmail clips a
-# body over ~102 KB and drops the tail silently, which on this report means
-# losing its own conclusion, so the size is a correctness constraint. 95 KB
-# leaves room for the clip threshold being approximate.
-_COMPACT_ABOVE_BYTES = 95_000
+# === Load-bearing: the limit applies to the ENCODED body, not the HTML ===
+#
+# Gmail clips a body over ~102 KB and drops the tail silently, which on this
+# report means losing its own conclusion. The trap is the unit: the HTML goes
+# on the wire quoted-printable — that is what EmailMessage.add_alternative
+# picks for this content — and QP costs +11% on our markup, because `·` and
+# `—` are multi-byte and every `=` and high byte expands.
+#
+# So the old 95,000-on-len(html) threshold was unsafe in the direction that
+# matters. 95,000 HTML bytes is ~105,450 on the wire, past the clip: there was
+# a live window, roughly 92,000-95,000 HTML bytes, where the guard said "fine"
+# and Gmail truncated the report anyway.
+#
+# Measure what ships. _wire_len encodes exactly as the send path does rather
+# than applying a fudge factor, because the inflation depends on how much
+# non-ASCII a given report happens to contain.
+_GMAIL_CLIP_BYTES = 102_400
+_COMPACT_ABOVE_WIRE_BYTES = 98_000       # ~4 KB of margin on the real number
+
+
+def _wire_len(html: str) -> int:
+    """Bytes this HTML becomes once MIME-encoded for sending."""
+    import quopri
+    return len(quopri.encodestring(html.encode("utf-8")))
 
 
 def render_html(data: dict, public_url: str = "", compact: bool | None = None) -> str:
@@ -826,11 +898,14 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None) -
         return _re.sub(r"\s{2,}", " ", s)
 
     html = _squeeze(html)
-    if compact is None and len(html) > _COMPACT_ABOVE_BYTES:
-        # Measured after squeezing, because that is the size that ships.
-        log.warning("digest: %d bytes with stacked bins, over the %d limit — "
-                    "re-rendering compact", len(html), _COMPACT_ABOVE_BYTES)
-        html = _squeeze(_render(True))
+    if compact is None:
+        # After squeezing, because that is what ships.
+        wire = _wire_len(html)
+        if wire > _COMPACT_ABOVE_WIRE_BYTES:
+            log.warning("digest: %d bytes on the wire with stacked bins (%d of "
+                        "HTML), past the %d limit — re-rendering compact",
+                        wire, len(html), _COMPACT_ABOVE_WIRE_BYTES)
+            html = _squeeze(_render(True))
     return html
 
 

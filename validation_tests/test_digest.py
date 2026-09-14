@@ -35,7 +35,8 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 from backend.digest import (                                   # noqa: E402
     DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
     evidence_url, render_text, spark, subject_line, subject_name, subject_title,
-    bar_bands, render_html, _BAR_PX,
+    bar_bands, blend_color, render_html, _wire_len, _BAR_PX,
+    _GMAIL_CLIP_BYTES, _COMPACT_ABOVE_WIRE_BYTES,
     _C_OK, _C_WARN, _C_BAD, _C_ERROR, _C_SKIP, _C_NONE,
 )
 
@@ -191,8 +192,14 @@ def main() -> int:
           avail_color(100) != avail_color(60) != avail_color(0))
     check("no data has its own color", avail_color(None) == "#d1d5db")
     check("bar_cells always yields 8 swatches", len(bar_cells([])) == 8)
-    check("every swatch carries a tooltip",
-          all(c["title"] for c in bar_cells([10, None, 99] + [50] * 5)))
+    # Tooltips only where the colour is ambiguous — a plain single-status bin
+    # says it itself, and 152 of them cost ~6 KB of the size budget.
+    check("an ambiguous swatch carries a tooltip",
+          all(bar_cells([None])[0]["title"] for _ in (0,)))
+    check("a plain single-status swatch does not",
+          bar_cells([{"n": 5, "n_pass": 5}])[0]["title"] == "")
+    check("a swatch with excluded runs keeps one",
+          bar_cells([{"n": 5, "n_pass": 5, "n_excluded": 3}])[0]["title"] != "")
 
     data = {
         "since": "2026-09-07T17:30:03+00:00", "until": "2026-09-08T17:30:03+00:00",
@@ -409,12 +416,24 @@ def main() -> int:
     auto = render_html(big, "https://x.test")
     comp = render_html(big, "https://x.test", compact=True)
     stacked = render_html(big, "https://x.test", compact=False)
+    # === the unit is the encoded body, not the HTML ===
+    # The HTML ships quoted-printable, which costs +11% on this markup. A
+    # threshold measured on len(html) is therefore unsafe by that margin: the
+    # old 95,000 allowed ~105,450 on the wire, past the clip, so the guard
+    # could say "fine" while Gmail truncated the report.
+    check("the compact threshold is stated in wire bytes, under the clip",
+          _COMPACT_ABOVE_WIRE_BYTES < _GMAIL_CLIP_BYTES,
+          f"{_COMPACT_ABOVE_WIRE_BYTES:,} vs clip {_GMAIL_CLIP_BYTES:,}")
+    check("encoding really does inflate, so the distinction matters",
+          _wire_len(stacked) > len(stacked) * 1.05,
+          f"html {len(stacked):,} -> wire {_wire_len(stacked):,}")
     check("an all-mixed report would exceed the clip if left stacked",
-          len(stacked) > 102_400, f"{len(stacked):,}")
+          _wire_len(stacked) > _GMAIL_CLIP_BYTES, f"{_wire_len(stacked):,} on the wire")
     check("...so it falls back to compact automatically",
           len(auto) == len(comp), f"auto {len(auto):,} vs compact {len(comp):,}")
-    check("...and the compact form is comfortably inside the clip",
-          len(comp) < 95_000, f"{len(comp):,}")
+    check("...and the compact form ships well inside the clip",
+          _wire_len(comp) < _GMAIL_CLIP_BYTES, f"{_wire_len(comp):,} on the wire")
+
 
     # --- size is a correctness constraint ------------------------------------
     # Gmail clips a body over ~102 KB and drops the tail silently, so a report
@@ -478,8 +497,33 @@ def main() -> int:
     check("a typical day keeps its proportional bins",
           len(typical_auto) == len(typical_stacked),
           f"auto {len(typical_auto):,} vs stacked {len(typical_stacked):,}")
-    check("...and still lands inside the clip",
-          len(typical_auto) < 102_400, f"{len(typical_auto):,} bytes")
+    check("...and still lands inside the clip once encoded",
+          _wire_len(typical_auto) < _GMAIL_CLIP_BYTES,
+          f"{_wire_len(typical_auto):,} bytes on the wire")
+
+    # Whatever render_html returns must fit once encoded, on every shape. This
+    # is the property the whole fallback exists for, so it is asserted on the
+    # thing that actually ships rather than on the HTML it is made from.
+    for label, payload in (("typical", typical), ("worst", worst), ("all-mixed", big)):
+        w = _wire_len(render_html(payload, "https://aqpi.local.shirejoe.com"))
+        check(f"the {label} report fits on the wire", w < _GMAIL_CLIP_BYTES,
+              f"{w:,} bytes encoded")
+
+    # The blend replaced a four-step availability ramp that could not tell
+    # 40% warn from 40% fail. Anchors stay exact; the mix stays monotone.
+    check("an all-pass bin blends to exactly the pass colour",
+          blend_color({"n": 10, "n_pass": 10}) == _C_OK.lower())
+    check("an all-fail bin blends to exactly the fail colour",
+          blend_color({"n": 10, "n_fail": 10}) == _C_BAD.lower())
+    check("40% warn and 40% fail no longer look identical",
+          blend_color({"n": 10, "n_pass": 6, "n_warn": 4})
+          != blend_color({"n": 10, "n_pass": 6, "n_fail": 4}))
+    reds = [int(blend_color({"n": 100, "n_pass": 100 - f, "n_fail": f})[1:3], 16)
+            for f in range(0, 101, 10)]
+    check("more failure always moves the swatch toward red",
+          all(b > a for a, b in zip(reds, reds[1:])), str(reds))
+    check("a bin with no verdict stays the no-data grey",
+          blend_color({"n": 0, "n_excluded": 5}) == _C_NONE)
 
     # --- names -------------------------------------------------------------
     # "XSWR" tells you nothing unless you have five X-band call signs
@@ -547,7 +591,7 @@ def main() -> int:
     tplsrc = (Path(__file__).resolve().parent.parent
               / "backend" / "templates" / "digest.html").read_text()
     import re as _re
-    boxes = _re.findall(r'<td title="\{\{ c\.title \}\}"[^>]*>', tplsrc)
+    boxes = _re.findall(r'<td\{% if c\.title %\}[^>]*?%\}[^>]*>', tplsrc)
     geo = {_re.sub(r'bgcolor="[^"]*" ?', '', b) for b in boxes}
     check("every bin variant shares one geometry", len(geo) == 1,
           f"{len(boxes)} variants, {len(geo)} distinct geometries")
