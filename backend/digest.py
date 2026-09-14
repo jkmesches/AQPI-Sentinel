@@ -531,13 +531,13 @@ def evidence_url(public_url: str, check_id: str, target: str,
     correctly said 99.5-99.8%. All fourteen of their non-passing runs were in
     the truncated older end. The evidence link disproved the report.
 
-    Only non-nominal rows are linked (render_text and the template both list
-    perfect subjects as a collapsed "N nominal" line), so every link is
-    attached to a claim about something going wrong, and "every run that was
-    not a pass" is exactly the set that claim is about. Inconclusive skips are
-    included even though availability excludes them from its denominator:
-    they are still not passes, the reader can see the reason on each row, and
-    the report discloses the conclusive share separately.
+    Every row is linked, healthy ones included. For a row with something wrong
+    the filtered view is the evidence for it; for a row at 100% it is the
+    evidence that there was nothing — an empty list is a real answer to "show
+    me the checks that did not pass", and on a clean row with excluded runs it
+    is where those runs can be seen. `skip` and `error` are in the filter for
+    that reason even though the report no longer counts them: the disclosure
+    line says how many were left out, and this is the link that shows them.
     """
     if not public_url:
         return None
@@ -571,13 +571,14 @@ def render_text(data: dict, public_url: str = "") -> str:
         rows = _rows(data, kind)
         if not rows:
             continue
-        # Anything perfectly healthy collapses to one line. A row per nominal
-        # product turns a 6-line report into a 20-line one and buries the two
-        # rows that matter — the report has to stay scannable on a phone, and
-        # length should track how much went wrong, not how much exists.
-        nominal = [r for r in rows if r["availability"] is not None
-                   and r["availability"] >= 99.95]
-        listed = [r for r in rows if r not in nominal]
+        # Every subject gets its own row, including the perfectly healthy ones.
+        # They used to collapse into a single "N nominal: A, B, C" line to keep
+        # the report short, but that hid the number a reader most often wants
+        # to confirm — a radar at 100% reads differently from a radar merely
+        # absent from the trouble list, and the rows are already sorted worst
+        # first, so a clean subject costs two lines at the bottom rather than
+        # attention at the top.
+        listed = rows
         # Two lines per subject rather than one wide row. Adding the name to
         # the aligned column pushed it past 100 characters — `fcst_total_precip_cum
         # · Forecast — Cumulative Precipitation` is 57 on its own — and the
@@ -595,12 +596,6 @@ def render_text(data: dict, public_url: str = "") -> str:
             url = evidence_url(public_url, f"{prefix}{r['key']}", r["key"], since, until)
             if url:
                 L.append(f"    {url}")
-        if nominal:
-            # Ids only here. These are the rows with nothing to report, and
-            # spelling out six site names to say "nothing happened" buries the
-            # rows that do need reading.
-            names = ", ".join(r["key"] for r in nominal)
-            L.append(f"  {len(nominal)} nominal: {names}")
         L.append("")
 
     if data["runs"]:
@@ -804,13 +799,11 @@ def render_html(data: dict, public_url: str = "") -> str:
         rows = _rows(data, kind)
         if not rows:
             continue
-        nominal = [r for r in rows if r["availability"] is not None
-                   and r["availability"] >= 99.95]
+        # Every subject, healthy ones included — see the note in render_text.
         sections.append({
             "heading": heading,
             "prefix":  prefix,
-            "rows":    [r for r in rows if r not in nominal],
-            "nominal": nominal,
+            "rows":    rows,
         })
     html = env.get_template("digest.html").render(
         d=data, sections=sections, public_url=public_url,
