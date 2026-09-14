@@ -58,12 +58,33 @@ def reset_http_caller(token) -> None:
 # samples. An independent 20-round probe the same hour: p90 21.0s, max 29.9s,
 # 2 of 20 past 20s. The tail genuinely crosses the old ceiling.
 #
-# 35s covers the observed ~30s tail. The wall-cost objection is already paid:
-# read timeouts are no longer retried (NO_RETRY_EXC), so worst case is now one
-# timeout rather than two, and 35s is LESS than the 40.5s the 20s-plus-retry
-# configuration cost. On the shortest cadence that still uses it (60s) a worst
-# case consumes 58% of the cycle, which is the real ceiling on raising this
-# further.
+# 2026-09-14, raised 35 -> 50. over_ceiling on layer0.origin.latency — the
+# measurement this comment told the next person to take — was sitting at 7.2%
+# against its own "sustained above ~1% means the tail has moved" threshold.
+# It had. Over 290 uncensored probes in 24h:
+#
+#     p50 4.8s   p75 10.9s   p90 23.0s   p95 41.9s   p99 59.4s   max 120.7s
+#
+# p95 was 5.9-8.4s when 35s was chosen. The 10s buckets above the old ceiling:
+# 30-40s x4, 40-50s x10, 50-60s x7, 60-70s x1, 90-100s x1, 120-130s x1.
+#
+# This is NOT the burst case the paragraph below warns about, which is why the
+# raise is justified at all: over_ceiling is 5.6% OUTSIDE episodes and 17.9%
+# during them. The baseline moved, not just the peaks.
+#
+# 50s and no further, for the reason the 35s note already gave: the shortest
+# cadence using this client is 60s, read timeouts are not retried, so worst
+# case is one timeout at 83% of the cycle. 60s would consume the whole cycle
+# and checks would overlap. That bound, not the latency distribution, is what
+# picks this number — the tail runs to 120.7s and no reachable ceiling covers
+# it. Roughly 14 of the 24 over-ceiling samples fall under 50s.
+#
+# What this trades away: a 45-second answer is now a slow pass rather than an
+# error. That is a real upstream degradation being reclassified, not fixed, and
+# the only thing still reporting it is layer0.origin.latency — which currently
+# returns `pass` on samples as slow as 91.9s because its verdict keys off HTTP
+# status rather than latency. If that check ever gains a latency threshold,
+# this is the trade that makes it worth having.
 #
 # Do NOT raise it to chase burst-induced timeouts. Those come from our own
 # concurrency during an episode, not from upstream being uniformly slow — a
@@ -74,7 +95,7 @@ def reset_http_caller(token) -> None:
 #   SELECT avg(value) FROM metric_samples
 #   WHERE check_id='layer0.origin.latency' AND metric='over_ceiling';
 # Sustained above ~1% means the tail has moved again.
-DEFAULT_TIMEOUT_S = 35.0
+DEFAULT_TIMEOUT_S = 50.0
 
 # One retry, not three. These are 2-minute-cadence health probes: the next
 # scheduled run is itself a retry, so deep retry ladders mostly add load and
