@@ -14,8 +14,9 @@ import requests
 # reasons unrelated to what is being tested. The 10s values here were set when
 # upstream's p95 was ~2.4s; measured 2026-08-31 its p90 is 8-13s, so a 10s
 # ceiling coin-flips. Raise this only alongside DEFAULT_TIMEOUT_S
-# (moved 20 -> 35 with it on 2026-08-31).
-LIVE_TIMEOUT_S = 35
+# (moved 20 -> 35 with it on 2026-08-31, 35 -> 50 on 2026-09-14 when
+# over_ceiling reached 7.2% and p95 reached 41.9s).
+LIVE_TIMEOUT_S = 50
 
 BASE = "https://radarca.engr.colostate.edu"
 HOST = "radarca.engr.colostate.edu"

@@ -20,8 +20,8 @@ It does NOT alarm on slowness. A slow-but-successful response is precisely the
 thing being measured, and turning it into a page would re-import the noise
 this whole line of work has been removing. The verdict is `pass` whenever
 upstream answers at all; the signal lives in the metrics. Only a failure to
-answer within CANARY_TIMEOUT_S — far beyond anything observed, including the
-42s seen during an episode — is treated as an error.
+answer within CANARY_TIMEOUT_S — chosen to sit far above anything observed,
+and raised whenever that stops being true — is treated as an error.
 
 Reading it:
 
@@ -52,9 +52,22 @@ from .base import Check, CheckResult, utcnow
 from .layer0_episode import in_episode
 from .transports.http import DEFAULT_TIMEOUT_S
 
-# Well beyond the worst observed (42s during a slow episode on 2026-08-31), so
-# a sample is only lost if upstream has genuinely stopped answering.
-CANARY_TIMEOUT_S = 75.0
+# Must stay well clear of DEFAULT_TIMEOUT_S, because measuring a tail from
+# inside the ceiling that truncates it is the circularity this check exists to
+# break. test_latency_canary pins the relationship at more than 2x, and that
+# assertion is what caught the 35 -> 50 operational raise on 2026-09-14: 75s
+# was no longer far enough above 50s to see past it.
+#
+# 75s was also already stale on its own terms. It was set as "well beyond the
+# worst observed (42s)", and on 2026-09-13 this check recorded a single sample
+# at 120.7s — which reached us only because httpx applies a bare float timeout
+# per-operation rather than to the whole request, so the 75s label was never
+# the total-request bound it read as.
+#
+# 150s covers that sample with headroom and keeps the 2x relationship. It is
+# not a prediction that 150s is the true maximum; it is a ceiling chosen to be
+# uninteresting, so that `timed_out` staying at 0 means something.
+CANARY_TIMEOUT_S = 150.0
 
 # === Load-bearing: sample where the interesting behavior is ===
 #
