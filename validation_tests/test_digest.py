@@ -206,8 +206,17 @@ def main() -> int:
     }
     txt = render_text(data, "https://x.test")
     check("text report names the worst subject", "XEBY" in txt)
-    check("a fully nominal subject collapses to one line",
-          "1 nominal: CBAND" in txt, [l for l in txt.splitlines() if "nominal" in l])
+    # Healthy subjects used to collapse into "N nominal: CBAND". They now get a
+    # full row: a radar reported at 100% reads differently from one merely
+    # absent from the trouble list, and the number is the thing a reader most
+    # often wants to confirm.
+    check("a healthy subject gets its own row with its uptime",
+          "CBAND" in txt and "100.0%" in txt,
+          [l for l in txt.splitlines() if "CBAND" in l or "100.0" in l])
+    check("...and is not collapsed into a nominal summary line",
+          "nominal: CBAND" not in txt and "1 nominal" not in txt)
+    check("...while the worst subject still comes first",
+          txt.index("XEBY") < txt.index("CBAND"))
     check("the coverage caveat is stated, not implied",
           "are not counted above" in txt and "pass, warn or fail" in txt,
           [l for l in txt.splitlines() if "not counted" in l])
@@ -406,11 +415,12 @@ def main() -> int:
     typical_size = len(render_html(typical, "https://aqpi.local.shirejoe.com"))
     # 75 KB, not 60: this fixture is harsher than a real day — every bucket is
     # a five-colour mix and every description runs to its full length. The same
-    # report rendered against production on 2026-09-11 was 51.7 KB. The guard
-    # is sized to catch a doubling of the markup, which is the regression that
+    # report rendered against production on 2026-09-13, with every subject
+    # listed rather than the healthy ones collapsed, was 64.9 KB. The guard is
+    # sized to catch a doubling of the markup, which is the regression that
     # actually happened, not to pin the exact byte count.
     check("a typical day's report stays small",
-          typical_size < 75_000, f"{typical_size:,} bytes (prod measured 51.7 KB)")
+          typical_size < 75_000, f"{typical_size:,} bytes (prod measured 64.9 KB)")
 
     # --- names -------------------------------------------------------------
     # "XSWR" tells you nothing unless you have five X-band call signs
