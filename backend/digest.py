@@ -727,31 +727,6 @@ def bar_bands(bucket) -> list[dict]:
             for (c, _, _), q in zip(reversed(parts), reversed(px)) if q > 0]
 
 
-def bar_css(bands: list[dict]) -> str:
-    """The stack as one `linear-gradient`, bottom-up like the grid draws it.
-
-    A nested table of coloured rows renders everywhere but costs ~100 bytes a
-    band, and real buckets average two and a half — measured against production
-    it took the email from 46 KB to 91 KB, inside 11 KB of Gmail's ~102 KB clip
-    threshold, which a busier day would have crossed. A clipped report loses its
-    tail silently, so the size is a correctness constraint, not a nicety.
-
-    One gradient per swatch instead, with `bgcolor` carrying the most severe
-    colour as the fallback. Outlook renders through Word and ignores the
-    gradient, so it shows a solid worst-status swatch — which is exactly the
-    grid's own "colour = worst status" rule, just without the density. Every
-    other client gets the full composition.
-    """
-    if len(bands) <= 1:
-        return ""
-    stops, cursor = [], 0.0
-    for b in reversed(bands):                    # reversed: gradient runs bottom-up
-        start = cursor
-        cursor += (b["px"] / _BAR_PX) * 100
-        stops.append(f'{b["color"]} {start:.0f}% {min(100, round(cursor))}%')
-    return "linear-gradient(to top," + ",".join(stops) + ")"
-
-
 def bar_cells(buckets) -> list[dict]:
     """Eight swatches, each carrying its bands and a tooltip."""
     out = []
@@ -771,19 +746,37 @@ def bar_cells(buckets) -> list[dict]:
             if ex:
                 bits.append(f"{ex} not counted")
             title = " · ".join(bits)
-        bands = bar_bands(b)
         out.append({
+            # Used only by the compact fallback below: one colour for the whole
+            # bin, on the availability ramp rather than its worst status.
             "color": avail_color(a),
-            "bands": bands,
-            # Most severe colour = the last band, since bands run top-down.
-            "solid": bands[-1]["color"],
-            "css":   bar_css(bands),
+            "bands": bar_bands(b),
             "title": title,
         })
     return out
 
 
-def render_html(data: dict, public_url: str = "") -> str:
+# Rendered HTML above this is re-rendered with compact swatches. Gmail clips a
+# body over ~102 KB and drops the tail silently, which on this report means
+# losing its own conclusion, so the size is a correctness constraint. 95 KB
+# leaves room for the clip threshold being approximate.
+_COMPACT_ABOVE_BYTES = 95_000
+
+
+def render_html(data: dict, public_url: str = "", compact: bool | None = None) -> str:
+    """Render the report.
+
+    `compact` draws each bin as one solid swatch instead of a proportional
+    stack. It is chosen automatically: the stacked form is what Outlook can
+    actually show — Word has no CSS gradients, so the gradient version that
+    preceded it collapsed to the bin's WORST status and painted a 95%-healthy
+    bin solid red — but stacked bins cost about four times the markup, and on a
+    day where every bin is mixed the report passes Gmail's ~102 KB clip.
+
+    Losing proportional detail is a real cost. Losing the tail of the report,
+    silently, is a worse one, so detail is what gives way. Passing True or
+    False overrides the automatic choice for tests and previews.
+    """
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from pathlib import Path as _P
     env = Environment(
@@ -803,16 +796,21 @@ def render_html(data: dict, public_url: str = "") -> str:
         sections.append({
             "heading": heading,
             "prefix":  prefix,
+            "kind":    kind,
             "rows":    rows,
         })
-    html = env.get_template("digest.html").render(
-        d=data, sections=sections, public_url=public_url,
-        subject=subject_line(data),
+    def _render(is_compact: bool) -> str:
+        return env.get_template("digest.html").render(
+            d=data, sections=sections, public_url=public_url,
+            compact=is_compact,
+            subject=subject_line(data),
         # Web-safe stack on purpose. Email clients are inconsistent about
         # system-font keywords, and the long -apple-system stack cost ~3 KB
         # repeated across every row for a difference nobody would notice.
-        F="Helvetica,Arial,sans-serif",
-    )
+            F="Helvetica,Arial,sans-serif",
+        )
+
+    html = _render(bool(compact))
     # === Load-bearing: Gmail CLIPS a message body over ~102 KB ===
     #
     # It truncates mid-document and appends a "View entire message" link, so
@@ -822,8 +820,17 @@ def render_html(data: dict, public_url: str = "") -> str:
     # whitespace between tags is safe here: there is no <pre> and no element
     # whose rendering depends on inter-tag spacing.
     import re as _re
-    html = _re.sub(r">\s+<", "><", html)
-    html = _re.sub(r"\s{2,}", " ", html)
+
+    def _squeeze(s: str) -> str:
+        s = _re.sub(r">\s+<", "><", s)
+        return _re.sub(r"\s{2,}", " ", s)
+
+    html = _squeeze(html)
+    if compact is None and len(html) > _COMPACT_ABOVE_BYTES:
+        # Measured after squeezing, because that is the size that ships.
+        log.warning("digest: %d bytes with stacked bins, over the %d limit — "
+                    "re-rendering compact", len(html), _COMPACT_ABOVE_BYTES)
+        html = _squeeze(_render(True))
     return html
 
 

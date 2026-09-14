@@ -35,7 +35,7 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 from backend.digest import (                                   # noqa: E402
     DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
     evidence_url, render_text, spark, subject_line, subject_name, subject_title,
-    bar_bands, bar_css, render_html, _BAR_PX,
+    bar_bands, render_html, _BAR_PX,
     _C_OK, _C_WARN, _C_BAD, _C_ERROR, _C_SKIP, _C_NONE,
 )
 
@@ -373,15 +373,48 @@ def main() -> int:
     check("spark still tolerates a bare float bucket",
           spark([100.0, 0.0, None]) == "█▁·", spark([100.0, 0.0, None]))
 
-    # The gradient is the same stack, bottom-up, with bgcolor carrying the most
-    # severe colour so Outlook — which renders through Word and drops the
-    # gradient — still shows the grid's "colour = worst status".
-    css = bar_css(bar_bands({"n": 15, "n_pass": 0, "n_fail": 12, "n_error": 2, "n_skip": 1}))
-    check("the gradient runs bottom-up from the most severe",
-          css.startswith("linear-gradient(to top,#B91C1C"), css)
-    check("...and ends at exactly 100%", css.rstrip(")").endswith("100%"), css)
-    check("a single-band swatch needs no gradient at all",
-          bar_css(bar_bands({"n": 5, "n_pass": 5})) == "")
+    # === Outlook renders the same bars as everyone else ===
+    # Bins are stacked background-coloured table ROWS, not a CSS gradient. Word,
+    # which is what Outlook renders through, has no gradients: the gradient
+    # version collapsed to its bgcolor fallback and painted a 95%-healthy bin
+    # solid red, which is the "worst of the bin" distortion the proportional
+    # encoding exists to avoid. It stopped being an acceptable degradation once
+    # nearly every recipient was on Outlook.
+    tpl = (Path(__file__).resolve().parent.parent
+           / "backend" / "templates" / "digest.html").read_text()
+    check("no CSS gradient survives in the template",
+          "linear-gradient" not in tpl)
+    check("bins are drawn as bgcolor table rows", "bgcolor=\"{{ b.color }}\"" in tpl)
+
+    _seed = {"window_label": "x", "since": "2026-09-13T13:00:00+00:00",
+             "until": "2026-09-14T13:00:00+00:00", "runs": 100,
+             "conclusive_pct": 100.0, "excluded": 0, "products": []}
+    _mixed = {"key": "XR", "kind": "radar", "name": "A Site", "availability": 40.0,
+              "description": "offline", "buckets":
+              [{"avail": 40.0, "n": 30, "n_pass": 12, "n_fail": 12, "n_warn": 6}] * 8}
+    _clean = dict(_mixed, key="XC", availability=100.0, description="nominal",
+                  buckets=[{"avail": 100.0, "n": 30, "n_pass": 30}] * 8)
+    mixed = render_html(dict(_seed, radars=[_mixed]), "https://x.test", compact=False)
+    clean = render_html(dict(_seed, radars=[_clean]), "https://x.test", compact=False)
+    check("a mixed bin draws a row per status, not one solid block",
+          mixed.count("bgcolor") > clean.count("bgcolor"),
+          f"mixed {mixed.count('bgcolor')} vs clean {clean.count('bgcolor')}")
+    check("a single-colour bin stays one cell, which is what keeps the size down",
+          clean.count("bgcolor") <= 10, str(clean.count("bgcolor")))
+
+    # The stacked form costs ~4x the markup, so on a day where every bin is
+    # mixed it passes Gmail's clip. Detail gives way; the report's tail does not.
+    big = dict(_seed, radars=[dict(_mixed, key=f"XR{i:02d}") for i in range(6)],
+               products=[dict(_mixed, key=f"p_{i:02d}", kind="product") for i in range(13)])
+    auto = render_html(big, "https://x.test")
+    comp = render_html(big, "https://x.test", compact=True)
+    stacked = render_html(big, "https://x.test", compact=False)
+    check("an all-mixed report would exceed the clip if left stacked",
+          len(stacked) > 102_400, f"{len(stacked):,}")
+    check("...so it falls back to compact automatically",
+          len(auto) == len(comp), f"auto {len(auto):,} vs compact {len(comp):,}")
+    check("...and the compact form is comfortably inside the clip",
+          len(comp) < 95_000, f"{len(comp):,}")
 
     # --- size is a correctness constraint ------------------------------------
     # Gmail clips a body over ~102 KB and drops the tail silently, so a report
@@ -410,17 +443,43 @@ def main() -> int:
     # from 46 KB to 91 KB and would still have passed it. A typical day —
     # roughly what 2026-09-11 looked like, 14 subjects worth listing — is the
     # number that actually moves when the markup regresses.
-    typical = dict(worst,
-                   radars=worst["radars"][:6], products=worst["products"][:8])
+    # Shaped like a real day rather than a bad one. Production on 2026-09-14
+    # had 19 subjects and 152 bins, of which 117 were a single colour, 28 were
+    # two and 7 were three — healthy subjects dominate, and a single-colour bin
+    # is a quarter of the markup. The previous fixture made every bin a full
+    # mix, which is a fleet-wide outage, not a typical morning; it rendered at
+    # 95.1 KB and tipped the compact fallback, so the assertion below was
+    # measuring the wrong day.
+    def _bins(n_mixed: int):
+        mixed = {"avail": 40.0, "n": 30, "n_pass": 12, "n_fail": 12, "n_warn": 6}
+        clean = {"avail": 100.0, "n": 30, "n_pass": 30}
+        return [mixed] * n_mixed + [clean] * (8 - n_mixed)
+
+    typical = dict(
+        worst,
+        radars=[dict(r, buckets=_bins(2 if i < 2 else 0))
+                for i, r in enumerate(worst["radars"])],
+        products=[dict(r, buckets=_bins(1 if i < 3 else 0))
+                  for i, r in enumerate(worst["products"])],
+    )
     typical_size = len(render_html(typical, "https://aqpi.local.shirejoe.com"))
-    # 75 KB, not 60: this fixture is harsher than a real day — every bucket is
-    # a five-colour mix and every description runs to its full length. The same
-    # report rendered against production on 2026-09-13, with every subject
-    # listed rather than the healthy ones collapsed, was 64.9 KB. The guard is
-    # sized to catch a doubling of the markup, which is the regression that
-    # actually happened, not to pin the exact byte count.
-    check("a typical day's report stays small",
-          typical_size < 75_000, f"{typical_size:,} bytes (prod measured 64.9 KB)")
+    # Size alone stopped being the useful guard once render_html gained its
+    # automatic compact fallback: nothing can ship above _COMPACT_ABOVE_BYTES
+    # any more, so "is it small" is now true by construction. What can still
+    # regress is the thing the fallback trades away — a normal day must keep
+    # its proportional bars rather than quietly dropping to solid blocks,
+    # because solid blocks are the Outlook rendering that prompted all this.
+    #
+    # Production on 2026-09-14 rendered 71.0 KB stacked. This fixture is
+    # harsher (every bin a full mix, every description at full length), so it
+    # sits higher; the assertion is that it still stays on the stacked side.
+    typical_auto = render_html(typical, "https://aqpi.local.shirejoe.com")
+    typical_stacked = render_html(typical, "https://aqpi.local.shirejoe.com", compact=False)
+    check("a typical day keeps its proportional bins",
+          len(typical_auto) == len(typical_stacked),
+          f"auto {len(typical_auto):,} vs stacked {len(typical_stacked):,}")
+    check("...and still lands inside the clip",
+          len(typical_auto) < 102_400, f"{len(typical_auto):,} bytes")
 
     # --- names -------------------------------------------------------------
     # "XSWR" tells you nothing unless you have five X-band call signs
@@ -452,6 +511,57 @@ def main() -> int:
     })
     check("the rendered report names the site", "Sawyer Ridge" in rendered,
           [l for l in rendered.splitlines() if "XSWR" in l])
+
+    # In HTML the two kinds lead with different halves: a radar's call sign is
+    # the vocabulary the lab speaks, a product's id is not a word anyone says.
+    _s = {"window_label": "x", "since": "2026-09-13T13:00:00+00:00",
+          "until": "2026-09-14T13:00:00+00:00", "runs": 10,
+          "conclusive_pct": 100.0, "excluded": 0}
+    _b = [{"avail": 100.0, "n": 5, "n_pass": 5}] * 8
+    both = render_html(dict(
+        _s,
+        radars=[{"key": "XSWR", "kind": "radar", "name": "Sawyer Ridge",
+                 "availability": 100.0, "description": "nominal", "buckets": _b}],
+        products=[{"key": "max_water_level", "kind": "product",
+                   "name": "Max Water Level", "availability": 100.0,
+                   "description": "nominal", "buckets": _b}]), "https://x.test")
+    # Assert on which text sits in the BOLD span. Comparing string positions in
+    # the whole document does not work: the id also appears earlier, inside the
+    # evidence link's href, so an index test passes for the wrong reason.
+    import re as _re2
+    bold = _re2.findall(r'font:600 16px[^"]*">([^<]+)</span>', both)
+    check("a radar leads with its id", "XSWR" in bold, str(bold))
+    check("a product leads with its name", "Max Water Level" in bold, str(bold))
+    # Products carry the name alone. Both together reached 59 characters for
+    # "Forecast — Cumulative Precipitation · fcst_total_precip_cum", wide
+    # enough to push the bars out of the column on that row.
+    prod_cell = both[both.index("Products"):]
+    check("a product's id is not printed beside its name",
+          "&nbsp;· max_water_level" not in prod_cell, "id still trailing")
+    check("...but the id still reaches the reader through the evidence link",
+          "layer1.product.max_water_level" in prod_cell)
+    check("a radar still carries both", "&nbsp;· Sawyer Ridge" in both)
+
+    # Bins must share one box model — a row mixing single- and multi-colour
+    # bins previously sat them at different heights and corner radii.
+    tplsrc = (Path(__file__).resolve().parent.parent
+              / "backend" / "templates" / "digest.html").read_text()
+    import re as _re
+    boxes = _re.findall(r'<td title="\{\{ c\.title \}\}"[^>]*>', tplsrc)
+    geo = {_re.sub(r'bgcolor="[^"]*" ?', '', b) for b in boxes}
+    check("every bin variant shares one geometry", len(geo) == 1,
+          f"{len(boxes)} variants, {len(geo)} distinct geometries")
+    check("...and that geometry pins height as well as width",
+          all('height="16"' in b and "height:16px" in b for b in boxes))
+
+    # The bar strip is right-aligned next to the availability figure, so if
+    # that figure sizes to its text the bars shift by the width difference
+    # between "0.0%" and "100.0%" and stop lining up down the column.
+    avail_td = _re.search(r'<td[^>]*avail_color\(r\.availability\)[^>]*>', tplsrc)
+    check("the availability cell is a fixed width, so the bars line up",
+          avail_td is not None and 'width="54"' in avail_td.group(0)
+          and "width:54px" in avail_td.group(0),
+          avail_td.group(0)[:120] if avail_td else "cell not found")
 
     # --- evidence links ------------------------------------------------------
     # 2026-09-11: the report said qpe_15min/qpe_1hr/precip_rate_radar/comp_ref
