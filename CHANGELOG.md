@@ -28,6 +28,30 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-09-13
+
+### Changed
+
+- **Every subject gets its own row in the daily report, healthy ones
+  included.** Perfectly healthy subjects collapsed into a single
+  `N nominal: CBAND, …` line to keep the report short. That traded away the
+  number a reader most often wants to confirm: `CBAND 100.0% nominal` reads
+  differently from CBAND merely being *absent* from the trouble list, and
+  absence is ambiguous — it could equally mean the check stopped running.
+
+  Rows are still sorted worst first, so a clean subject costs two lines at the
+  bottom rather than attention at the top.
+
+  The evidence link now hangs off healthy rows too, which changes its meaning
+  slightly and deliberately: for a row with something wrong the filtered view
+  is the evidence for it; for a row at 100% it is the evidence that there was
+  nothing. It is also where a clean row's *excluded* runs can be seen, which is
+  why `error` and `skip` stay in the link's filter even though v0.4.6 stopped
+  counting them — the disclosure line needs somewhere to point.
+
+  Against production the report grows from 51.3 KB to 64.9 KB, 37 KB clear of
+  Gmail's ~102 KB clip.
+
 ## [0.4.6] — 2026-09-13
 
 ### Changed
