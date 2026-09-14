@@ -28,6 +28,53 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.9] — 2026-09-14
+
+### Fixed
+
+- **Outlook was showing a different chart from Gmail.** Word has no CSS
+  gradients, so the gradient bins collapsed to their `bgcolor` fallback — the
+  bin's **worst** status, painted solid. A bin that was 95% healthy read as
+  solid red. Defensible while Outlook was the minority; as the primary
+  rendering for nearly the whole readership it is the exact "worst of the bin"
+  distortion the proportional encoding exists to avoid.
+
+  Bins are now stacked background-colored table **rows**, which Word draws
+  natively. One rendering for every client.
+
+  Size was the obstacle: stacked bins cost ~4× the markup and put a 19-row
+  report at 119 KB, past Gmail's ~102 KB clip. Two things clear it —
+  a single-color bin skips the nested table (117 of 152 bins on a real day are
+  one color; that alone took 88.9 KB → 71.0 KB), and `render_html` measures
+  itself and re-renders compact above 95 KB so an all-mixed day degrades to
+  solid bins rather than losing its tail. That fallback colors by the bin's
+  *availability*, not its worst status, so it does not reintroduce the
+  distortion.
+
+- **Three alignment faults**, each found behind the last:
+
+  | Fault | Effect |
+  |---|---|
+  | Bin variants did not share a box — the multi-color cell had no `height` or `border-radius`, the single-color one had both | rows mixing them sat at different sizes and corners |
+  | The availability figure had no fixed width, and the strip is right-aligned | `0.0%` pushed the bars ~18px further right than `100.0%`; radars span the full range, so it showed there |
+  | `Forecast — Cumulative Precipitation · fcst_total_precip_cum` is 59 chars | wide enough to push the right-hand cell and knock that row out of the column |
+
+  All three bin variants now render one geometry (asserted by reading the
+  template), the availability cell is a fixed 54px as both attribute and CSS,
+  and products print the name alone — 35 characters at worst.
+
+### Changed
+
+- **Products lead with their name; radars keep their id.** `XSWR` is what
+  appears in alarms, check ids and the evidence link, and the call signs are
+  the vocabulary the lab speaks. `max_water_level` is not a word anyone says,
+  and unlike a call sign carries nothing the name does not. The product id is
+  dropped rather than trailed — it still reaches the reader through the
+  evidence link, and the plain-text part still carries it where no width can
+  break.
+
+- `bar_css` and the gradient path are removed rather than left dormant.
+
 ## [0.4.8] — 2026-09-14
 
 ### Changed
