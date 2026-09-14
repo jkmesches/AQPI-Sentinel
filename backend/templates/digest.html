@@ -139,10 +139,14 @@
         <div class="t-mute" style="font:400 13px/1.6 {{ F }};color:#6b7280;">
           {{ '{:,}'.format(d.runs) }} checks ·
           {% if d.conclusive_pct is not none %}{{ '%.1f'|format(d.conclusive_pct) }}% conclusive{% endif %}
-          {% if d.inconclusive %}
-          <br>{{ '{:,}'.format(d.inconclusive) }} could not be judged (an upstream dependency
-          was unhealthy). Those are excluded from the percentages above rather than
-          counted as healthy.
+          {% if d.excluded %}
+          {# Load-bearing. Every figure above now comes from pass/warn/fail only,
+             so without this line a window in which Sentinel could see nothing
+             would read as a window in which nothing was wrong. #}
+          <br>{{ '{:,}'.format(d.excluded) }} runs are not counted above — the check errored,
+          or declined to judge because something it depends on was already down.
+          Every figure in this report comes only from checks that returned
+          pass, warn or fail.
           {% endif %}
         </div>
       </td></tr>

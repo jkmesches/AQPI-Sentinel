@@ -201,7 +201,7 @@ def main() -> int:
                     "description": "offline the whole window — day 52"},
                    {"key": "CBAND", "availability": 100.0, "buckets": [100] * 8,
                     "description": "nominal"}],
-        "products": [], "runs": 32035, "inconclusive": 130,
+        "products": [], "runs": 32035, "excluded": 130,
         "conclusive_pct": 99.6,
     }
     txt = render_text(data, "https://x.test")
@@ -209,7 +209,8 @@ def main() -> int:
     check("a fully nominal subject collapses to one line",
           "1 nominal: CBAND" in txt, [l for l in txt.splitlines() if "nominal" in l])
     check("the coverage caveat is stated, not implied",
-          "could not be judged" in txt)
+          "are not counted above" in txt and "pass, warn or fail" in txt,
+          [l for l in txt.splitlines() if "not counted" in l])
     check("defaults ship disabled", DEFAULTS["enabled"] is False)
 
     # --- the daily send claim ------------------------------------------------
@@ -301,24 +302,51 @@ def main() -> int:
     check("an untroubled bucket is one solid green swatch",
           allpass == [(_C_OK, _BAR_PX)], str(allpass))
 
-    # XEBY 22:00 on 2026-09-11: 12 fail, 2 error, 1 skip, no passes.
-    xeby = stack({"n": 15, "n_pass": 0, "n_fail": 12, "n_error": 2, "n_skip": 1})
+    # The report covers pass/warn/fail only. `n` is already the count of those,
+    # so XEBY's 22:00 bucket (12 fail, 2 error, 1 skip) reports n=12 and reads
+    # as wholly failing rather than mostly failing with a violet cap.
+    xeby = stack({"n": 12, "n_pass": 0, "n_fail": 12, "n_excluded": 3})
     check("a bucket with no passing runs shows no green",
           all(c != _C_OK for c, _ in xeby), str(xeby))
-    check("...and shows its errors in the grid's violet",
-          any(c == _C_ERROR for c, _ in xeby), str(xeby))
+    check("...and no violet or grey, which the report no longer uses",
+          all(c not in (_C_ERROR, _C_SKIP) for c, _ in xeby), str(xeby))
     check("...stacked most-severe LAST, because HTML rows paint top-down",
           xeby[-1][0] == _C_BAD, str(xeby))
 
-    rare = stack({"n": 30, "n_pass": 29, "n_error": 1})
-    check("one error in thirty runs still earns a visible band",
-          any(c == _C_ERROR and px >= 3 for c, px in rare), str(rare))
+    warned = stack({"n": 20, "n_pass": 10, "n_warn": 10})
+    check("warn still earns its own band", any(c == _C_WARN for c, _ in warned),
+          str(warned))
     almost = stack({"n": 720, "n_pass": 1, "n_fail": 719})
     check("a 0.1% healthy share earns no green pixel",
           all(c != _C_OK for c, _ in almost), str(almost))
 
-    check("an all-skip bucket is grey, not green",
-          stack({"n": 10, "n_skip": 10}) == [(_C_SKIP, _BAR_PX)])
+    # === the safety property ===
+    # Excluding a status must never turn a blind spot green. A slice in which
+    # every run errored or skipped has no verdict to report, and the one thing
+    # it must not look like is a slice where nothing went wrong.
+    blind = stack({"n": 0, "n_pass": 0, "n_excluded": 30})
+    check("a slice with nothing but errors and skips is NOT green",
+          all(c != _C_OK for c, _ in blind), str(blind))
+    check("...it is the no-verdict grey", blind == [(_C_NONE, _BAR_PX)], str(blind))
+    from backend.digest import bar_cells as _bc
+    tip = _bc([{"n": 0, "n_pass": 0, "n_excluded": 30}])[0]["title"]
+    check("...and says so, so it differs from a slice where nothing ran",
+          "not counted" in tip, tip)
+
+    # A subject with NO verdicts at all is now far more reachable than before,
+    # because error and skip no longer count. The two ways to get there are
+    # different statements and must not share a sentence.
+    from backend.digest import Subject as _S, describe as _d
+    _now = datetime.now(timezone.utc)
+    blind_sub = _S(key="X", label="X"); blind_sub.excluded = 1440
+    msg = _d(blind_sub, kind="radar", chronic_since=None, now=_now)
+    check("a subject whose every run was excluded does not claim nothing ran",
+          "no checks in window" not in msg, msg)
+    check("...it says how many ran and that none were conclusive",
+          "1,440" in msg and "nothing conclusive" in msg, msg)
+    check("a subject that genuinely had no runs still says so",
+          _d(_S(key="Y", label="Y"), kind="radar", chronic_since=None,
+             now=_now) == "no checks in window")
     check("a bucket with no runs is the no-data grey",
           stack(None) == [(_C_NONE, _BAR_PX)])
 
@@ -361,7 +389,7 @@ def main() -> int:
     worst = {
         "window_label": "Fri 11 Sep 07:00 MDT",
         "since": "2026-09-10T13:00:00+00:00", "until": "2026-09-11T13:00:00+00:00",
-        "runs": 31986, "conclusive_pct": 99.4, "inconclusive": 183,
+        "runs": 31986, "conclusive_pct": 99.4, "excluded": 183,
         "radars":   [row(f"XR{i:02d}", "radar") for i in range(6)],
         "products": [row(f"product_number_{i:02d}", "product") for i in range(13)],
     }
@@ -407,7 +435,7 @@ def main() -> int:
     rendered = render_text({
         "window_label": "Fri 11 Sep 07:00 MDT", "since": "2026-09-10T13:00:00+00:00",
         "until": "2026-09-11T13:00:00+00:00", "runs": 0, "conclusive_pct": 100.0,
-        "inconclusive": 0,
+        "excluded": 0,
         "radars": [{"key": "XSWR", "kind": "radar", "name": "Sawyer Ridge",
                     "availability": 58.3, "buckets": [], "description": "offline 9h 16m"}],
         "products": [],
