@@ -28,6 +28,68 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-09-13
+
+### Changed
+
+- **The daily report covers `pass`, `warn` and `fail` only.** `error` means
+  Sentinel's own probe failed; `skip` means it declined to judge because a
+  dependency was already down. Neither says anything about whether a radar is
+  working, and both were moving the figures.
+
+  The effect is larger than it sounds. Measured against the same 24 h window:
+
+  | Subject | Before | After |
+  |---|---|---|
+  | XSCW | 85.5% | **90.2%** |
+  | XSCR | 94.2% | **99.7%** |
+  | XSCV | 94.4% | **99.9%** |
+  | XSWR | 94.8% | **99.4%** |
+  | CBAND | 94.1% | **nominal** |
+  | XEBY | 0.0% | 0.0% |
+  | *every product* | — | *unchanged* |
+
+  Every radar moved and not one product did, which is the finding in a line:
+  the radars' missing percent was our probe erroring against the upstream API
+  and being counted as the radar being offline. Errors were class 2 in the
+  episode grouping, indistinguishable from a fail — so CBAND's "offline 15m
+  across 3 outages" was three API errors, and it now reads nominal, which is
+  what it was. The products' losses are genuine fails and stayed put.
+
+  Swatches lose the violet and grey bands with them.
+
+### Fixed
+
+- **`describe()` claimed "no checks in window" for a subject whose every run
+  was excluded.** With 1,440 runs in the window that is simply false, and it is
+  the plainest possible false claim in a report whose purpose is to be
+  checkable. It now reads "nothing conclusive — all 1,440 checks errored or
+  were skipped"; a genuinely empty window keeps the old wording. Both are
+  pinned, because they are different statements that were sharing a sentence.
+
+### Notes
+
+Dropping two statuses from a report is the easiest possible way to make a blind
+spot look healthy — the mistake this codebase has made three times already
+(closing alarms on demoted skips, painting skips green, painting errors green
+above them). So the exclusion is stated rather than silent:
+
+- The excluded count appears in both renderings, with wording that matches what
+  is actually excluded. In the window above: 2,413 of 31,995 runs, 7.5%.
+- A slice where every run errored renders in the no-verdict grey, never green,
+  and its tooltip says "N not counted" so it differs from a slice where nothing
+  ran at all.
+- Availability is `None`, not 0%, when nothing was conclusive — calling it 0%
+  would invent an outage out of our own blindness.
+
+One honest cost: outage durations grow 5–12 minutes on a ~2 h outage, because
+the episode window now runs over the filtered series and failures either side
+of an excluded run merge into one episode. The alternative splits one outage
+into two on the strength of a run that told us nothing.
+
+`/api/report/daily` renames `inconclusive` to `excluded`, and its meaning
+widens from demoted skips to all errors and skips.
+
 ## [0.4.5] — 2026-09-12
 
 ### Fixed
