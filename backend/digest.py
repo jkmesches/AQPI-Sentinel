@@ -59,6 +59,22 @@ VERDICT_PLAIN = {
 # no data arrives, so nothing else in the chain will report it.
 SILENT_FAILURE = "GHOST_UP"
 
+# What the report is about: the three verdicts that say something about the
+# monitored thing. `error` says our probe failed and `skip` says we declined to
+# judge — both are facts about Sentinel, not about the radar network, and this
+# report goes to people who want to know whether the network is working.
+#
+# They are EXCLUDED, not hidden. Every figure below is computed over
+# REPORTED_STATUSES only, and the count of everything left out is carried on
+# the report itself. That disclosure is load-bearing: without it a window where
+# Sentinel could see nothing would render as a window where nothing was wrong,
+# which is the exact mistake this codebase has now made three times — closing
+# alarms on demoted skips, painting skips green on the timeline, and painting
+# errors green above them. Dropping a status from a report is fine; dropping it
+# silently is not.
+REPORTED_STATUSES = ("pass", "warn", "fail")
+EXCLUDED_STATUSES = ("error", "skip")
+
 DEFAULTS: dict[str, Any] = {
     "enabled":    False,
     "recipients": [],
@@ -73,9 +89,9 @@ class Subject:
     """One radar or product row."""
     key: str
     label: str
-    judged: int = 0                 # runs we could form an opinion about
+    judged: int = 0                 # runs with a pass / warn / fail verdict
     passed: int = 0
-    inconclusive: int = 0           # demoted skips — excluded from availability
+    excluded: int = 0               # error + skip — see EXCLUDED_STATUSES
     outages: list[dict] = field(default_factory=list)   # sustained, 2+ runs
     blips: int = 0                  # isolated single-run failures
     blip_seconds: float = 0.0
@@ -173,6 +189,14 @@ def describe(sub: Subject, *, kind: str = "radar",
         return " · ".join(bits)
     # Nothing episodic to report. Only claim "nominal" if the number agrees.
     if avail is None:
+        # There are two ways to have no availability, and they are not the same
+        # statement. Saying "no checks in window" when 1,440 of them ran and
+        # every one errored would be the plainest possible false claim in a
+        # report whose whole purpose is to be checkable.
+        if sub.excluded:
+            n = sub.excluded
+            return (f"nothing conclusive — all {n:,} check{'s' if n != 1 else ''} "
+                    f"errored or were skipped")
         return "no checks in window"
     if avail >= 99.5:
         return "nominal"
@@ -197,6 +221,7 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                                            ORDER BY finished_at) AS next_at
             FROM check_runs
             WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+              AND status = ANY($4::text[])
         ),
         grp AS (
             SELECT *,
@@ -212,15 +237,24 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                -- bad run: measuring to the last bad run understates every
                -- outage by one cadence interval.
                max(coalesce(next_at, $2))                     AS ended,
-               count(*) FILTER (WHERE status = 'pass')         AS n_pass,
-               count(*) FILTER (WHERE status = 'skip'
-                                 AND reason = ANY($4::text[])) AS n_inconclusive,
-               count(*) FILTER (WHERE status = 'skip')         AS n_skip
+               count(*) FILTER (WHERE status = 'pass')         AS n_pass
         FROM grp
         GROUP BY check_id, g, bad
         ORDER BY check_id, min(finished_at)
         """,
-        since, until, like, list(INCONCLUSIVE_SKIP_REASONS),
+        since, until, like, list(REPORTED_STATUSES),
+    )
+    # Counted, not reported. See EXCLUDED_STATUSES for why these are kept out
+    # of the figures and why the count still has to be shown somewhere.
+    excl = await pool.fetch(
+        """
+        SELECT check_id, count(*) AS n
+        FROM check_runs
+        WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+          AND status = ANY($4::text[])
+        GROUP BY 1
+        """,
+        since, until, like, list(EXCLUDED_STATUSES),
     )
 
     subs: dict[str, Subject] = {}
@@ -228,13 +262,11 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
         key = r["check_id"].replace(strip, "")
         sub = subs.setdefault(key, Subject(key=key, label=key))
         n = int(r["n_runs"])
-        inconclusive = int(r["n_inconclusive"] or 0)
-        skips = int(r["n_skip"] or 0)
-        sub.inconclusive += inconclusive
-        # Judged = everything we formed an opinion about. Intrinsic skips (no
-        # reason) counted as "nothing wrong"; demoted ones are not judged.
-        sub.judged += n - inconclusive
-        sub.passed += int(r["n_pass"] or 0) + (skips - inconclusive)
+        # Every run reaching here is a pass, a warn or a fail — the SQL filters
+        # the rest out — so the denominator is simply the runs that produced a
+        # verdict about the monitored thing.
+        sub.judged += n
+        sub.passed += int(r["n_pass"] or 0)
         cls = int(r["bad"])
         if cls:
             seconds = (r["ended"] - r["started"]).total_seconds()
@@ -249,6 +281,10 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                                      "seconds": seconds, "runs": n})
             else:
                 sub.degraded_blips += 1
+
+    for r in excl:
+        key = r["check_id"].replace(strip, "")
+        subs.setdefault(key, Subject(key=key, label=key)).excluded += int(r["n"])
     return subs
 
 
@@ -284,34 +320,33 @@ async def _buckets(pool, since, until, like: str, strip: str,
         """
         SELECT check_id,
                floor(extract(epoch from (finished_at - $1)) / $4)::int AS b,
-               count(*)                                        AS n,
-               count(*) FILTER (WHERE status = 'pass')         AS n_pass,
-               count(*) FILTER (WHERE status = 'fail')         AS n_fail,
-               count(*) FILTER (WHERE status = 'error')        AS n_error,
-               count(*) FILTER (WHERE status = 'warn')         AS n_warn,
-               count(*) FILTER (WHERE status = 'skip')         AS n_skip,
-               count(*) FILTER (WHERE NOT (status = 'skip'
-                                 AND payload->>'reason' = ANY($5::text[]))) AS judged
+               count(*) FILTER (WHERE status = ANY($5::text[]))  AS n,
+               count(*) FILTER (WHERE status = 'pass')           AS n_pass,
+               count(*) FILTER (WHERE status = 'fail')           AS n_fail,
+               count(*) FILTER (WHERE status = 'warn')           AS n_warn,
+               count(*) FILTER (WHERE status = ANY($6::text[]))  AS n_excluded
         FROM check_runs
         WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
         GROUP BY 1, 2
         """,
-        since, until, like, span, list(INCONCLUSIVE_SKIP_REASONS),
+        since, until, like, span, list(REPORTED_STATUSES), list(EXCLUDED_STATUSES),
     )
     out: dict[str, list[dict | None]] = {}
     for r in rows:
         key = r["check_id"].replace(strip, "")
         arr = out.setdefault(key, [None] * n_buckets)
         idx = min(max(int(r["b"]), 0), n_buckets - 1)
-        judged = int(r["judged"] or 0)
+        n = int(r["n"] or 0)
         arr[idx] = {
-            "avail": (100.0 * int(r["n_pass"] or 0) / judged) if judged else None,
-            "n":      int(r["n"] or 0),
-            "n_pass": int(r["n_pass"] or 0),
-            "n_fail": int(r["n_fail"] or 0),
-            "n_error": int(r["n_error"] or 0),
-            "n_warn": int(r["n_warn"] or 0),
-            "n_skip": int(r["n_skip"] or 0),
+            # None, not 0%, when nothing in the slice produced a verdict. A
+            # bucket that was entirely errors is "we could not see", and
+            # calling that 0% healthy would invent an outage.
+            "avail": (100.0 * int(r["n_pass"] or 0) / n) if n else None,
+            "n":          n,
+            "n_pass":     int(r["n_pass"] or 0),
+            "n_fail":     int(r["n_fail"] or 0),
+            "n_warn":     int(r["n_warn"] or 0),
+            "n_excluded": int(r["n_excluded"] or 0),
         }
     return out
 
@@ -367,7 +402,7 @@ async def compute(pool, *, since: datetime, until: datetime,
                 "name":           subject_name(kind, key),
                 "availability":   sub.availability,
                 "judged":         sub.judged,
-                "inconclusive":   sub.inconclusive,
+                "excluded":       sub.excluded,
                 "offline_seconds": sub.offline_seconds,
                 "outages":        len(sub.outages),
                 "blips":          sub.blips,
@@ -388,15 +423,13 @@ async def compute(pool, *, since: datetime, until: datetime,
     totals = await pool.fetchrow(
         """
         SELECT count(*) AS runs,
-               count(*) FILTER (WHERE status = 'skip'
-                                 AND payload->>'reason' = ANY($3::text[]))
-                   AS inconclusive
+               count(*) FILTER (WHERE status = ANY($3::text[])) AS excluded
         FROM check_runs WHERE finished_at > $1 AND finished_at <= $2
         """,
-        since, until, list(INCONCLUSIVE_SKIP_REASONS),
+        since, until, list(EXCLUDED_STATUSES),
     )
     runs = int(totals["runs"] or 0)
-    incon = int(totals["inconclusive"] or 0)
+    incon = int(totals["excluded"] or 0)
 
     return {
         "since":    since.isoformat(),
@@ -406,7 +439,7 @@ async def compute(pool, *, since: datetime, until: datetime,
         "radars":   radars,
         "products": prods,
         "runs":     runs,
-        "inconclusive": incon,
+        "excluded": incon,
         "conclusive_pct": (100.0 * (runs - incon) / runs) if runs else None,
     }
 
@@ -572,9 +605,11 @@ def render_text(data: dict, public_url: str = "") -> str:
 
     if data["runs"]:
         L.append(f"{data['runs']:,} checks · {data['conclusive_pct']:.1f}% conclusive")
-        if data["inconclusive"]:
-            L.append(f"{data['inconclusive']:,} runs could not be judged (an upstream "
-                     f"dependency was unhealthy) and are excluded from availability.")
+        if data.get("excluded"):
+            L.append(f"{data['excluded']:,} runs are not counted above — the check "
+                     f"errored, or declined to judge because something it "
+                     f"depends on was already down. Every figure in this report "
+                     f"comes only from checks that returned pass, warn or fail.")
     return "\n".join(L)
 
 
@@ -622,8 +657,12 @@ def subject_line(data: dict) -> str:
 _C_OK    = "#16a34a"    # --color-ok      green-600
 _C_WARN  = "#9a6905"    # --color-warn    deep gold
 _C_BAD   = "#B91C1C"    # --color-fail    red-700
-_C_ERROR = "#6D28D9"    # --color-error   violet-700
-_C_SKIP  = "#6f7568"    # --color-faint   "we declined to judge"
+# Kept, unused by the swatches on purpose. `error` and `skip` no longer set a
+# colour here — the report covers pass/warn/fail only — but the grid still draws
+# them, and leaving the two palettes side by side is what stops someone
+# "restoring" a different violet later. See REPORTED_STATUSES.
+_C_ERROR = "#6D28D9"    # --color-error   violet-700  (timeline only)
+_C_SKIP  = "#6f7568"    # --color-faint   violet's grey sibling (timeline only)
 _C_NONE  = "#d1d5db"    # nothing ran at all
 
 
@@ -660,14 +699,16 @@ def bar_bands(bucket) -> list[dict]:
     same reason, as timelineFill.ts.
     """
     if not bucket or not (bucket.get("n") if isinstance(bucket, dict) else 0):
+        # No run in this slice produced a verdict — either nothing ran, or
+        # everything that ran errored or was skipped. Neutral grey, never
+        # green: "we have nothing to show you" must not look like "all clear".
         return [{"color": _C_NONE, "px": _BAR_PX}]
     n = bucket["n"]
     parts: list[tuple[str, float, int]] = []      # (color, share, min_px)
-    for key, color in (("n_fail", _C_BAD), ("n_error", _C_ERROR),
-                       ("n_warn", _C_WARN), ("n_skip", _C_SKIP)):
+    for key, color in (("n_fail", _C_BAD), ("n_warn", _C_WARN)):
         c = int(bucket.get(key) or 0)
         if c > 0:
-            parts.append((color, min(1.0, c / n), _BAR_MIN_PX if key != "n_skip" else 1))
+            parts.append((color, min(1.0, c / n), _BAR_MIN_PX))
     used_share = sum(s for _, s, _ in parts)
     if 1.0 - used_share > 0:
         parts.append((_C_OK, 1.0 - used_share, 0))
@@ -724,12 +765,16 @@ def bar_cells(buckets) -> list[dict]:
         if b is None:
             title = "no checks"
         else:
-            bits = [f"{a:.0f}% healthy"] if a is not None else ["not judged"]
-            for label, key in (("fail", "n_fail"), ("error", "n_error"),
-                               ("warn", "n_warn"), ("skip", "n_skip")):
+            bits = [f"{a:.0f}% healthy"] if a is not None else ["nothing conclusive"]
+            for label, key in (("fail", "n_fail"), ("warn", "n_warn")):
                 c = int(b.get(key) or 0) if isinstance(b, dict) else 0
                 if c:
                     bits.append(f"{c} {label}")
+            # Named in the tooltip even though it sets no colour, so a grey
+            # swatch can be told apart from one where nothing ran at all.
+            ex = int(b.get("n_excluded") or 0) if isinstance(b, dict) else 0
+            if ex:
+                bits.append(f"{ex} not counted")
             title = " · ".join(bits)
         bands = bar_bands(b)
         out.append({
