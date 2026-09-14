@@ -28,6 +28,57 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.8] — 2026-09-14
+
+### Changed
+
+- **Upstream HTTP timeout raised 35s → 50s.** radarca's latency tail has moved
+  again. The 35s comment named the measurement to take — `over_ceiling` on
+  `layer0.origin.latency`, "sustained above ~1% means the tail has moved" — and
+  it is at **7.2%**. Over 290 uncensored probes in 24 h:
+
+  ```
+  p50 4.8s   p75 10.9s   p90 23.0s   p95 41.9s   p99 59.4s   max 120.7s
+  ```
+
+  p95 was 5.9–8.4s when 35s was chosen. Buckets above the old ceiling:
+  30–40s ×4, 40–50s ×10, 50–60s ×7, 60–70s ×1, 90–100s ×1, 120–130s ×1.
+
+  The same comment warns against raising this for *burst*-induced timeouts, and
+  that warning does not apply: `over_ceiling` is **5.6% outside episodes** and
+  17.9% during them, so the baseline moved rather than only the peaks.
+
+  **The cadence picks the number, not the latency.** The shortest cadence using
+  this client is 60s and read timeouts are not retried, so 50s is one timeout at
+  83% of a cycle; 60s would consume the whole cycle. That covers roughly 14 of
+  the 24 over-ceiling samples — the 60s, 92s and 120.7s tail is not reachable by
+  any timeout this scheduler can afford.
+
+  What it trades away: a 45-second answer is now a slow pass rather than an
+  error. That is a real upstream degradation being reclassified, not fixed, and
+  `layer0.origin.latency` is the only thing still reporting it — which today
+  returns `pass` on samples as slow as 91.9s because its verdict keys off HTTP
+  status rather than latency. That check is the natural home for a latency
+  threshold; deliberately not in this release.
+
+- **Canary ceiling raised 75s → 150s**, and not optionally.
+  `test_latency_canary` asserts the canary's ceiling stays more than 2× the
+  operational one, and that assertion failed on this change: measuring a tail
+  from inside the ceiling that truncates it is the circularity the canary
+  exists to break, and 75s is not far enough above 50s to see past it.
+
+  75s was stale regardless. It was set as "well beyond the worst observed
+  (42s)", while this check recorded **120.7s** on 2026-09-13 — a sample that
+  reached us only because httpx applies a bare float timeout per-operation
+  rather than to the whole request, so the 75s label never was the
+  total-request bound it read as. 150s is not a prediction of the true maximum;
+  it is a ceiling chosen to be uninteresting, so `timed_out` staying at 0 means
+  something.
+
+- `LIVE_TIMEOUT_S` in `validation_tests/test_layer0_website.py` moves with the
+  operational ceiling, as its own comment instructs — the live probes hit the
+  same endpoint, and a lower ceiling fails for reasons unrelated to the test.
+
 ## [0.4.7] — 2026-09-13
 
 ### Changed
