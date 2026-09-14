@@ -28,6 +28,64 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-09-14
+
+### Fixed
+
+- **The clip guard was measured in the wrong unit, in the unsafe direction.**
+  Gmail's ~102 KB limit applies to the **encoded** body. The HTML ships
+  quoted-printable — what `EmailMessage.add_alternative` picks for this
+  content — and QP costs **+11%** on this markup, since `·` and `—` are
+  multi-byte and every `=` and high byte expands.
+
+  The threshold was `95,000` measured on `len(html)`, which is ~105,450 on the
+  wire. There was a live window, roughly 92,000–95,000 HTML bytes, where the
+  guard reported the report was fine and Gmail truncated it anyway — precisely
+  the failure the fallback was added to prevent, missed because the check and
+  the limit were in different units.
+
+  `render_html` now encodes the way the send path does and compares against a
+  wire threshold, rather than applying a fudge factor: the inflation depends on
+  how much non-ASCII a given report contains, so a constant would be wrong
+  somewhere. The log line reports both numbers, and the tests assert on wire
+  bytes including that every fixture shape ships under the clip.
+
+  Where the fallback now fires, in wire bytes:
+
+  ```
+  4/8 bins mixed:  97,921  -> stacked
+  5/8 bins mixed: 106,737  -> compact, ships 67,616
+  ```
+
+- **A tooltip trim undid a property from 0.4.6.** Dropping titles from all
+  single-status bins also dropped them from grey no-verdict bins — which then
+  could not be told apart from a slice where nothing ran, a different
+  statement. Titles are kept wherever the color is ambiguous (multi-band bins,
+  bins with excluded runs, no-verdict bins) and dropped only where the swatch
+  is already its own answer.
+
+### Changed
+
+- **The compact fallback blends rather than steps.** It used a four-step ramp
+  on the bin's availability, which could not distinguish a bin that was 40%
+  `warn` from one that was 40% `fail` — both landed on the same gold. It now
+  mixes the status colors in proportion. Anchors are exact (all-pass is
+  precisely `#16a34a`, all-fail `#b91c1c`) and the mix is monotone: more
+  failure always moves the swatch toward red.
+
+  Two limits, recorded as properties rather than oversights. A pass/fail blend
+  passes through olive near 50/50, which sits close to the warn gold — three
+  hues in one swatch cannot be fully unambiguous. And the blend does not floor
+  the failing share the way the stacked bars do, so a 1%-fail bin is very
+  nearly green. Both are the cost of asking one color to carry a proportion,
+  and both are why stacking is the default and this is the fallback.
+
+- Markup trims: band rows drop the duplicate `height` CSS (the attribute
+  already says it), and plain single-status bins drop their tooltip. Worth ~4
+  KB. Noted honestly: this was expected to move the fallback trigger from 5/8
+  to 6/8 mixed bins and did not — 67 KB of the worst case is per-row
+  scaffolding that bin trimming does not touch.
+
 ## [0.4.9] — 2026-09-14
 
 ### Fixed
