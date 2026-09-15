@@ -28,6 +28,111 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.11] — 2026-09-15
+
+Root-cause work on the 2026-09-13/14 upstream incident turned up seven
+Sentinel defects that let an 11h 47m data outage and a 14h 06m publisher
+stall pass with zero notifications and a daily report that understated both
+by roughly an order of magnitude. This release fixes all seven, and widens
+the one threshold whose false alarms had trained the reflex that silenced
+them.
+
+### Fixed
+
+- **The daily report stated a condition it had not checked.** `describe()`
+  hardcoded the word "stale" for every product `warn` episode regardless of
+  which sub-check warned, so the 2026-09-15 briefing told ten recipients that
+  `fcst_temp` was "stale 2h 59m" — for data whose newest timestamp was five
+  days *ahead* of wall clock. The warns were manifest-ordering parity
+  defects. The sentence now names the sub-checks that actually warned, with a
+  raw-key fallback for anything unmapped: an unfamiliar sub-check prints its
+  own name, which is ugly but never wrong. Radars emit no `sub_status` map
+  and keep the generic word rather than acquiring a specific one that would
+  be false.
+
+- **An outage already running when the report window opened was printed at
+  its clipped length, as though that were the whole thing.** `comp_now`'s
+  14h 06m stall (01:26 → 15:32 UTC) rendered as "one outage, 2h 26m" because
+  the window opened at 13:05; `qpe_1hr`'s 11h 47m outage rendered as "1h
+  04m". Both figures were arithmetically exact and gave a false impression.
+  Such episodes now print as a floor with the last known-good time — `one
+  outage, ≥ 2h 26m · last healthy 01:25 UTC 09-14, before this window`. The
+  clipped number is deliberately *not* replaced by the true length, because
+  the report's own header says it covers 24 hours. A one-run clipped episode
+  is also promoted out of the blip counters: a 14-hour outage whose tail
+  lands on a single check is an outage, not a "brief interruption".
+
+- **Cascade suppression never expired.** `suppressed_by` was computed once at
+  alarm-open and thereafter only read. Four product alarms opened
+  2026-09-13 21:40 attributed to `layer0.origin.episode` — correct at that
+  minute. The origin episode passed; the products did not, and went on to
+  serve an empty manifest from 02:22 to 14:10 the next day. The stale
+  attribution held all four silent for 17h 30m. Suppression is now
+  re-evaluated every tick against a per-tick status snapshot: cleared when
+  the named cause recovers, re-stamped when a different ancestor is failing,
+  and left exactly as it was when no snapshot is available.
+
+- **Alarm severity was a property of the first bad sample, not of the
+  condition.** `compute_severity` read `status_at_open` and nothing else, and
+  warn-opened alarms were explicitly excluded from duration promotion.
+  `qpe_1hr` opened on an `E_step_count` warn, went to a hard fail four hours
+  later, and served no data for twelve hours — at severity `info` throughout.
+  An alarm that opened on a warn could never escalate however far the thing
+  fell afterwards, which is exactly the shape a progressively degrading
+  upstream produces. Severity is now the worse of open-time and current
+  status, duration promotion fires if either is `fail`/`error`, and the
+  result is ratcheted so it rises with the condition and falls only when the
+  alarm closes.
+
+- **Acknowledgement froze everything, not just the paging.** `is_acked`
+  returned before route matching and before severity computation, so acking
+  an alarm pinned its severity for life and silenced it unconditionally. One
+  bulk ack at 2026-09-14 04:00:38 covered five alarms including a nowcast
+  that had stopped publishing ninety minutes earlier and would not resume for
+  another eleven hours. The ack check now runs after severity, and consults a
+  baseline: `ack_alarm` records `severity_at_ack` and `status_at_ack`, and
+  the ack lapses when either rises. Acking the degraded thing no longer means
+  going deaf to what it becomes.
+
+- **An empty manifest and a malformed one shared one nameless verdict.**
+  Both returned the summary `empty/malformed steps` with no sub-check list at
+  all. From 2026-09-14 02:22 to 14:10 UTC the upstream answered every request
+  for `comp_ref`, `qpe_1hr`, `qpe_15min` and `precip_rate_radar` with HTTP
+  200 and zero steps — 2,018 runs, an 11h 47m total data outage whose
+  highest-signal symptom was the least legible line in the UI. Split into
+  `B_nonempty` and `B_schema`, each with a summary that says which happened.
+
+- **Parity verdicts never reached the summary.** `_summarize()` was called
+  with the sub-check dict *before* the parity verdict was merged in, while
+  `_final()` got the merged one. A parity warn therefore set the overall
+  status to `warn` while leaving the summary with no `warn=[...]` list, so
+  nothing downstream could name the condition — the direct cause of the
+  "stale" mislabel above. One dict now feeds both.
+
+### Changed
+
+- **`comp_now`'s freshness threshold widened from -3000s to -2400s.** -3000
+  is exactly where a healthy publish cycle ends, so the threshold had no
+  slack and a single late cycle failed the check. Measured over 7 days to
+  2026-09-15 with the 01:26–15:32 stall excluded (n=9,200): p50 -3227, p90
+  -3078, p99 -2750, p99.5 -2122. A cycle publishes at ~-3360 and drifts to
+  ~-3000 over about six minutes, so one missed publish lands near -2640 and
+  two near -2280; -2400 tolerates one and catches the second. Failing share
+  drops from 1.99% to 0.62%, at the cost of ~10 minutes of extra detection
+  latency on a genuine stall. The churn mattered: it produced six pass/fail
+  flips in the 00:00–01:00 UTC hour on 2026-09-14, an hour before the real
+  stall, and the alarms for that stall were bulk-acked at 04:00 and then ran
+  unnoticed for eleven more hours.
+
+- `alarm_acks` gains two nullable columns, `severity_at_ack` and
+  `status_at_ack`, via the existing idempotent `ALTER TABLE ... ADD COLUMN IF
+  NOT EXISTS` pattern. No backfill: `NULL` means "no baseline on record", and
+  such an ack is honored rather than revoked on a guess.
+
+- The daily report's JSON now carries `fail_subs`, `warn_subs` and
+  `truncated` per subject, so API consumers can reach the same facts the
+  sentence states without parsing prose.
+
 ## [0.4.10] — 2026-09-14
 
 ### Fixed
