@@ -6,8 +6,12 @@ Layer 3B is folded into this check on purpose: it needs the same
 for no signal gain. The parity verdict lives in ``payload['parity']``.
 
 One instance per product in ``config.PRODUCTS``. Each emits sub-check
-booleans A–H plus a parity dict, with the overall ``status`` set to the
-worst of the contributing sub-checks.
+booleans A–H plus a parity verdict, with the overall ``status`` set to the
+worst of the contributing sub-checks. Every sub-check that is not `pass`
+is named in the summary's ``fail=[...]`` / ``warn=[...]`` list — downstream
+(the digest, the drilldown, the alert email) reports the condition by that
+name, so a verdict that does not appear there is a condition nothing can
+describe.
 """
 from __future__ import annotations
 import hashlib
@@ -102,9 +106,36 @@ class Layer1ProductCheck(Check):
         payload["n_steps"] = n
         metrics["n_steps"] = float(n)
 
-        if not steps or not all("imageName" in s and "timestamp" in s for s in steps):
+        # Two failures were folded into one line here, and the more important
+        # of them was the one that lost its name.
+        #
+        # On 2026-09-14 the upstream answered every request for comp_ref,
+        # qpe_1hr, qpe_15min and precip_rate_radar with HTTP 200 and a
+        # manifest containing zero steps, continuously from 02:22 to 14:10
+        # UTC — 2,018 check runs across the four. Every one of them recorded
+        # `fail` with the summary "empty/malformed steps" and no sub-check
+        # list at all, so the single highest-signal symptom of an 11h 47m
+        # outage was also the least legible line in our own UI.
+        #
+        # An empty manifest and a malformed one are different upstream
+        # defects with different owners: empty means the generator produced
+        # nothing while the API kept answering, malformed means the API is
+        # serving something it should have rejected. They get separate
+        # sub-check names so the digest, the drilldown and the alert email
+        # can each say which one happened.
+        if not steps:
+            sub["B_nonempty"] = "fail"
+            payload["empty_manifest"] = True
+            return _final(self, t0, sub, payload, metrics,
+                          summary=f"upstream served an empty manifest "
+                                  f"(http {r.status_code}, n_steps=0)")
+        if not all("imageName" in s and "timestamp" in s for s in steps):
             sub["B_schema"] = "fail"
-            return _final(self, t0, sub, payload, metrics, summary="empty/malformed steps")
+            return _final(self, t0, sub, payload, metrics,
+                          summary=f"malformed steps — {n} entr"
+                                  f"{'y' if n == 1 else 'ies'}, some missing "
+                                  f"imageName/timestamp")
+        sub["B_nonempty"] = "pass"
         sub["B_schema"] = "pass"
 
         # --- derive timestamps once ---
@@ -336,10 +367,18 @@ class Layer1ProductCheck(Check):
                 "defects":          tseq["defects"],
             })
 
-        summary = _summarize(sub, age_s, n, ir.status_code if ir else None,
+        # Summarize the SAME dict that sets the verdict. These were two
+        # different dicts: `sub` (no parity) went to _summarize, and
+        # `{**sub, "parity": ...}` went to _final. A parity warn therefore
+        # set the overall status to warn while leaving the summary with no
+        # `warn=[...]` list, so nothing downstream could name the condition
+        # — which is how the 2026-09-15 digest came to describe fcst_temp's
+        # parity warns as "stale 2h 59m" for data that was five days AHEAD
+        # of wall clock. See digest.describe().
+        sub_all = {**sub, "parity": parity_verdict}
+        summary = _summarize(sub_all, age_s, n, ir.status_code if ir else None,
                              cfg["unit"], parity=payload["parity"])
-        return _final(self, t0, {**sub, "parity": parity_verdict}, payload, metrics,
-                      summary=summary)
+        return _final(self, t0, sub_all, payload, metrics, summary=summary)
 
 
 # --------------------------------------------------------------------------
