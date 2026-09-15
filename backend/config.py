@@ -118,10 +118,33 @@ PRODUCTS = {
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": 360, "min_png_bytes": 5_000,
                                "unit": "dBZ"},
+    # max_freshness_s was -3000, which is exactly where a healthy cycle ends,
+    # so the threshold had approximately zero slack against the publish
+    # interval and a single late cycle failed the check.
+    #
+    # Measured over 7 days to 2026-09-15, with the 2026-09-14 01:26-15:32
+    # stall excluded so the tail is churn and not one real outage
+    # (n=9,200 samples of age_s):
+    #
+    #     p50 -3227   p90 -3078   p99 -2750   p99.5 -2122   p99.9 -11
+    #
+    # A cycle publishes at age ~-3360 and drifts to ~-3000 over about six
+    # minutes, then republishes. One missed publish therefore lands near
+    # -2640 and two near -2280, so -2400 tolerates exactly one missed cycle
+    # and catches the second. Share of samples failing: 1.99% at -3000,
+    # 0.62% at -2400 — the removed two-thirds are single-cycle lateness,
+    # which produced six pass/fail flips in the 00:00-01:00 UTC hour on
+    # 2026-09-14 alone. That churn is the reason the real stall an hour
+    # later was bulk-acknowledged at 04:00 and then ran for another eleven
+    # hours unnoticed; a threshold that cries wolf is a threshold that gets
+    # acked reflexively.
+    #
+    # Detection of a genuine stall is ~10 minutes later than before, which
+    # is the whole cost, against a stall that lasted 14h 06m.
     "comp_now":               {"details": "composite_nowcast/details.json",
                                "image_dir": "composite_nowcast/images/",
                                "cadence_s": 120, "expected_steps": 31,
-                               "max_freshness_s": -3000, "min_png_bytes": 5_000,
+                               "max_freshness_s": -2400, "min_png_bytes": 5_000,
                                "unit": "dBZ"},
     # Forecast products: two non-obvious calibrations.
     # 1. `min_png_bytes` lowered to 1500 — these products legitimately
