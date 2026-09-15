@@ -12,13 +12,21 @@ ownership behavior for a team on one rotation.
 Three separate paths can notify, and ack has to hold on all of them:
 
   engine._process   → email / console / webhook, plus every repeat_interval
-                      re-send. Gated by is_acked() before route matching, so
-                      an acked alarm never even resolves a policy.
+                      re-send. Gated by is_acked(), which runs AFTER route
+                      matching and severity computation: an ack stops the
+                      paging, not the bookkeeping. It used to return before
+                      both, which froze an acked alarm's severity for life.
   push (immediate)  → fires from the alarm_open listener. An ack cannot
                       exist before the alarm does, so this one always goes
                       out; that is the notification the ack responds to.
   push (deferred)   → the smart-delay re-checks liveness after delay_s and
                       must honour an ack placed during the window.
+
+An ack is also not unconditional. It records the severity and check status
+it was given (alarm_acks.severity_at_ack / status_at_ack) and lapses if
+either rises — see engine._ack_still_covers. Rows written before those
+columns existed carry no baseline and keep their ack rather than being
+revoked on a guess.
 
 The subtle one is REVOCATION. is_acked() filters `revoked_at IS NULL`; the
 deferred-push re-check originally did a bare EXISTS on alarm_acks, so an
@@ -66,19 +74,39 @@ CFG = AlertsConfig.model_validate({
 
 class AckStore:
     """Store stub that reports an ack and records dispatch attempts."""
-    def __init__(self, acked: bool):
+    def __init__(self, acked: bool, ack_baseline: dict | None = None):
         self.acked = acked
+        # What the operator was looking at when they acked. None models a row
+        # written before the columns existed.
+        self.ack_baseline = ack_baseline
         self.dispatched: list = []
         self.notif_counts = 0
+        self.severities: list = []
+        self.suppressions: list = []
+        self.unacked: list = []
 
     async def is_acked(self, alarm_id):
         return self.acked
 
+    async def ack_state(self, alarm_id):
+        if not self.acked:
+            return None
+        return {"acked_by": "op", "acked_at": utcnow(), "note": None,
+                **(self.ack_baseline or {"severity_at_ack": None,
+                                         "status_at_ack": None})}
+
+    async def unack_alarm(self, alarm_id):
+        self.unacked.append(alarm_id)
+        self.acked = False
+
     async def list_active_silences(self, now):
         return []
 
-    async def update_alarm_severity(self, *a, **k):
-        pass
+    async def update_alarm_severity(self, alarm_id, severity):
+        self.severities.append((alarm_id, severity))
+
+    async def update_alarm_suppression(self, alarm_id, suppressed_by):
+        self.suppressions.append((alarm_id, suppressed_by))
 
     async def notification_count_for_step(self, alarm_id, step_idx):
         # >0 exercises the repeat_interval branch rather than a first send.
@@ -88,11 +116,12 @@ class AckStore:
         return utcnow() - timedelta(hours=2)   # repeat is well overdue
 
 
-def make_engine(store):
+def make_engine(store, depends_on=None):
     eng = AlarmEngine.__new__(AlarmEngine)
     eng.store = store
     eng.cfg = CFG
     eng.router = Router(CFG)
+    eng.depends_on_index = depends_on or {}
     eng._emit = lambda *a, **k: asyncio.sleep(0)
 
     async def _dispatch(alarm, route, step, step_idx):
@@ -155,6 +184,96 @@ async def main() -> int:
     row = {**alarm_row(now), "severity": "critical"}
     await make_engine(st)._process(row, now, [])
     check("ack outranks severity and repeat count", st.dispatched == [])
+
+    # --- ack lapses when the condition outgrows it -------------------------
+    #
+    # 2026-09-14 04:00:38: five alarms acked in one sweep. One of them was a
+    # composite nowcast that had stopped publishing at 01:26 and would not
+    # resume until 15:32. The ack silenced all fourteen hours of it, and the
+    # severity it happened to hold at 04:00 is the severity it still held at
+    # 15:00. An ack has to be a statement about a condition, not a blanket.
+    base = {"severity_at_ack": "warn", "status_at_ack": "warn"}
+
+    st = AckStore(acked=True, ack_baseline=base)
+    row = {**alarm_row(now), "severity": "warn",
+           "payload": {"status_at_open": "warn"}}
+    await make_engine(st)._process(row, now, [], {"layer2.radar.XEBY": "warn"})
+    check("an ack holds while the condition is what was acked",
+          st.dispatched == [] and st.unacked == [], str(st.dispatched))
+
+    st = AckStore(acked=True, ack_baseline=base)
+    row = {**alarm_row(now), "severity": "warn",
+           "payload": {"status_at_open": "warn"}}
+    await make_engine(st)._process(row, now, [], {"layer2.radar.XEBY": "fail"})
+    check("...and lapses when the check falls from warn to fail",
+          st.unacked == [1], str(st.unacked))
+    check("...so the page that was owed actually goes out",
+          st.dispatched == [(1, 0)], str(st.dispatched))
+
+    # The baseline is what makes the comparison possible. Rows acked before
+    # those columns existed have none, and must keep their ack rather than be
+    # revoked on a guess.
+    st = AckStore(acked=True, ack_baseline={"severity_at_ack": None,
+                                            "status_at_ack": None})
+    await make_engine(st)._process(alarm_row(now), now, [],
+                                   {"layer2.radar.XEBY": "fail"})
+    check("an ack with no recorded baseline is honored, not revoked",
+          st.dispatched == [] and st.unacked == [], str(st.unacked))
+
+    # --- severity tracks the condition, not the first sample ---------------
+    #
+    # qpe_1hr opened on an E_step_count warn at 2026-09-13 21:41, went to a
+    # hard fail four hours later and served nothing at all for twelve hours.
+    # It sat at severity `info` the entire time, because severity was read off
+    # the status that opened it.
+    st = AckStore(acked=False)
+    row = {**alarm_row(now), "severity": "info",
+           "payload": {"status_at_open": "warn"}}
+    await make_engine(st)._process(row, now, [], {"layer2.radar.XEBY": "fail"})
+    check("an alarm opened on warn escalates once the check fails",
+          st.severities and st.severities[-1][1] == "critical",
+          str(st.severities))
+
+    # ...and does not walk back down when the check flaps to warn again. A
+    # de-escalation nobody asked for reads exactly like the problem ending.
+    st = AckStore(acked=False)
+    row = {**alarm_row(now), "severity": "critical",
+           "payload": {"status_at_open": "warn"}}
+    await make_engine(st)._process(row, now, [], {"layer2.radar.XEBY": "warn"})
+    check("severity ratchets — a flap back to warn does not demote it",
+          st.severities == [], str(st.severities))
+
+    # --- suppression is a claim about now, not about then ------------------
+    #
+    # Four product alarms opened 2026-09-13 21:40 attributed to an origin
+    # episode. The episode cleared within the hour; the attribution did not,
+    # and held them silent for 17h 30m.
+    DEPS = {"layer2.radar.XEBY": ["layer0.origin"]}
+
+    st = AckStore(acked=False)
+    row = {**alarm_row(now), "suppressed_by": "layer0.origin"}
+    await make_engine(st, DEPS)._process(row, now, [],
+                                         {"layer0.origin": "fail"})
+    check("suppression holds while the named cause is still failing",
+          st.dispatched == [] and st.suppressions == [], str(st.dispatched))
+
+    st = AckStore(acked=False)
+    row = {**alarm_row(now), "suppressed_by": "layer0.origin"}
+    await make_engine(st, DEPS)._process(row, now, [],
+                                         {"layer0.origin": "pass"})
+    check("...and clears once the cause recovers",
+          st.suppressions == [(1, None)], str(st.suppressions))
+    check("...leaving the alarm to stand on its own and page",
+          st.dispatched == [(1, 0)], str(st.dispatched))
+
+    # Without a status snapshot there is nothing to re-evaluate against, and
+    # the safe answer is the old behavior rather than a guess in either
+    # direction.
+    st = AckStore(acked=False)
+    row = {**alarm_row(now), "suppressed_by": "layer0.origin"}
+    await make_engine(st, DEPS)._process(row, now, [], {})
+    check("a missing status snapshot leaves suppression exactly as it was",
+          st.dispatched == [] and st.suppressions == [], str(st.suppressions))
 
     # --- deferred push path ------------------------------------------------
     import backend.push as push
