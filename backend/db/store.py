@@ -243,6 +243,23 @@ class Store:
             alarm_id, severity,
         )
 
+    async def update_alarm_suppression(
+        self, alarm_id: int, suppressed_by: str | None
+    ) -> None:
+        """Re-stamp (usually clear) an alarm's cascade attribution.
+
+        `suppressed_by` was written once at open time and never revisited, so
+        a suppression that was correct for one minute stayed correct forever.
+        On 2026-09-13 four product alarms opened attributed to an origin
+        episode; the episode passed, the products did not, and the attribution
+        held them silent for 17h 30m — through an 11h 47m total data outage.
+        """
+        assert self.pool is not None
+        await self.pool.execute(
+            "UPDATE alarms SET suppressed_by = $2 WHERE id = $1",
+            alarm_id, suppressed_by,
+        )
+
     async def non_pass_streak_start(self, check_id: str, target: str):
         """When the current unbroken run of non-pass results began.
 
@@ -345,11 +362,25 @@ class Store:
     # Acks
     # ===================================================================
     async def ack_alarm(self, alarm_id: int, user: str, note: str | None) -> None:
+        """Acknowledge, recording the state being acknowledged.
+
+        An ack means "I have seen THIS". Storing the severity and check status
+        at ack time is what later lets the engine notice that this is no
+        longer this — see AlarmEngine._ack_still_covers.
+        """
         assert self.pool is not None
         await self.pool.execute(
             """
-            INSERT INTO alarm_acks (alarm_id, acked_by, acked_at, note)
-            VALUES ($1, $2, now(), $3)
+            INSERT INTO alarm_acks
+                (alarm_id, acked_by, acked_at, note,
+                 severity_at_ack, status_at_ack)
+            VALUES ($1, $2, now(), $3,
+                    (SELECT severity FROM alarms WHERE id = $1),
+                    (SELECT r.status FROM alarms a
+                       JOIN check_runs r
+                         ON r.check_id = a.check_id AND r.target = a.target
+                      WHERE a.id = $1
+                      ORDER BY r.finished_at DESC LIMIT 1))
             """,
             alarm_id, user, note,
         )
@@ -380,7 +411,7 @@ class Store:
         assert self.pool is not None
         row = await self.pool.fetchrow(
             """
-            SELECT acked_by, acked_at, note
+            SELECT acked_by, acked_at, note, severity_at_ack, status_at_ack
             FROM alarm_acks
             WHERE alarm_id = $1 AND revoked_at IS NULL
             ORDER BY acked_at DESC LIMIT 1

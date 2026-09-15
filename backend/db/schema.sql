@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS alarm_acks (
   PRIMARY KEY (alarm_id, acked_at)
 );
 
+-- What the operator was acknowledging. An ack is "I have seen THIS", so the
+-- engine needs THIS on record to notice when the condition stops being it and
+-- the ack should lapse. Added 2026-09-15; NULL on rows predating it, which the
+-- engine treats as "no baseline, keep the ack".
+ALTER TABLE alarm_acks
+  ADD COLUMN IF NOT EXISTS severity_at_ack TEXT,
+  ADD COLUMN IF NOT EXISTS status_at_ack   TEXT;
+
 CREATE TABLE IF NOT EXISTS notification_log (
   id              BIGSERIAL PRIMARY KEY,
   alarm_id        BIGINT NOT NULL REFERENCES alarms(id) ON DELETE CASCADE,

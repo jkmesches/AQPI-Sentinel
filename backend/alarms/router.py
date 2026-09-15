@@ -23,6 +23,16 @@ Route ``severity_floor`` raises the severity if the floor is higher.
 Prior model (v0.1.1-): warn/fail/error all mapped to severity=warn, making
 severity_floor unable to distinguish "degraded" from "broken." Reshaped in
 v0.1.2 so the routing tier maps cleanly onto operational priority.
+
+Severity tracks the CURRENT status, not the status that opened the alarm.
+Until 2026-09-15 it read `status_at_open` only, which made severity a
+property of the first bad sample rather than of the condition — an alarm
+that opened on a warn could never escalate however far the thing fell
+afterwards. It cost 17h 30m of `info` on a product serving no data. See
+compute_severity.
+
+Escalation is one-way. Severity rises with the condition and falls only when
+the alarm closes.
 """
 from __future__ import annotations
 import logging
@@ -125,20 +135,41 @@ class Router:
         self, alarm: dict, route: Route | None, now: datetime
     ) -> str:
         alarm = flatten_alarm(alarm)
-        sev = severity_for_status(alarm.get("status_at_open", "warn"))
+        at_open = alarm.get("status_at_open", "warn")
+        # `status_now` is the latest run for this check/target, supplied by the
+        # engine each tick. Absent (older callers, tests), fall back to the
+        # open-time status — the previous behavior exactly.
+        now_status = alarm.get("status_now") or at_open
+
+        # Severity is the worse of what opened the alarm and what is happening
+        # now. Reading only `status_at_open` meant an alarm could never
+        # escalate past the condition that created it: on 2026-09-13 qpe_1hr
+        # opened on an E_step_count warn at 21:41, went to a hard fail four
+        # hours later, and stayed at severity `info` for 17h 30m while the
+        # product served no data at all. A progressively degrading upstream
+        # produces exactly that shape — warn first, fail later — and it is the
+        # shape this used to be blind to.
+        sev = _max_sev(severity_for_status(at_open),
+                       severity_for_status(now_status))
+
         opened: datetime = alarm["opened_at"]
-        # Duration-based promotion: long-running fail/error → critical.
-        # Both kinds mean "broken"; if either is still open past
-        # PROMOTE_AFTER_S, it's no longer transient and warrants a
-        # page-tier severity. warn-status alarms stay at info (they're
-        # degraded, not broken — no auto-escalation).
-        if (now - opened).total_seconds() >= PROMOTE_AFTER_S and \
-           alarm.get("status_at_open") in ("fail", "error"):
+        # Duration-based promotion: long-running fail/error → critical. Both
+        # kinds mean "broken"; if either is still open past PROMOTE_AFTER_S,
+        # it's no longer transient and warrants a page-tier severity. A
+        # warn-only alarm still stays at info — degraded is not broken — but
+        # "warn-only" now means neither then nor now, not merely not then.
+        if (now - opened).total_seconds() >= PROMOTE_AFTER_S and (
+                at_open in ("fail", "error") or now_status in ("fail", "error")):
             sev = _max_sev("critical", sev)
         # apply floor
         if route and route.severity_floor:
             sev = _max_sev(route.severity_floor, sev)
-        return sev
+        # Ratchet. Severity may rise within an alarm's life and must not fall:
+        # a check flapping fail→warn while the alarm stays open would
+        # otherwise quietly walk the severity back down, and a de-escalation
+        # nobody asked for is indistinguishable from the problem going away.
+        # The alarm closing is what ends it.
+        return _max_sev(sev, alarm.get("severity"))
 
 
 def reload(path: str | None = None) -> Router:

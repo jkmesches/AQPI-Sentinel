@@ -20,7 +20,7 @@ from ..registry import CHECKS
 from . import silences as silence_lib
 from . import suppression as sup_lib
 from .models import AlertsConfig
-from .router import Router, severity_for_status
+from .router import Router, severity_for_status, _SEV_RANK
 from .sinks import build_sinks
 
 log = logging.getLogger(__name__)
@@ -262,9 +262,25 @@ class AlarmEngine:
         if not rows:
             return
         active_silences = await self.store.list_active_silences(now)
+        # One snapshot of every check's latest status, shared by all open
+        # alarms this tick. Both the suppression re-evaluation and the
+        # current-status severity read need it, and neither is worth a
+        # per-alarm query.
+        try:
+            latest = {
+                cid: row["status"]
+                for cid, row in (await self.store.latest_per_check_map()).items()
+            }
+        except Exception:
+            # Fail closed onto the old behavior rather than dropping a tick:
+            # without the snapshot, suppression and severity simply stay as
+            # they were, which is what they did before this existed.
+            log.exception("latest-status snapshot failed; tick degrades to "
+                          "open-time severity and frozen suppression")
+            latest = {}
         for alarm in rows:
             try:
-                await self._process(alarm, now, active_silences)
+                await self._process(alarm, now, active_silences, latest)
             except Exception:
                 log.exception("processing alarm %s", alarm.get("id"))
 
@@ -321,11 +337,41 @@ class AlarmEngine:
                 "auto_close_reason": "acked_and_recovered",
             })
 
-    async def _process(self, alarm: dict, now: datetime, silences: list[dict]):
+    async def _process(self, alarm: dict, now: datetime, silences: list[dict],
+                       latest: dict[str, str] | None = None):
+        latest = latest or {}
+        status_now = latest.get(alarm["check_id"])
+        if status_now:
+            alarm = {**alarm, "status_now": status_now}
+
+        # === Suppression, re-evaluated ===
+        #
+        # This used to be a bare `if alarm["suppressed_by"]: return`, reading a
+        # column written once at open time. A cascade attribution is a claim
+        # about the present ("the origin is down, so of course this is too"),
+        # and it was being stored as though it were a claim about the alarm.
+        #
+        # On 2026-09-13 21:40 four product alarms opened attributed to
+        # layer0.origin.episode. The episode passed. The products did not —
+        # they went on to serve an empty manifest from 02:22 to 14:10 the next
+        # day — and the stale attribution held all four silent for 17h 30m.
         if alarm["suppressed_by"]:
-            return
-        if await self.store.is_acked(alarm["id"]):
-            return
+            if not latest:
+                return                      # no snapshot: leave it as it was
+            still = sup_lib.compute_suppression(
+                alarm["check_id"], latest, self.depends_on_index,
+            )
+            if still:
+                if still != alarm["suppressed_by"]:
+                    await self.store.update_alarm_suppression(alarm["id"], still)
+                    alarm["suppressed_by"] = still
+                return
+            await self.store.update_alarm_suppression(alarm["id"], None)
+            alarm["suppressed_by"] = None
+            log.info("alarm %s no longer suppressed — cause cleared, alarm stands",
+                     alarm["id"])
+            await self._emit("alarm_unsuppress", {"id": alarm["id"]})
+
         sil = silence_lib.find_active_silence(silences, alarm, now)
         if sil:
             return
@@ -337,12 +383,35 @@ class AlarmEngine:
         if route is None:
             return
 
-        # Severity (with floor + duration promotion)
+        # === Severity (floor + duration + current status) ===
+        #
+        # Computed BEFORE the ack check, deliberately. An ack is a statement
+        # about notification — "stop telling me" — not about how bad the thing
+        # is, and the two were conflated: `is_acked` returned before this line,
+        # so acknowledging an alarm froze its severity for the rest of its
+        # life. On 2026-09-14 one bulk ack at 04:00 pinned five alarms,
+        # including a 14h 06m total stall, at the severity they happened to
+        # hold ninety minutes in.
         new_sev = self.router.compute_severity(alarm, route, now)
         if new_sev != alarm["severity"]:
             await self.store.update_alarm_severity(alarm["id"], new_sev)
             alarm["severity"] = new_sev
             await self._emit("alarm_promote", {"id": alarm["id"], "severity": new_sev})
+
+        # === Ack ===
+        #
+        # Silences notification only, and only while it still describes what is
+        # happening. See _ack_still_covers.
+        if await self.store.is_acked(alarm["id"]):
+            if await self._ack_still_covers(alarm, status_now):
+                return
+            await self.store.unack_alarm(alarm["id"])
+            log.info("alarm %s ack lapsed — condition worsened to severity=%s "
+                     "status=%s", alarm["id"], alarm["severity"], status_now)
+            await self._emit("alarm_ack_lapsed", {
+                "id": alarm["id"], "severity": alarm["severity"],
+                "status": status_now,
+            })
 
         # Which steps are due AND not yet fired?
         policy = self.cfg.policy(route.policy)
@@ -363,6 +432,51 @@ class AlarmEngine:
                 if last and (now - last).total_seconds() < route.repeat_interval_s:
                     continue
             await self._dispatch(alarm, route, step, step_idx)
+
+    # Status severity for the ack comparison. Deliberately separate from the
+    # alarm severity ladder: this ranks how bad the CHECK is, not how loudly
+    # we page about it.
+    _STATUS_RANK = {"pass": 0, "skip": 0, "warn": 1, "fail": 2, "error": 2}
+
+    async def _ack_still_covers(self, alarm: dict, status_now: str | None) -> bool:
+        """Does the ack still describe what is happening?
+
+        An ack means "I have seen this, stop telling me". It should not also
+        mean "and stop telling me about whatever this becomes". Ack the
+        degraded thing at 04:00 and it is reasonable to hear nothing more
+        about the degraded thing; it is not reasonable to hear nothing when
+        the product stops serving data entirely at 04:10.
+
+        That is what happened. Five alarms acked in one sweep at 2026-09-14
+        04:00:38 covered, among others, a nowcast that had stopped publishing
+        ninety minutes earlier and did not resume for another eleven hours.
+        Zero notifications were sent for any of them.
+
+        Lapses when the check status or the alarm severity has risen above
+        what was on record at ack time. Rows acked before those columns
+        existed have no baseline, and a missing baseline keeps the ack — an
+        ack that cannot be compared is left alone rather than revoked on a
+        guess.
+        """
+        try:
+            st = await self.store.ack_state(alarm["id"])
+        except Exception:
+            log.exception("ack_state lookup failed for alarm %s; honoring ack",
+                          alarm["id"])
+            return True
+        if not st:
+            return True                     # raced with an un-ack
+
+        sev_at = st.get("severity_at_ack")
+        if sev_at and _SEV_RANK.get(alarm["severity"], 0) > _SEV_RANK.get(sev_at, 0):
+            return False
+
+        status_at = st.get("status_at_ack")
+        if status_at and status_now:
+            if self._STATUS_RANK.get(status_now, 0) > \
+               self._STATUS_RANK.get(status_at, 0):
+                return False
+        return True
 
     async def _expand_receiver_groups(self, recv, when):
         """Apply group expansion + schedule gate to a receiver.
