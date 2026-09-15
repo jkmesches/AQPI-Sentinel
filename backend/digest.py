@@ -97,6 +97,14 @@ class Subject:
     blip_seconds: float = 0.0
     degraded: list[dict] = field(default_factory=list)  # sustained `warn`
     degraded_blips: int = 0
+    # Sub-check names seen failing / warning, so the description can say WHICH
+    # condition occurred instead of guessing. Empty for radars, which do not
+    # emit a sub_status map.
+    fail_subs: set[str] = field(default_factory=set)
+    warn_subs: set[str] = field(default_factory=set)
+    # The first episode in the window, kept so it can be re-labelled once we
+    # know whether it was already running when the window opened.
+    _boundary: dict | None = None
     verdicts: dict[str, int] = field(default_factory=dict)
     buckets: list[float | None] = field(default_factory=list)
 
@@ -117,6 +125,56 @@ class Subject:
     @property
     def silent_failures(self) -> int:
         return self.verdicts.get(SILENT_FAILURE, 0)
+
+
+# What each sub-check means in the words an operator would use. Anything not
+# listed falls through to its raw key, which is ugly but never wrong — the
+# failure mode this replaces was a confident word for the wrong condition.
+_SUB_LABELS = {
+    "A_api_up":       "API down",
+    "B_nonempty":     "empty manifest",
+    "B_schema":       "malformed manifest",
+    "C_freshness":    "stale",
+    "D_cadence":      "irregular cadence",
+    "E_step_count":   "short manifest",
+    "F_image_exists": "image missing",
+    "G_image_size":   "image undersized",
+    "H_image_hash":   "image unchanged",
+    "parity":         "manifest ordering",
+}
+
+
+def _name_subs(keys: set[str], limit: int = 2) -> str:
+    """Join sub-check names, worst-known-first, truncating politely."""
+    names = [_SUB_LABELS.get(k, k) for k in sorted(keys)]
+    if not names:
+        return ""
+    if len(names) <= limit:
+        return " + ".join(names)
+    return f"{' + '.join(names[:limit])} +{len(names) - limit} more"
+
+
+def _truncation_note(sub: "Subject") -> str:
+    """One clause saying the window cut an episode short, or "".
+
+    Only the FIRST episode of a subject can be truncated — a later one is by
+    definition preceded by a run inside the window. `_subject_rows` marks it
+    when the run immediately before the window opened was bad in the same
+    way, and carries the last time the subject was known good.
+    """
+    ep = next((e for e in (*sub.outages, *sub.degraded) if e.get("truncated")),
+              None)
+    if ep is None:
+        return ""
+    began = ep.get("true_started")
+    if began is None:
+        return "already running when the window opened"
+    # "last healthy", not "began": what we measured is the last run that
+    # passed, and the first bad run is somewhere in the cadence interval
+    # after it. Saying "began" would state as fact a time up to one interval
+    # earlier than the truth, in a line whose entire purpose is to correct an
+    # overstatement of precision.
+    return f"last healthy {began:%H:%M} UTC {began:%m-%d}, before this window"
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -157,14 +215,31 @@ def describe(sub: Subject, *, kind: str = "radar",
             line += f" — day {days}"
         return line
 
+    # An episode already running when the window opened is measured from the
+    # window edge, not from where it started, so its duration is a floor and
+    # has to be printed as one. On 2026-09-15 comp_now's 14h 06m stall (01:26
+    # -> 15:32 UTC) was rendered "one outage, 2h 26m" because the window
+    # opened at 13:05 and 13:05 -> 15:32 is 2h 26m; qpe_1hr's 11h 47m
+    # empty-manifest outage was rendered "1h 04m" the same way. Both numbers
+    # were arithmetically correct and told the reader something false.
+    trunc = _truncation_note(sub)
+    # The floor marker belongs only on the figure it actually qualifies: if
+    # the clipped episode was an outage, the degradation total beside it is
+    # still exact, and marking both would trade one imprecision for another.
+    GE = "\u2265 "
+    out_ge = GE if any(o.get("truncated") for o in sub.outages) else ""
+    deg_ge = GE if any(d.get("truncated") for d in sub.degraded) else ""
+
     if sub.outages:
         total = _fmt_duration(sub.offline_seconds)
         if len(sub.outages) == 1:
-            bits.append(f"one outage, {total}")
+            bits.append(f"one outage, {out_ge}{total}")
         else:
-            longest = _fmt_duration(max(o["seconds"] for o in sub.outages))
-            bits.append(f"{dead} {total} across {len(sub.outages)} outages, "
-                        f"longest {longest}")
+            worst = max(sub.outages, key=lambda o: o["seconds"])
+            longest = _fmt_duration(worst["seconds"])
+            long_ge = GE if worst.get("truncated") else ""
+            bits.append(f"{dead} {out_ge}{total} across {len(sub.outages)} "
+                        f"outages, longest {long_ge}{longest}")
     # Reported whether or not there was also a sustained outage. An earlier
     # version only mentioned blips when there were no outages, which left
     # CBAND described as "one outage, 5m" beside an availability of 97.5% —
@@ -173,17 +248,29 @@ def describe(sub: Subject, *, kind: str = "radar",
     brief = sub.blips + sub.degraded_blips
     if brief:
         word = "also brief" if bits else "brief interruptions only"
-        secs = _fmt_duration(sub.blip_seconds) if sub.blip_seconds else None
+        blip_s = max(0.0, sub.blip_seconds)
+        secs = _fmt_duration(blip_s) if blip_s else None
         bits.append(f"{word}, {secs} total" if secs else
                     f"{word} ({brief} single check{'s' if brief != 1 else ''})")
 
     if sub.degraded:
-        stale = "stale" if kind == "product" else "degraded"
-        bits.append(f"{stale} {_fmt_duration(sub.degraded_seconds)}")
+        # Name the condition. This line used to hardcode "stale" for every
+        # product warn episode regardless of which sub-check warned, so the
+        # 2026-09-15 digest reported fcst_temp as "stale 2h 59m" when the
+        # warns were parity defects and the data was five days AHEAD of wall
+        # clock — the one thing in that report that was not merely imprecise
+        # but untrue. Radars emit no sub_status map, so they keep the generic
+        # word rather than gaining a wrong specific one.
+        label = _name_subs(sub.warn_subs) or (
+            "stale" if kind == "product" else "degraded")
+        bits.append(f"{label} {deg_ge}{_fmt_duration(sub.degraded_seconds)}")
 
     n = sub.silent_failures
     if n:
         bits.append(f"{n} check{'s' if n != 1 else ''}: reported online but sent nothing")
+
+    if trunc:
+        bits.append(trunc)
 
     if bits:
         return " · ".join(bits)
@@ -210,6 +297,25 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
         WITH runs AS (
             SELECT check_id, finished_at, status, payload->>'reason' AS reason,
                    substring(summary from '→ ([A-Z_]+)') AS verdict,
+                   -- Which sub-checks were unhappy on this run. Products
+                   -- carry a sub_status map; radars do not, and get NULL,
+                   -- which string_agg drops. See describe().
+                   -- The ELSE arm matters: without it this expands the
+                   -- sub_status map of every PASSING run too, which is ~95%
+                   -- of the window and took compute() from 0.3s to 6s.
+                   CASE
+                     WHEN status = 'warn' THEN (
+                       SELECT string_agg(e.key, ',' ORDER BY e.key)
+                         FROM jsonb_each_text(
+                                coalesce(payload->'sub_status', '{}'::jsonb)) e
+                        WHERE e.value = 'warn')
+                     WHEN status IN ('fail', 'error') THEN (
+                       SELECT string_agg(e.key, ',' ORDER BY e.key)
+                         FROM jsonb_each_text(
+                                coalesce(payload->'sub_status', '{}'::jsonb)) e
+                        WHERE e.value IN ('fail', 'error'))
+                     ELSE NULL
+                   END AS sub_names,
                    -- Three classes, not two. `warn` is neither healthy nor
                    -- an outage: for a radar it means the status flag is stale
                    -- while data flows, for a product it means stale data. It
@@ -237,7 +343,8 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                -- bad run: measuring to the last bad run understates every
                -- outage by one cadence interval.
                max(coalesce(next_at, $2))                     AS ended,
-               count(*) FILTER (WHERE status = 'pass')         AS n_pass
+               count(*) FILTER (WHERE status = 'pass')         AS n_pass,
+               string_agg(sub_names, ',')                      AS sub_names
         FROM grp
         GROUP BY check_id, g, bad
         ORDER BY check_id, min(finished_at)
@@ -257,6 +364,45 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
         since, until, like, list(EXCLUDED_STATUSES),
     )
 
+    # Was each subject already unhealthy when the window opened? An episode
+    # that begins before `since` is measured from the window edge and would
+    # otherwise be reported at that clipped length as though it were the whole
+    # thing. The lookback is bounded at 14 days so a long-dead product costs a
+    # bounded index scan; beyond that we say "already running" without a date.
+    boundary = await pool.fetch(
+        """
+        WITH last_before AS (
+            -- Lower-bounded on purpose. Without `finished_at > $1 - 1 day`
+            -- this DISTINCT ON walks every run a check has ever recorded to
+            -- find the newest one before the window, which cost 2.8s of a
+            -- 3.1s report. The newest run before `since` is at most one
+            -- cadence interval back; a check silent for a whole day has no
+            -- boundary state worth reporting.
+            SELECT DISTINCT ON (check_id) check_id, status
+              FROM check_runs
+             WHERE check_id LIKE $2
+               AND finished_at <= $1 AND finished_at > $1 - interval '1 day'
+               AND status = ANY($3::text[])
+             ORDER BY check_id, finished_at DESC
+        )
+        SELECT l.check_id, l.status,
+               (SELECT max(c.finished_at) FROM check_runs c
+                 WHERE c.check_id = l.check_id
+                   AND c.finished_at <= $1
+                   AND c.finished_at > $1 - interval '14 days'
+                   AND c.status = 'pass') AS last_pass
+          FROM last_before l
+         WHERE l.status <> 'pass'
+        """,
+        since, like, list(REPORTED_STATUSES),
+    )
+    prior: dict[str, dict] = {
+        r["check_id"].replace(strip, ""):
+            {"cls": 2 if r["status"] in ("fail", "error") else 1,
+             "last_pass": r["last_pass"]}
+        for r in boundary
+    }
+
     subs: dict[str, Subject] = {}
     for r in rows:
         key = r["check_id"].replace(strip, "")
@@ -270,17 +416,44 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
         cls = int(r["bad"])
         if cls:
             seconds = (r["ended"] - r["started"]).total_seconds()
+            names = {x for x in (r["sub_names"] or "").split(",") if x}
+            (sub.warn_subs if cls == 1 else sub.fail_subs).update(names)
+            ep = {"started": r["started"], "ended": r["ended"],
+                  "seconds": seconds, "runs": n}
             if cls == 2 and n >= 2:
-                sub.outages.append({"started": r["started"], "ended": r["ended"],
-                                    "seconds": seconds, "runs": n})
+                sub.outages.append(ep)
             elif cls == 2:
                 sub.blips += 1
                 sub.blip_seconds += seconds
             elif n >= 2:
-                sub.degraded.append({"started": r["started"], "ended": r["ended"],
-                                     "seconds": seconds, "runs": n})
+                sub.degraded.append(ep)
             else:
                 sub.degraded_blips += 1
+            # Rows arrive ordered by start, so the first bad group of a
+            # subject is the only one that can abut the window edge.
+            if sub._boundary is None:
+                sub._boundary = {"cls": cls, "n": n, "ep": ep,
+                                 "seconds": seconds}
+
+    for key, sub in subs.items():
+        p = prior.get(key)
+        b = sub._boundary
+        if not p or not b or b["cls"] != p["cls"]:
+            continue
+        ep = b["ep"]
+        ep["truncated"] = True
+        ep["true_started"] = p["last_pass"]
+        if b["n"] < 2:
+            # A 14-hour outage whose last run lands one check inside the
+            # window is not a blip. Promote it out of the blip counters so
+            # the sentence calls it what it was.
+            if b["cls"] == 2:
+                sub.blips -= 1
+                sub.blip_seconds -= b["seconds"]
+                sub.outages.append(ep)
+            else:
+                sub.degraded_blips -= 1
+                sub.degraded.append(ep)
 
     for r in excl:
         key = r["check_id"].replace(strip, "")
@@ -410,6 +583,12 @@ async def compute(pool, *, since: datetime, until: datetime,
                 "buckets":        sub.buckets,
                 "chronic_since":  chronic.isoformat() if chronic else None,
                 "degraded_seconds": sub.degraded_seconds,
+                # Named conditions and the window-edge flag, so /api/report
+                # consumers and the drilldown can say the same thing the
+                # sentence says without re-deriving it from prose.
+                "fail_subs":      sorted(sub.fail_subs),
+                "warn_subs":      sorted(sub.warn_subs),
+                "truncated":      bool(_truncation_note(sub)),
                 "description":    describe(sub, kind=kind, chronic_since=chronic,
                                            now=until),
             })

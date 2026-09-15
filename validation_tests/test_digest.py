@@ -151,6 +151,72 @@ def main() -> int:
     check("an outage is stated as a duration", "9h 16m" in d, d)
     check("...and not as a run count", "273" not in d, d)
 
+    print("the description names the condition it found:")
+    # The 2026-09-15 regression. fcst_temp warned on manifest-ordering parity
+    # defects and the report called it "stale 2h 59m" — for data whose newest
+    # timestamp was five days AHEAD of wall clock. Not imprecise: false.
+    s = sub(judged=49, passed=43, degraded=[ep(10740, 6)], warn_subs={"parity"})
+    d = describe(s, kind="product")
+    check("a parity warn is named as one", "manifest ordering" in d, d)
+    check("...and is NOT called stale", "stale" not in d, d)
+
+    s = sub(judged=49, passed=30, degraded=[ep(3600, 9)],
+            warn_subs={"C_freshness"})
+    check("a freshness warn IS still called stale",
+          "stale" in describe(s, kind="product"))
+
+    s = sub(judged=49, passed=20, degraded=[ep(3600, 9)],
+            warn_subs={"E_step_count", "D_cadence"})
+    d = describe(s, kind="product")
+    check("two conditions are both named",
+          "short manifest" in d and "irregular cadence" in d, d)
+
+    s = sub(judged=49, passed=20, degraded=[ep(3600, 9)],
+            warn_subs={"Z_invented_later"})
+    check("an unmapped sub-check degrades to its raw key, never to a guess",
+          "Z_invented_later" in describe(s, kind="product"))
+
+    # Radars emit no sub_status map. They must keep the generic word rather
+    # than acquire a specific one that would be wrong.
+    s = sub(judged=49, passed=20, degraded=[ep(3600, 9)])
+    check("a radar with no sub-checks still says 'degraded'",
+          "degraded" in describe(s, kind="radar"))
+
+    print("an episode clipped by the window edge says so:")
+    began = datetime(2026, 9, 14, 1, 26, tzinfo=timezone.utc)
+    clipped = {**ep(8812, 147), "truncated": True, "true_started": began}
+    s = sub(judged=1425, passed=1230, outages=[clipped])
+    d = describe(s, kind="product")
+    check("the duration is marked as a floor", "\u2265 2h 26m" in d, d)
+    check("...and the last known-good time is given",
+          "last healthy 01:26 UTC 09-14" in d, d)
+    check("...and it is flagged as predating the window",
+          "before this window" in d, d)
+    # The clipped figure itself must stay honest: we report what the window
+    # saw, marked as a minimum — we do not silently substitute the true 14h
+    # into a report whose header says it covers 24.
+    check("the in-window number is not inflated to the true length",
+          "14h" not in d, d)
+
+    s = sub(judged=1425, passed=1230, outages=[ep(8812, 147)])
+    check("an outage wholly inside the window carries no floor marker",
+          "\u2265" not in describe(s, kind="product"))
+
+    # Scope: the marker qualifies the figure it belongs to and no other.
+    s = sub(judged=1425, passed=1100, outages=[clipped],
+            degraded=[ep(1800, 5)], warn_subs={"E_step_count"})
+    d = describe(s, kind="product")
+    check("a clipped outage does not cast doubt on an exact warn total",
+          d.count("\u2265") == 1, d)
+
+    # A 14-hour outage whose tail lands on one check inside the window is an
+    # outage, not a "brief interruption".
+    lone = {**ep(62, 1), "truncated": True, "true_started": began}
+    s = sub(judged=49, passed=48, outages=[lone])
+    d = describe(s, kind="product")
+    check("a one-run clipped episode still reads as an outage",
+          "outage" in d and "brief" not in d, d)
+
     print("availability excludes what we could not judge:")
     s = sub(judged=0, passed=0, inconclusive=50)
     check("a fully inconclusive window has no availability, not 0%",
