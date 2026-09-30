@@ -80,6 +80,17 @@
           </tr>
           {% endif %}
 
+          {% if ack_url %}
+          <tr>
+            <td style="padding:16px 24px;">
+              <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#6f7568;margin-bottom:8px;">Seen it?</div>
+              <div style="margin-bottom:10px;">
+                <a href="{{ ack_url }}" style="display:inline-block;padding:8px 14px;background:#1E4D2B;color:#ffffff;text-decoration:none;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;border-radius:2px;">Acknowledge →</a>
+              </div>
+              <div style="font-size:11px;color:#555c50;">Stops the remaining reminder emails for this alarm. It does not resolve it, and you will be told again if it worsens.</div>
+            </td>
+          </tr>
+          {% endif %}
           {% if dashboard_url or verify_urls %}
           <tr>
             <td style="padding:16px 24px;">

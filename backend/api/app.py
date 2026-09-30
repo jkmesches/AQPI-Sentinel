@@ -18,6 +18,7 @@ from ..registry import CHECKS, all_stages
 from ..scheduler import Scheduler
 from .routes import admin as admin_routes
 from .routes import digest as digest_routes
+from .routes import ack as ack_routes
 from .routes import alarms as alarms_routes
 from .routes import auth as auth_routes
 from .routes import checks as checks_routes
@@ -310,6 +311,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_routes.router)
     app.include_router(users_routes.router)
     app.include_router(users_routes.public_router)
+    app.include_router(ack_routes.public_router)
     app.include_router(push_routes.router)
     app.include_router(digest_routes.router)
     app.include_router(digest_routes.admin_router)
