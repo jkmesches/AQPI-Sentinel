@@ -353,9 +353,13 @@ The alarm lifecycle:
 
 - **Open** — alarm is fresh, not yet acknowledged. Default
   notification cadence applies.
-- **Acked** — a user clicked the ack button. Repeats stop firing
-  even if the alarm is still open. Tracked in `alarm_acks` (one
-  row per ack event, supports unack-and-re-ack).
+- **Acked** — someone acknowledged it, either from the dashboard or
+  by tapping the per-recipient link in the alert email. Notification
+  stops even if the alarm is still open. Tracked in `alarm_acks` (one
+  row per ack event, supports unack-and-re-ack), along with the
+  severity and check status at the moment of acking — if either rises
+  afterwards the ack lapses and notification resumes, so acking the
+  degraded thing is not going deaf to what it becomes.
 - **Unacked** — a previously-acked alarm got un-acked. Repeats
   resume. Used when an ack was premature.
 - **Closed** — the underlying check returned to `pass` or an

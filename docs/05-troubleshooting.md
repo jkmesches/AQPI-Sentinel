@@ -232,6 +232,29 @@ Three usual causes:
    regenerated, every existing subscription stopped working
    silently. Toggle push off + on on each device to re-subscribe.
 
+### "An alarm is open in the UI but no email went out"
+
+Work down this list; each is silent when it bites.
+
+1. **Hold-down not yet met.** A route's *only after it lasts* (or the
+   global `hold_down`) delays the alarm opening at all. An alarm you
+   can see is past it, but check the first policy step's delay — that
+   stacks on top, and an alarm that closes inside the gap is routed,
+   matched, and notifies nobody. Keep the first step at `0m`.
+2. **No route matched.** `_matches` is exact string equality, so
+   `stage: L2` matches and `layer2.radar.*` does not. A route matching
+   nothing produces no error and no log line — see the warning in
+   [the alarm engine reference](16-alarm-engine.md). Add a catch-all
+   `status_at_open` route per status so nothing falls through unrouted.
+3. **The policy has no email channel.** A step naming only `console`
+   records and does not send, regardless of the policy's name.
+4. **Suppressed by a cascade dependency**, or covered by a silence.
+   `alarms.suppressed_by` names the cause.
+5. **Acked.** An ack stops notification for everyone, including
+   remaining escalation steps.
+6. **The group is off-duty.** If every group a receiver references is
+   outside its schedule, that receiver is skipped entirely.
+
 ### "Test alert in /admin/alerts says success but I never received the email"
 
 Sentinel reports success when SMTP accepted the message — the
@@ -244,6 +267,13 @@ view). Likely causes:
 - **Recipient's mail server** is rejecting from your provider's IP
   range → bounces in the provider's log.
 - **Provider quota** exceeded → silent throttle.
+- **The receiver holds an address nobody owns.** `delivery_status:
+  sent` only means SMTP accepted the handoff; a nonexistent mailbox
+  bounces asynchronously and Sentinel never learns. This is quiet and
+  can persist indefinitely — on 2026-09-30 a receiver had a colleague's
+  given and family names transposed in their address, so that person
+  received none of 26 alerts while the log showed every one as `sent`.
+  Cross-check each receiver's address against the `users` table.
 
 ### "Email arrives but goes to spam"
 

@@ -54,7 +54,8 @@ Per-product sub-check verdicts, folded with `worst_of()`:
 | Sub-check | Trip condition | Verdict | Tier |
 |---|---|---|---|
 | `A_api_up` | Manifest unreachable | `fail` | Action |
-| `B_schema` | Manifest not JSON / malformed | `fail` | Action |
+| `B_nonempty` | Manifest served with zero steps (HTTP 200, `n_steps: 0`) | `fail` | Action |
+| `B_schema` | Manifest not JSON / entries missing `imageName`/`timestamp` | `fail` | Action |
 | `C_freshness` | Latest image age exceeds threshold | `fail` | Action |
 | `D_cadence` | Median inter-step Δ off cadence | `warn` | Attention |
 | `E_step_count` | Step count outside tolerance | `warn` | Attention |
