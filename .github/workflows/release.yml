@@ -63,10 +63,23 @@ jobs:
             exit 1
           fi
 
-          # Annotated tag subject, e.g. "v0.4.11 — say what happened, and
-          # say it out loud". Falls back to the bare tag for a lightweight
-          # tag, which has no message of its own.
-          title="$(git for-each-ref --format='%(contents:subject)' "refs/tags/${tag}")"
+          # actions/checkout leaves refs/tags/<tag> pointing at the COMMIT,
+          # not at the annotated tag object, so %(contents:subject) silently
+          # dereferences to the commit subject. v0.4.13 shipped titled
+          # "release: v0.4.13" — its commit message — instead of the tag's
+          # own theme line. Re-fetch the ref to get the real object.
+          git fetch --force origin "+refs/tags/${tag}:refs/tags/${tag}" --no-tags
+
+          # Only an annotated tag carries a message. A lightweight one's
+          # %(contents:subject) is the commit subject, which is NOT a release
+          # title and is NOT empty — so the old `[ -n "$title" ]` fallback
+          # never fired. Gate on the object type instead.
+          if [ "$(git cat-file -t "refs/tags/${tag}" 2>/dev/null)" = "tag" ]; then
+            title="$(git for-each-ref --format='%(contents:subject)' "refs/tags/${tag}")"
+          else
+            echo "::warning::${tag} is a lightweight tag — no theme line available."
+            title=""
+          fi
           [ -n "$title" ] || title="$tag"
 
           echo "title=${title}" >> "$GITHUB_OUTPUT"
