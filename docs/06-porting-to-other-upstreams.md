@@ -127,7 +127,7 @@ DNS) is upstream-agnostic. Leave it alone.
 2. Parses the steps list, finds the latest step's timestamp.
 3. Computes age, compares to `max_freshness_s`.
 4. Fetches the latest image, validates size + MIME type.
-5. Records sub-check verdicts (`A_api`, `B_schema`, `C_freshness`,
+5. Records sub-check verdicts (`A_api`, `B_nonempty`, `B_schema`, `C_freshness`,
    etc.).
 
 Rewrite the URL builders + JSON parser to match your upstream's

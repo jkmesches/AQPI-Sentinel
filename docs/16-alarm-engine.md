@@ -61,11 +61,20 @@ The code lives in `backend/alarms/`:
 4. **`Engine._tick()` runs every `TICK_S` (default 15s)**:
    - Walks every open alarm.
    - Updates the latest_status cache (used by suppression).
-   - Computes current severity (factoring duration-based
-     auto-promotion from `warn` → `critical` after
-     `PROMOTE_AFTER_S`, hard-coded at 30 min). This reads
-     `status_at_open`, which lives in the alarm's payload — see the
-     shape note under [Routes and policies](#routes-and-policies).
+   - Re-evaluates cascade suppression against that cache. A
+     suppression is a claim about the present, so it is recomputed
+     every tick and cleared when the named cause recovers — not
+     frozen at open time. (Before v0.4.11 it was written once and
+     only ever read, which held four product alarms silent for
+     17h 30m after the origin episode they were attributed to had
+     passed.)
+   - Computes current severity, as the worse of `status_at_open` and
+     the check's *current* status, with duration-based promotion to
+     `critical` after `PROMOTE_AFTER_S` (30 min) if either is
+     `fail`/`error`. The result is ratcheted: severity rises with the
+     condition and falls only when the alarm closes. Reading
+     `status_at_open` alone meant an alarm opened on a `warn` could
+     never escalate however far the thing fell afterwards.
    - Matches the alarm against the route table; finds the policy.
    - Determines the next-step time (`policy.steps[next].delay_s`
      after the previous step fired).
@@ -74,11 +83,41 @@ The code lives in `backend/alarms/`:
 5. **Dispatch resolves recipients**, expands groups (gated by each
    group's schedule), dedupes emails across overlapping groups +
    direct recipients in the step, and fires each configured sink.
-6. **Ack closes the loop** — an acked alarm stops repeating even
-   if it's still open. `_process` checks `is_acked` *before* it
-   resolves a route, so an acked alarm dispatches nothing on any
-   channel at any severity, `repeat_interval` re-sends included.
-   Unack resumes.
+6. **Ack closes the loop** — an acked alarm stops notifying even
+   if it's still open. `_process` checks `is_acked` *after* it
+   resolves the route and computes severity, deliberately: an ack is
+   a statement about notification ("stop telling me"), not about how
+   bad the thing is. Checking it first, as versions before v0.4.11
+   did, froze an acked alarm's severity for the rest of its life —
+   one bulk ack pinned five alarms, including a 14h 06m total stall,
+   at whatever severity they held ninety minutes in.
+
+   An ack also lapses when the condition outgrows it. `ack_alarm`
+   records `severity_at_ack` and `status_at_ack`; if either rises the
+   ack is revoked and notification resumes. Acking the degraded thing
+   does not mean going deaf to what it becomes. Rows acked before
+   those columns existed carry no baseline and keep their ack, rather
+   than being revoked on a guess.
+
+   **Acking from the email.** Alert emails carry a per-recipient ack
+   link (`/api/alerts/ack/<token>`). The `GET` is read-only and
+   renders a confirmation button; the button `POST`s. That split is
+   load-bearing, not ceremony: Outlook Safe Links, Gmail's proxy and
+   DLP scanners all follow URLs before a human reads the message, and
+   a `GET` that acknowledged on sight would be claimed by a scanner
+   seconds after delivery — silently cancelling the remaining rungs,
+   which is the exact failure the rungs exist to prevent.
+
+   Tokens are 256 bits of urandom, single-use (enforced in the
+   `UPDATE ... WHERE used_at IS NULL` clause, so two taps race in
+   Postgres and one wins), expire after 7 days, and authorise nothing
+   beyond acking their one alarm. They are issued **per recipient**,
+   which is why the email sink sends one message per address instead
+   of one message addressed to everyone: a shared link can only ever
+   report that *someone* acknowledged. The ack is recorded against
+   the address the token was issued to.
+
+   Unack resumes notification.
 
     !!! warning "An ack binds to the alarm row, not to the check"
         `alarm_acks.alarm_id` references one specific alarm. Anything

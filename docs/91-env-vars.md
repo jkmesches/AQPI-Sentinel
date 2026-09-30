@@ -80,10 +80,17 @@ afterwards.**
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `SENTINEL_PUBLIC_URL` | no | — | URL users actually visit. Embedded in alert emails. Blank = no "Open in dashboard" link in emails. |
+| `SENTINEL_PUBLIC_URL` | no | — | URL users actually visit. Embedded in alert emails. Blank = no "Open in dashboard" link **and no acknowledge link** in emails. |
 
 This is **not** a listen address. It's purely the URL operators
 see when an email lands.
+
+!!! warning "Leaving it blank costs you the ack link"
+    The per-recipient acknowledge link in alert emails is built from
+    this value, so with it unset the emails still send but carry no way
+    to acknowledge from the mail itself — the escalation rungs then run
+    to completion unless someone opens the dashboard. If alerting is
+    configured, set this.
 
 ---
 

@@ -73,7 +73,10 @@ check from radarca → your browser:
 
 2. **Run** (`backend/checks/layer1_product.py`)
    - Fetches `productDetail` JSON via `ctx.http`.
-   - Computes 8 sub-checks (`A_api_up`, `B_schema`, …, `H_image_hash`)
+   - Computes 9 sub-checks (`A_api_up`, `B_nonempty`, `B_schema`, …,
+     `H_image_hash`) plus a parity verdict. `B_nonempty` separates
+     "upstream served an empty manifest" from "upstream served a
+     malformed one" — different defects, different owners.
      plus an L3B parity fold-in (timestamp parity for observed
      products, step-index contiguity for forecasts — see § *L3B
      parity* below).

@@ -282,7 +282,7 @@ conditions), and a `then` block (which policy to invoke).
 | `timezone` | IANA name, defaults to UTC. Anchors the time-of-day fields. |
 | `weekday_only` | Skip weekends. |
 | `duration_at_severity_min` | "Only fire after the alarm has been at this severity for N minutes." Mostly used for paging vs. notifying. |
-| `count_of_targets_failing` | "Only fire if N peers also failing." Cross-radar correlation; rarely needed. |
+| `count_of_targets_failing` | **Non-functional — do not use.** It counts siblings in `ctx["open_alarms"]`, which `_process` always passes as an empty list, so any `>=N` with N≥1 never matches and the route silently never fires. It also only ever compared alarms sharing a `check_id`, which for per-target checks is just the alarm itself. |
 | `metric_above` | Reference a metric name + threshold. Niche. |
 
 **Then block — what to do when matched:**
@@ -291,8 +291,9 @@ conditions), and a `then` block (which policy to invoke).
 |---|---|
 | Policy | The escalation policy below. Pick from the dropdown. |
 | Severity floor | Bump the alarm's effective severity if it's lower (`warn` → `critical` on this route). |
-| Repeat every | Re-fire the same step for as long as the alarm is open + unacked. Accepts `30s`, `15m`, `1h`, `2d`, or a bare number of seconds. **Blank = no repeat.** |
-| Group by | Which alarm fields to coalesce on. e.g. `stage,target` collapses a flapping product to one email rather than three. |
+| Only after it lasts | Per-route hold-down: how long the condition must persist before it becomes an alarm at all. Blank inherits the global `hold_down`. This is the main lever against alert noise — see the measured table below. |
+| Repeat every | Re-fire the same step for as long as the alarm is open + unacked. Accepts `30s`, `15m`, `1h`, `2d`, or a bare number of seconds. **Blank = no repeat**, which is what you want if your policy already has multiple steps: the steps then form a bounded escalation ladder instead of looping forever. |
+| Group by | **Non-functional — do not rely on it.** The field is accepted and stored, but `group_by` is referenced nowhere in the engine or the sinks, so nothing is coalesced and you still get one email per alarm. |
 
 **First match wins.** Order rules from most-specific to least. The
 top rule that matches is the one that fires. There is **no implicit
@@ -352,6 +353,67 @@ set, and fires one email per unique address.
 > minutes if still open. See
 > [93-severity-audit.md](93-severity-audit.md) for the full
 > per-check classification table.
+
+### Tuning for noise — the measured numbers
+
+Notification volume is dominated by two settings, and the failure mode
+is not "too few alerts" but alerts nobody reads. On 2026-09-30 a
+single-step policy with `repeat every: 30m` sent 26 emails to each of
+three people in nine hours, 24 of them identical repeats of two
+unchanging radar outages. Modelled over the preceding 14 days that
+configuration was worth **449 emails per person, 32/day**.
+
+Two changes took it to 7.4/day without losing anything real:
+
+1. **Blank `repeat every`, multiple policy steps.** Steps fire once
+   each, so an outage of any length has a ceiling. Widening gaps
+   (`0m` / `40m` / `6h`) read as "it persisted" → "nobody has picked
+   it up" → "this has run all day".
+2. **Per-route hold-downs**, set from how long alarms in that class
+   actually last. Measured over 14 days of real alarms:
+
+    | Stage | Hold-down | Alarms kept | of which real (≥1h) |
+    |---|---|---|---|
+    | L0 — Sentinel's own health | 5m | 3 | 2 |
+    | any `error` | 10m | 7 | 6 |
+    | L1 — products | 20m | 8 | 4 |
+    | L2 — radars | 30m | 39 | 27 |
+
+    Radars flap around 2.3×/day at this site, which is why they get the
+    longest hold-down: a 12-minute alarm that self-resolves two minutes
+    after paging is noise, not signal.
+
+Set the first policy step to `0m`. A step delay stacks *on top of* the
+hold-down, and an alarm that opens and closes inside that gap is routed,
+matched, and tells nobody — indistinguishable from nothing happening. A
+5-minute first step cost 3 of 32 radar alarms in 14 days.
+
+Route `warn` to a console-only policy. The daily report already covers
+degraded subjects with full uptime and duration.
+
+### Acknowledging from the alert email
+
+Alert emails carry an **Acknowledge** link. Acking stops the remaining
+escalation steps for that alarm immediately — for everyone, not just the
+person who tapped it — without resolving it. If the condition worsens
+afterwards the ack lapses and notification resumes.
+
+Two things worth knowing:
+
+- The link opens a confirmation page with a button rather than acking on
+  sight. That is deliberate: Outlook Safe Links, Gmail's proxy and DLP
+  scanners follow URLs before a human reads the mail, and a link that
+  acknowledged on load would be claimed by a scanner and silently cancel
+  the escalation.
+- Each recipient gets their **own** link, which is why the email goes out
+  as one message per address rather than one message addressed to
+  everyone. That is what lets the ack record *who* acknowledged. Tokens
+  are single-use, expire after 7 days, and authorise nothing but acking
+  their one alarm.
+
+Requires `SENTINEL_PUBLIC_URL` to be set — see
+[Environment variables](91-env-vars.md). Without it the emails still
+send, but with no way to acknowledge from the mail.
 
 ### Send test alert
 
