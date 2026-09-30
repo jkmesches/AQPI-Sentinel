@@ -28,6 +28,74 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.13] — 2026-09-30
+
+### Added
+
+- **Acknowledge an alarm from the alert email.** The escalation ladder is the
+  answer to "did anyone see this", and an ack is what stops it early — but
+  only if acking costs less than ignoring the mail. It previously meant
+  opening the dashboard and logging in, so at 02:00 nobody did and every rung
+  ran to completion. `ack_tokens` had been in `schema.sql` since May with no
+  code referencing it; this fills it in.
+
+  `GET` is read-only and renders a confirmation button; the button `POST`s.
+  That split is the security design, not ceremony: Outlook Safe Links,
+  Gmail's proxy and DLP scanners all follow URLs in mail before a human reads
+  the message, so a `GET` that acknowledged on sight would be claimed by a
+  scanner seconds after delivery — silently cancelling the remaining rungs,
+  which is exactly the failure the rungs exist to prevent.
+
+  Tokens are 256 bits of urandom, expire after 7 days, and authorise nothing
+  but acking their one alarm. Single-use is enforced in the `UPDATE`'s `WHERE`
+  clause, so two taps race in Postgres and one wins. The page is plain HTML
+  with no SPA, session or JavaScript — it is what someone opens on a phone at
+  02:00.
+
+  Because the ack goes through `store.ack_alarm` it picks up the
+  `severity_at_ack` / `status_at_ack` baseline from v0.4.11, so a link-ack
+  still lapses if the condition worsens. It quiets the reminders; it does not
+  blind you.
+
+### Changed
+
+- **Alert emails now go out as one message per address** rather than one
+  message addressed to everyone. Ack tokens are issued per recipient so an
+  acknowledgement records *who* made it; a shared link can only ever report
+  that "someone" acknowledged. Delivery failure is per-address — one bad
+  mailbox is logged and does not silence the other recipients.
+
+- `ack_tokens` gains a nullable `recipient` column via the existing
+  idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` pattern. Tokens
+  predating it read back as unattributed acks and still work.
+
+### Fixed
+
+- **Documentation described two routing fields that do not work.**
+  `count_of_targets_failing` counts siblings in `ctx["open_alarms"]`, which
+  `_process` always passes as an empty list, so any `>=N` with N≥1 never
+  matches and the route silently never fires. `group_by` is accepted and
+  stored but referenced nowhere in the engine or the sinks — the admin guide
+  claimed it "collapses a flapping product to one email rather than three".
+  Both are now marked non-functional. A documented feature that silently does
+  nothing is worse than an absent one: it gets configured and then trusted.
+
+- **`16-alarm-engine.md` still described the pre-v0.4.11 ack ordering**,
+  stating that `_process` checks `is_acked` *before* resolving a route. That
+  changed deliberately in v0.4.11 — checking first froze an acked alarm's
+  severity for life — and the doc was not updated at the time. It now also
+  covers suppression re-evaluation, the severity ratchet, and ack
+  lapse-on-worsening.
+
+- Sub-check naming brought in line with v0.4.11's `B_nonempty` split across
+  the severity audit, `ARCHITECTURE.md` and the porting guide; `03-administration.md`
+  documents the per-route hold-down added in v0.4.12, with the measured
+  numbers behind the tuning advice; `SENTINEL_PUBLIC_URL` now notes that it
+  gates the ack link as well as the dashboard link; and troubleshooting gains
+  "an alarm is open but no email went out", walking the six silent causes,
+  plus the case where a receiver holds an address nobody owns — which cost a
+  colleague all 26 of one night's alerts while every one logged as `sent`.
+
 ## [0.4.12] — 2026-09-30
 
 ### Fixed
@@ -1732,7 +1800,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.13...HEAD
+[0.4.13]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.11...v0.4.12
 [0.3.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...v0.3.0
