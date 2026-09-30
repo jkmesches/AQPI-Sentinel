@@ -1,0 +1,97 @@
+# Publish a GitHub Release for every vX.Y.Z tag.
+#
+# Triggers:
+#   - push of a vX.Y.Z tag → create (or update) the matching Release
+#
+# The release body is the CHANGELOG.md section for that version, read
+# from the tagged commit — not the annotated tag message. The title is
+# the tag's subject line.
+#
+# Why this exists: releases were cut by hand through v0.4.3 and then
+# stopped, while tags kept being pushed. Tags v0.4.4 .. v0.4.11 all
+# existed on the remote and the images all published, but the Releases
+# page said the latest version was v0.4.3 for six days. The step was
+# documented as "optional but recommended" and required a second manual
+# action — create from the tag message, then hand-edit the body into the
+# CHANGELOG section — so it was the first thing dropped under pressure.
+#
+# Uses the built-in GITHUB_TOKEN with `contents: write` — no manual
+# secret setup required.
+
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # fetch-depth: 0 so the annotated tag *object* is present —
+      # %(contents:subject) below reads the tag message, not the commit's.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract the CHANGELOG section for this tag
+        id: notes
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+
+          # CHANGELOG headings are `## [X.Y.Z] — YYYY-MM-DD`. Take
+          # everything up to the next `## [` heading.
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/        { exit }
+            found                    { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > /tmp/release-notes.md
+
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::No '## [${version}]' section in CHANGELOG.md at ${tag}." \
+                 "Add the section, delete and re-push the tag."
+            exit 1
+          fi
+
+          # Annotated tag subject, e.g. "v0.4.11 — say what happened, and
+          # say it out loud". Falls back to the bare tag for a lightweight
+          # tag, which has no message of its own.
+          title="$(git for-each-ref --format='%(contents:subject)' "refs/tags/${tag}")"
+          [ -n "$title" ] || title="$tag"
+
+          echo "title=${title}" >> "$GITHUB_OUTPUT"
+          echo "Release title: ${title}"
+          echo "Notes: $(wc -l < /tmp/release-notes.md) lines"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Via env, not ${{ }} interpolated into the script: titles carry
+          # em dashes and apostrophes, and one with a quote in it would
+          # otherwise be spliced into the command line.
+          TITLE: ${{ steps.notes.outputs.title }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          # Idempotent: re-running the workflow on an existing tag
+          # refreshes the notes rather than failing.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+                --title "$TITLE" \
+                --notes-file /tmp/release-notes.md
+          else
+            gh release create "$tag" --verify-tag \
+                --title "$TITLE" \
+                --notes-file /tmp/release-notes.md
+          fi

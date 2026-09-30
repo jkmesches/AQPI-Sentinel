@@ -90,8 +90,9 @@ git push
 git push origin vX.Y.Z
 ```
 
-The tag push triggers `.github/workflows/docker-publish.yml`,
-which:
+The tag push triggers two workflows.
+
+`.github/workflows/docker-publish.yml`:
 
 1. Builds the backend + frontend images in parallel.
 2. Publishes to GHCR with the version-tag set:
@@ -121,7 +122,10 @@ which:
     default `latest=auto` applies it to any non-prerelease version tag, in
     addition to the explicit main-branch rule.
 
-Watch the run finish:
+`.github/workflows/release.yml` publishes the GitHub Release — see
+step 5.
+
+Watch the runs finish:
 
 ```bash
 gh run watch
@@ -138,16 +142,33 @@ Both should succeed without authentication errors. If the packages
 are still private, you'll need a PAT — see [`02-deployment.md` §
 GHCR auth](02-deployment.md#2-ghcr-images-and-authentication).
 
-### 5. Create a GitHub release (optional but recommended)
+### 5. Confirm the GitHub release published
+
+Nothing to do by hand — `release.yml` creates it on the tag push:
+
+- **Title** — the annotated tag's subject line, so `git tag -a`'s
+  first line is what the Releases page shows. Write it as a theme.
+- **Body** — the `## [X.Y.Z]` section of `CHANGELOG.md` as committed
+  at that tag, verbatim.
 
 ```bash
-gh release create vX.Y.Z \
-    --title "vX.Y.Z — <theme>" \
-    --notes-from-tag
+gh release view vX.Y.Z --web
 ```
 
-The release notes pull from the annotated tag message. Edit on
-github.com afterwards to format with the CHANGELOG section.
+If the job failed, it is almost always the guard: no `## [X.Y.Z]`
+section in the CHANGELOG at that commit, because step 1 was skipped
+or the tag was cut before the commit landed. Fix the CHANGELOG, move
+the tag, and re-push — the job is idempotent and re-running it on an
+existing release refreshes the notes rather than erroring.
+
+!!! warning "This step used to be manual, and it lapsed"
+
+    It read "optional but recommended" through v0.4.3 and took two
+    actions — create from the tag message, then hand-edit the body into
+    the CHANGELOG section. It stopped being done after v0.4.3 while tags
+    and images kept publishing, so for six days the Releases page named
+    v0.4.3 as latest with v0.4.11 tagged and shipped. Releases for
+    v0.4.4 .. v0.4.11 were backfilled from the CHANGELOG on 2026-09-17.
 
 ---
 
@@ -216,6 +237,8 @@ a normal release cycle:
 - Build backend + frontend Docker images.
 - Push tagged images to GHCR.
 - Build the MkDocs docs site and deploy to GitHub Pages.
+- Publish the GitHub Release for a version tag, with the
+  CHANGELOG section for that version as its body.
 
 **Doesn't (yet):**
 
@@ -236,3 +259,5 @@ path.
   side of a release.
 - **`.github/workflows/docker-publish.yml`** — the CI that runs on
   every release.
+- **`.github/workflows/release.yml`** — publishes the Release
+  itself from the CHANGELOG.
