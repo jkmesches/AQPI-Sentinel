@@ -519,6 +519,8 @@ class AlarmEngine:
     async def _dispatch(self, alarm, route, step, step_idx):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
+
+
         # Dedup overlap: if user A is reachable through two different
         # receivers (direct email + group membership) inside the same
         # step, send them ONE message, not two. Track emails already
@@ -572,6 +574,24 @@ class AlarmEngine:
                 if fresh != recv.email:
                     recv = recv.model_copy(update={"email": fresh})
                 emails_seen_this_step.update(e.lower() for e in fresh)
+            # Ack-by-link, one token per recipient address. Minted here
+            # rather than in the email sink because the sink has no database
+            # handle, and only once group expansion and cross-receiver dedup
+            # have settled who actually gets this message. Per address, not
+            # per alarm, so the ack records WHO acknowledged — which is also
+            # why the sink sends one message per address below.
+            ack_tokens: dict[str, str] = {}
+            if recv.email and "email" in (self.sinks or {}):
+                for addr in recv.email:
+                    try:
+                        ack_tokens[addr] = await self.store.ensure_ack_token(
+                            alarm["id"], addr)
+                    except Exception:
+                        # A missing ack link is a worse email, not a lost alert.
+                        log.exception("ack token mint failed for alarm %s / %s",
+                                      alarm.get("id"), addr)
+            alarm_for_send = {**alarm, "_ack_tokens": ack_tokens} if ack_tokens else alarm
+
             channels = [c for c in ("email", "webhook", "console")
                         if getattr(recv, c, None) or (c == "console" and recv.console)]
             for ch in channels:
@@ -584,7 +604,7 @@ class AlarmEngine:
                         error="sink unavailable")
                     continue
                 try:
-                    sr = await sink.send(alarm, recv, route, step_idx)
+                    sr = await sink.send(alarm_for_send, recv, route, step_idx)
                     await self.store.write_notification(
                         alarm_id=alarm["id"], receiver=receiver_name, channel=ch,
                         step_idx=step_idx, template=recv.template,

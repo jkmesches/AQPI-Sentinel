@@ -111,6 +111,12 @@ CREATE TABLE IF NOT EXISTS alarm_acks (
   PRIMARY KEY (alarm_id, acked_at)
 );
 
+-- Who an ack link was issued to. One token per (alarm, recipient) so an ack
+-- from an email names the person who tapped it, not just "someone". NULL on
+-- rows predating this, which read back as an unattributed ack.
+ALTER TABLE ack_tokens
+  ADD COLUMN IF NOT EXISTS recipient TEXT;
+
 -- What the operator was acknowledging. An ack is "I have seen THIS", so the
 -- engine needs THIS on record to notice when the condition stops being it and
 -- the ack should lapse. Added 2026-09-15; NULL on rows predating it, which the

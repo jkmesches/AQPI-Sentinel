@@ -6,6 +6,7 @@ Codecs: ``payload`` columns are JSONB. We register a codec that handles dict
 from __future__ import annotations
 import json
 import logging
+import secrets
 from typing import Any
 
 import asyncpg
@@ -406,6 +407,88 @@ class Store:
             alarm_id,
         )
         return bool(v)
+
+    # ===================================================================
+    # Ack-by-link tokens
+    # ===================================================================
+    #
+    # An ack stops the remaining escalation rungs immediately, which makes it
+    # the right answer to "did anyone see this" — but only if acking is
+    # cheaper than ignoring the mail. Until now it meant opening the UI and
+    # logging in, so at 02:00 nobody did, and the rungs ran to completion.
+    #
+    # The token IS the credential, so it is 256 bits of urandom, single-use,
+    # expiring, and scoped to exactly one alarm. It authorises nothing else.
+
+    async def ensure_ack_token(self, alarm_id: int, recipient: str,
+                               ttl_days: int = 7) -> str:
+        """Stable ack link for one (alarm, recipient) pair.
+
+        Per recipient, not per alarm, so the ack names who tapped it. That is
+        why the alert email goes out as one message per address rather than a
+        single message addressed to everyone: a shared link can only ever say
+        "someone acknowledged this".
+
+        Deliberately reuses a live token rather than minting per send — the
+        link in the first rung's email must still work after the second and
+        third arrive, because people ack from whichever copy is in front of
+        them, usually the oldest.
+        """
+        assert self.pool is not None
+        row = await self.pool.fetchrow(
+            """
+            SELECT token FROM ack_tokens
+            WHERE alarm_id = $1 AND recipient IS NOT DISTINCT FROM $2
+              AND used_at IS NULL AND expires_at > now()
+            ORDER BY issued_at DESC LIMIT 1
+            """,
+            alarm_id, recipient,
+        )
+        if row:
+            return row["token"]
+        token = secrets.token_urlsafe(32)
+        await self.pool.execute(
+            """
+            INSERT INTO ack_tokens (token, alarm_id, recipient, issued_at, expires_at)
+            VALUES ($1, $2, $3, now(), now() + make_interval(days => $4))
+            """,
+            token, alarm_id, recipient, ttl_days,
+        )
+        return token
+
+    async def peek_ack_token(self, token: str) -> dict | None:
+        """Read-only lookup for the confirmation page. Mutates nothing —
+        mail scanners and link prefetchers hit this, not the ack itself."""
+        assert self.pool is not None
+        row = await self.pool.fetchrow(
+            """
+            SELECT t.alarm_id, t.used_at, t.expires_at, t.recipient,
+                   a.check_id, a.target, a.severity, a.opened_at,
+                   a.closed_at, a.message
+              FROM ack_tokens t JOIN alarms a ON a.id = t.alarm_id
+             WHERE t.token = $1
+            """,
+            token,
+        )
+        return dict(row) if row else None
+
+    async def consume_ack_token(self, token: str) -> dict | None:
+        """Claim a token. Returns {alarm_id, recipient}, or None if it was
+        already used, expired, or never existed.
+
+        The guard is in the UPDATE's WHERE clause, so two taps on the same
+        link race in the database rather than in Python and exactly one wins.
+        """
+        assert self.pool is not None
+        row = await self.pool.fetchrow(
+            """
+            UPDATE ack_tokens SET used_at = now()
+             WHERE token = $1 AND used_at IS NULL AND expires_at > now()
+             RETURNING alarm_id, recipient
+            """,
+            token,
+        )
+        return dict(row) if row else None
 
     async def ack_state(self, alarm_id: int) -> dict | None:
         assert self.pool is not None

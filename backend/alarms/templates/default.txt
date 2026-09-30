@@ -22,7 +22,15 @@ OBSERVED
 ──────────────────────────────────────────────────────────────────────
 {% for label, value in observed %}  {{ "%-28s"|format(label) }}{{ value }}
 {% endfor %}{% endif %}
-{% if captured_image_url or verify_urls or dashboard_url %}
+{% if ack_url %}
+──────────────────────────────────────────────────────────────────────
+SEEN IT?
+──────────────────────────────────────────────────────────────────────
+  Acknowledging stops the remaining reminder emails for this alarm.
+  It does not resolve it, and you will be told again if it worsens.
+
+    {{ ack_url }}
+{% endif %}{% if captured_image_url or verify_urls or dashboard_url %}
 ──────────────────────────────────────────────────────────────────────
 VERIFY YOURSELF
 ──────────────────────────────────────────────────────────────────────

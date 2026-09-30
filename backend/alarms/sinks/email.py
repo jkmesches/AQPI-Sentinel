@@ -87,7 +87,8 @@ def _opened_str(opened_at: Any) -> str:
     return str(opened_at)
 
 
-def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
+def _build_ctx(alarm: dict, route: Any, step_idx: int,
+               recipient: str | None = None) -> dict:
     """Build the per-check rendering context.
 
     Mirrors the timeline drill-down's verifyContext: thresholds vs
@@ -263,6 +264,15 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
                          f"?check={quote(check_id, safe='')}"
                          f"&target={quote(target, safe='')}")
 
+    # -------- Ack link ---------------------------------------------------
+    # One token per recipient, so the ack names who tapped it. Present only
+    # when the engine minted one for this address and a public URL is
+    # configured; templates guard on it.
+    ack_url = None
+    _tok = (alarm.get("_ack_tokens") or {}).get(recipient or "")
+    if _tok and SETTINGS.public_url:
+        ack_url = f"{SETTINGS.public_url}/api/alerts/ack/{_tok}"
+
     # One-line problem summary (for subject + email teaser)
     short = alarm.get("message") or ""
     # Trim long summaries: keep the first sentence-ish.
@@ -287,6 +297,7 @@ def _build_ctx(alarm: dict, route: Any, step_idx: int) -> dict:
         "verify_urls":         verify_urls,          # list of (label, url)
         "captured_image_url":  captured_image_url,
         "dashboard_url":       dashboard_url,
+        "ack_url":             ack_url,
         "step_idx":            step_idx,
         "policy":              route.policy if hasattr(route, "policy") else "",
         "alarm":               alarm,
@@ -315,38 +326,62 @@ class EmailSink:
         self.smtp = smtp_cfg
 
     async def send(self, alarm, receiver, route, step_idx) -> SinkResult:
-        ctx = _build_ctx(alarm, route, step_idx)
+        """One message PER ADDRESS, not one message addressed to everyone.
 
-        text_tpl = _env.get_template(f"{receiver.template}.txt")
-        text_body = text_tpl.render(**ctx)
+        The ack link carries a per-recipient token so an acknowledgement says
+        who made it. A single message shared by three people can only ever
+        carry one token, and any ack through it is anonymous — so the split
+        is what makes attribution possible, not a stylistic choice.
 
-        # HTML is best-effort — fall back to text-only if no .html sibling exists.
-        try:
-            html_tpl = _env.get_template(f"{receiver.template}.html")
-            html_body: str | None = html_tpl.render(**ctx)
-        except Exception:
-            html_body = None
+        Delivery is reported as success if any recipient was reached; a
+        partial failure is logged per address rather than failing the whole
+        step, because one bad mailbox must not silence the other two.
+        """
+        sent, errors = 0, []
+        first_excerpt = ""
+        for addr in receiver.email:
+            ctx = _build_ctx(alarm, route, step_idx, recipient=addr)
 
-        msg = EmailMessage()
-        msg["From"] = self.smtp.from_
-        msg["To"] = ", ".join(receiver.email)
-        msg["Subject"] = _subject(ctx)
-        if self.smtp.reply_to:
-            msg["Reply-To"] = self.smtp.reply_to
-        msg.set_content(text_body)
-        if html_body:
-            msg.add_alternative(html_body, subtype="html")
+            text_tpl = _env.get_template(f"{receiver.template}.txt")
+            text_body = text_tpl.render(**ctx)
+            first_excerpt = first_excerpt or text_body[:500]
 
-        try:
-            await asyncio.wait_for(
-                aiosmtplib.send(
-                    msg,
-                    hostname=self.smtp.host, port=self.smtp.port,
-                    username=self.smtp.username, password=self.smtp.password,
-                    start_tls=self.smtp.starttls,
-                ),
-                timeout=15,
-            )
-            return SinkResult(delivered=True, body_excerpt=text_body[:500])
-        except Exception as e:
-            return SinkResult(delivered=False, body_excerpt=text_body[:500], error=str(e))
+            # HTML is best-effort — fall back to text-only if no .html sibling.
+            try:
+                html_tpl = _env.get_template(f"{receiver.template}.html")
+                html_body: str | None = html_tpl.render(**ctx)
+            except Exception:
+                html_body = None
+
+            msg = EmailMessage()
+            msg["From"] = self.smtp.from_
+            msg["To"] = addr
+            msg["Subject"] = _subject(ctx)
+            if self.smtp.reply_to:
+                msg["Reply-To"] = self.smtp.reply_to
+            msg.set_content(text_body)
+            if html_body:
+                msg.add_alternative(html_body, subtype="html")
+
+            try:
+                await asyncio.wait_for(
+                    aiosmtplib.send(
+                        msg,
+                        hostname=self.smtp.host, port=self.smtp.port,
+                        username=self.smtp.username, password=self.smtp.password,
+                        start_tls=self.smtp.starttls,
+                    ),
+                    timeout=15,
+                )
+                sent += 1
+            except Exception as e:
+                log.warning("email to %s failed: %s", addr, e)
+                errors.append(f"{addr}: {e}")
+
+        if sent:
+            if errors:
+                return SinkResult(delivered=True, body_excerpt=first_excerpt,
+                                  error="; ".join(errors)[:500])
+            return SinkResult(delivered=True, body_excerpt=first_excerpt)
+        return SinkResult(delivered=False, body_excerpt=first_excerpt,
+                          error="; ".join(errors)[:500] or "no recipients")
