@@ -28,6 +28,53 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.4.12] — 2026-09-30
+
+### Fixed
+
+- **The alert-routing editor silently erased per-route hold-downs on save.**
+  `/admin/alerts` is a form builder, not a text editor: saving discards the
+  stored config and rebuilds each route from form state. `buildConfig()` wrote
+  `match`, `policy`, `when`, `severity_floor`, `repeat_interval` and
+  `group_by` — but not `hold_down`, which the backend honors per route and
+  which the editor never rendered. The string appeared zero times in the page.
+  Opening the page and clicking Save therefore reset every per-route hold-down
+  to the global default, with no error and no warning; the config saved and
+  looked correct.
+
+  Measured against the 14 days to 2026-09-30, that is the difference between
+  104 and 136 alert emails — and the 32 that return are precisely the flappers
+  the thresholds exist to remove, including an XEBY alarm that opened and
+  self-resolved inside 12 minutes, two minutes after its page went out.
+
+  The field is now present across all five touchpoints `repeat_interval`
+  already had (type, load, `buildConfig()`, new-route default, editor control),
+  labelled "only after it lasts", with the global value in the placeholder so a
+  blank field reads as "inherit" rather than "none".
+
+### Added
+
+- `validation_tests/js/test_route_config_roundtrip.mjs` — asserts that every
+  non-UI field on the `Route` interface is both read by the load path and
+  written by `buildConfig()`. That function lives inline in the `.svelte` and
+  cannot be imported the way the other js tests import `$lib` modules, and the
+  defect class is a field being *absent*, so the assertion is source-level.
+  Verified against the original bug: removing the emit line fails exactly one
+  assertion, and restoring it passes.
+
+- **The GitHub Release is now cut by CI, not by hand.**
+  `.github/workflows/release.yml` fires on a `vX.Y.Z` tag push and
+  publishes the Release with the annotated tag's subject as the title and
+  that version's `CHANGELOG.md` section as the body. Creating the Release
+  had been a manual step marked "optional but recommended" that also
+  required hand-editing the notes after the fact, and it lapsed after
+  v0.4.3: tags and GHCR images kept publishing while the Releases page
+  named v0.4.3 as latest for six days, through v0.4.11. The job fails
+  loudly if the CHANGELOG has no section for the tag, rather than
+  publishing an empty release, and re-running it on an existing tag
+  refreshes the notes instead of erroring. Releases for v0.4.4 .. v0.4.11
+  were backfilled from the CHANGELOG.
+
 ## [0.4.11] — 2026-09-15
 
 Root-cause work on the 2026-09-13/14 upstream incident turned up seven
@@ -1685,7 +1732,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...HEAD
+[0.4.12]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.11...v0.4.12
 [0.3.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.2.1...v0.2.2
