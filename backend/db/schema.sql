@@ -111,12 +111,6 @@ CREATE TABLE IF NOT EXISTS alarm_acks (
   PRIMARY KEY (alarm_id, acked_at)
 );
 
--- Who an ack link was issued to. One token per (alarm, recipient) so an ack
--- from an email names the person who tapped it, not just "someone". NULL on
--- rows predating this, which read back as an unattributed ack.
-ALTER TABLE ack_tokens
-  ADD COLUMN IF NOT EXISTS recipient TEXT;
-
 -- What the operator was acknowledging. An ack is "I have seen THIS", so the
 -- engine needs THIS on record to notice when the condition stops being it and
 -- the ack should lapse. Added 2026-09-15; NULL on rows predating it, which the
@@ -157,6 +151,15 @@ CREATE TABLE IF NOT EXISTS ack_tokens (
   expires_at    TIMESTAMPTZ NOT NULL,
   used_at       TIMESTAMPTZ
 );
+-- Who an ack link was issued to. One token per (alarm, recipient) so an ack
+-- from an email names the person who tapped it, not just "someone". NULL on
+-- rows predating this, which read back as an unattributed ack.
+--
+-- Must stay BELOW the CREATE above: schema.sql runs top to bottom on every
+-- boot including the first, so an ALTER placed before its table fails on a
+-- fresh database and takes the whole startup migration with it.
+ALTER TABLE ack_tokens
+  ADD COLUMN IF NOT EXISTS recipient TEXT;
 
 -- =========================================================================
 -- LAYER 4 — TIER 1 BASELINES + TIER 5 CORPUS (§15)
