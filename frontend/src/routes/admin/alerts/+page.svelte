@@ -37,6 +37,12 @@
 		policy: string;
 		severity_floor: string;       // '' = none
 		repeat_interval: string;      // '' = none
+		// '' = inherit the global hold_down. Route-level was previously absent
+		// from this form entirely: the backend honored it, the editor never
+		// rendered it, and buildConfig() rebuilt every route without it — so
+		// opening this page and saving silently reset all four per-route
+		// hold-downs to the global default.
+		hold_down: string;
 		group_by: string[];
 		showWhen: boolean;            // UI-only: condition section expanded?
 		showAdvanced: boolean;        // UI-only: custom matchers expanded?
@@ -246,6 +252,7 @@
 					policy: r.policy ?? '',
 					severity_floor: r.severity_floor ?? '',
 					repeat_interval: r.repeat_interval ?? '',
+					hold_down: r.hold_down ?? '',
 					group_by: Array.isArray(r.group_by) ? [...r.group_by] : [],
 					showWhen: hasAnyCondition(cond),
 					showAdvanced: customMatchers.length > 0,
@@ -324,6 +331,7 @@
 				if (w) out.when = w;
 				if (r.severity_floor) out.severity_floor = r.severity_floor;
 				if (r.repeat_interval) out.repeat_interval = r.repeat_interval;
+				if (r.hold_down) out.hold_down = r.hold_down;
 				if (r.group_by.length) out.group_by = [...r.group_by];
 				return out;
 			}),
@@ -509,7 +517,7 @@
 	function addRoute() {
 		routes.push({
 			match: {}, when: emptyCondition(), policy: '',
-			severity_floor: '', repeat_interval: '1h', group_by: [],
+			severity_floor: '', repeat_interval: '1h', hold_down: '', group_by: [],
 			showWhen: false, showAdvanced: false, testBusy: false, testResult: null,
 		});
 	}
@@ -1143,6 +1151,11 @@
 
 						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">repeat every</label>
 						<input bind:value={r.repeat_interval} placeholder="1h (blank = no repeat)"
+							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+
+						<label for="route-hold-down-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">only after it lasts</label>
+						<input id="route-hold-down-{i}" bind:value={r.hold_down}
+							placeholder="blank = global ({opaque.hold_down ?? '5m'})"
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] self-start pt-1">group by</label>
