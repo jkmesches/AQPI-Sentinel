@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The timeline puts a target's two readings on adjacent rows.** Rows group by
+  stage, so the Products tab drew all thirteen `L1` rows and then all thirteen
+  `LB1` rows — a product and its backend reading ended up about thirteen rows
+  apart, and the one thing the pair exists to show, the two sources
+  disagreeing, could not be seen at all.
+
+  A backend stage no longer gets a block of its own; it is interleaved with the
+  stage it mirrors. The radarca row names the target and tags itself `RC`, and
+  the backend row sits beneath it, indented, carrying only its source.
+
+  Not a group header plus two subrows: on a grid people scroll that is 39 rows
+  where there were 26, thirteen of them drawing no cells. Naming the target
+  once on the first row of its pair costs nothing — the tab is exactly as tall
+  as before. Deployments without the mount pair nothing and are unchanged, and
+  the feeds with no backend counterpart (vectors, streams, map overlays, image
+  QC) stay flat rows.
+
+### Fixed
+
+- **Every backend row was labelled "K2", which is false for CBAND.** It reads
+  Trinity — the reason `SENTINEL_SSCB_ROOT` is a separate setting pointing at a
+  separate mount. `/api/checks` served nothing that distinguished a share, so
+  the dashboard guessed and was wrong for one radar in six; the timeline hedged
+  it as "K2 / Trinity", which is never both and never says which.
+
+  Each backend-reading check now declares `source_label` and `source_tag`, and
+  the UI uses what the check that did the reading says. The tag is exactly two
+  characters by constraint, not coincidence: it sits between the status dot and
+  the sparkline in the home rails, so its width decides where every trace in
+  that column begins.
+
 ## [0.5.5] — 2026-10-03
 
 ### Fixed
