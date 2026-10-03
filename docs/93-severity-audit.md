@@ -104,7 +104,7 @@ doesn't need a page.
 
 | Check | Trip condition | Status | Tier |
 |---|---|---|---|
-| `layer2.xband.fleet` | ≥4 of 5 X-band radars simultaneously unhealthy | `fail` | Action |
+| `layer2.xband.fleet` | ≥3 of 5 X-band radars simultaneously unhealthy, latched | `fail` | Action |
 
 The five X-band radars sit at separate sites and do not fail in lockstep.
 Measured over 14 days to 2026-08-25, **80.2%** of all `GHOST_UP` runs occurred
@@ -113,14 +113,35 @@ single radar; one episode had four sites entering and leaving `GHOST_UP`
 within the same second, 79 hours apart. Correlation that tight is one upstream
 event, not five radar outages.
 
-The five X-band radar checks list `layer2.xband.fleet` in `depends_on`, so when
-it trips their alarms are still recorded but marked `suppressed_by` — one
-actionable page describing the true scope instead of five saying the same
-thing. `layer2.radar.CBAND` deliberately does **not** depend on it: different
-band, different site, and it stayed healthy through the real episodes.
+The five X-band radar checks list `layer2.xband.fleet` in
+`alarm_only_depends_on`, so when it trips their alarms are still recorded but
+marked `suppressed_by` — one actionable page describing the true scope instead
+of five saying the same thing. `layer2.radar.CBAND` deliberately does **not**
+depend on it: different band, different site, and it stayed healthy through
+the real episodes.
 
 An isolated single-radar failure does not trip this check and pages exactly as
-before.
+before. Two simultaneous do not either.
+
+!!! note "Why 3 of 5, and why it latches"
+    It was ≥4 with no latch until v0.5.5, and in that form it suppressed
+    **zero** alarms across its entire recorded history — 27,917 runs from
+    2026-08-25 to 2026-10-03.
+
+    2026-09-17 shows the failure. Three radars dropped together at 16:09 and
+    their alarms opened at 16:12, 16:14 and 16:15, after the 5-minute
+    hold-down. The count sat at 3 the whole time and never reached 4, so the
+    check correctly reported `pass` by its own rule — and three pages went out
+    for one event.
+
+    Suppression is only consulted when an alarm **opens**, which is one
+    hold-down after the radar started failing. So the verdict has to be
+    standing at that moment, which gives two requirements: a bar low enough to
+    trip (3, since the count is ≥4 on only 0.8% of ticks and ≥3 on 1.0%), and
+    a verdict that does not flap away before the alarms arrive. Hence
+    `FLEET_MIN_DWELL_S` at 10 minutes, comfortably longer than the 5-minute
+    hold-down plus a 2-minute cadence. **Raising `hold_down` above ~8 minutes
+    means raising the dwell too.**
 
 ### L3 — Map Overlays
 
