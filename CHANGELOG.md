@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.4] — 2026-10-03
+
 ### Changed
 
 - **The home-page rails pair each target's two sources on one row.** With the
@@ -80,7 +82,47 @@ unknown`.
   silent at runtime, since the rail receives an empty array and draws an
   empty cell. It is how `LB1`/`LB2` shipped with no sparkline in v0.5.0.
 
+- `validation_tests/test_backend_checks.py` and
+  `validation_tests/test_reprocess_stage_coverage.py` — the `LB1`/`LB2` checks
+  shipped in v0.5.0 with no tests, and each of the three patch releases that
+  same day fixed something a test would have caught in seconds.
+
+- The FAQ now lists the `LB` stages and says why they sit outside the
+  dependency chain: radarca being down tells you nothing about whether a
+  product exists, and that independence is the point.
+
 ### Fixed
+
+- **Threshold reprocessing silently skipped any stage it had no branch for.**
+  The engine dispatched on stage through an if/elif chain; anything unmatched
+  fell through to `continue`, so a job could report success having evaluated
+  rows and changed nothing, with no counter and no warning. Dispatch now goes
+  through a registry, and stages the engine cannot handle are counted and
+  named in the job result instead of being dropped.
+
+  This was observable in production: a reprocess run on 2026-10-03 included
+  `LB1` and `LB2` in its stage list and did nothing for them, reporting
+  nothing.
+
+- **The Radars rail did not scroll**, while the Products rail did — a flex
+  child defaults to `min-height: auto` and will not shrink below its content.
+
+- **Backend rows in the Radars rail rendered as duplicate radar IDs** —
+  `XEBY` directly above `XEBY` — because the rail printed the raw target
+  while merging two stages. (Superseded within this release by the paired
+  layout above, which names each radar once.)
+
+- **The backend checks' sparklines fetched no series at all.** The store
+  enumerated stages `L1` and `L2` by hand to decide what to fetch, so `LB2`
+  was absent and `LB1` was excluded twice. Those rows drew an empty cell
+  while their samples sat in `metric_samples`. That was the ninth hand-rolled
+  stage enumeration; v0.5.1 found eight, all in `.svelte` files, and this one
+  was in a store.
+
+- **`test_compose_parity` had been red since v0.5.0** (an unupdated mount
+  literal) and `test_retention_offload` reported a skip as a failure on every
+  run, because `sys.exit(str)` exits 1. Two permanently-red tests train you
+  to read past the suite's output, which is how the first one went unnoticed.
 
 - **The products rail's age readout would have gone permanently blank.** It
   came along for free while the sparkline plotted `age_s`; once the trace
