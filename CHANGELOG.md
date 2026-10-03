@@ -28,6 +28,24 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-10-03
+
+### Added
+
+- **`backend_max_age_s` and `backend_silent_s` are editable in `/admin/thresholds`.**
+  The `LB1`/`LB2` checks read these through the normal threshold machinery, and the API
+  accepted them from the start — but the admin tables wrote their column sets out by
+  hand, so neither key appeared and tuning meant hand-crafting a `PUT`. Both tables now
+  derive their columns from a single `PRODUCT_KEYS` / `RADAR_KEYS` list, the same
+  approach `ALL_STAGES` took in v0.5.1.
+
+### Changed
+
+- `_validate_thresholds` type-checks the two new keys (positive number for
+  `backend_silent_s`, number for `backend_max_age_s`) rather than passing them through
+  unvalidated.
+
+
 ## [0.5.1] — 2026-10-03
 
 ### Fixed
