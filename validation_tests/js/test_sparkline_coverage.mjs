@@ -108,10 +108,22 @@ check('the store fetches readouts alongside traces',
 // deployment without the mount has none. Deciding the layout from the rollup
 // instead of the catalog renders the one-column form until the first LB run
 // lands and then jumps — correct eventually, wrong on every first paint.
-check('the layout asks the checks catalog whether the backend exists',
-      /sentinel\.checks\.map\(\(c\) => c\.stage\)/.test(home));
-check('...and not an empty rollup stage',
+const srcBlock = home.match(/const sources = \$derived\.by\([\s\S]*?\n\t\}\);/);
+check('the layout derives its sources from somewhere', !!srcBlock);
+check('...from the checks catalog, not the rollup',
+      !!srcBlock && /sentinel\.checks/.test(srcBlock[0]) && !/rollup/.test(srcBlock[0]));
+check('...and not by counting an empty rollup stage',
       !/stages\?\.LB\d\s*\?\?\s*\[\]\)\.length/.test(home));
+// Stage presence is too coarse a question. One unrelated check sitting in L1
+// or L2 — the xband-fleet row, the NWM stream feed — would otherwise flip the
+// whole rail into the paired layout and print "not mounted" on every row with
+// no radarca counterpart, which is what an XQPI deployment looks like.
+check('...keyed on TARGETS, so a stray check cannot flip the layout',
+      !!srcBlock && /\.add\(c\.target\)/.test(srcBlock[0]) &&
+      /some\(\(t\) => rc\.has\(t\)\)/.test(srcBlock[0]));
+check('the rails branch on "two readings exist", not "the backend exists"',
+      /pairedRadars/.test(home) && /pairedProducts/.test(home) &&
+      !/hasBackend/.test(home));
 
 console.log(failures.length
   ? `\n${failures.length} FAILED: ${failures.join(', ')}`
