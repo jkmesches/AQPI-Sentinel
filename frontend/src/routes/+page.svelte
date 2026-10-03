@@ -34,7 +34,7 @@
 		!!fleetRow && fleetRow.status !== 'pass' && fleetRow.status !== 'skip'
 	);
 
-	// Does THIS deployment have the backend tree mounted?
+	// Which sources exist on THIS deployment, per family.
 	//
 	// Read off the /api/checks catalog, not the rollup. The backend checks are
 	// registered at import time behind `if SETTINGS.backend_root:`, so the
@@ -46,10 +46,56 @@
 	// exist, so there is nothing to show and no column to show it in. If the
 	// mount drops *after* boot the checks stay registered and report fail,
 	// which is what we want to see.
-	const hasBackend = $derived.by(() => {
-		const stages = new Set(sentinel.checks.map((c) => c.stage));
-		return { products: stages.has('LB1'), radars: stages.has('LB2') };
+	//
+	// === Both sides are tracked, not just the backend ===
+	//
+	// This asked only `stages.has('LB1')` and treated the answer as "are there
+	// two sources". That holds on AQPI, where the radarca stages always exist
+	// and only the backend is ever absent — so the two questions coincide and
+	// the bug is invisible.
+	//
+	// It breaks on the inverse, which is exactly what the XQPI deployment is:
+	// LB1/LB2 exist and L1/L2 do not, because nothing serves FLOW over HTTP.
+	// The rail would take the paired branch, find `primary` null on every row,
+	// and print "not mounted" down the whole RadarCA column — on a deployment
+	// that is working as designed, and with a tooltip that is wrong twice over
+	// (it is the radarca side that is absent, and there is no backend tree
+	// failing to mount).
+	// Keyed by TARGET, not by stage presence. "Does stage L1 exist" is too
+	// coarse: one unrelated check sitting in that stage — the xband-fleet
+	// correlation row is in L2, the NWM stream feed is in L1 — would flip the
+	// whole rail into the paired layout and print "not mounted" on every row
+	// that has no radarca counterpart. Asking whether any TARGET actually has
+	// both readings cannot be fooled that way.
+	const sources = $derived.by(() => {
+		const pairable = (radarcaStage: string, backendStage: string) => {
+			const rc = new Set<string>();
+			const bk = new Set<string>();
+			for (const c of sentinel.checks) {
+				if (c.stage === radarcaStage) rc.add(c.target);
+				else if (c.stage === backendStage) bk.add(c.target);
+			}
+			return {
+				radarca: rc.size > 0,
+				backend: bk.size > 0,
+				// Paired means two readings of ONE target exist to compare —
+				// not merely that both stages are populated.
+				paired: [...bk].some((t) => rc.has(t))
+			};
+		};
+		return { products: pairable('L1', 'LB1'), radars: pairable('L2', 'LB2') };
 	});
+	const pairedRadars   = $derived(sources.radars.paired);
+	const pairedProducts = $derived(sources.products.paired);
+	// In an unpaired rail the single reading may come from EITHER side, so
+	// nothing downstream may assume it is `primary`.
+	const loneOf = (p: { primary: any; backend: any }) => p.primary ?? p.backend;
+	// The stage descriptor for whichever sources a family actually has.
+	const sourceLabelFor = (fam: { radarca: boolean; backend: boolean; paired: boolean },
+	                        rc: string, bk: string) =>
+		fam.paired ? `${stageLabel(rc)} + ${stageLabel(bk)}`
+		: fam.backend ? stageLabel(bk)
+		: stageLabel(rc);
 
 	// One row per target, carrying whichever of the two sources reported it.
 	// Both halves are optional on purpose:
@@ -265,7 +311,7 @@
 			{/each}
 		</ul>
 
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={hasBackend.radars ? `${stageLabel('L2')} + ${stageLabel('LB2')}` : stageLabel('L2')} />
+		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={sourceLabelFor(sources.radars, 'L2', 'LB2')} />
 		{#if fleetAlerting && fleetRow}
 			<!-- The fleet verdict, where it belongs: above the radars it is a
 			     statement about, and only while it is making one. Everything
@@ -288,7 +334,7 @@
 				</div>
 			</div>
 		{/if}
-		{#if hasBackend.radars}
+		{#if pairedRadars}
 			<!-- Column headers only exist in the paired layout. They name the
 			     sources in full: "K2/TRIN" was not parseable cold, and these
 			     labels are the first thing a new operator reads. -->
@@ -299,27 +345,31 @@
 		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
 			{#each radarPairs as p (p.target)}
 				{@const imgQc = l4XbandByRadar[p.target]}
-				<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {hasBackend.radars ? 'grid-cols-[3.6rem_1fr_1fr_auto]' : 'grid-cols-[3.6rem_3rem_1fr_auto]'} items-center gap-2 px-3 py-2 text-[12px]">
+				<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {pairedRadars ? 'grid-cols-[3.6rem_1fr_1fr_auto]' : 'grid-cols-[3.6rem_3rem_1fr_auto]'} items-center gap-2 px-3 py-2 text-[12px]">
 					<!-- The bare target, once. The old rail rendered prettyCheckLabel
 					     per row, which read "XEBY" then "XEBY · backend" down the
 					     list; with the two sources on one row the radar is named
 					     once and each source is named by its own column + tag. -->
 					<span class="num truncate text-[13px] text-[var(--color-bright)] tracking-wide"
 						  title={p.target}>{p.target}</span>
-					{#if hasBackend.radars}
+					{#if pairedRadars}
 						{@render sourceCell(p.backend, 'K2', true, 76)}
+						{@render sourceCell(p.primary, 'RC', true, 76)}
 					{:else}
 						<!-- Unpaired, so there is room for the word. Dropping it would
 						     change today's rail on a deployment this change otherwise
 						     leaves alone. With two sources there is no room for two of
-						     these, and the dot plus the trace colour carry it. -->
-						<span class="label text-left {statusText(p.primary?.status ?? 'skip')}">
-							{p.primary?.status === 'pass' ? 'UP'
-								: p.primary?.status === 'fail' ? 'DOWN'
-								: (p.primary?.status ?? 'skip').toUpperCase()}
+						     these, and the dot plus the trace colour carry it.
+						     `loneOf`, not `primary`: on an XQPI-shaped deployment the
+						     one reading is the BACKEND one. -->
+						{@const lone = loneOf(p)}
+						<span class="label text-left {statusText(lone?.status ?? 'skip')}">
+							{lone?.status === 'pass' ? 'UP'
+								: lone?.status === 'fail' ? 'DOWN'
+								: (lone?.status ?? 'skip').toUpperCase()}
 						</span>
+						{@render sourceCell(lone, 'RC', false, 86)}
 					{/if}
-					{@render sourceCell(p.primary, 'RC', hasBackend.radars, hasBackend.radars ? 76 : 86)}
 					<span class="num text-[10.5px] text-[var(--color-muted)]">
 						{#if imgQc}
 							<span class="inline-block align-middle" title="image QC">
@@ -348,8 +398,8 @@
 
 	<!-- RIGHT RAIL: PRODUCTS --------------------------------------------------------- -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={hasBackend.products ? `${stageLabel('L1')} + ${stageLabel('LB1')}` : stageLabel('L1')} />
-		{#if hasBackend.products}
+		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
+		{#if pairedProducts}
 			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
 				<span></span><span>K2 / Trinity</span><span>RadarCA</span>
 			</div>
@@ -370,23 +420,31 @@
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
 						{#each g.rows as p (p.target)}
-							{@const ageS = p.primary ? ageFromMetrics(p.primary.check_id, 'age_s') : null}
-							<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {hasBackend.products ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_4.5rem_auto]'} items-center gap-2 px-3 py-1.5 text-[12px]">
+							{@const lone = loneOf(p)}
+							{@const ageS = lone ? ageFromMetrics(lone.check_id, 'age_s') : null}
+							<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {pairedProducts ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_4.5rem_auto]'} items-center gap-2 px-3 py-1.5 text-[12px]">
+								<!-- Named off whichever reading exists. prettyCheckLabel
+								     suffixes "· backend" for layer1.backend.*, which is
+								     right in a paired rail and wrong when the backend IS
+								     the only source, so an unpaired row uses the bare
+								     product label. -->
 								<span class="num truncate text-[var(--color-bright)]"
-									  title={p.primary ? `${p.primary.check_id} · ${p.target}` : p.target}>
-									{p.primary ? prettyCheckLabel(p.primary.check_id, p.target) : productLabel(p.target)}
+									  title={lone ? `${lone.check_id} · ${p.target}` : p.target}>
+									{pairedProducts && p.primary
+										? prettyCheckLabel(p.primary.check_id, p.target)
+										: productLabel(p.target)}
 								</span>
-								{#if hasBackend.products}
+								{#if pairedProducts}
 									{@render sourceCell(p.backend, 'K2', true, 64)}
 									{@render sourceCell(p.primary, 'RC', true, 64)}
 								{:else}
 									<!-- Unpaired: keep the age readout this rail has always
 									     had. It only loses its column when the second source
 									     needs the room. -->
-									<span class="num text-right text-[10.5px] {statusText(p.primary?.status ?? 'skip')}">
+									<span class="num text-right text-[10.5px] {statusText(lone?.status ?? 'skip')}">
 										{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
 									</span>
-									{@render sourceCell(p.primary, 'RC', false, 56)}
+									{@render sourceCell(lone, 'RC', false, 56)}
 								{/if}
 							</li>
 						{/each}
