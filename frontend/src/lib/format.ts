@@ -139,6 +139,24 @@ export function stageOptions(withHint = false): { value: string; label: string; 
  * 300 s to 1080 s. The image count survives as the sparkline's trailing count
  * label; it is no longer the trace.
  */
+/**
+ * The X-band fleet correlation check, which is not a radar.
+ *
+ * It shares stage L2 with the six radars and used to render as a seventh row
+ * in the Radars rail — with a UP/DOWN word, an empty sparkline (it measures a
+ * count, not freshness, so it records no `headroom`), no image-QC dot, and a
+ * target of `xband-fleet` that truncated to `xband-…`. It also made the rail
+ * read "5/7" when there are six radars.
+ *
+ * It is a verdict ABOUT the rail, so it renders above it as a banner and only
+ * when it has something to say. See backend/checks/layer2_radar.py.
+ */
+export const FLEET_CHECK_ID = 'layer2.xband.fleet';
+
+export function isFleetCheck(checkId: string): boolean {
+	return checkId === FLEET_CHECK_ID;
+}
+
 export function sparklineMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer2.radar.'))   return 'headroom';
 	if (checkId.startsWith('layer2.backend.')) return 'headroom';

@@ -9,7 +9,7 @@
 		fmtAge, severityChip, statusText, statusBorder,
 		stageLabel, prettyCheckLabel, productLabel,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
-		sparklineMetric, sparklineDomain, sparklineWarnAt } from '$lib/format';
+		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck } from '$lib/format';
 	import { api } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -19,7 +19,19 @@
 	// `radarPairs` instead, which puts the two sources on ONE row.
 	const radarRows = $derived(
 		[...(sentinel.rollup?.stages?.L2 ?? []), ...(sentinel.rollup?.stages?.LB2 ?? [])]
+			.filter((r) => !isFleetCheck(r.check_id))
 			.slice().sort((a, b) => a.target.localeCompare(b.target))
+	);
+
+	// The fleet correlation verdict is about the rail, not a row in it. Pulled
+	// out so the count reads 6 radars rather than 7, and rendered as a banner
+	// only when it has something to say — it is `pass` 99% of the time and a
+	// permanently-green row that cannot be acted on is just furniture.
+	const fleetRow = $derived(
+		(sentinel.rollup?.stages?.L2 ?? []).find((r) => isFleetCheck(r.check_id)) ?? null
+	);
+	const fleetAlerting = $derived(
+		!!fleetRow && fleetRow.status !== 'pass' && fleetRow.status !== 'skip'
 	);
 
 	// Does THIS deployment have the backend tree mounted?
@@ -74,7 +86,7 @@
 	};
 
 	const radarPairs = $derived(pairByTarget(
-		sentinel.rollup?.stages?.L2 ?? [],
+		(sentinel.rollup?.stages?.L2 ?? []).filter((r) => !isFleetCheck(r.check_id)),
 		sentinel.rollup?.stages?.LB2 ?? []
 	));
 	const productPairs = $derived(pairByTarget(
@@ -250,6 +262,28 @@
 		</ul>
 
 		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={hasBackend.radars ? `${stageLabel('L2')} + ${stageLabel('LB2')}` : stageLabel('L2')} />
+		{#if fleetAlerting && fleetRow}
+			<!-- The fleet verdict, where it belongs: above the radars it is a
+			     statement about, and only while it is making one. Everything
+			     below is explained by this one line, which is the whole point
+			     of the check — one upstream event, not six radar outages. -->
+			<div
+				class="flex items-start gap-2 border-b border-[var(--color-border)] bg-[var(--color-fail)]/10 px-3 py-2"
+				title={fleetRow.check_id}
+			>
+				<!-- shrink-0: the dot is a flex child in an items-start row and
+				     gets squashed into a bar without it. -->
+				<span class="mt-[3px] shrink-0"><StatusDot status={fleetRow.status} size={8} /></span>
+				<div class="min-w-0">
+					<div class="label text-[10px] tracking-[0.14em] {statusText(fleetRow.status)}">
+						X-band fleet
+					</div>
+					<div class="num text-[11px] leading-snug text-[var(--color-default)]">
+						{fleetRow.summary}
+					</div>
+				</div>
+			</div>
+		{/if}
 		{#if hasBackend.radars}
 			<!-- Column headers only exist in the paired layout. They name the
 			     sources in full: "K2/TRIN" was not parseable cold, and these
