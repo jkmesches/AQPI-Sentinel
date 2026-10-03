@@ -3,7 +3,7 @@
 import { api, type StatusRollup, type Alarm, type CheckMeta } from '$lib/api';
 import { SentinelWs, type WsEvent } from '$lib/ws';
 import { diag } from '$lib/diag';
-import { sparklineMetric } from '$lib/format';
+import { sparklineMetric, readoutMetric } from '$lib/format';
 
 class SentinelState {
 	rollup     = $state<StatusRollup | null>(null);
@@ -99,7 +99,7 @@ class SentinelState {
 		this.pulseTick = upd;
 	}
 
-	/** The (check, metric) pairs the dashboard draws sparklines for. */
+	/** Every (check, metric) pair the dashboard needs — traces and readouts. */
 	private sparklineSeries(): { check_id: string; metric: string }[] {
 		// Walks every stage in the rollup and asks sparklineMetric what, if
 		// anything, that check plots. It used to enumerate L2 and L1 by hand,
@@ -109,11 +109,26 @@ class SentinelState {
 		// drew an empty cell while their samples sat in metric_samples.
 		// Deriving from the rollup's own keys means a new stage needs no change
 		// here at all.
+		//
+		// It collects the numeric readouts too, for the same reason in a
+		// different disguise: the products rail prints an age beside each row,
+		// which used to arrive free because the sparkline plotted age_s. Once
+		// the trace became headroom nothing fetched age_s and that column read
+		// "—" on every row — a rail asking for a series nobody fetches, which
+		// is the exact failure this function was written to end.
 		const wanted: { check_id: string; metric: string }[] = [];
+		const seen = new Set<string>();
+		const want = (check_id: string, metric: string | null) => {
+			if (!metric) return;
+			const k = `${check_id}|${metric}`;
+			if (seen.has(k)) return;
+			seen.add(k);
+			wanted.push({ check_id, metric });
+		};
 		for (const rows of Object.values(this.rollup?.stages ?? {})) {
 			for (const r of rows ?? []) {
-				const metric = sparklineMetric(r.check_id);
-				if (metric) wanted.push({ check_id: r.check_id, metric });
+				want(r.check_id, sparklineMetric(r.check_id));
+				want(r.check_id, readoutMetric(r.check_id));
 			}
 		}
 		return wanted;
