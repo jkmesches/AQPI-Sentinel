@@ -125,17 +125,64 @@ export function stageOptions(withHint = false): { value: string; label: string; 
  * routed them through ALL_STAGES, but all eight were in .svelte pages and
  * this one is in a store, so the sweep missed it.
  *
- * The two families plot different shapes on purpose. A radarca radar plots
- * its image count; a backend check plots age_s, which sawtooths — climbing
- * between arrivals and resetting on each one — because arrival time is the
- * only thing a filesystem read observes.
+ * All four families plot `headroom` — the fraction of the check's freshness
+ * budget still unspent, 0..1, computed by backend.checks.helpers.headroom
+ * against the very threshold the verdict uses. They deliberately plot the SAME
+ * metric now. The radarca and backend radar checks even divide by the same
+ * per-radar `silent_fail_s`, so when one trace diverges from the other that is
+ * the two sources genuinely disagreeing rather than two scales disagreeing.
+ *
+ * What this replaced: radarca radars plotted `images_Reflectivity` and the
+ * other three plotted `age_s`. Two shapes in one rail meant a reader had to
+ * know which family a row belonged to before the trace meant anything, and
+ * `age_s` is not comparable across rows anyway — the radar limits alone span
+ * 300 s to 1080 s. The image count survives as the sparkline's trailing count
+ * label; it is no longer the trace.
  */
 export function sparklineMetric(checkId: string): string | null {
-	if (checkId.startsWith('layer2.radar.'))   return 'images_Reflectivity';
-	if (checkId.startsWith('layer2.backend.')) return 'age_s';
+	if (checkId.startsWith('layer2.radar.'))   return 'headroom';
+	if (checkId.startsWith('layer2.backend.')) return 'headroom';
+	if (checkId.startsWith('layer1.product.')) return 'headroom';
+	if (checkId.startsWith('layer1.backend.')) return 'headroom';
+	return null;
+}
+
+/**
+ * A second series a rail shows as a NUMBER rather than as a trace, or null.
+ *
+ * The products rail prints each row's newest age next to it. That used to come
+ * along for free because the sparkline itself plotted `age_s`; once the trace
+ * became `headroom` nothing fetched `age_s` any more and the readout sat at
+ * "—" permanently. It is a separate concern from what gets drawn, so it is a
+ * separate question — and the store fetches the union of the two.
+ */
+export function readoutMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer1.product.')) return 'age_s';
 	if (checkId.startsWith('layer1.backend.')) return 'age_s';
 	return null;
+}
+
+/**
+ * The fixed y range a metric is drawn on, or null to autoscale to the window.
+ *
+ * `headroom` is already normalized to its own budget, so it gets a FIXED 0..1
+ * axis and the sparkline stops rescaling. That is the whole point of the
+ * metric: under autoscale a steady series and a dead one both collapsed to the
+ * baseline (identical pixel for pixel), and a 2% wobble drew the same
+ * full-height zigzag as a 6x swing. Anything else keeps the old behaviour.
+ */
+export function sparklineDomain(metric: string | null): [number, number] | null {
+	return metric === 'headroom' ? [0, 1] : null;
+}
+
+/**
+ * Where to draw the sparkline's warn rule, in the metric's own units, or null
+ * for none. 0.2 headroom is the band layer2_backend_radar warns at
+ * (`age_s <= silent_s * 0.8`), so the rule marks a real boundary rather than a
+ * decorative gridline.
+ */
+export function sparklineWarnAt(metric: string | null): number | null {
+	return metric === 'headroom' ? 0.2 : null;
 }
 
 export function stageColor(s: string): string {

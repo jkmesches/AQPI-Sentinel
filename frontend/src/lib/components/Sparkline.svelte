@@ -4,12 +4,17 @@
   Y axis carries TWO signals at once:
 
     1. For non-empty buckets, height is the mean of `value` across the
-       samples that landed in that bucket, normalized against the
-       observed min/max in the visible window. This brings back the
-       per-check shape that pure-count sparklines homogenized away —
-       a radar producing 10 scans/min looks different from one
-       producing 2, a product whose age_s drifts looks different from
-       a fresh one.
+       samples that landed in that bucket, scaled either against a
+       FIXED `domain` (what the dashboard passes for `headroom`) or,
+       with no domain, against the observed min/max in the window.
+
+       Prefer a fixed domain wherever the metric has one. Autoscale
+       rescales every trace to fill the box, which erases exactly what
+       the sparkline is for: a perfectly steady series and a dead one
+       both land on the baseline — identical pixel for pixel — and a
+       2% wobble draws the same full-height zigzag as a 6x swing.
+       Autoscale remains the default only because a bare count has no
+       natural ceiling to scale against.
 
     2. For empty buckets (no samples in that interval), the trace
        drops to the baseline. This preserves the outage-detection
@@ -30,6 +35,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { windowFromCadence } from '$lib/format';
+	import { sparklineGeometry } from '$lib/sparklineGeometry';
 
 	let {
 		data = [],
@@ -38,7 +44,9 @@
 		height = 18,
 		stroke = 'currentColor',
 		showLabel = true,
-		tickMs = 5_000
+		tickMs = 5_000,
+		domain = null,
+		warnAt = null
 	}: {
 		data?: { ts: number; value: number }[];
 		cadenceS?: number | null;
@@ -47,6 +55,10 @@
 		stroke?: string;
 		showLabel?: boolean;
 		tickMs?: number;
+		/** Fixed [min, max] y range. Null autoscales to the window. */
+		domain?: [number, number] | null;
+		/** Draw a dashed rule at this value, in the metric's own units. */
+		warnAt?: number | null;
 	} = $props();
 
 	const win = $derived(windowFromCadence(cadenceS));
@@ -70,64 +82,34 @@
 	});
 	onDestroy(() => { if (timer) clearInterval(timer); });
 
-	const result = $derived.by(() => {
-		const windowMs = win.ms;
-		// One bucket per cadence interval — when healthy, that's roughly
-		// one sample per bucket. Floor at 15 s so a wonky 0-cadence input
-		// doesn't make the bucket count blow up.
-		const baseBucket = Math.max(15_000, (cadenceS ?? 60) * 1000);
-		const nBuckets = Math.max(8, Math.min(48, Math.floor(windowMs / baseBucket)));
-		const bucketMs = windowMs / nBuckets;
-		// Track sums + counts so we can derive per-bucket means. Buckets
-		// that received no samples stay at count=0 and render at baseline.
-		const sums = new Array(nBuckets).fill(0);
-		const counts = new Array(nBuckets).fill(0);
-		const left = now - windowMs;
-		for (const d of data) {
-			if (d.ts < left || d.ts > now) continue;
-			const i = Math.min(nBuckets - 1, Math.floor((d.ts - left) / bucketMs));
-			if (i >= 0) {
-				sums[i] += d.value;
-				counts[i]++;
-			}
-		}
-		const total = counts.reduce((a, b) => a + b, 0);
-		// Per-bucket mean, or null for an empty bucket (renders at baseline).
-		const means: (number | null)[] = sums.map((s, i) => (counts[i] > 0 ? s / counts[i] : null));
-		const nonEmpty = means.filter((v): v is number => v !== null);
-		// Local autoscale: each sparkline's variation gets the full y range,
-		// so a radar producing 2-vs-12 scans/min looks visibly different
-		// from one producing 50-vs-60. Floors prevent div-by-zero when the
-		// metric is constant or the window is entirely empty.
-		const minV = nonEmpty.length > 0 ? Math.min(...nonEmpty) : 0;
-		const maxV = nonEmpty.length > 0 ? Math.max(...nonEmpty) : 1;
-		const span = Math.max(1e-9, maxV - minV);
-		const dx = nBuckets > 1 ? width / (nBuckets - 1) : 0;
-		const pts = means.map((v, i) => {
-			const x = i * dx;
-			// Empty → baseline. Non-empty → linearly scaled within the
-			// observed range so the bucket variation reads as shape.
-			const y =
-				v === null
-					? height - 1
-					: height - ((v - minV) / span) * (height - 2) - 1;
-			return [x, y] as [number, number];
-		});
-		const strokeD = pts
-			.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`)
-			.join(' ');
-		// Area fill spans the full width with baseline at height — so the
-		// "trace at zero" state still draws as a thin sliver, visibly
-		// distinct from an empty/unrendered sparkline.
-		const fillD = pts.length > 1
-			? `${strokeD} L${width.toFixed(1)},${height} L0,${height} Z`
-			: '';
-		return { strokeD, fillD, total };
-	});
+	// All of it lives in $lib/sparklineGeometry so it can be tested without a
+	// DOM. See that module for why the fixed-domain path exists.
+	const result = $derived(
+		sparklineGeometry({
+			data,
+			now,
+			windowMs: win.ms,
+			cadenceS,
+			width,
+			height,
+			domain,
+			warnAt
+		})
+	);
 </script>
 
 <span class="inline-flex items-center gap-1.5 align-middle">
 	<svg class="spark" {width} {height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+		{#if result.warnY !== null}
+			<path
+				class="warn-rule"
+				d={`M0,${result.warnY} L${width},${result.warnY}`}
+				stroke="var(--color-border-strong)"
+				stroke-width="1"
+				stroke-dasharray="2 2"
+				fill="none"
+			/>
+		{/if}
 		{#if result.fillD}
 			<path class="fill" d={result.fillD} fill={stroke} fill-opacity="0.18" />
 		{/if}
