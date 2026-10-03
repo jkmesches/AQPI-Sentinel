@@ -35,7 +35,7 @@ from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
-from .helpers import worst_of
+from .helpers import headroom, worst_of
 
 # A hung NFS mount blocks stat(2) indefinitely. Every existing check is HTTP with a
 # timeout, so the scheduler has never had to survive a blocking syscall; without this
@@ -160,6 +160,7 @@ class Layer1BackendProductCheck(Check):
             self.cfg.get("backend_max_age_s", DEFAULT_BACKEND_MAX_AGE_S),
         )
         metrics["backend_max_age_s"] = float(max_age)
+        metrics["headroom"] = headroom(age_s, max_age)
         sub["B_freshness"] = "pass" if age_s <= max_age else "fail"
         # Also in the payload, not just metrics: check_runs stores payload but NOT
         # metrics (those go to metric_samples), and the reprocess engine reads only

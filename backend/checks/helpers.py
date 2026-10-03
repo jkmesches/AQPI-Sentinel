@@ -109,3 +109,38 @@ def derive_check_cadence(scan_cadence_s: int | None) -> int:
     if scan_cadence_s is None:
         return 3600
     return max(60, scan_cadence_s // 2)
+
+
+# --------------------------------------------------------------------------
+# Freshness headroom
+# --------------------------------------------------------------------------
+
+def headroom(age_s: float, limit_s: float) -> float:
+    """Fraction of a freshness budget still unspent, clamped to 0..1.
+
+    The dashboard sparklines plot this rather than raw ``age_s`` because the
+    limits are not comparable across checks: the per-radar silence thresholds
+    alone span 300 s (XEBY) to 1080 s (CBAND), and the product limits run 360 s
+    to 90 000 s. Dividing by the budget puts every check on one axis where 1.0
+    is "just arrived" and 0.0 is "out of budget", which is what lets the
+    sparkline use a FIXED y range.
+
+    That fixed range is the point. Autoscaling each trace to its own observed
+    min/max -- what Sparkline.svelte did before -- rescales every series to fill
+    the box, so a 2% wobble and a 6x swing draw the same picture, and a
+    perfectly steady series collapses onto the baseline where a dead one
+    already sits. Those two were pixel-identical.
+
+    ``limit_s`` is negative for the nowcast/forecast products, which publish
+    timestamps AHEAD of wall clock (see layer1_product's note on negative
+    max_freshness_s). Both signs work here because this measures distance from
+    the limit, not from zero; dividing by ``abs(limit_s)`` then reads as
+    "fraction of the required lead time still in hand". A healthy nowcast
+    therefore sits lower in the box than a healthy radar -- it is a different
+    budget -- but it is still flat when steady and still falls to 0 exactly
+    where the verdict flips.
+    """
+    span = abs(float(limit_s))
+    if span == 0.0:
+        return 0.0
+    return max(0.0, min(1.0, (float(limit_s) - float(age_s)) / span))
