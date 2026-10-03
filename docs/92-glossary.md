@@ -281,6 +281,50 @@ window to a natural unit so the inline label reads cleanly.
 
 ---
 
+## Headroom
+
+The fraction of a check's freshness budget still unspent, `0.0` to
+`1.0`. Recorded as the `headroom` metric by every check family the
+dashboard draws a sparkline for, and computed by
+[`backend/checks/helpers.py:headroom`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/backend/checks/helpers.py)
+against the very threshold that check's verdict uses:
+
+| Family | Divided by |
+|---|---|
+| `layer2.radar.*` (RadarCA radars) | `silent_fail_s` |
+| `layer2.backend.*` (K2/Trinity radars) | `backend_silent_s`, defaulting to the same table |
+| `layer1.product.*` | `max_freshness_s` |
+| `layer1.backend.*` | `backend_max_age_s` |
+
+`1.0` means "just arrived", `0.0` means "out of budget" — and 0.0
+lands exactly where the verdict flips, so the trace reaching the floor
+and the row going red are the same event.
+
+**Why a normalized number rather than `age_s`.** The limits are not
+comparable across checks. The per-radar silence thresholds alone span
+300 s (XEBY) to 1080 s (CBAND), and the product limits run 360 s to
+90 000 s, so a rail of raw ages cannot be read down a column. Dividing
+by each check's own budget puts them all on one axis.
+
+That shared axis is what lets the sparkline be drawn on a **fixed**
+0..1 range instead of autoscaling to whatever the window happened to
+contain. Autoscaling rescales every trace to fill its box, which
+erases the distinction the sparkline exists to draw: a perfectly
+steady series and one with no samples at all both collapse onto the
+baseline, pixel for pixel, and a 2% wobble draws the same full-height
+zigzag as a 6x swing.
+
+**Negative budgets.** The nowcast and forecast products publish
+timestamps *ahead* of wall clock and carry a negative
+`max_freshness_s` (`comp_now` -2400, `water_depth` and
+`max_water_depth` -3600). `headroom` measures distance from the limit
+rather than from zero, so both signs work; for those products it reads
+as "fraction of the required lead time still in hand". A healthy
+nowcast therefore sits lower in its box than a healthy radar — a
+different budget, not a worse one.
+
+---
+
 ## Silence
 
 A temporary mute rule. While active, **alarms matching the silence

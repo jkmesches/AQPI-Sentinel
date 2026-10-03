@@ -74,7 +74,7 @@ export const FAQ: FaqItem[] = [
 				]
 			},
 			{ kind: 'p', text: 'The stages are also a dependency chain. If L0 says the origin is unreachable, downstream failures are collateral and Sentinel marks them as such, rather than painting forty red cells for one root cause.' },
-			{ kind: 'p', text: 'The two LB stages sit deliberately outside that chain. They read the published files straight off the backend shares, so radarca being down tells you nothing about whether a product exists — and that independence is the point. Where an LB stage and its radarca counterpart disagree, the LB answer is the one describing reality, and the disagreement itself is the useful signal: the data is being produced but something in the display tier is not showing it.' }
+			{ kind: 'p', text: 'The two LB stages sit deliberately outside that chain. They read the published files straight off the backend shares, so radarca being down tells you nothing about whether a product exists — and that independence is the point. Where an LB stage and its radarca counterpart disagree, the LB answer is the one describing reality, and the disagreement itself is the useful signal: the data is being produced but something in the display tier is not showing it. The home page puts that comparison on one row: each radar and product carries two readings, tagged K2 (the backend tree \u2014 Trinity for CBAND) and RC (radarca), plotted on the same fixed scale against the same threshold. When one trace falls and the other does not, that is the disagreement, visible without reading anything. Rails on a deployment with no backend mount show a single column and no tags.' }
 		]
 	},
 	{

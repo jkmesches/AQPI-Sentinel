@@ -149,13 +149,24 @@ A guided tour, top to bottom:
   monitoring stage. Connectivity / Product Freshness / Radar Scans /
   Map Overlays / Image Quality. Dot turns gray (skip) when an upstream
   failure is cascade-suppressing the whole stage.
-- **Left rail** — Site (L0 connectivity) on top, Radars (L2) below.
-  Each row has a status dot, a sparkline of recent data-arrival rate,
-  and a one-line summary.
+- **Left rail** — Site (L0 connectivity) on top, Radars below. Each
+  row has a status dot and a sparkline of
+  [headroom](92-glossary.md#headroom) — how much of that radar's
+  silence budget is left, on a fixed scale where a full box is fresh
+  and an empty one is silent.
+
+  On a deployment with the backend tree mounted, each radar is **one
+  row with two readings**: `K2` (the filesystem, or Trinity for CBAND)
+  and `RC` (RadarCA, the scraped upstream). Both divide by the same
+  per-radar threshold, so when the two traces disagree that is the two
+  sources disagreeing — the usual shape of a RadarCA scraping problem
+  that is not a radar problem. Without the mount there is one column
+  and no tags; see [Deployment shapes](#deployment-shapes).
 - **Center hero** — Network map with radar pins. Click to focus, drag
   the time chip strip to scrub through historical composite imagery.
 - **Right rail** — Products grouped by category (Radar Data /
-  Atmospheric Forecast / CoSMoS / NWM).
+  Atmospheric Forecast / CoSMoS / NWM), paired the same way when the
+  backend is mounted.
 - **Alarms ticker** at the bottom — most-recent open alarms, click to
   drill in.
 
@@ -163,6 +174,37 @@ The mobile shell at `/m` is fully featured: install it to your home
 screen on iPhone Safari (Share → Add to Home Screen) or tap the
 "Install app" button that appears on Android Chrome. Push
 notifications + the same data, all touch-optimized.
+
+---
+
+## Deployment shapes
+
+Sentinel runs the same image everywhere; what differs is which checks
+register. Two settings in `.env.prod` decide it, and both are read at
+import time, so a check is either registered for the life of the
+process or absent from it:
+
+| Setting | When set | When unset |
+|---|---|---|
+| `SENTINEL_BACKEND_ROOT` | 13 `LB1` product checks + 6 `LB2` radar checks register | none of them exist |
+| `SENTINEL_SSCB_ROOT` | CBAND's `LB2` check registers (it reads Trinity, not the DROPS tree) | every other radar still registers; CBAND does not |
+
+The home page reads this off `/api/checks` and lays itself out to
+match:
+
+- **Both mounted** — each radar and product is one row with two
+  readings, `K2` and `RC`, each tagged.
+- **Neither mounted** (the dev deployment, no VPN) — one column, no
+  tags, no second header. Identical to the pre-v0.5.4 rail.
+- **Backend but no SSCB** — CBAND's `K2` cell reads *not mounted*
+  while its neighbours have one. The same wording covers the
+  vector/stream feeds in the Products rail, which have no backend
+  counterpart on any deployment.
+
+*Not mounted* and *failing* are different states and look different.
+If a mount drops **after** boot the checks stay registered and start
+failing, which is what you want to see; a check that was never
+registered has nothing to report and says so.
 
 ---
 

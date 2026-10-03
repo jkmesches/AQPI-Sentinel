@@ -28,6 +28,66 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The home-page rails pair each target's two sources on one row.** With the
+  backend tree mounted, a radar or product is one row carrying two readings —
+  `K2` (the filesystem; Trinity for CBAND) and `RC` (RadarCA, the scraped
+  upstream) — each tagged where it sits, under spelled-out column headers.
+  Previously the two were separate rows sorted together, which rendered
+  `XEBY` immediately above `XEBY · backend` and read as a duplicate.
+
+  The tag is on the trace rather than only in a header because a header is
+  gone the moment the rail scrolls, and gone again in a screenshot of three
+  rows.
+
+- **Sparklines plot `headroom` on a fixed 0..1 axis** instead of each family
+  plotting a different metric autoscaled to its own window.
+
+  Autoscaling rescaled every trace to fill its box, which erased the
+  distinction the sparkline exists to draw. Measured, in a 16 px box: a
+  perfectly steady series and one with *no samples at all* both rendered flat
+  on the baseline, identical pixel for pixel; and a series wobbling 2% drew
+  the same full-height zigzag as one swinging 6x. A radar 85% of the way to
+  its silence limit looked indistinguishable from a healthy one.
+
+  `headroom` is the fraction of a check's freshness budget still unspent,
+  recorded by every plotted family against the *same* threshold its verdict
+  uses, so the trace reaches the floor exactly where the row turns red. The
+  radarca and backend radar checks divide by the same per-radar
+  `silent_fail_s`, which is what makes the two columns comparable: a
+  divergence between the traces is the two sources disagreeing, not two
+  scales disagreeing. A dashed rule marks the warn boundary.
+
+  The image count is no longer the trace. It is still recorded, and the
+  sparkline's trailing `N/h` label still shows sample flow.
+
+### Added
+
+- **The rails adapt to which trees a deployment mounts**, read from
+  `/api/checks` rather than from the rollup — the catalog answers before the
+  first run lands, so the layout does not flash its one-column form on every
+  first paint. No mount means one column and no tags; CBAND without
+  `SENTINEL_SSCB_ROOT`, and the vector/stream feeds that have no backend
+  counterpart, say *not mounted* rather than leaving a blank cell that reads
+  as a failure.
+
+- `validation_tests/js/run_sparkline_geometry.mjs` and
+  `validation_tests/test_sparkline_metric.py`. The first pins the scaling
+  arithmetic — including the old autoscale behaviour, so the regression has a
+  name. The second walks the check registry and fails if a family the
+  dashboard plots does not record the metric it asks for; that mismatch is
+  silent at runtime, since the rail receives an empty array and draws an
+  empty cell. It is how `LB1`/`LB2` shipped with no sparkline in v0.5.0.
+
+### Fixed
+
+- **The products rail's age readout would have gone permanently blank.** It
+  came along for free while the sparkline plotted `age_s`; once the trace
+  became `headroom`, nothing fetched `age_s`. The store now fetches the union
+  of what is drawn and what is printed (`readoutMetric`), and the coverage
+  test asserts every metric a rail prints is one something fetches.
+
 ## [0.5.3] — 2026-10-03
 
 ### Fixed

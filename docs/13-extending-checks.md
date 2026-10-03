@@ -219,18 +219,45 @@ stable order.
 ## Metrics and sparklines
 
 Anything in `metrics` becomes available to the sparkline + history
-metric API. Two conventions:
+metric API. Three conventions:
 
 1. **Count-like metrics** (`n_steps`, `images_Reflectivity`,
-   `image_bytes`) — integer or float counts. Sparkline plots
-   arrival rate per cadence bucket.
+   `image_bytes`) — integer or float counts.
 2. **Age / latency** (`age_s`, `latency_ms`, `primary_age_s`) —
-   single-shot numbers per run. Sparkline still plots arrival rate
-   (one bucket = one sample).
+   single-shot numbers per run.
+3. **`headroom`** — the fraction of this check's freshness budget
+   still unspent, `0.0`–`1.0`. This is what the home-page rails
+   actually plot.
 
-The frontend's `Sparkline` component knows the cadence and picks
-the right window automatically (see
-[`92-glossary.md` § Sparklines](92-glossary.md#sparklines)).
+If your check has a freshness threshold, record `headroom` with the
+shared helper rather than computing a ratio yourself:
+
+```python
+from .helpers import headroom
+
+metrics["age_s"]    = float(age_s)
+metrics["headroom"] = headroom(age_s, limit_s)   # same limit the verdict uses
+```
+
+Pass the **same** threshold the verdict gates on. The point of the
+metric is that the trace hits the floor exactly where the check turns
+red; a sparkline drawn against a different number than the verdict is
+worse than no sparkline. It handles a negative limit too — the
+forecast products publish future-dated steps — so there is no sign
+special-casing to do.
+
+Then teach the dashboard about it in
+[`frontend/src/lib/format.ts`](https://github.com/jkmesches/AQPI-Sentinel/blob/main/frontend/src/lib/format.ts):
+`sparklineMetric()` maps your check-id prefix to the metric name, and
+`sparklineDomain()` gives `headroom` its fixed `0..1` axis. Both are
+asserted by `validation_tests/test_sparkline_metric.py`, which walks
+the registry and fails if a family the dashboard plots does not record
+what it asks for — that mismatch is silent at runtime, since the rail
+just receives an empty array and draws an empty cell.
+
+The `Sparkline` component knows the cadence and picks the right window
+automatically (see [`92-glossary.md` § Sparklines](92-glossary.md#sparklines)
+and [§ Headroom](92-glossary.md#headroom)).
 
 ---
 

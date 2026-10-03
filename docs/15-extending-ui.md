@@ -68,11 +68,19 @@ data:
 export const sentinel = $state<{
     rollup:  StatusRollup | null;    // GET /api/status response
     alarms:  Alarm[];                 // GET /api/alarms
-    metrics: Record<string, {ts: number; value: number}[]>;  // sparkline data
+    metrics: Record<string, {ts: number; value: number}[]>;  // keyed `check_id|metric`
     pulseTick: Record<string, number>;  // status-transition counters
     // ...
 }>({...});
 ```
+
+Which series land in `metrics` is decided in one place —
+`sparklineSeries()` walks whatever stages the rollup has and asks
+`format.ts` two questions per check: `sparklineMetric()` (what to
+draw) and `readoutMetric()` (what to print as a number). A rail that
+reads a key nobody asked for gets an empty array and renders nothing,
+with no error, so add the question rather than the lookup. Asserted by
+`validation_tests/js/test_sparkline_coverage.mjs`.
 
 Two write sources:
 
