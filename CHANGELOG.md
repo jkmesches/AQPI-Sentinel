@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-10-03
+
 ### Changed
 
 - **The timeline puts a target's two readings on adjacent rows.** Rows group by
