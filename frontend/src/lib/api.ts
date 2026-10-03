@@ -24,6 +24,13 @@ export interface CheckMeta {
 	target: string;
 	cadence_s: number;
 	depends_on: string[];
+	/** Which published tree a backend-reading check read — "the main archive" or "TRIN".
+	 *  Null for everything that does not read one. CBAND is the reason this
+	 *  exists: it comes off the secondary archive while every other backend row comes off
+	 *  the main archive, and the UI cannot know that. */
+	source_tag?: string | null;
+	/** The full name of the same thing, for row labels and tooltips. */
+	source_label?: string | null;
 }
 export interface CheckRun extends StatusRow {
 	id: number;

@@ -76,6 +76,12 @@ class Layer2BackendRadarCheck(Check):
 
     def __init__(self, radar_id: str):
         self.radar_id = radar_id
+        # CBAND lives on the secondary archive, every other radar on the main archive. See Check.source_*.
+        if radar_id in _special_trees():
+            self.source_tag, self.source_label = "TR", "the secondary archive"
+        else:
+            self.source_tag, self.source_label = "the main archive", "the main archive"
+
         self.id = f"layer2.backend.{radar_id}"
         self.target = radar_id
         self.cadence_s = 60
