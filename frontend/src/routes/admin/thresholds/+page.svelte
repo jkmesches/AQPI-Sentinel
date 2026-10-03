@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { url as apiUrl } from '$lib/origin';
+	import { stageLabel } from '$lib/format';
 
 	type ProductOverride = {
 		max_freshness_s?:    number | null;
@@ -70,6 +71,12 @@
 			updatedAt = j.updated_at;
 			updatedBy = j.updated_by;
 			draft = structuredClone(j.value);
+			// Older backends do not send this; fall back to the stages that
+			// existed before the registry so the picker is never empty.
+			reprocessable = Array.isArray(j.reprocessable_stages) && j.reprocessable_stages.length
+				? j.reprocessable_stages
+				: ['L1', 'L2', 'L4-T1T2'];
+			reStages = Object.fromEntries(reprocessable.map((k: string) => [k, true]));
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
@@ -165,17 +172,17 @@
 	let oneDayAgoIso = new Date(Date.now() - 86400_000).toISOString().slice(0, 16);
 	let reSince = $state(oneDayAgoIso);
 	let reUntil = $state(nowIso);
-	// Stages the reprocess engine can re-verdict. Must match the dispatch in
-	// backend/reprocess_engine.py — a stage listed here that the engine cannot
-	// handle produces a job that reports success having evaluated nothing.
-	const REPROCESSABLE: [string, string][] = [
-		['L1', 'Product Freshness'], ['LB1', 'Backend Products'],
-		['L2', 'Radar Scans'],       ['LB2', 'Backend Radar Arrival'],
-		['L4-T1T2', 'Image Quality']
-	];
-	let reStages = $state<Record<string, boolean>>(
-		Object.fromEntries(REPROCESSABLE.map(([k]) => [k, true]))
+	// Stages the reprocess engine can re-verdict, served by GET /thresholds from
+	// the engine's own handler registry. This was a hand-kept list whose comment
+	// said it "must match the dispatch in reprocess_engine.py" — it did not, and
+	// offered three stages while omitting the two just added. Deriving it means
+	// the picker cannot offer a stage the engine would silently drop. Labels come
+	// from the shared stage map, so a new stage needs no change here at all.
+	let reprocessable = $state<string[]>([]);
+	const REPROCESSABLE = $derived<[string, string][]>(
+		reprocessable.map((s) => [s, stageLabel(s)] as [string, string])
 	);
+	let reStages = $state<Record<string, boolean>>({});
 	let reConfirmText = $state('');
 	let reJob = $state<any>(null);
 	let rePoller: ReturnType<typeof setInterval> | undefined;

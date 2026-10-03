@@ -421,6 +421,13 @@ async def get_thresholds(
         "updated_at": persisted["updated_at"],
         "updated_by": persisted["updated_by"],
         "version":    _thresholds.current_version(),
+        # Served from the engine's handler registry rather than restated in the
+        # UI. The reprocess stage picker was a hand-kept list carrying a comment
+        # that it "must match the dispatch in reprocess_engine.py"; it did not,
+        # and offered three stages while omitting the two that had just been
+        # added. A picker that cannot drift is better than a comment asking it
+        # not to.
+        "reprocessable_stages": _reproc.reverdict_stages(),
     }
 
 
