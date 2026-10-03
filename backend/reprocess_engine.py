@@ -426,6 +426,55 @@ def _reverdict_l2(row: dict) -> tuple[str, dict] | None:
 # Job machinery
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Stage -> re-verdict handler
+# ---------------------------------------------------------------------------
+#
+# A registry, not an if/elif chain, because the chain has now silently dropped
+# a stage three times:
+#
+#   2026-08-26  L2 had no branch; jobs reported success having re-verdicted
+#               nothing (recorded in _reverdict_l2's docstring).
+#   2026-10-03  LB1 and LB2 had no branch, the same day they were added, for
+#               the same reason (v0.5.3).
+#
+# Each time the fix was another `elif`, which leaves the next stage to repeat
+# it. The failure is invisible by construction: an unhandled stage falls
+# through to `continue`, every row counts as evaluated, and the job finishes
+# green. A reprocess that changes nothing is indistinguishable from a
+# threshold that needed no change.
+#
+# So: stages are registered here, and anything NOT registered is counted and
+# reported rather than skipped in silence. Adding a stage without a handler is
+# now a visible "N rows skipped" in the job status instead of a quiet no-op.
+#
+# L4 needs the running phash/source trail, so handlers take (row, ctx) and
+# pull what they need out of ctx rather than every handler carrying L4's
+# parameters.
+_REVERDICT: dict[str, Any] = {
+    "L1":      lambda row, ctx: _reverdict_l1(row),
+    "L2":      lambda row, ctx: _reverdict_l2(row),
+    "L4-T1T2": lambda row, ctx: _reverdict_l4(row, ctx["l4_phash"], ctx["l4_source"]),
+    "LB1":     lambda row, ctx: _reverdict_lb1(row),
+    "LB2":     lambda row, ctx: _reverdict_lb2(row),
+}
+
+# Stages that legitimately have nothing threshold-driven to recompute. Listed
+# explicitly so "no handler" and "nothing to do" are different answers, and so
+# a genuinely new stage shows up as unhandled rather than hiding among these.
+_NO_REVERDICT: frozenset[str] = frozenset({"L0", "L3"})
+
+
+def reverdict_stages() -> list[str]:
+    """Stages a reprocess job can actually act on.
+
+    The admin UI's stage selector derives from this, so the picker cannot offer
+    a stage the engine will silently drop — which it did until v0.5.3, offering
+    three stages and none of the new ones.
+    """
+    return sorted(_REVERDICT)
+
+
 class ReprocessJob:
     def __init__(self, job_id: str, since: datetime, until: datetime, only_stages: list[str] | None):
         self.job_id = job_id
@@ -437,6 +486,10 @@ class ReprocessJob:
         self.n_evaluated: int = 0
         self.n_changed: int = 0
         self.n_preserved: int = 0
+        # Rows whose stage has no registered handler. Surfaced so an
+        # unhandled stage is a visible number, not a silent pass.
+        self.n_unhandled: int = 0
+        self.unhandled_stages: set[str] = set()
         self.started_at: datetime | None = None
         self.finished_at: datetime | None = None
         self.error: str | None = None
@@ -453,6 +506,8 @@ class ReprocessJob:
             "n_evaluated":  self.n_evaluated,
             "n_changed":    self.n_changed,
             "n_preserved":  self.n_preserved,
+            "n_unhandled":  self.n_unhandled,
+            "unhandled_stages": sorted(self.unhandled_stages),
             "started_at":   self.started_at.isoformat() if self.started_at else None,
             "finished_at":  self.finished_at.isoformat() if self.finished_at else None,
             "error":        self.error,
@@ -541,17 +596,14 @@ async def run_reprocess(pool, job: ReprocessJob) -> None:
                         l4_source[(row["check_id"], row["target"])] = payload["source"]
                 continue
 
-            new = None
-            if row["stage"] == "L1":
-                new = _reverdict_l1(row)
-            elif row["stage"] == "L2":
-                new = _reverdict_l2(row)
-            elif row["stage"] == "L4-T1T2":
-                new = _reverdict_l4(row, l4_phash, l4_source)
-            elif row["stage"] == "LB1":
-                new = _reverdict_lb1(row)
-            elif row["stage"] == "LB2":
-                new = _reverdict_lb2(row)
+            stage = row["stage"]
+            handler = _REVERDICT.get(stage)
+            if handler is None:
+                if stage not in _NO_REVERDICT:
+                    job.n_unhandled += 1
+                    job.unhandled_stages.add(stage)
+                continue
+            new = handler(row, {"l4_phash": l4_phash, "l4_source": l4_source})
 
             if new is None:
                 continue
