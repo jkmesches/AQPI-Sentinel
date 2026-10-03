@@ -4,12 +4,25 @@
 	import { url as apiUrl } from '$lib/origin';
 
 	type ProductOverride = {
-		max_freshness_s?: number | null;
-		min_png_bytes?:   number | null;
-		expected_steps?:  number | null;
-		cadence_s?:       number | null;
+		max_freshness_s?:    number | null;
+		min_png_bytes?:      number | null;
+		expected_steps?:     number | null;
+		cadence_s?:          number | null;
+		backend_max_age_s?:  number | null;
 	};
-	type RadarOverride = { silent_fail_s?: number | null };
+	type RadarOverride = {
+		silent_fail_s?:      number | null;
+		backend_silent_s?:   number | null;
+	};
+
+	// One list per section, so a new tunable is added in exactly one place. The
+	// LB1/LB2 keys shipped in v0.5.0 were editable through the API immediately but
+	// invisible here, because the column set was written out by hand in four spots.
+	const PRODUCT_KEYS = [
+		'max_freshness_s', 'min_png_bytes', 'expected_steps', 'cadence_s',
+		'backend_max_age_s'
+	] as const;
+	const RADAR_KEYS = ['silent_fail_s', 'backend_silent_s'] as const;
 	type L4Override = {
 		extreme_threshold?:  number | null;
 		skip_frozen?:        boolean | null;
@@ -273,16 +286,15 @@
 
 			<!-- Products -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Products (L1 freshness · cadence · step count · size)</h2>
+				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Products (L1 freshness · cadence · step count · size · LB1 backend age)</h2>
 				<div class="overflow-auto rounded-sm border border-[var(--color-border)]">
 					<table class="w-full text-[11px] num">
 						<thead class="bg-[var(--color-elevated)]/40 text-[var(--color-muted)] uppercase tracking-wider">
 							<tr>
 								<th class="px-3 py-1 text-left">product_id</th>
-								<th class="px-3 py-1 text-right">max_freshness_s</th>
-								<th class="px-3 py-1 text-right">min_png_bytes</th>
-								<th class="px-3 py-1 text-right">expected_steps</th>
-								<th class="px-3 py-1 text-right">cadence_s</th>
+								{#each PRODUCT_KEYS as k}
+									<th class="px-3 py-1 text-right">{k}</th>
+								{/each}
 							</tr>
 						</thead>
 						<tbody>
@@ -290,7 +302,7 @@
 								{@const cur = draft.products[pid] ?? (draft.products[pid] = {})}
 								<tr class="border-t border-[var(--color-border)]/40">
 									<td class="px-3 py-1 text-[var(--color-bright)]">{pid}</td>
-									{#each ['max_freshness_s','min_png_bytes','expected_steps','cadence_s'] as k}
+									{#each PRODUCT_KEYS as k}
 										<td class="px-3 py-1 text-right">
 											<input
 												type="number"
@@ -317,7 +329,9 @@
 						<thead class="bg-[var(--color-elevated)]/40 text-[var(--color-muted)] uppercase tracking-wider">
 							<tr>
 								<th class="px-3 py-1 text-left">radar_id</th>
-								<th class="px-3 py-1 text-right">silent_fail_s</th>
+								{#each RADAR_KEYS as k}
+									<th class="px-3 py-1 text-right">{k}</th>
+								{/each}
 							</tr>
 						</thead>
 						<tbody>
@@ -325,16 +339,18 @@
 								{@const cur = draft.radars[rid] ?? (draft.radars[rid] = {})}
 								<tr class="border-t border-[var(--color-border)]/40">
 									<td class="px-3 py-1 text-[var(--color-bright)]">{rid}</td>
-									<td class="px-3 py-1 text-right">
-										<input
-											type="number"
-											step="any"
-											value={cur.silent_fail_s ?? ''}
-											oninput={(e) => (cur.silent_fail_s = parseNum((e.target as HTMLInputElement).value))}
-											placeholder={String(defaultRadar(rid, 'silent_fail_s') ?? '—')}
-											class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
-										/>
-									</td>
+									{#each RADAR_KEYS as k}
+										<td class="px-3 py-1 text-right">
+											<input
+												type="number"
+												step="any"
+												value={cur[k as keyof RadarOverride] ?? ''}
+												oninput={(e) => (cur[k as keyof RadarOverride] = parseNum((e.target as HTMLInputElement).value))}
+												placeholder={String(defaultRadar(rid, k as keyof RadarOverride) ?? '—')}
+												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
+											/>
+										</td>
+									{/each}
 								</tr>
 							{/each}
 						</tbody>

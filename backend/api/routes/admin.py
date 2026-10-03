@@ -438,15 +438,17 @@ def _validate_thresholds(blob: object) -> dict:
             raise HTTPException(400, f"products.{pid} must be an object")
         for k, v in p.items():
             if v is None: continue
-            if k in ("max_freshness_s", "min_png_bytes", "expected_steps", "cadence_s"):
+            if k in ("max_freshness_s", "min_png_bytes", "expected_steps",
+                     "cadence_s", "backend_max_age_s"):
                 if not isinstance(v, (int, float)):
                     raise HTTPException(400, f"products.{pid}.{k} must be a number")
     for rid, r in (blob.get("radars") or {}).items():
         if not isinstance(r, dict):
             raise HTTPException(400, f"radars.{rid} must be an object")
-        if "silent_fail_s" in r and r["silent_fail_s"] is not None:
-            if not isinstance(r["silent_fail_s"], (int, float)) or r["silent_fail_s"] <= 0:
-                raise HTTPException(400, f"radars.{rid}.silent_fail_s must be positive number")
+        for k in ("silent_fail_s", "backend_silent_s"):
+            if k in r and r[k] is not None:
+                if not isinstance(r[k], (int, float)) or r[k] <= 0:
+                    raise HTTPException(400, f"radars.{rid}.{k} must be positive number")
     for pid, p in (blob.get("l4") or {}).items():
         if not isinstance(p, dict):
             raise HTTPException(400, f"l4.{pid} must be an object")
