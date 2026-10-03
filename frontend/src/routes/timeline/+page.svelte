@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket, type TimelineCell } from '$lib/api';
 	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
-	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES } from '$lib/format';
+	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES, backendStageOf, isBackendStage } from '$lib/format';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
 	import ReportExportModal from '$lib/components/ReportExportModal.svelte';
@@ -135,6 +135,45 @@
 		return out;
 	});
 
+	// A grid row: the check it draws, and whether it is half of a pair.
+	//
+	// `primary` is the radarca-derived reading and names the target; `secondary`
+	// is the backend reading of that SAME target and sits directly beneath it,
+	// labelled only by its source. Previously the two lived in separate stage
+	// blocks, so a product and its backend row ended up thirteen rows apart and
+	// the one thing worth seeing — the two sources disagreeing — could not be
+	// seen at all.
+	//
+	// Deliberately NOT a header row plus two subrows: that is half again the
+	// height on a grid people scroll, for a row that carries no cells.
+	type PairRole = 'solo' | 'primary' | 'secondary';
+	interface GridRow { col: CheckMeta; role: PairRole }
+
+	function pairRows(primary: CheckMeta[], backend: CheckMeta[]): GridRow[] {
+		// No backend on this deployment (SENTINEL_BACKEND_ROOT unset) means no
+		// second reading to pair with, so every row stays flat — the grid is
+		// byte-identical to what it was.
+		if (!backend.length) return primary.map((col) => ({ col, role: 'solo' as PairRole }));
+		const bk = new Map(backend.map((c) => [c.target, c]));
+		const out: GridRow[] = [];
+		for (const col of primary) {
+			const mate = bk.get(col.target);
+			if (mate) {
+				out.push({ col, role: 'primary' });
+				out.push({ col: mate, role: 'secondary' });
+				bk.delete(col.target);
+			} else {
+				// e.g. the vector/stream feeds, which have no backend counterpart
+				// on any deployment.
+				out.push({ col, role: 'solo' });
+			}
+		}
+		// A backend check whose radarca counterpart is missing still deserves a
+		// row; it just has nothing to pair with.
+		for (const orphan of bk.values()) out.push({ col: orphan, role: 'solo' });
+		return out;
+	}
+
 	// `subgroups` is populated for L1 only (Products tab) so the grid
 	// renders a category sub-header before each cohort — same four
 	// categories the home page uses (Radar Data / Atmospheric Forecast /
@@ -146,26 +185,40 @@
 			if (!byStage.has(c.stage)) byStage.set(c.stage, []);
 			byStage.get(c.stage)!.push(c);
 		}
-		const out: { stage: string; cols: CheckMeta[]; subgroups?: { label: string; cols: CheckMeta[] }[] }[] = [];
+		const out: { stage: string; label: string; rows: GridRow[];
+		             subgroups?: { label: string; rows: GridRow[] }[] }[] = [];
+		const byId = (a: CheckMeta, b: CheckMeta) => a.id.localeCompare(b.id);
 		for (const s of tabCfg.stages) {
-			const cols = byStage.get(s);
-			if (!cols?.length) continue;
-			cols.sort((a, b) => a.id.localeCompare(b.id));
-			if (s === 'L1' || s === 'LB1') {
-				const byCat: Record<string, CheckMeta[]> = {};
+			// A backend stage never gets a block of its own — it is rendered
+			// interleaved with the stage it mirrors.
+			if (isBackendStage(s)) continue;
+			const primary = (byStage.get(s) ?? []).slice().sort(byId);
+			const bs = backendStageOf(s);
+			const backend = ((bs && byStage.get(bs)) || []).slice().sort(byId);
+			if (!primary.length && !backend.length) continue;
+			const rows = pairRows(primary, backend);
+			// Label is the primary stage alone even when the block holds both.
+			// "Product Freshness + Backend Products" wraps and clips in a 22px
+			// separator at 208px, and the per-row RC/K2 tags already say both
+			// sources are present — as does the stage strip above the grid,
+			// which still counts them separately.
+			const label = stageLabel(s);
+			if (s === 'L1') {
+				const byCat: Record<string, GridRow[]> = {};
 				for (const cat of PRODUCT_CATEGORY_ORDER) byCat[cat] = [];
-				for (const c of cols) byCat[productCategory(c.target)].push(c);
+				// Keyed on target, so both halves of a pair land in one category.
+				for (const r of rows) byCat[productCategory(r.col.target)].push(r);
 				const subgroups = PRODUCT_CATEGORY_ORDER
-					.map((cat) => ({ label: PRODUCT_CATEGORY_LABEL[cat], cols: byCat[cat] }))
-					.filter((sg) => sg.cols.length > 0);
-				out.push({ stage: s, cols, subgroups });
+					.map((cat) => ({ label: PRODUCT_CATEGORY_LABEL[cat], rows: byCat[cat] }))
+					.filter((sg) => sg.rows.length > 0);
+				out.push({ stage: s, label, rows, subgroups });
 			} else {
-				out.push({ stage: s, cols });
+				out.push({ stage: s, label, rows });
 			}
 		}
 		return out;
 	});
-	const flatColumns = $derived(groupedColumns.flatMap((g) => g.cols));
+	const flatColumns = $derived(groupedColumns.flatMap((g) => g.rows.map((r) => r.col)));
 	const totalCols   = $derived(flatColumns.length);
 
 	// Per-bucket column width — wider when fewer buckets so the row doesn't
@@ -661,6 +714,77 @@
 	}
 </script>
 
+<!--
+  One grid row: a sticky label on the left, then one cell per time bucket.
+
+  `role` decides only the label. A `primary` row names the target and tags
+  itself RC; the `secondary` row directly beneath it is the SAME target read
+  off the backend, so it repeats nothing and carries only its source. That is
+  what keeps a paired tab exactly as tall as it was before pairing — the
+  alternative, a header row plus two subrows, is half again the height for a
+  row that draws no cells.
+
+  `solo` is the unpaired case: no backend mount on this deployment, or a feed
+  (vectors, streams, map overlays, image QC) that has no backend counterpart
+  anywhere. It renders exactly as it always did.
+-->
+{#snippet gridRow(r: GridRow)}
+	{@const col = r.col}
+	{@const isSecondary = r.role === 'secondary'}
+	<div
+		class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center gap-1.5 px-3 text-[12px] num {isSecondary ? 'text-[var(--color-muted)]' : 'text-[var(--color-bright)]'}"
+		style="height:{ROW_H}px;"
+		title={[
+			`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
+			``,
+			`Check ID:  ${col.id}`,
+			`Target:    ${col.target}`,
+			`Cadence:   every ${col.cadence_s}s`,
+			`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
+			``,
+			`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
+			`Cell fill: the colored band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
+			`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
+		].join('\n')}
+	>
+		{#if isSecondary}
+			<!-- Indent + a left rule, so the pair reads as one unit without
+			     spending a row on a header to say so. -->
+			<span
+				class="ml-1 mr-1 self-stretch border-l border-[var(--color-border-strong)]"
+				aria-hidden="true"
+			></span>
+			<span class="truncate text-[11px]">{col.source_label ?? 'Backend'}</span>
+		{:else}
+			<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
+		{/if}
+		{#if r.role !== 'solo'}
+			<span
+				class="ml-auto shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]"
+			>{isSecondary ? (col.source_tag ?? 'BK') : 'RC'}</span>
+		{/if}
+	</div>
+	{#each orderedBuckets as b}
+		{@const cell = b.cells[cellKey(col)]}
+		{@const st = cell?.status ?? 'unknown'}
+		{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
+		<button
+			type="button"
+			class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
+			style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
+			onclick={() => openDetail(b, col)}
+			title={cell
+				? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cellRatioText(cell)} · ${fmtRowTs(b.ts).primary} UTC`
+				: `${prettyCheckLabel(col.id, col.target)} · no data · ${fmtRowTs(b.ts).primary} UTC`}
+		>
+			<span
+				class="block"
+				style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{cellFill(cell, st, ROW_H - 6)}; border-radius:2px;"
+			></span>
+		</button>
+	{/each}
+{/snippet}
+
 <div class="flex h-full flex-col">
 	<!-- TABS -->
 	<nav class="flex items-end gap-1 border-b border-[var(--color-border)] px-4 pt-2 text-[12px]">
@@ -847,11 +971,11 @@
 				{#each groupedColumns as g}
 					<!-- Stage separator (sticky-left label + full-width strip) -->
 					<div
-						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center px-3 text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
+						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center gap-1 overflow-hidden whitespace-nowrap px-3 text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
 						style="height:{STAGE_ROW_H}px;"
 					>
-						<span>{stageLabel(g.stage)}</span>
-						<span class="ml-2 text-[var(--color-faint)] num">({g.cols.length})</span>
+						<span class="truncate">{g.label}</span>
+						<span class="ml-2 text-[var(--color-faint)] num">({g.rows.length})</span>
 					</div>
 					<div
 						class="tl-cell border-b border-t border-[var(--color-border)] bg-[var(--color-canvas)]"
@@ -869,92 +993,20 @@
 								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px;"
 							>
 								<span>{sg.label}</span>
-								<span class="ml-2 text-[var(--color-faint)] num">({sg.cols.length})</span>
+								<span class="ml-2 text-[var(--color-faint)] num">({sg.rows.length})</span>
 							</div>
 							<div
 								class="tl-cell border-b border-[var(--color-border)] bg-[var(--color-canvas)]/60"
 								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px; grid-column: span {orderedBuckets.length};"
 							></div>
-							{#each sg.cols as col}
-								<div
-									class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] text-[var(--color-bright)] num"
-									style="height:{ROW_H}px;"
-									title={[
-										`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
-										``,
-										`Check ID:  ${col.id}`,
-										`Target:    ${col.target}`,
-										`Cadence:   every ${col.cadence_s}s`,
-										`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
-										``,
-										`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Cell fill: the colored band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
-										`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
-									].join('\n')}
-								>
-									<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
-								</div>
-								{#each orderedBuckets as b}
-									{@const cell = b.cells[cellKey(col)]}
-									{@const st = cell?.status ?? 'unknown'}
-									{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
-									<button
-										type="button"
-										class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
-										style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
-										onclick={() => openDetail(b, col)}
-										title={cell
-											? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cellRatioText(cell)} · ${fmtRowTs(b.ts).primary} UTC`
-											: `${prettyCheckLabel(col.id, col.target)} · no data · ${fmtRowTs(b.ts).primary} UTC`}
-									>
-										<span
-											class="block"
-											style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{cellFill(cell, st, ROW_H - 6)}; border-radius:2px;"
-										></span>
-									</button>
-								{/each}
+							{#each sg.rows as r (r.col.id)}
+								{@render gridRow(r)}
 							{/each}
 						{/each}
 					{:else}
 					<!-- Per-check rows in this stage -->
-					{#each g.cols as col}
-						<div
-							class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] text-[var(--color-bright)] num"
-							style="height:{ROW_H}px;"
-							title={[
-								`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
-								``,
-								`Check ID:  ${col.id}`,
-								`Target:    ${col.target}`,
-								`Cadence:   every ${col.cadence_s}s`,
-								`Stage:     ${stageLabel(col.stage)} (${col.stage})`,
-								``,
-								`Cell colors: green = pass · yellow = warn · red = fail · violet = error (check could not determine state) · gray = no data / skipped.`,
-										`Cell fill: the colored band is sized by how much of the bucket was at that status, so a single blip in a long window is a thin line and a sustained outage fills the cell.`,
-								`Click any cell to open a drill-down with thresholds, observed values, and verification URLs.`,
-							].join('\n')}
-						>
-							<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
-						</div>
-						{#each orderedBuckets as b}
-							{@const cell = b.cells[cellKey(col)]}
-							{@const st = cell?.status ?? 'unknown'}
-							{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
-							<button
-								type="button"
-								class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
-								style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
-								onclick={() => openDetail(b, col)}
-								title={cell
-									? `${prettyCheckLabel(col.id, col.target)} · ${STATUS_WORD[st]} · ${cellRatioText(cell)} · ${fmtRowTs(b.ts).primary} UTC`
-									: `${prettyCheckLabel(col.id, col.target)} · no data · ${fmtRowTs(b.ts).primary} UTC`}
-							>
-								<span
-									class="block"
-									style="width:{Math.max(bodyColW - 4, 4)}px; height:{ROW_H - 6}px; background:{cellFill(cell, st, ROW_H - 6)}; border-radius:2px;"
-								></span>
-							</button>
-						{/each}
+					{#each g.rows as r (r.col.id)}
+						{@render gridRow(r)}
 					{/each}
 					{/if}
 				{/each}

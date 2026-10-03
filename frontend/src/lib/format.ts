@@ -140,6 +140,30 @@ export function stageOptions(withHint = false): { value: string; label: string; 
  * label; it is no longer the trace.
  */
 /**
+ * Which stage is the backend-read view of which radarca-derived stage.
+ *
+ * `LB1` reads the same products off the filesystem that `L1` scrapes from
+ * radarca, and `LB2` does the same for the radars `L2` watches. They are two
+ * observations of one thing, which is why the home rails pair them on a row
+ * and the timeline puts them adjacent.
+ *
+ * One map rather than a check scattered across the surfaces that need it —
+ * this codebase has been bitten repeatedly by stage knowledge living in
+ * whichever file happened to need it first.
+ */
+export const BACKEND_STAGE_OF: Record<string, string> = { L1: 'LB1', L2: 'LB2' };
+
+/** The backend counterpart of a stage, or null if it has none. */
+export function backendStageOf(stage: string): string | null {
+	return BACKEND_STAGE_OF[stage] ?? null;
+}
+
+/** True for a stage that is itself a backend view (so it is never a block of its own). */
+export function isBackendStage(stage: string): boolean {
+	return Object.values(BACKEND_STAGE_OF).includes(stage);
+}
+
+/**
  * The X-band fleet correlation check, which is not a radar.
  *
  * It shares stage L2 with the six radars and used to render as a seventh row
