@@ -111,6 +111,33 @@ export function stageOptions(withHint = false): { value: string; label: string; 
 	);
 }
 
+/**
+ * Which metric a check's sparkline plots, or null for checks that have none.
+ *
+ * One place, because the previous arrangement had the answer in three: the
+ * store enumerated stages L1 and L2 to decide what to FETCH, and each rail
+ * hard-coded a metric name to decide what to DRAW. The backend checks were
+ * missing from the store's enumeration — doubly, since the L1 loop also
+ * guarded on `layer1.product.` — so LB1 and LB2 rows asked for no series and
+ * rendered an empty cell, while the data sat in metric_samples.
+ *
+ * That was the ninth hand-rolled stage enumeration. v0.5.1 found eight and
+ * routed them through ALL_STAGES, but all eight were in .svelte pages and
+ * this one is in a store, so the sweep missed it.
+ *
+ * The two families plot different shapes on purpose. A radarca radar plots
+ * its image count; a backend check plots age_s, which sawtooths — climbing
+ * between arrivals and resetting on each one — because arrival time is the
+ * only thing a filesystem read observes.
+ */
+export function sparklineMetric(checkId: string): string | null {
+	if (checkId.startsWith('layer2.radar.'))   return 'images_Reflectivity';
+	if (checkId.startsWith('layer2.backend.')) return 'age_s';
+	if (checkId.startsWith('layer1.product.')) return 'age_s';
+	if (checkId.startsWith('layer1.backend.')) return 'age_s';
+	return null;
+}
+
 export function stageColor(s: string): string {
 	return (
 		{
