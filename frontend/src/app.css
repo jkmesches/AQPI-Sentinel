@@ -231,3 +231,9 @@ svg.spark path.stroke { opacity: 0.95; }
 	/* Stop the rubber-band pull-to-refresh from arguing with page scroll. */
 	html, body { overscroll-behavior-y: contain; }
 }
+
+/* Paired source rows: tint when EITHER source is unhappy. The case this
+   layout exists for is exactly one of the two being unhappy, so the tint has
+   to key off the pair, not off a single row's status. */
+.row-bad { background: color-mix(in srgb, var(--color-fail) 7%, transparent); }
+.row-bad:hover { background: color-mix(in srgb, var(--color-fail) 13%, transparent); }

@@ -7,19 +7,80 @@
 	import SectionHeader from '$lib/components/SectionHeader.svelte';
 	import {
 		fmtAge, severityChip, statusText, statusBorder,
-		stageLabel, prettyCheckLabel,
-		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, sparklineMetric } from '$lib/format';
+		stageLabel, prettyCheckLabel, productLabel,
+		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
+		sparklineMetric, sparklineDomain, sparklineWarnAt } from '$lib/format';
 	import { api } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
 
 	// L2 + LB2 together: the same radar seen through radarca and read off the
-	// backend. Sorting by target pairs them, and prettyCheckLabel suffixes the
-	// backend row, so the two verdicts sit side by side.
+	// backend. Kept flat for the header's pass count; the rails render
+	// `radarPairs` instead, which puts the two sources on ONE row.
 	const radarRows = $derived(
 		[...(sentinel.rollup?.stages?.L2 ?? []), ...(sentinel.rollup?.stages?.LB2 ?? [])]
 			.slice().sort((a, b) => a.target.localeCompare(b.target))
 	);
+
+	// Does THIS deployment have the backend tree mounted?
+	//
+	// Read off the /api/checks catalog, not the rollup. The backend checks are
+	// registered at import time behind `if SETTINGS.backend_root:`, so the
+	// catalog answers correctly from the first paint; keying off an empty
+	// stages.LB2 would render the one-column layout until the first LB run
+	// landed and then jump to two columns.
+	//
+	// Absent is not the same as failing: without the mount these checks do not
+	// exist, so there is nothing to show and no column to show it in. If the
+	// mount drops *after* boot the checks stay registered and report fail,
+	// which is what we want to see.
+	const hasBackend = $derived.by(() => {
+		const stages = new Set(sentinel.checks.map((c) => c.stage));
+		return { products: stages.has('LB1'), radars: stages.has('LB2') };
+	});
+
+	// One row per target, carrying whichever of the two sources reported it.
+	// Both halves are optional on purpose:
+	//   - no mount at all (the shirejoe deployment) → every `backend` is null
+	//     and the rails collapse to a single column
+	//   - CBAND is skipped when SENTINEL_SSCB_ROOT is unset even though the
+	//     rest of the tree is mounted, so one radar can lack a backend row
+	//     while its neighbours have one
+	//   - L1 carries vector + stream feeds that have no backend counterpart
+	//     at all
+	// Those cells say so rather than rendering a blank, which reads as broken.
+	function pairByTarget(primary: any[], backend: any[]) {
+		const out = new Map<string, { target: string; primary: any; backend: any }>();
+		const slot = (t: string) => {
+			let s = out.get(t);
+			if (!s) { s = { target: t, primary: null, backend: null }; out.set(t, s); }
+			return s;
+		};
+		for (const r of primary) slot(r.target).primary = r;
+		for (const r of backend) slot(r.target).backend = r;
+		return [...out.values()].sort((a, b) => a.target.localeCompare(b.target));
+	}
+	const pairStatuses = (p: { primary: any; backend: any }) =>
+		[p.primary, p.backend].filter(Boolean);
+	// A row is "bad" when EITHER source is unhappy — including the case the
+	// paired layout exists for, where exactly one of them is.
+	const pairIsBad = (p: { primary: any; backend: any }) =>
+		pairStatuses(p).some((r: any) => r.status !== 'pass' && r.status !== 'skip');
+
+	// Group headers count CHECKS, not rows: a paired row holds up to two.
+	const groupCount = (pairs: any[]) => {
+		const all = pairs.flatMap(pairStatuses);
+		return { pass: all.filter((r: any) => r.status === 'pass').length, total: all.length };
+	};
+
+	const radarPairs = $derived(pairByTarget(
+		sentinel.rollup?.stages?.L2 ?? [],
+		sentinel.rollup?.stages?.LB2 ?? []
+	));
+	const productPairs = $derived(pairByTarget(
+		sentinel.rollup?.stages?.L1 ?? [],
+		sentinel.rollup?.stages?.LB1 ?? []
+	));
 	// CheckMeta lookup by check_id — used per-row to feed cadence into the
 	// Sparkline so its visible window auto-sizes to each check (radars at
 	// 2-min cadence get a 1-hour window; forecasts at 30-min cadence get
@@ -51,7 +112,10 @@
 	const productGroups = $derived.by(() => {
 		const groups: Record<string, any[]> = {};
 		for (const cat of PRODUCT_CATEGORY_ORDER) groups[cat] = [];
-		for (const r of productRows) {
+		// Groups hold PAIRS now, categorised by target — the same key for both
+		// sources, so a product and its backend reading never land in
+		// different groups.
+		for (const r of productPairs) {
 			// Category is purely target-keyed now. The mapping in format.ts
 			// covers layer1.product.* (radar/forecast/cosmos), plus
 			// layer1.vector.* + layer1.stream.* targets that source from
@@ -118,6 +182,56 @@
 	const ackedCount    = $derived(ranking.acked);
 </script>
 
+<!--
+  One source's reading of one target: its status dot, a two-character tag
+  naming WHICH source, and its headroom sparkline.
+
+  The tag is the point of the paired layout. A column header only works while
+  it is on screen — it is gone the moment the rail scrolls, and gone again
+  when someone pastes a screenshot of three rows into a thread. Two characters
+  welded to the trace survive both. K2 = the backend tree (K2, or Trinity for
+  CBAND); RC = radarca, the scraped upstream.
+
+  A null `row` means this source does not cover this target on this
+  deployment — no backend mount at all, CBAND without SENTINEL_SSCB_ROOT, or a
+  vector/stream feed that has no backend counterpart. Saying so is deliberate:
+  a blank cell reads as a failure.
+-->
+{#snippet sourceCell(row: any, tag: string, paired: boolean, w: number)}
+	{#if !row}
+		<span
+			class="num justify-self-start whitespace-nowrap text-[9.5px] text-[var(--color-faint)]"
+			title="not monitored on this deployment — the backend tree is not mounted for this target"
+		>
+			not mounted
+		</span>
+	{:else}
+		{@const metric = sparklineMetric(row.check_id)}
+		{@const spark = sentinel.metrics[`${row.check_id}|${metric ?? 'age_s'}`] ?? []}
+		{@const cadenceS = checksById[row.check_id]?.cadence_s ?? 120}
+		<span
+			class="flex min-w-0 items-center gap-1.5 {statusText(row.status)}"
+			title={`${row.check_id} · ${row.target}${row.summary ? `\n${row.summary}` : ''}`}
+		>
+			<StatusDot status={row.status} size={8} pulseKey={sentinel.pulseTick[row.check_id] ?? 0} />
+			{#if paired}
+				<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{tag}</span>
+			{/if}
+			{#if diag.spark}
+				<Sparkline
+					data={spark}
+					{cadenceS}
+					width={w}
+					height={14}
+					domain={sparklineDomain(metric)}
+					warnAt={sparklineWarnAt(metric)}
+					showLabel={!paired}
+				/>
+			{/if}
+		</span>
+	{/if}
+{/snippet}
+
 <div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
 	<!-- LEFT RAIL: SITE + RADARS + IMAGE QC ------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
@@ -135,34 +249,42 @@
 			{/each}
 		</ul>
 
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right="{stageLabel('L2')} + {stageLabel('LB2')}" />
+		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={hasBackend.radars ? `${stageLabel('L2')} + ${stageLabel('LB2')}` : stageLabel('L2')} />
+		{#if hasBackend.radars}
+			<!-- Column headers only exist in the paired layout. They name the
+			     sources in full: "K2/TRIN" was not parseable cold, and these
+			     labels are the first thing a new operator reads. -->
+			<div class="grid grid-cols-[3.6rem_1fr_1fr_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
+				<span></span><span>K2 / Trinity</span><span>RadarCA</span><span></span>
+			</div>
+		{/if}
 		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
-			{#each radarRows as r}
-				<!-- Metric via sparklineMetric: the radarca rows plot their image
-				     count, the backend rows plot age_s. Hardcoding
-				     images_Reflectivity here drew nothing for LB2, which records
-				     arrival time and never that counter. -->
-				{@const spark = sentinel.metrics[`${r.check_id}|${sparklineMetric(r.check_id) ?? 'age_s'}`] ?? []}
-				{@const imgQc = l4XbandByRadar[r.target]}
-				{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 120}
-				<li class="row-hover grid grid-cols-[auto_7rem_3rem_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
-					<StatusDot status={r.status} size={9} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<!-- prettyCheckLabel, not r.target: this section merges L2 and LB2
-					     ([...L2, ...LB2]), so a raw target rendered "XEBY" twice with
-					     nothing to say which row was radarca and which was the backend.
-					     The helper already appends "· backend" for layer2.backend.*,
-					     and the Products rail already used it — this rail did not. -->
+			{#each radarPairs as p (p.target)}
+				{@const imgQc = l4XbandByRadar[p.target]}
+				<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {hasBackend.radars ? 'grid-cols-[3.6rem_1fr_1fr_auto]' : 'grid-cols-[3.6rem_3rem_1fr_auto]'} items-center gap-2 px-3 py-2 text-[12px]">
+					<!-- The bare target, once. The old rail rendered prettyCheckLabel
+					     per row, which read "XEBY" then "XEBY · backend" down the
+					     list; with the two sources on one row the radar is named
+					     once and each source is named by its own column + tag. -->
 					<span class="num truncate text-[13px] text-[var(--color-bright)] tracking-wide"
-						  title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
-					<span class="label text-left {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
-					<span class="ml-2 {statusText(r.status)}">
-						{#if diag.spark}
-							<Sparkline data={spark} {cadenceS} width={72} height={16} />
-						{/if}
-					</span>
+						  title={p.target}>{p.target}</span>
+					{#if hasBackend.radars}
+						{@render sourceCell(p.backend, 'K2', true, 76)}
+					{:else}
+						<!-- Unpaired, so there is room for the word. Dropping it would
+						     change today's rail on a deployment this change otherwise
+						     leaves alone. With two sources there is no room for two of
+						     these, and the dot plus the trace colour carry it. -->
+						<span class="label text-left {statusText(p.primary?.status ?? 'skip')}">
+							{p.primary?.status === 'pass' ? 'UP'
+								: p.primary?.status === 'fail' ? 'DOWN'
+								: (p.primary?.status ?? 'skip').toUpperCase()}
+						</span>
+					{/if}
+					{@render sourceCell(p.primary, 'RC', hasBackend.radars, hasBackend.radars ? 76 : 86)}
 					<span class="num text-[10.5px] text-[var(--color-muted)]">
 						{#if imgQc}
-							<span class="inline-block align-middle">
+							<span class="inline-block align-middle" title="image QC">
 								<StatusDot status={imgQc} size={6} />
 							</span>
 						{/if}
@@ -188,13 +310,19 @@
 
 	<!-- RIGHT RAIL: PRODUCTS --------------------------------------------------------- -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right="{stageLabel('L1')} + {stageLabel('LB1')}" />
+		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={hasBackend.products ? `${stageLabel('L1')} + ${stageLabel('LB1')}` : stageLabel('L1')} />
+		{#if hasBackend.products}
+			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
+				<span></span><span>K2 / Trinity</span><span>RadarCA</span>
+			</div>
+		{/if}
 		<div class="overflow-y-auto">
 			{#each productGroups as g}
+				{@const gc = groupCount(g.rows)}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
 					<span>{g.label}</span>
 					<span class="num text-[9.5px] text-[var(--color-faint)] ml-auto">
-						{g.rows.length === 0 ? 'not exposed upstream' : `${g.rows.filter((r) => r.status === 'pass').length}/${g.rows.length}`}
+						{g.rows.length === 0 ? 'not exposed upstream' : `${gc.pass}/${gc.total}`}
 					</span>
 				</div>
 				{#if g.rows.length === 0}
@@ -203,21 +331,25 @@
 					</div>
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
-						{#each g.rows as r}
-							{@const spark = sentinel.metrics[`${r.check_id}|${sparklineMetric(r.check_id) ?? 'age_s'}`] ?? []}
-							{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
-							{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 60}
-							<li class="row-hover grid grid-cols-[auto_1fr_4.5rem_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
-								<StatusDot status={r.status} size={8} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-								<span class="num truncate text-[var(--color-bright)]" title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
-								<span class="num text-right text-[10.5px] {statusText(r.status)}">
-									{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
+						{#each g.rows as p (p.target)}
+							{@const ageS = p.primary ? ageFromMetrics(p.primary.check_id, 'age_s') : null}
+							<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {hasBackend.products ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_4.5rem_auto]'} items-center gap-2 px-3 py-1.5 text-[12px]">
+								<span class="num truncate text-[var(--color-bright)]"
+									  title={p.primary ? `${p.primary.check_id} · ${p.target}` : p.target}>
+									{p.primary ? prettyCheckLabel(p.primary.check_id, p.target) : productLabel(p.target)}
 								</span>
-								<span class={statusText(r.status)}>
-									{#if diag.spark}
-										<Sparkline data={spark} {cadenceS} width={56} height={14} />
-									{/if}
-								</span>
+								{#if hasBackend.products}
+									{@render sourceCell(p.backend, 'K2', true, 64)}
+									{@render sourceCell(p.primary, 'RC', true, 64)}
+								{:else}
+									<!-- Unpaired: keep the age readout this rail has always
+									     had. It only loses its column when the second source
+									     needs the room. -->
+									<span class="num text-right text-[10.5px] {statusText(p.primary?.status ?? 'skip')}">
+										{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
+									</span>
+									{@render sourceCell(p.primary, 'RC', false, 56)}
+								{/if}
 							</li>
 						{/each}
 					</ul>
