@@ -28,6 +28,51 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-03
+
+### Added
+
+- **Backend product and radar checks — stages `LB1` and `LB2`.** Until now every
+  product and radar verdict was derived from `radarca`'s API, which conflates two
+  different failures: the product not being *produced*, and the display tier not
+  *showing* it. Operators repeatedly reported "Sentinel says X, but when I checked
+  the products in K2…", and when the two disagree K2 is ground truth — so each
+  disagreement cost Sentinel credibility.
+
+  The new checks read the published files directly over the monitoring host's
+  existing read-only NFS mounts of K2 and trinity, and are therefore unaffected by
+  anything wrong with radarca. `LB1` covers the 13 products; `LB2` covers the six
+  radars, including the C-band tree on trinity which does not live under the DROPS
+  tree with the five X-bands.
+
+  They are a **third family of checks, not a modification of the existing two.**
+  `layer1_product.py` and `layer2_radar.py` are untouched. Because the new checks
+  carry their own stages, which family pages and which is informational is decided
+  entirely in `alerts.yaml` routing — reversible with `POST /api/alerts/reload`, no
+  redeploy. The same reason `layer4_image` is its own stage rather than a flag on
+  the radar checks.
+
+  **Gated on `SENTINEL_BACKEND_ROOT`.** Unset, the checks are never registered, so a
+  deployment that cannot reach the shares — a dev instance with no VPN — runs an
+  identical image with no new checks and nothing to explain away. The bind mounts
+  default to empty named volumes and are `:ro`, so Sentinel cannot modify what it
+  monitors.
+
+  Every filesystem read is wrapped in a 5-second timeout and reports `error` rather
+  than `fail` on expiry. A hung NFS mount is a failure mode Sentinel has not had
+  before — every prior check is HTTP with its own timeout — and without this one
+  wedged mount would stall the scheduler.
+
+### Changed
+
+- `backend/config.py` gains `backend_root` and `sscb_root`, both `None` when unset.
+- `backend/stages.py` and `frontend/src/lib/format.ts` gain `LB1` / `LB2` labels.
+  Unknown stages already fall through to their raw ID, so this is cosmetic.
+- `ops/docker-compose.{prod,ghcr}.yml` gain the two read-only mounts, following the
+  existing `SENTINEL_BACKUP_HOST_PATH` idiom: an env-parameterised host path that
+  defaults to an empty named volume.
+
+
 ## [0.4.13] — 2026-09-30
 
 ### Added

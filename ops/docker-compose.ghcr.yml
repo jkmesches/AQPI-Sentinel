@@ -68,6 +68,13 @@ services:
       SENTINEL_PREWARM_ENABLED:     ${SENTINEL_PREWARM_ENABLED:-0}
       SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
       SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
+      # Backend (filesystem) checks, stages LB1/LB2. Read K2 and trinity directly
+      # instead of inferring product health from radarca. Unset = the checks are
+      # never registered, which is what the no-VPN dev deployment wants: it mounts
+      # neither share, so the question is unanswerable there. These are CONTAINER
+      # paths and must match the mounts below.
+      SENTINEL_BACKEND_ROOT: ${SENTINEL_BACKEND_ROOT:-}
+      SENTINEL_SSCB_ROOT:    ${SENTINEL_SSCB_ROOT:-}
     volumes:
       # === Load-bearing: these accept a HOST PATH, not just a volume name ===
       #
@@ -90,6 +97,12 @@ services:
       # same absolute path as the cron job's SENTINEL_BACKUP_DIR. Left unset,
       # the check reports "backup monitoring not configured" and stays silent.
       - ${SENTINEL_BACKUP_HOST_PATH:-sentinel_backups}:/data/backups:ro
+      # Read-only view of the published product tree on K2 and the C-band tree on
+      # trinity, for the LB1/LB2 checks. Same shape as the backup mount above:
+      # defaults to an empty named volume so a deploy without the shares is still
+      # valid, and :ro so Sentinel can never modify what it monitors.
+      - ${SENTINEL_BACKEND_HOST_PATH:-sentinel_backend_unset}:/backend:ro
+      - ${SENTINEL_SSCB_HOST_PATH:-sentinel_sscb_unset}:/sscb:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
@@ -117,6 +130,11 @@ volumes:
   sentinel_cold:
     name: sentinel_cold
   sentinel_backups:
+  # Fallbacks so the file stays valid when the LB1/LB2 shares are not configured.
+  # A deploy with the NFS mounts points SENTINEL_BACKEND_HOST_PATH / _SSCB_HOST_PATH
+  # at the real host paths and these go unused.
+  sentinel_backend_unset:
+  sentinel_sscb_unset:
 
 networks:
   sentinel:

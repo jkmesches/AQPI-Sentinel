@@ -98,7 +98,9 @@ export function stageColor(s: string): string {
 			L1:        'text-[var(--color-default)]',
 			L2:        'text-[var(--color-bright)]',
 			L3:        'text-[var(--color-warn)]',
-			'L4-T1T2': 'text-[var(--color-critical)]'
+			'L4-T1T2': 'text-[var(--color-critical)]',
+			LB1:       'text-[var(--color-bright)]',
+			LB2:       'text-[var(--color-bright)]'
 		}[s] ?? 'text-[var(--color-muted)]'
 	);
 }
@@ -109,7 +111,9 @@ export function stageLabel(s: string): string {
 			L1:        'Product Freshness',
 			L2:        'Radar Scans',
 			L3:        'Map Overlays',
-			'L4-T1T2': 'Image Quality'
+			'L4-T1T2': 'Image Quality',
+			LB1:       'Backend Products',
+			LB2:       'Backend Radar Arrival'
 		}[s] ?? s
 	);
 }
@@ -120,7 +124,9 @@ export function stageTechCode(s: string): string {
 			L1:        'L1',
 			L2:        'L2',
 			L3:        'L3',
-			'L4-T1T2': 'L4'
+			'L4-T1T2': 'L4',
+			LB1:       'LB1',
+			LB2:       'LB2'
 		}[s] ?? s
 	);
 }
@@ -255,9 +261,11 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	if (checkId.startsWith('layer0.net.dns'))        return 'Sentinel DNS';
 	if (checkId.startsWith('layer0.'))               return L0_TARGET_LABELS[target] ?? titleCase(tDash);
 	if (checkId.startsWith('layer1.product.'))       return productLabel(target);
+	if (checkId.startsWith('layer1.backend.'))       return `${productLabel(target)} · backend`;
 	if (checkId.startsWith('layer1.stream.'))        return STREAM_TARGET_LABELS[target] ?? `Stream · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer1.vector.'))        return VECTOR_TARGET_LABELS[target] ?? `Overlay · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer2.radar.'))         return target;            // XSCV / CBAND — keep radar IDs as-is
+	if (checkId.startsWith('layer2.backend.'))       return `${target} · backend`;
 	if (checkId.startsWith('layer3.'))               return `Reconcile · ${productLabel(target)}`;
 	if (checkId.startsWith('layer4.xband.'))         return target;            // radar IDs
 	if (checkId.startsWith('layer4.'))               return productLabel(target);

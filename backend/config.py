@@ -40,6 +40,19 @@ class Settings:
     prewarm_enabled: bool                  # background capture of every moment + tilt
     prewarm_interval_s: int                # seconds between sweeps of all streams
     prewarm_concurrency: int               # simultaneous in-flight prewarm fetches
+    # Backend (filesystem) monitoring, stages LB1/LB2. None == disabled, and those
+    # checks are then never registered. The shirejoe deployment has no VPN and mounts
+    # neither K2 nor trinity, so it leaves both unset and runs an identical image with
+    # no new checks at all. These are CONTAINER paths, not host paths.
+    backend_root: Path | None              # K2 web-files root, read-only bind mount
+    sscb_root: Path | None                 # C-band tree on trinity, read-only
+
+
+def _opt_path(var: str) -> Path | None:
+    """Optional filesystem root. Empty or unset -> None, so callers can test truthiness
+    without worrying about the empty-string case."""
+    v = os.environ.get(var, "").strip()
+    return Path(v) if v else None
 
 
 def _load() -> Settings:
@@ -57,6 +70,8 @@ def _load() -> Settings:
     return Settings(
         db_url=db,
         base=os.environ.get("SENTINEL_BASE", "https://radarca.engr.colostate.edu"),
+        backend_root=_opt_path("SENTINEL_BACKEND_ROOT"),
+        sscb_root=_opt_path("SENTINEL_SSCB_ROOT"),
         data_dir=data_dir,
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
         api_port=int(os.environ.get("SENTINEL_API_PORT", "8000")),

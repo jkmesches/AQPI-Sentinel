@@ -16,6 +16,11 @@ _STAGE_LABELS = {
     "L2":      "Radar Scans",
     "L3":      "Map Overlays",
     "L4-T1T2": "Image Quality",
+    # Read from K2/trinity directly rather than through radarca. Separate stages so
+    # alerts.yaml can route them as authoritative while the radarca-derived stages
+    # stay informational.
+    "LB1":     "Backend Products",
+    "LB2":     "Backend Radar Arrival",
 }
 _STAGE_TECH_CODES = {
     "L0":      "L0",
@@ -23,6 +28,8 @@ _STAGE_TECH_CODES = {
     "L2":      "L2",
     "L3":      "L3",
     "L4-T1T2": "L4",
+    "LB1":     "LB1",
+    "LB2":     "LB2",
 }
 
 

@@ -1,0 +1,160 @@
+"""Layer-2 BACKEND radar arrival — read from the filesystem, not from radarca.
+
+Companion to ``layer1_backend_product``. Where ``layer2_radar`` asks radarca
+"does /api/radar-status/ say this radar is up, and are there images for it", this asks
+the only question that is unambiguous: **is this radar's data landing on disk right now**.
+
+Two trees, because the radars do not all arrive the same way:
+
+* Five X-bands  — DROPS2 writes a dated tree per radar under
+  ``{backend_root}/PRODUCTS/DROPS/<folder>``. Entries are *created*, so the directory
+  mtime is a true arrival time and one stat suffices.
+* CBAND (SSCB)  — lands on trinity at ``/trinity/projects/aqpi/sscb/YYYY/MM/DD``, not in
+  the DROPS tree. It has no ACCEPT entry in iris's ldmd.conf and no file_process_sscb.sh
+  on granite, so it neither arrives by the X-band push path nor joins their composite.
+  Monitored here because a C-band outage was previously undetectable.
+
+FLOW (XQPI/JPL) is deliberately NOT included in this revision.
+
+Thresholds reuse ``config.RADAR_SILENT_FAIL_S``, which was characterised against real
+per-radar cadence (XEBY 300 s ... CBAND 1080 s) and is already the number operators
+reason about. Overridable per radar under ``backend_silent_s``.
+"""
+from __future__ import annotations
+import asyncio
+import os
+from datetime import timezone
+from typing import Any
+
+from ..config import RADAR_FOLDER, RADAR_SILENT_FAIL_S, SETTINGS  # noqa: F401
+from ..errors import humanize_error
+from .. import thresholds as _thresholds
+from ..registry import register
+from .base import Check, CheckResult, utcnow
+from .helpers import worst_of
+
+FS_TIMEOUT_S = 5.0
+
+# Radars whose data does not land in the DROPS tree. Value is a strftime template
+# evaluated in UTC, matching how the writer dates its directories.
+# NOTE: these are paths INSIDE the container, which differ from the host. cira-aqpi
+# mounts /trinity on the host, but sentinel-backend sees only what the compose file
+# bind-mounts. Hence a setting, not a literal.
+def _special_trees() -> dict[str, str]:
+    return {"CBAND": (SETTINGS.sscb_root.rstrip("/") + "/%Y/%m/%d")} if SETTINGS.sscb_root else {}
+
+
+def _radar_path(radar_id: str, now) -> str:
+    tmpl = _special_trees().get(radar_id)
+    if tmpl:
+        return now.astimezone(timezone.utc).strftime(tmpl)
+    return os.path.join(SETTINGS.backend_root, "PRODUCTS", "DROPS",
+                        RADAR_FOLDER[radar_id])
+
+
+def _dir_mtime(path: str) -> float:
+    """Blocking. Directory mtime only — one stat, no listing.
+
+    Valid here *because DROPS2 creates entries*: a directory's mtime moves when a file is
+    added or removed in it. It would NOT be valid for a tree whose files are overwritten
+    in place, which is why the product check scans for the newest file instead.
+    """
+    return os.stat(path).st_mtime
+
+
+class Layer2BackendRadarCheck(Check):
+    """One per radar in config.RADAR_FOLDER. Reads the backend tree directly."""
+
+    # Own stage — see layer1_backend_product for why.
+    stage = "LB2"
+    # Independent of radarca by design.
+    depends_on: list[str] = []
+
+    def __init__(self, radar_id: str):
+        self.radar_id = radar_id
+        self.id = f"layer2.backend.{radar_id}"
+        self.target = radar_id
+        self.cadence_s = 60
+
+    async def run(self, ctx) -> CheckResult:
+        t0 = utcnow()
+        sub: dict[str, str] = {}
+        metrics: dict[str, float] = {}
+        path = _radar_path(self.radar_id, t0)
+        payload: dict[str, Any] = {"path": path, "source": "backend-filesystem"}
+
+        try:
+            mtime = await asyncio.wait_for(
+                asyncio.to_thread(_dir_mtime, path), FS_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage, status="error",
+                started_at=t0, finished_at=utcnow(),
+                summary=f"NFS read timed out after {FS_TIMEOUT_S:g}s — mount may be hung",
+                payload=payload, metrics={"fs_timeout": 1.0},
+            )
+        except FileNotFoundError:
+            # For a dated tree this is the normal shape of "nothing has arrived today
+            # yet", which just after 00Z is not yet a fault. The silence threshold is
+            # what decides; treat absence as maximally stale and let it be judged.
+            metrics["fs_timeout"] = 0.0
+            sub["A_arriving"] = "fail"
+            payload["absent"] = True
+            return _final(self, t0, sub, payload, metrics,
+                          "no data directory for the current UTC day")
+        except OSError as e:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage, status="error",
+                started_at=t0, finished_at=utcnow(),
+                summary=f"backend read failed: {humanize_error(e)}",
+                payload=payload, metrics={"fs_timeout": 0.0},
+            )
+
+        metrics["fs_timeout"] = 0.0
+        age_s = t0.timestamp() - mtime
+        metrics["age_s"] = float(age_s)
+
+        silent_s = _thresholds.get_radar(
+            self.radar_id, "backend_silent_s",
+            RADAR_SILENT_FAIL_S.get(self.radar_id, 900),
+        )
+        metrics["backend_silent_s"] = float(silent_s)
+
+        # One threshold, three bands: a radar at 0.8x its characterised silence limit is
+        # worth seeing before it crosses.
+        if age_s <= silent_s * 0.8:
+            sub["A_arriving"] = "pass"
+        elif age_s <= silent_s:
+            sub["A_arriving"] = "warn"
+        else:
+            sub["A_arriving"] = "fail"
+
+        summary = (f"last arrival {age_s / 60:.1f} min ago"
+                   f"  (silent limit {silent_s / 60:.0f} min)")
+        if sub["A_arriving"] == "fail":
+            summary = "BACKEND SILENT — " + summary
+        return _final(self, t0, sub, payload, metrics, summary)
+
+
+def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,
+           summary: str) -> CheckResult:
+    payload["sub_status"] = sub
+    return CheckResult(
+        check_id=check.id, target=check.target, stage=check.stage,
+        status=worst_of(*sub.values()) if sub else "pass",
+        started_at=t0, finished_at=utcnow(),
+        summary=summary, payload=payload, metrics=metrics,
+    )
+
+
+# --------------------------------------------------------------------------
+# Register one instance per radar. FLOW is intentionally excluded for now.
+# --------------------------------------------------------------------------
+
+# Gated identically to layer1_backend_product. CBAND additionally requires
+# SENTINEL_SSCB_ROOT, since it does not live under the DROPS tree.
+if SETTINGS.backend_root:
+    for _rid in RADAR_FOLDER:
+        if _rid == "CBAND" and not SETTINGS.sscb_root:
+            continue
+        register(Layer2BackendRadarCheck(radar_id=_rid))
