@@ -65,13 +65,16 @@ export const FAQ: FaqItem[] = [
 				head: ['Stage', 'Name', 'Question it answers'],
 				rows: [
 					['L0', 'Connectivity', 'Is the internet up, DNS resolving, radarca reachable?'],
-					['L1', 'Product Freshness', 'Is each product publishing recent, correctly-sized data?'],
-					['L2', 'Radar Scans', 'Is each radar actually emitting scans?'],
+					['L1', 'Product Freshness', 'Is each product publishing recent, correctly-sized data, according to radarca?'],
+					['LB1', 'Backend Products', 'Is each product actually being produced — read from K2 directly, not via radarca?'],
+					['L2', 'Radar Scans', 'Is each radar actually emitting scans, according to radarca?'],
+					['LB2', 'Backend Radar Arrival', 'Is each radar\u2019s data landing on disk right now — read from the backend trees directly?'],
 					['L3', 'Map Overlays', 'Do overlays render in a real browser?'],
 					['L4', 'Image Quality', 'Does the imagery itself look plausible?']
 				]
 			},
-			{ kind: 'p', text: 'The stages are also a dependency chain. If L0 says the origin is unreachable, downstream failures are collateral and Sentinel marks them as such, rather than painting forty red cells for one root cause.' }
+			{ kind: 'p', text: 'The stages are also a dependency chain. If L0 says the origin is unreachable, downstream failures are collateral and Sentinel marks them as such, rather than painting forty red cells for one root cause.' },
+			{ kind: 'p', text: 'The two LB stages sit deliberately outside that chain. They read the published files straight off the backend shares, so radarca being down tells you nothing about whether a product exists — and that independence is the point. Where an LB stage and its radarca counterpart disagree, the LB answer is the one describing reality, and the disagreement itself is the useful signal: the data is being produced but something in the display tier is not showing it.' }
 		]
 	},
 	{
