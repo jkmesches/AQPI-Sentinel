@@ -3,6 +3,7 @@
 import { api, type StatusRollup, type Alarm, type CheckMeta } from '$lib/api';
 import { SentinelWs, type WsEvent } from '$lib/ws';
 import { diag } from '$lib/diag';
+import { sparklineMetric } from '$lib/format';
 
 class SentinelState {
 	rollup     = $state<StatusRollup | null>(null);
@@ -100,13 +101,19 @@ class SentinelState {
 
 	/** The (check, metric) pairs the dashboard draws sparklines for. */
 	private sparklineSeries(): { check_id: string; metric: string }[] {
+		// Walks every stage in the rollup and asks sparklineMetric what, if
+		// anything, that check plots. It used to enumerate L2 and L1 by hand,
+		// which silently excluded the backend stages: LB2 was absent from the
+		// loop entirely and LB1 was excluded twice, since the L1 loop also
+		// guarded on `layer1.product.`. Those rows then asked for no series and
+		// drew an empty cell while their samples sat in metric_samples.
+		// Deriving from the rollup's own keys means a new stage needs no change
+		// here at all.
 		const wanted: { check_id: string; metric: string }[] = [];
-		for (const r of this.rollup?.stages?.L2 ?? []) {
-			wanted.push({ check_id: r.check_id, metric: 'images_Reflectivity' });
-		}
-		for (const r of this.rollup?.stages?.L1 ?? []) {
-			if (r.check_id.startsWith('layer1.product.')) {
-				wanted.push({ check_id: r.check_id, metric: 'age_s' });
+		for (const rows of Object.values(this.rollup?.stages ?? {})) {
+			for (const r of rows ?? []) {
+				const metric = sparklineMetric(r.check_id);
+				if (metric) wanted.push({ check_id: r.check_id, metric });
 			}
 		}
 		return wanted;

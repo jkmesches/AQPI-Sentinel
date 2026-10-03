@@ -8,8 +8,7 @@
 	import {
 		fmtAge, severityChip, statusText, statusBorder,
 		stageLabel, prettyCheckLabel,
-		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
-	} from '$lib/format';
+		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, sparklineMetric } from '$lib/format';
 	import { api } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -139,7 +138,11 @@
 		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right="{stageLabel('L2')} + {stageLabel('LB2')}" />
 		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
 			{#each radarRows as r}
-				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
+				<!-- Metric via sparklineMetric: the radarca rows plot their image
+				     count, the backend rows plot age_s. Hardcoding
+				     images_Reflectivity here drew nothing for LB2, which records
+				     arrival time and never that counter. -->
+				{@const spark = sentinel.metrics[`${r.check_id}|${sparklineMetric(r.check_id) ?? 'age_s'}`] ?? []}
 				{@const imgQc = l4XbandByRadar[r.target]}
 				{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 120}
 				<li class="row-hover grid grid-cols-[auto_7rem_3rem_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
@@ -201,7 +204,7 @@
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
 						{#each g.rows as r}
-							{@const spark = sentinel.metrics[`${r.check_id}|age_s`] ?? []}
+							{@const spark = sentinel.metrics[`${r.check_id}|${sparklineMetric(r.check_id) ?? 'age_s'}`] ?? []}
 							{@const ageS = ageFromMetrics(r.check_id, 'age_s')}
 							{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 60}
 							<li class="row-hover grid grid-cols-[auto_1fr_4.5rem_auto] items-center gap-2 px-3 py-1.5 text-[12px]">
