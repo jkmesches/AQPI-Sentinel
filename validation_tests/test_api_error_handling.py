@@ -232,6 +232,66 @@ async def test_fleet_correlation() -> None:
         L2._publish_verdict(rid, "GHOST_UP", stale)
     check("stale verdicts expire", L2._not_reporting_xband(now) == set())
 
+    # --- the 2026-09-17 case, which 4-of-5 could not catch -----------------
+    #
+    # Three radars dropped together at 16:09 and their alarms opened at
+    # 16:12/16:14/16:15 after the 5 min hold-down. The count never reached 4,
+    # so the fleet reported pass and suppressed nothing — three pages for one
+    # event. Over the whole recorded history the check suppressed zero alarms.
+    L2._reset_fleet_state()
+    for rid in ["XSCV", "XSCR", "XSWR"]:
+        L2._publish_verdict(rid, "GHOST_UP", now)
+    for rid in ["XEBY", "XSCW"]:
+        L2._publish_verdict(rid, "HEALTHY", now)
+    r = await fleet.run(ctx)
+    check("3 of 5 ghosting IS systemic (the 2026-09-17 shape)",
+          r.status == "fail" and r.payload["n"] == 3 and not r.payload["latched"])
+
+    L2._reset_fleet_state()
+    for rid in ["XSCV", "XSCR"]:
+        L2._publish_verdict(rid, "GHOST_UP", now)
+    for rid in ["XEBY", "XSCW", "XSWR"]:
+        L2._publish_verdict(rid, "HEALTHY", now)
+    check("2 of 5 is still NOT systemic — two radars may genuinely coincide",
+          (await fleet.run(ctx)).status == "pass")
+
+    # --- the latch ---------------------------------------------------------
+    #
+    # Suppression is consulted when a radar alarm OPENS, one hold-down after
+    # that radar started failing. A verdict that trips and clears inside that
+    # window is invisible to the alarms it exists to suppress, so once
+    # systemic it holds.
+    L2._reset_fleet_state()
+    for rid in ["XSCV", "XSCR", "XSWR"]:
+        L2._publish_verdict(rid, "GHOST_UP", now)
+    for rid in ["XEBY", "XSCW"]:
+        L2._publish_verdict(rid, "HEALTHY", now)
+    check("latch arms on entry", (await fleet.run(ctx)).status == "fail")
+
+    for rid in L2.XBAND_FLEET:
+        L2._publish_verdict(rid, "HEALTHY", now)
+    L2._publish_verdict("XSCV", "GHOST_UP", now)
+    r = await fleet.run(ctx)
+    check("drops to 1 inside the dwell -> still systemic, flagged as holding",
+          r.status == "fail" and r.payload["n"] == 1 and r.payload["latched"])
+
+    # Backdate the latch past the dwell; the next run must release it.
+    L2._fleet_since = now - timedelta(seconds=L2.FLEET_MIN_DWELL_S + 60)
+    r = await fleet.run(ctx)
+    check("released once the dwell has elapsed and the fleet is quiet",
+          r.status == "pass" and not r.payload["systemic"])
+
+    # Still-bad must re-arm rather than expire on a fixed timer.
+    L2._reset_fleet_state()
+    for rid in ["XSCV", "XSCR", "XSWR"]:
+        L2._publish_verdict(rid, "GHOST_UP", now)
+    for rid in ["XEBY", "XSCW"]:
+        L2._publish_verdict(rid, "HEALTHY", now)
+    await fleet.run(ctx)
+    L2._fleet_since = now - timedelta(seconds=L2.FLEET_MIN_DWELL_S + 60)
+    check("a still-failing fleet never releases on the dwell alone",
+          (await fleet.run(ctx)).status == "fail")
+
     checks = [L2.Layer2RadarReconcile(radar_id=r) for r in L2.RADAR_FOLDER] + [fleet]
     alarm_idx = build_depends_on_index(checks, include_alarm_only=True)
     sched_idx = build_depends_on_index(checks)          # scheduler's view

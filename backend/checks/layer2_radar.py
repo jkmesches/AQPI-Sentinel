@@ -128,9 +128,54 @@ def _reset_status_cache() -> None:
 XBAND_FLEET = frozenset(r for r in RADAR_FOLDER if r != "CBAND")
 FLEET_CHECK_ID = "layer2.xband.fleet"
 
-# 4 of 5, not all 5: a genuinely-broken radar during a systemic event should
-# not stop us recognizing the systemic event.
-FLEET_SYSTEMIC_MIN = 4
+# Enter at 3 of 5, leave at 1, and hold for at least FLEET_MIN_DWELL_S.
+#
+# === Why this is not simply "4 of 5" any more ===
+#
+# It was, and in its entire recorded history (27,917 runs, 2026-08-25 to
+# 2026-10-03) the fleet check suppressed exactly ZERO alarms. It never once
+# did the job it exists for.
+#
+# 2026-09-17 shows why. Three X-band radars dropped out together at 16:09;
+# their alarms opened at 16:12, 16:14 and 16:15 after the 5-minute hold-down.
+# Across that whole window the fleet count sat at 3 and never reached 4, so
+# the check correctly reported `pass` by its own rule — and three pages went
+# out for what the correlation evidence says was one upstream event.
+#
+# The count distribution over those 27,917 runs says 4-of-5 is simply too
+# rare a bar to catch the thing:
+#
+#     0/5  93.9%    1/5  4.8%    2/5  0.2%    3/5  0.2%    4/5  0.8%    5/5  0.0%
+#
+# Radars at different sites do not fail independently at the same minute: 3
+# simultaneous is already systemic. Simulated over the same history, entering
+# at 3 takes the systemic share from 0.8% to 1.6% and covers the 2026-09-17
+# case; keeping the bar at 4 does not cover it at any dwell.
+FLEET_SYSTEMIC_ENTER = 3
+
+# Hysteresis, same idea as the per-radar HYSTERESIS band below: once systemic,
+# stay systemic while 2 or more are still out, so the verdict stops flapping
+# as radars straggle back. On 2026-09-17 the raw count oscillated 0-1-3-1
+# within ten minutes.
+FLEET_SYSTEMIC_EXIT = 1
+
+# === Load-bearing: this must outlast the alarm hold-down ===
+#
+# The whole mechanism is `alarm_only_depends_on`, which suppresses a radar's
+# page only if the fleet check is ALREADY failing when that alarm opens. A
+# radar alarm opens `hold_down` after the radar starts failing (5m globally,
+# see alerts.yaml), so a fleet verdict that trips and clears inside five
+# minutes is invisible to exactly the alarms it was meant to suppress.
+#
+# 10 minutes covers the 5-minute hold-down plus a 2-minute check cadence with
+# room to spare. Raising hold_down above ~8m means raising this too.
+FLEET_MIN_DWELL_S = 600.0
+
+# Latched state for the above. Module-level, like _last_verdict: the fleet
+# check is a singleton and this is per-process, which is the same lifetime the
+# verdict cache already assumes.
+_fleet_systemic: bool = False
+_fleet_since: datetime | None = None
 
 # Which verdicts count toward a systemic diagnosis. Deliberately NOT
 # "anything that isn't HEALTHY":
@@ -184,7 +229,10 @@ def _not_reporting_xband(now: datetime) -> set[str]:
 
 def _reset_fleet_state() -> None:
     """Test hook."""
+    global _fleet_systemic, _fleet_since
     _last_verdict.clear()
+    _fleet_systemic = False
+    _fleet_since = None
 
 
 # Default GHOST_UP detection threshold (used when a radar isn't listed in
@@ -425,7 +473,7 @@ class Layer2RadarReconcile(Check):
         systemic = None
         if self.radar_id in XBAND_FLEET:
             peers = _not_reporting_xband(now)
-            if verdict in SYSTEMIC_VERDICTS and len(peers) >= FLEET_SYSTEMIC_MIN:
+            if verdict in SYSTEMIC_VERDICTS and len(peers) >= FLEET_SYSTEMIC_ENTER:
                 systemic = {"scope": "xband", "not_reporting": sorted(peers),
                             "n": len(peers), "of": len(XBAND_FLEET)}
 
@@ -489,12 +537,18 @@ class Layer2RadarReconcile(Check):
 class Layer2XbandFleet(Check):
     """Fleet-wide X-band correlation — is this one event or five?
 
-    Fails when FLEET_SYSTEMIC_MIN or more of the five X-band radars are
+    Fails when FLEET_SYSTEMIC_ENTER or more of the five X-band radars are
     simultaneously not reporting, which empirically means an upstream/systemic
     cause rather than coincident independent failures. The per-radar checks
-    list this one in depends_on, so when it fails their alarms are opened but
-    marked suppressed_by — the operator gets one actionable page describing
-    the real scope instead of five saying the same thing.
+    list this one in alarm_only_depends_on, so when it fails their alarms are
+    opened but marked suppressed_by — the operator gets one actionable page
+    describing the real scope instead of five saying the same thing.
+
+    The verdict latches: once systemic it stays systemic until the count drops
+    to FLEET_SYSTEMIC_EXIT, and for at least FLEET_MIN_DWELL_S regardless. Both
+    exist because suppression is only consulted when a radar alarm OPENS, which
+    is one hold-down after that radar started failing — a verdict that flaps
+    inside that window suppresses nothing. See the constants for the history.
 
     Deliberately reads verdicts published by the radar checks rather than
     re-fetching upstream: it must agree with them by construction, and it
@@ -516,7 +570,7 @@ class Layer2XbandFleet(Check):
 
         # No verdicts yet (fresh boot, or this check ran before its peers).
         # Skip rather than assert health from absence of evidence.
-        if len(known) < FLEET_SYSTEMIC_MIN:
+        if len(known) < FLEET_SYSTEMIC_ENTER:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage,
                 status="skip", started_at=t0, finished_at=utcnow(),
@@ -525,20 +579,42 @@ class Layer2XbandFleet(Check):
             )
 
         n, total = len(not_reporting), len(XBAND_FLEET)
-        systemic = n >= FLEET_SYSTEMIC_MIN
+
+        global _fleet_systemic, _fleet_since
+        held_for = (now - _fleet_since).total_seconds() if _fleet_since else 0.0
+        if not _fleet_systemic:
+            if n >= FLEET_SYSTEMIC_ENTER:
+                _fleet_systemic, _fleet_since = True, now
+        else:
+            if n >= FLEET_SYSTEMIC_ENTER:
+                # Still bad: re-arm the dwell so it measures from the most
+                # recent systemic reading, not the first one.
+                _fleet_since = now
+            elif n <= FLEET_SYSTEMIC_EXIT and held_for >= FLEET_MIN_DWELL_S:
+                _fleet_systemic, _fleet_since = False, None
+        systemic = _fleet_systemic
+        # Distinguish "still bad" from "held open by the dwell/hysteresis", so
+        # the row says which it is rather than looking like a stuck check.
+        latched = systemic and n < FLEET_SYSTEMIC_ENTER
         verdicts = {r: _last_verdict[r][1] for r in sorted(known)}
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,
             status=("fail" if systemic else "pass"),
             started_at=t0, finished_at=utcnow(),
             summary=(
-                f"SYSTEMIC: {n}/{total} X-band radars not reporting "
-                f"({', '.join(sorted(not_reporting))}) — one upstream event, not {n} radar outages"
-                if systemic else
+                (f"SYSTEMIC: {n}/{total} X-band radars not reporting "
+                 f"({', '.join(sorted(not_reporting))}) — one upstream event, "
+                 f"not {n} radar outages")
+                if systemic and not latched else
+                (f"SYSTEMIC (holding): {n}/{total} not reporting — recent episode, "
+                 f"still inside the {FLEET_MIN_DWELL_S / 60:.0f} min window")
+                if latched else
                 f"{n}/{total} X-band radars not reporting"
             ),
             payload={"not_reporting": sorted(not_reporting), "n": n, "of": total,
-                     "systemic": systemic, "verdicts": verdicts},
+                     "systemic": systemic, "latched": latched,
+                     "enter_at": FLEET_SYSTEMIC_ENTER, "exit_at": FLEET_SYSTEMIC_EXIT,
+                     "verdicts": verdicts},
             metrics={"not_reporting_radars": float(n)},
         )
 
