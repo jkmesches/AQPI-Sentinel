@@ -126,7 +126,7 @@
 	     "what's actually broken" the first thing the operator sees. -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
 		<SectionHeader title="Site" right={stageLabel('L0')} />
-		<ul class="divide-y divide-[var(--color-border)]">
+		<ul class="shrink-0 divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
 				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
@@ -137,14 +137,20 @@
 		</ul>
 
 		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right="{stageLabel('L2')} + {stageLabel('LB2')}" />
-		<ul class="divide-y divide-[var(--color-border)]">
+		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
 			{#each radarRows as r}
 				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
 				{@const imgQc = l4XbandByRadar[r.target]}
 				{@const cadenceS = checksById[r.check_id]?.cadence_s ?? 120}
-				<li class="row-hover grid grid-cols-[auto_3.2rem_3rem_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
+				<li class="row-hover grid grid-cols-[auto_7rem_3rem_1fr_auto] items-center gap-2 px-3 py-2 text-[12px]">
 					<StatusDot status={r.status} size={9} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="num text-[13px] text-[var(--color-bright)] tracking-wide">{r.target}</span>
+					<!-- prettyCheckLabel, not r.target: this section merges L2 and LB2
+					     ([...L2, ...LB2]), so a raw target rendered "XEBY" twice with
+					     nothing to say which row was radarca and which was the backend.
+					     The helper already appends "· backend" for layer2.backend.*,
+					     and the Products rail already used it — this rail did not. -->
+					<span class="num truncate text-[13px] text-[var(--color-bright)] tracking-wide"
+						  title={`${r.check_id} · ${r.target}`}>{prettyCheckLabel(r.check_id, r.target)}</span>
 					<span class="label text-left {statusText(r.status)}">{r.status === 'pass' ? 'UP' : r.status === 'fail' ? 'DOWN' : r.status.toUpperCase()}</span>
 					<span class="ml-2 {statusText(r.status)}">
 						{#if diag.spark}
