@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-10-03
+
+### Fixed
+
+- **The X-band fleet correlation check had never suppressed a single alarm.**
+  Across its entire recorded history — 27,917 runs, 2026-08-25 to 2026-10-03 —
+  `layer2.xband.fleet` appears zero times in `suppressed_by`, despite that
+  being the only reason it exists.
+
+  2026-09-17 shows why. Three radars dropped together at 16:09; their alarms
+  opened at 16:12, 16:14 and 16:15 after the 5-minute hold-down. The fleet
+  count sat at 3 throughout and never reached the required 4, so the check
+  reported `pass` — correctly by its own rule — and three pages went out for
+  what the correlation evidence calls one upstream event.
+
+  Two changes, both measured against that history: the bar drops to **3 of 5**
+  (the count is ≥4 on 0.8% of ticks and ≥3 on 1.0%, so this is a small
+  widening, and it covers the 2026-09-17 case where ≥4 cannot at any dwell),
+  and the verdict now **latches** — it holds until the count falls to 1 and
+  for at least 10 minutes regardless. The latch matters because suppression is
+  only consulted when an alarm *opens*, one hold-down after the radar started
+  failing; a verdict that flaps inside that window is invisible to exactly the
+  alarms it exists to suppress.
+
+### Changed
+
+- **The fleet row is no longer a row in the Radars rail.** It is a verdict
+  *about* the rail, not a member of it: it rendered as a seventh radar with a
+  UP/DOWN word, an empty sparkline (it counts radars, so it records no
+  `headroom`), no image-QC dot, and a `xband-fleet` target that truncated to
+  `xband-…` — and it made the rail read 5/7 when there are six radars. It now
+  renders as a banner above the list, and only while it has something to say.
+
 ## [0.5.4] — 2026-10-03
 
 ### Changed
