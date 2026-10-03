@@ -44,6 +44,7 @@ class Settings:
     # checks are then never registered. The shirejoe deployment has no VPN and mounts
     # neither K2 nor trinity, so it leaves both unset and runs an identical image with
     # no new checks at all. These are CONTAINER paths, not host paths.
+    profile: str                           # "aqpi" (default) or "xqpi" — see backend/profiles
     backend_root: Path | None              # K2 web-files root, read-only bind mount
     sscb_root: Path | None                 # C-band tree on trinity, read-only
 
@@ -70,6 +71,7 @@ def _load() -> Settings:
     return Settings(
         db_url=db,
         base=os.environ.get("SENTINEL_BASE", "https://radarca.engr.colostate.edu"),
+        profile=os.environ.get("SENTINEL_PROFILE", "aqpi").strip().lower() or "aqpi",
         backend_root=_opt_path("SENTINEL_BACKEND_ROOT"),
         sscb_root=_opt_path("SENTINEL_SSCB_ROOT"),
         data_dir=data_dir,
@@ -384,3 +386,67 @@ def image_path(product_id: str, image_name: str) -> str:
     if product_id == "fcst_temp":
         return cfg["image_dir"] + TEMP_UNIT_SUBDIR.get(unit, "F") + "/" + image_name
     return cfg["image_dir"] + unit.split("/")[0] + "/" + image_name
+
+
+# ==========================================================================
+# Deployment profile
+# ==========================================================================
+#
+# Everything above describes AQPI. A second deployment — XQPI, monitoring the
+# FLOW radar on trinity — watches a different radar and a different product
+# set, so it swaps these tables wholesale rather than adding to them.
+#
+# Rebinding here rather than branching at every use site: `PRODUCTS`,
+# `RADAR_FOLDER` and `RADAR_SILENT_FAIL_S` are imported by name across a dozen
+# modules, and the helpers below (`image_path`, `l4_profile`) read the module
+# globals at CALL time. So one rebind, before any check module imports this,
+# reaches all of them. A fork would have to be kept in sync by hand across
+# every check, label and threshold.
+#
+# Profile modules are pure data and must not import this module — the
+# dependency runs one way only.
+#
+# `BACKEND_SOURCE` is the (tag, label) a backend-reading check reports when it
+# has no more specific answer. AQPI publishes to K2; XQPI publishes to
+# trinity. Hardcoding "K2" in the check modules was right for one profile and
+# silently wrong for the other — the same class of error as labelling CBAND's
+# row "K2" before v0.5.6.
+BACKEND_SOURCE: tuple[str, str] = ("K2", "K2")
+
+# Does this deployment have a radarca-style HTTP display tier in front of the
+# data? AQPI does, and most of the check stack is built on scraping it. XQPI
+# does not: FLOW publishes to a filesystem tree and nothing serves it over
+# HTTP. Phrased as a capability rather than `profile == "xqpi"` so a third
+# profile has to state its answer instead of inheriting one by omission —
+# which is how a check that can only ever fail gets shipped.
+HAS_RADARCA: bool = True
+
+# Published-image tree layout, relative to SETTINGS.backend_root. K2 nests the
+# products under realtime/product_images/; trinity's XQPI tree puts them
+# directly under PRODUCT_IMAGES/. Getting this wrong does not raise -- LB1
+# reports "product directory does not exist" for every product, which reads
+# like an outage rather than a misconfiguration.
+PRODUCT_IMAGES_PREFIX: tuple[str, ...] = ("realtime", "product_images")
+
+# Radars whose volumes land in a date-partitioned tree under backend_root, as a
+# strftime template evaluated in UTC. AQPI's are flat under PRODUCTS/DROPS and
+# so declare nothing here; CBAND is dated but lives on a separate mount and is
+# handled by SENTINEL_SSCB_ROOT instead. See layer2_backend_radar._radar_path.
+RADAR_DATED_TREE: dict[str, str] = {}
+
+if SETTINGS.profile == "xqpi":
+    from .profiles import xqpi as _xqpi       # noqa: E402
+
+    PRODUCTS = _xqpi.PRODUCTS
+    RADAR_FOLDER = _xqpi.RADAR_FOLDER
+    RADAR_SILENT_FAIL_S = _xqpi.RADAR_SILENT_FAIL_S
+    BACKEND_SOURCE = (_xqpi.SOURCE_TAG, _xqpi.SOURCE_LABEL)
+    PRODUCT_IMAGES_PREFIX = _xqpi.PRODUCT_IMAGES_PREFIX
+    RADAR_DATED_TREE = _xqpi.RADAR_DATED_TREE
+    HAS_RADARCA = False
+elif SETTINGS.profile != "aqpi":
+    # Fail loudly. A typo here would otherwise start a Sentinel that silently
+    # monitors the wrong radar network, which is worse than not starting.
+    raise ValueError(
+        f"unknown SENTINEL_PROFILE {SETTINGS.profile!r} — expected 'aqpi' or 'xqpi'"
+    )

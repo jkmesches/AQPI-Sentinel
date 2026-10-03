@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 
+from ..config import HAS_RADARCA
 from ..errors import humanize_error
 from ..registry import register
 from .base import Check, CheckResult, utcnow
@@ -187,4 +188,8 @@ class Layer0RadarDisplayTlsCheck(Check):
         )
 
 
-register(Layer0RadarDisplayTlsCheck())
+# radar-display is part of the radarca stack. The two control checks above are
+# genuine connectivity probes and run on every profile; this one has a host to
+# probe only where there is a display tier.
+if HAS_RADARCA:
+    register(Layer0RadarDisplayTlsCheck())

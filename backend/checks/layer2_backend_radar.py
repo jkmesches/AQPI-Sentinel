@@ -26,7 +26,8 @@ import os
 from datetime import timezone
 from typing import Any
 
-from ..config import RADAR_FOLDER, RADAR_SILENT_FAIL_S, SETTINGS  # noqa: F401
+from ..config import (BACKEND_SOURCE, RADAR_DATED_TREE, RADAR_FOLDER,  # noqa: F401
+                      RADAR_SILENT_FAIL_S, SETTINGS)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -49,9 +50,16 @@ def _special_trees() -> dict[str, str]:
 
 
 def _radar_path(radar_id: str, now) -> str:
+    # Three layouts, most specific first: a radar on its own mount (CBAND via
+    # SENTINEL_SSCB_ROOT), a radar dated inside this profile's own mount (XQPI's
+    # FLOW), and AQPI's flat DROPS tree.
     tmpl = _special_trees().get(radar_id)
     if tmpl:
         return now.astimezone(timezone.utc).strftime(tmpl)
+    rel = RADAR_DATED_TREE.get(radar_id)
+    if rel:
+        return now.astimezone(timezone.utc).strftime(
+            os.path.join(SETTINGS.backend_root, rel))
     return os.path.join(SETTINGS.backend_root, "PRODUCTS", "DROPS",
                         RADAR_FOLDER[radar_id])
 
@@ -76,11 +84,14 @@ class Layer2BackendRadarCheck(Check):
 
     def __init__(self, radar_id: str):
         self.radar_id = radar_id
-        # CBAND lives on Trinity, every other radar on K2. See Check.source_*.
+        # A radar in _special_trees() lives somewhere other than the profile's
+        # default tree — on AQPI that is CBAND on trinity while the rest are on
+        # K2. Otherwise it is wherever this profile publishes, which is K2 for
+        # AQPI and trinity for XQPI. See config.BACKEND_SOURCE.
         if radar_id in _special_trees():
             self.source_tag, self.source_label = "TR", "Trinity"
         else:
-            self.source_tag, self.source_label = "K2", "K2"
+            self.source_tag, self.source_label = BACKEND_SOURCE
 
         self.id = f"layer2.backend.{radar_id}"
         self.target = radar_id

@@ -30,7 +30,8 @@ import asyncio
 import os
 from typing import Any
 
-from ..config import PRODUCTS, SETTINGS, image_path
+from ..config import (BACKEND_SOURCE, PRODUCT_IMAGES_PREFIX, PRODUCTS, SETTINGS,
+                      image_path)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -50,7 +51,7 @@ DEFAULT_BACKEND_MAX_AGE_S = 1_800
 def _product_dir(product_id: str) -> str:
     """Absolute directory holding this product's published images."""
     rel = image_path(product_id, "")          # trailing-slash dir, unit subdir applied
-    return os.path.join(SETTINGS.backend_root, "realtime", "product_images", rel)
+    return os.path.join(SETTINGS.backend_root, *PRODUCT_IMAGES_PREFIX, rel)
 
 
 def _scan(path: str) -> dict[str, Any]:
@@ -100,9 +101,10 @@ class Layer1BackendProductCheck(Check):
     def __init__(self, product_id: str):
         cfg = PRODUCTS[product_id]
         self.product_id = product_id
-        # Every product is published to the K2 web share; nothing under
-        # realtime/product_images/ comes off Trinity. See Check.source_*.
-        self.source_tag, self.source_label = "K2", "K2"
+        # Whichever tree THIS profile publishes to — K2 for AQPI, trinity for
+        # XQPI. Hardcoding "K2" was right for one deployment and silently
+        # wrong for the other. See config.BACKEND_SOURCE and Check.source_*.
+        self.source_tag, self.source_label = BACKEND_SOURCE
 
         self.cfg = cfg
         self.id = f"layer1.backend.{product_id}"

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
+from ..config import HAS_RADARCA
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 
@@ -160,4 +161,9 @@ class Layer0OriginEpisode(Check):
         )
 
 
-register(Layer0OriginEpisode())
+# Correlates slow episodes on the radarca origin. With no HTTP origin there is
+# nothing to correlate and the check would fail forever — but the module still
+# has to import, because attach_episode_suppression lives here and the registry
+# wiring calls it on every profile. So gate the registration, not the import.
+if HAS_RADARCA:
+    register(Layer0OriginEpisode())
