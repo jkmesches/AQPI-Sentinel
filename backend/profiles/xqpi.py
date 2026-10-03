@@ -64,10 +64,14 @@ RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
 _CYCLE_S = 120
 _FAIL_AGE_S = 1_500
 
-# The rolling window is 14-15 frames, not exactly 14 — re-verified 2026-10-03
-# 23:31 UTC, after the counts had drifted up by one since the survey. The
-# global ±4 `step_count_tol` absorbs that, so `expected_steps` below is a
-# centre rather than an assertion.
+# The rolling window is 14-15 frames in steady state, but it SHRINKS after a
+# gap rather than holding: observed at 15 steps at 23:50 UTC on 2026-10-03,
+# then 8 steps at 23:57 while recovering from a ~33-minute publication gap.
+# So `expected_steps` is a centre for the steady state, not an assertion, and
+# a count check keyed on it would fire during every recovery. The global ±4
+# `step_count_tol` does not cover a drop to 8 — if an L1-shaped check is ever
+# pointed at this profile, it needs a recovery-aware count rule, not a wider
+# tolerance.
 #
 # It is also inert on this profile today: `expected_steps` is read by
 # layer1_product (manifest step count), which does not register here. Kept so
@@ -98,6 +102,42 @@ PRODUCT_IMAGES_PREFIX = ("PRODUCT_IMAGES",)
 # but rooted inside the profile's own mount rather than a separate one.
 # strftime template, relative to SETTINGS.backend_root, evaluated in UTC.
 RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}
+
+# --------------------------------------------------------------------------
+# Freshness basis — DO NOT use mtime on this tree
+# --------------------------------------------------------------------------
+# A root gzip sweep walks the archive daily around 07:25 UTC and rewrites
+# files, so mtime does not mean "when this observation happened". Verified
+# directly on csu-aqpi 2026-10-03: the last file of 2026/09/25 and of
+# 2026/09/30 both carry mtime 2026-10-03 01:25 local, the same instant five
+# days apart, and the extension mix is 2,880 .gz against 4-9 .netcdf per day.
+# The sweep touches the CURRENT day's directory too.
+#
+# The live directory also accumulates gzip's temporary files -- 14 of them on
+# inspection, including three different suffixes for one source volume
+# (`.flow-20261003-194148_..._PPI.netcdf.gz.4u4pxw`). They are dot-prefixed,
+# they are the newest thing in the directory by mtime, and their names DO
+# contain a parseable timestamp, so they must be excluded by the dot rather
+# than by failing to parse.
+#
+# The asymmetry is what settles it: a sweep inflating mtime MASKS an outage,
+# silently, in the one direction monitoring must never fail. A stale declared
+# time at worst delays recovery and keeps alarming until current data lands.
+# mtime is still fine for detecting change; it is not sound for asserting
+# recency. See 16-§10 for the measurement that exposed it — mtime-derived
+# intervals showed eight multi-hour outages whose magnitudes rose by exactly
+# 1440 min/day going back, all artifacts of the single sweep instant.
+LB1_FRESHNESS = "manifest"      # the per-step timestamp the manifest declares
+LB2_FRESHNESS = "filename"      # flow-<YYYYMMDD>-<HHMMSS>_...
+
+# Anchored at the start and excluding dotfiles upstream, so a gzip temp file
+# cannot match even though its name embeds the same timestamp.
+RAW_VOLUME_TS_RE = r"^flow-(\d{8})-(\d{6})_"
+
+# The dated tree is partitioned by UTC date, not local: the first file of each
+# day directory lands at 00:00:1x UTC (verified across 09/26, 09/30, 10/02).
+# _radar_path formats in UTC, which is therefore correct — getting this wrong
+# would look in the wrong directory for the six hours of MDT offset.
 
 PRODUCTS = {
     # One manifest, no unit subdirectory.

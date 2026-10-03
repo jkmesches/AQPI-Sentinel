@@ -27,11 +27,13 @@ their own positive thresholds, resolved under the ``backend_max_age_s`` key.
 """
 from __future__ import annotations
 import asyncio
+import json
 import os
+from datetime import datetime, timezone
 from typing import Any
 
-from ..config import (BACKEND_SOURCE, PRODUCT_IMAGES_PREFIX, PRODUCTS, SETTINGS,
-                      image_path)
+from ..config import (BACKEND_SOURCE, LB1_FRESHNESS, PRODUCT_IMAGES_PREFIX, PRODUCTS,
+                      SETTINGS, image_path)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -52,6 +54,52 @@ def _product_dir(product_id: str) -> str:
     """Absolute directory holding this product's published images."""
     rel = image_path(product_id, "")          # trailing-slash dir, unit subdir applied
     return os.path.join(SETTINGS.backend_root, *PRODUCT_IMAGES_PREFIX, rel)
+
+
+def _manifest_path(product_id: str) -> str:
+    """Absolute path to the product's published manifest."""
+    return os.path.join(SETTINGS.backend_root, *PRODUCT_IMAGES_PREFIX,
+                        PRODUCTS[product_id]["details"])
+
+
+def _newest_declared(path: str) -> dict[str, Any]:
+    """Blocking. Newest observation time the manifest DECLARES, as an epoch.
+
+    Used where the filesystem's own timestamps are not a sound freshness basis
+    -- see config.LB1_FRESHNESS. Two reasons to prefer the manifest over
+    parsing the image filenames on this tree:
+
+    * A gzip sweep rewrites files, so mtime can say "fresh" when nothing new
+      arrived. The manifest only changes when the publisher rewrites it.
+    * The directory outlives its own window. qpe_15min/images/in/ held 26
+      entries against a manifest of 14-15 -- eleven orphans from 2026-09-03
+      that the rolling window never reclaimed. The manifest is the product;
+      the directory is a cache with litter in it.
+
+    Timestamps are naive ISO ("2026-10-03T22:26:00") and are UTC: the newest
+    step read 23:24 while the wall clock was 23:50 UTC, and reading them as
+    local time would place them an hour into the future.
+    """
+    with open(path, "rb") as fh:
+        doc = json.load(fh)
+    steps = doc.get("steps") or []
+    newest = 0.0
+    newest_name = ""
+    for st in steps:
+        raw = (st or {}).get("timestamp")
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw))
+        except ValueError:
+            continue                      # one malformed step is not an outage
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        ts = dt.timestamp()
+        if ts > newest:
+            newest, newest_name = ts, str((st or {}).get("imageName") or raw)
+    return {"newest_mtime": newest, "newest_name": newest_name,
+            "count": len(steps), "truncated": False, "basis": "manifest"}
 
 
 def _scan(path: str) -> dict[str, Any]:
@@ -81,7 +129,7 @@ def _scan(path: str) -> dict[str, Any]:
             if m > newest:
                 newest, newest_name = m, e.name
     return {"newest_mtime": newest, "newest_name": newest_name,
-            "count": n, "truncated": truncated}
+            "count": n, "truncated": truncated, "basis": "newest_mtime"}
 
 
 class Layer1BackendProductCheck(Check):
@@ -120,8 +168,16 @@ class Layer1BackendProductCheck(Check):
         path = _product_dir(self.product_id)
         payload: dict[str, Any] = {"path": path, "source": "backend-filesystem"}
 
+        if LB1_FRESHNESS == "manifest":
+            read_path = _manifest_path(self.product_id)
+            reader, payload["manifest"] = _newest_declared, read_path
+        else:
+            read_path, reader = path, _scan
+        payload["freshness_basis"] = LB1_FRESHNESS
+
         try:
-            info = await asyncio.wait_for(asyncio.to_thread(_scan, path), FS_TIMEOUT_S)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(reader, read_path), FS_TIMEOUT_S)
         except asyncio.TimeoutError:
             # Distinct from "stale": the mount did not answer. Reported as error so it
             # routes like a broken check rather than a broken product.
@@ -145,6 +201,16 @@ class Layer1BackendProductCheck(Check):
                 summary=f"backend read failed: {humanize_error(e)}",
                 payload=payload, metrics={"fs_timeout": 0.0},
             )
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Reported as error, not fail: a manifest caught mid-rewrite is a
+            # broken read, not a product that stopped publishing. Routing it as
+            # a product failure would page for a torn file.
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage, status="error",
+                started_at=t0, finished_at=utcnow(),
+                summary=f"manifest is not valid JSON: {humanize_error(e)}",
+                payload=payload, metrics={"fs_timeout": 0.0},
+            )
 
         metrics["fs_timeout"] = 0.0
         metrics["file_count"] = float(info["count"])
@@ -155,7 +221,9 @@ class Layer1BackendProductCheck(Check):
         if not info["newest_mtime"]:
             sub["A_present"] = "fail"
             return _final(self, t0, sub, payload, metrics,
-                          "no files published on the backend")
+                          "manifest declares no usable steps"
+                          if info["basis"] == "manifest"
+                          else "no files published on the backend")
         sub["A_present"] = "pass"
 
         # --- B. freshness (the primary verdict) ---
@@ -175,8 +243,9 @@ class Layer1BackendProductCheck(Check):
         payload["max_age_s"] = float(max_age)
 
         mins = age_s / 60.0
+        unit = "steps" if info["basis"] == "manifest" else "files"
         summary = (f"newest {info['newest_name']} {mins:.0f} min old"
-                   f"  (limit {max_age / 60:.0f} min, {info['count']} files)")
+                   f"  (limit {max_age / 60:.0f} min, {info['count']} {unit})")
         if sub["B_freshness"] != "pass":
             summary = "BACKEND STALE — " + summary
         return _final(self, t0, sub, payload, metrics, summary)

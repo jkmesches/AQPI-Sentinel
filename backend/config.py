@@ -434,6 +434,24 @@ PRODUCT_IMAGES_PREFIX: tuple[str, ...] = ("realtime", "product_images")
 # handled by SENTINEL_SSCB_ROOT instead. See layer2_backend_radar._radar_path.
 RADAR_DATED_TREE: dict[str, str] = {}
 
+# How a backend check decides HOW FRESH the data is. This is a property of the
+# published tree, not a preference, so it is declared per profile.
+#
+# AQPI stays on mtime, deliberately. Verified on csu-aqpi 2026-10-03: every
+# sampled K2 product directory has newest-by-mtime == newest-by-filename, no
+# dotfiles and no compression pass, so mtime there does mean what it says. And
+# AQPI's DROPS tree is not uniform — ebay holds flat `.drops` files while scvw
+# holds a nested `2026/` directory — so the directory's own mtime is the only
+# basis that works across all six radars. Changing it would be a behavior
+# change on a live deployment (cira-aqpi, v0.5.6) to fix a defect that tree
+# does not have.
+#
+# XQPI must NOT use mtime: a daily gzip sweep rewrites its archive and masks
+# outages. See backend/profiles/xqpi.py for the evidence.
+LB1_FRESHNESS: str = "newest_mtime"   # newest file's mtime in the images dir
+LB2_FRESHNESS: str = "dir_mtime"      # the data directory's own mtime
+RAW_VOLUME_TS_RE: str | None = None   # only used by LB2_FRESHNESS="filename"
+
 if SETTINGS.profile == "xqpi":
     from .profiles import xqpi as _xqpi       # noqa: E402
 
@@ -443,6 +461,9 @@ if SETTINGS.profile == "xqpi":
     BACKEND_SOURCE = (_xqpi.SOURCE_TAG, _xqpi.SOURCE_LABEL)
     PRODUCT_IMAGES_PREFIX = _xqpi.PRODUCT_IMAGES_PREFIX
     RADAR_DATED_TREE = _xqpi.RADAR_DATED_TREE
+    LB1_FRESHNESS = _xqpi.LB1_FRESHNESS
+    LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
+    RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
     HAS_RADARCA = False
 elif SETTINGS.profile != "aqpi":
     # Fail loudly. A typo here would otherwise start a Sentinel that silently

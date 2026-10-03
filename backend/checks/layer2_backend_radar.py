@@ -23,10 +23,12 @@ reason about. Overridable per radar under ``backend_silent_s``.
 from __future__ import annotations
 import asyncio
 import os
-from datetime import timezone
+import re
+from datetime import datetime, timezone
 from typing import Any
 
-from ..config import (BACKEND_SOURCE, RADAR_DATED_TREE, RADAR_FOLDER,  # noqa: F401
+from ..config import (BACKEND_SOURCE, LB2_FRESHNESS,  # noqa: F401
+                      RADAR_DATED_TREE, RADAR_FOLDER, RAW_VOLUME_TS_RE,
                       RADAR_SILENT_FAIL_S, SETTINGS)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
@@ -62,6 +64,57 @@ def _radar_path(radar_id: str, now) -> str:
             os.path.join(SETTINGS.backend_root, rel))
     return os.path.join(SETTINGS.backend_root, "PRODUCTS", "DROPS",
                         RADAR_FOLDER[radar_id])
+
+
+# Generous: one FLOW day holds ~2,900 volumes. If a directory ever exceeds
+# this the walk stops early, which can only make the newest timestamp look
+# OLDER than it is -- a false alarm rather than a masked outage, which is the
+# correct direction to fail in.
+MAX_SCAN_ENTRIES = 20_000
+
+
+def _newest_declared(path: str) -> float:
+    """Blocking. Newest observation time the FILENAMES declare, as an epoch.
+
+    For trees where mtime is not a sound freshness basis -- see
+    config.LB2_FRESHNESS and backend/profiles/xqpi.py for the gzip sweep that
+    makes it unsound on trinity.
+
+    Dot-prefixed entries are skipped before matching, and deliberately so
+    rather than relying on the pattern to reject them: gzip leaves temporary
+    files like `.flow-20261003-194148_..._PPI.netcdf.gz.4u4pxw` in the live
+    directory (14 of them on inspection, three suffixes for one source
+    volume). They are the newest entries by mtime and their names embed a
+    real, parseable timestamp, so only the leading dot distinguishes them.
+
+    No stat(2) per entry, unlike the mtime path -- the name carries everything
+    needed, so this is cheaper than what it replaces despite the larger walk.
+    """
+    pat = re.compile(RAW_VOLUME_TS_RE)
+    newest = 0.0
+    n = 0
+    with os.scandir(path) as it:
+        for e in it:
+            n += 1
+            if n > MAX_SCAN_ENTRIES:
+                break
+            if e.name.startswith("."):
+                continue
+            m = pat.match(e.name)
+            if not m:
+                continue
+            try:
+                dt = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            ts = dt.replace(tzinfo=timezone.utc).timestamp()
+            if ts > newest:
+                newest = ts
+    if not newest:
+        # The directory exists but declares nothing readable. Same meaning as
+        # an absent directory: let the silence threshold judge it.
+        raise FileNotFoundError(f"no parseable volume filenames in {path}")
+    return newest
 
 
 def _dir_mtime(path: str) -> float:
@@ -104,9 +157,12 @@ class Layer2BackendRadarCheck(Check):
         path = _radar_path(self.radar_id, t0)
         payload: dict[str, Any] = {"path": path, "source": "backend-filesystem"}
 
+        reader = _newest_declared if LB2_FRESHNESS == "filename" else _dir_mtime
+        payload["freshness_basis"] = LB2_FRESHNESS
+
         try:
             mtime = await asyncio.wait_for(
-                asyncio.to_thread(_dir_mtime, path), FS_TIMEOUT_S)
+                asyncio.to_thread(reader, path), FS_TIMEOUT_S)
         except asyncio.TimeoutError:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage, status="error",
@@ -123,6 +179,13 @@ class Layer2BackendRadarCheck(Check):
             payload["absent"] = True
             return _final(self, t0, sub, payload, metrics,
                           "no data directory for the current UTC day")
+        except re.error as e:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage, status="error",
+                started_at=t0, finished_at=utcnow(),
+                summary=f"profile RAW_VOLUME_TS_RE is not a valid pattern: {e}",
+                payload=payload, metrics={"fs_timeout": 0.0},
+            )
         except OSError as e:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage, status="error",
@@ -156,7 +219,8 @@ class Layer2BackendRadarCheck(Check):
         else:
             sub["A_arriving"] = "fail"
 
-        summary = (f"last arrival {age_s / 60:.1f} min ago"
+        what = "newest volume" if LB2_FRESHNESS == "filename" else "last arrival"
+        summary = (f"{what} {age_s / 60:.1f} min ago"
                    f"  (silent limit {silent_s / 60:.0f} min)")
         if sub["A_arriving"] == "fail":
             summary = "BACKEND SILENT — " + summary
