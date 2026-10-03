@@ -31,7 +31,7 @@ from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
-from .helpers import worst_of
+from .helpers import headroom, worst_of
 
 FS_TIMEOUT_S = 5.0
 
@@ -123,6 +123,9 @@ class Layer2BackendRadarCheck(Check):
             RADAR_SILENT_FAIL_S.get(self.radar_id, 900),
         )
         metrics["backend_silent_s"] = float(silent_s)
+        # Sparkline series. See helpers.headroom: the dashboard needs one
+        # fixed 0..1 axis, and these limits differ per radar (300 s..1080 s).
+        metrics["headroom"] = headroom(age_s, silent_s)
         # See layer1_backend_product: payload is what the reprocess engine can read.
         payload["age_s"] = round(age_s, 1)
         payload["silent_s"] = float(silent_s)

@@ -26,6 +26,7 @@ from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import (
     derive_check_cadence,
+    headroom,
     parse_api_ts,
     parse_filename_ts,
     parse_filename_step_idx,
@@ -165,6 +166,10 @@ class Layer1ProductCheck(Check):
             self.product_id, "max_freshness_s", cfg.get("max_freshness_s"),
         )
         sub["C_freshness"] = "pass" if age_s <= max_fresh else "fail"
+        # Sparkline series. Negative max_fresh is handled by helpers.headroom
+        # (it measures distance from the limit, not from zero), so the
+        # forecast products get a real gradient instead of a step.
+        metrics["headroom"] = headroom(age_s, max_fresh)
 
         # --- D. cadence ---
         scan_cad = _thresholds.get_product(

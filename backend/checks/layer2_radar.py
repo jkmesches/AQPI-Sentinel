@@ -47,7 +47,7 @@ from ..config import (
 from ..registry import register
 from .layer0_episode import note_upstream_exception
 from .base import Check, CheckResult, utcnow
-from .helpers import parse_filename_ts
+from .helpers import headroom, parse_filename_ts
 
 PRIMARY_MOMENT = "Reflectivity"
 
@@ -410,7 +410,13 @@ class Layer2RadarReconcile(Check):
             if n is not None:
                 metrics[f"images_{m.replace(' ', '_')}"] = float(n)
         if primary_ts is not None:
-            metrics["primary_age_s"] = float((now - primary_ts).total_seconds())
+            _age = float((now - primary_ts).total_seconds())
+            metrics["primary_age_s"] = _age
+            # Plotted by the dashboard against the SAME silent_fail_s that
+            # layer2_backend_radar uses, so the radarca and backend traces
+            # for one radar share a denominator and can be read against
+            # each other. See helpers.headroom.
+            metrics["headroom"] = headroom(_age, silent_fail_s)
 
         # Publish this radar's verdict for the fleet check (and read back how
         # many peers are currently not reporting) BEFORE building the summary, so
