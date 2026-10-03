@@ -16,9 +16,7 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { url as apiUrl } from '$lib/origin';
-	import {
-		stageLabel, stageTechCode, severityChip, prettyCheckLabel, fmtAge
-	} from '$lib/format';
+	import { stageLabel, stageTechCode, severityChip, prettyCheckLabel, fmtAge, stageOptions } from '$lib/format';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import { api, type CheckRun } from '$lib/api';
@@ -48,13 +46,7 @@
 		summary: string;
 	};
 
-	const STAGE_OPTIONS = [
-		{ value: 'L0',      label: 'Connectivity' },
-		{ value: 'L1',      label: 'Products' },
-		{ value: 'L2',      label: 'Radar Scans' },
-		{ value: 'L3',      label: 'Map Overlays' },
-		{ value: 'L4-T1T2', label: 'Image Quality' }
-	];
+	const STAGE_OPTIONS = stageOptions();
 	const SEVERITY_OPTIONS = ['warn', 'critical'];
 	const STATUS_OPTIONS   = ['pass', 'warn', 'fail', 'error', 'skip'];
 

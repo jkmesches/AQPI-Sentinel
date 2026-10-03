@@ -8,7 +8,7 @@
 	 *  motion. */
 	import MultiSelectChips from './MultiSelectChips.svelte';
 	import { url as apiUrl } from '$lib/origin';
-	import { stageLabel } from '$lib/format';
+	import { stageLabel, stageOptions } from '$lib/format';
 
 	let {
 		open = $bindable<boolean>(false),
@@ -85,13 +85,7 @@
 	}
 	function markTargetsTouched() { targetsTouched = true; }
 
-	const STAGE_OPTIONS = [
-		{ value: 'L0',      label: 'Connectivity',      hint: 'L0' },
-		{ value: 'L1',      label: 'Product Freshness', hint: 'L1' },
-		{ value: 'L2',      label: 'Radar Scans',       hint: 'L2' },
-		{ value: 'L3',      label: 'Map Overlays',      hint: 'L3' },
-		{ value: 'L4-T1T2', label: 'Image Quality',     hint: 'L4' }
-	];
+	const STAGE_OPTIONS = stageOptions(true);
 	const BUCKET_OPTIONS = [
 		{ value: '1m',  label: '1 minute'  },
 		{ value: '5m',  label: '5 minutes' },

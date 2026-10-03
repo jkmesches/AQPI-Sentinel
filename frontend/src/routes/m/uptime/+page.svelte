@@ -18,10 +18,7 @@
 	// than reimplemented so the two surfaces cannot drift into disagreeing
 	// about what a cell means — see $lib/timelineFill.
 	import { STATUS_BG, cellFill, cellRatioText } from '$lib/timelineFill';
-	import {
-		prettyCheckLabel, stageLabel, productCategory,
-		PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
-	} from '$lib/format';
+	import { prettyCheckLabel, stageLabel, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES } from '$lib/format';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import { url as apiUrl } from '$lib/origin';
@@ -48,8 +45,8 @@
 	type SubTab = 'connectivity' | 'products' | 'radar';
 	const SUBTABS: { key: SubTab; label: string; stages: string[] }[] = [
 		{ key: 'connectivity', label: 'Connectivity', stages: ['L0'] },
-		{ key: 'products',     label: 'Products',     stages: ['L1'] },
-		{ key: 'radar',        label: 'Radar',        stages: ['L2', 'L3', 'L4-T1T2'] }
+		{ key: 'products',     label: 'Products',     stages: ['L1', 'LB1'] },
+		{ key: 'radar',        label: 'Radar',        stages: ['L2', 'LB2', 'L3', 'L4-T1T2'] }
 	];
 
 
@@ -138,7 +135,7 @@
 				byStage.get(c.stage)!.push(c);
 			}
 			const out: Subgroup[] = [];
-			for (const s of ['L0', 'L1', 'L2', 'L3', 'L4-T1T2']) {
+			for (const s of ALL_STAGES) {
 				const cols = byStage.get(s);
 				if (cols?.length) out.push({ label: stageLabel(s), cols });
 			}
@@ -166,7 +163,7 @@
 			byStage.get(c.stage)!.push(c);
 		}
 		const out: Subgroup[] = [];
-		for (const s of ['L2', 'L3', 'L4-T1T2']) {
+		for (const s of ['L2', 'LB2', 'L3', 'L4-T1T2']) {
 			const cols = byStage.get(s);
 			if (cols?.length) out.push({ label: stageLabel(s), cols });
 		}

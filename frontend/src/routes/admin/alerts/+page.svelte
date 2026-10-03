@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { stageLabel, stageTechCode } from '$lib/format';
+	import { stageLabel, stageTechCode, ALL_STAGES } from '$lib/format';
 
 	// ---- shape mirrors backend/alarms/models.py:AlertsConfig ---------------
 	interface Receiver {
@@ -50,7 +50,7 @@
 		testResult: { ok: boolean; results: any[]; step_receivers: string[] } | null;
 	}
 
-	const STAGES = ['L0', 'L1', 'L2', 'L3', 'L4-T1T2'] as const;
+	const STAGES = ALL_STAGES;
 	const STATUSES = ['warn', 'fail', 'error'] as const;
 	const SEVERITIES = ['warn', 'critical'] as const;
 	const GROUP_BY_KEYS = ['stage', 'check_id', 'target', 'status_at_open'] as const;

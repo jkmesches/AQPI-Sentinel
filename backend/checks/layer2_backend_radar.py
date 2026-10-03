@@ -41,7 +41,11 @@ FS_TIMEOUT_S = 5.0
 # mounts /trinity on the host, but sentinel-backend sees only what the compose file
 # bind-mounts. Hence a setting, not a literal.
 def _special_trees() -> dict[str, str]:
-    return {"CBAND": (SETTINGS.sscb_root.rstrip("/") + "/%Y/%m/%d")} if SETTINGS.sscb_root else {}
+    # str() first: SETTINGS.sscb_root is a Path (config._opt_path), and Path has no
+    # .rstrip. Calling it raised AttributeError on every LB2 run in v0.5.0.
+    if not SETTINGS.sscb_root:
+        return {}
+    return {"CBAND": str(SETTINGS.sscb_root).rstrip("/") + "/%Y/%m/%d"}
 
 
 def _radar_path(radar_id: str, now) -> str:
