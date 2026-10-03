@@ -76,6 +76,12 @@ class Layer2BackendRadarCheck(Check):
 
     def __init__(self, radar_id: str):
         self.radar_id = radar_id
+        # CBAND lives on Trinity, every other radar on K2. See Check.source_*.
+        if radar_id in _special_trees():
+            self.source_tag, self.source_label = "TR", "Trinity"
+        else:
+            self.source_tag, self.source_label = "K2", "K2"
+
         self.id = f"layer2.backend.{radar_id}"
         self.target = radar_id
         self.cadence_s = 60

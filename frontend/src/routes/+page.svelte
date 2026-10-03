@@ -10,7 +10,7 @@
 		stageLabel, prettyCheckLabel, productLabel,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
 		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck } from '$lib/format';
-	import { api } from '$lib/api';
+	import { api, type CheckMeta } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
 
@@ -98,7 +98,7 @@
 	// 2-min cadence get a 1-hour window; forecasts at 30-min cadence get
 	// several hours).
 	const checksById = $derived.by(() => {
-		const out: Record<string, { cadence_s: number }> = {};
+		const out: Record<string, CheckMeta> = {};
 		for (const c of sentinel.checks) out[c.id] = c;
 		return out;
 	});
@@ -209,7 +209,7 @@
   vector/stream feed that has no backend counterpart. Saying so is deliberate:
   a blank cell reads as a failure.
 -->
-{#snippet sourceCell(row: any, tag: string, paired: boolean, w: number)}
+{#snippet sourceCell(row: any, fallbackTag: string, paired: boolean, w: number)}
 	{#if !row}
 		<span
 			class="num justify-self-start whitespace-nowrap text-[9.5px] text-[var(--color-faint)]"
@@ -220,10 +220,14 @@
 	{:else}
 		{@const metric = sparklineMetric(row.check_id)}
 		{@const spark = sentinel.metrics[`${row.check_id}|${metric ?? 'age_s'}`] ?? []}
-		{@const cadenceS = checksById[row.check_id]?.cadence_s ?? 120}
+		{@const meta = checksById[row.check_id]}
+		{@const cadenceS = meta?.cadence_s ?? 120}
+		<!-- The check says which tree it read. Hardcoding "K2" was wrong for
+		     CBAND, which comes off Trinity — see Check.source_tag. -->
+		{@const tag = meta?.source_tag || fallbackTag}
 		<span
 			class="flex min-w-0 items-center gap-1.5 {statusText(row.status)}"
-			title={`${row.check_id} · ${row.target}${row.summary ? `\n${row.summary}` : ''}`}
+			title={`${row.check_id} · ${row.target}${meta?.source_label ? ` · read from ${meta.source_label}` : ''}${row.summary ? `\n${row.summary}` : ''}`}
 		>
 			<StatusDot status={row.status} size={8} pulseKey={sentinel.pulseTick[row.check_id] ?? 0} />
 			{#if paired}

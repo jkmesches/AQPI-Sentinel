@@ -100,6 +100,10 @@ class Layer1BackendProductCheck(Check):
     def __init__(self, product_id: str):
         cfg = PRODUCTS[product_id]
         self.product_id = product_id
+        # Every product is published to the K2 web share; nothing under
+        # realtime/product_images/ comes off Trinity. See Check.source_*.
+        self.source_tag, self.source_label = "K2", "K2"
+
         self.cfg = cfg
         self.id = f"layer1.backend.{product_id}"
         self.target = product_id

@@ -61,6 +61,32 @@ class Check:
     # get one page instead of five while keeping every per-radar verdict
     # visible and true.
     alarm_only_depends_on: list[str] = []
+    # Which published tree this check actually read, for checks that read one.
+    #
+    # Not cosmetic and not derivable by the frontend. The backend-reading
+    # checks do NOT all read the same share: the X-band radars and every
+    # product come off K2, but CBAND comes off Trinity -- which is exactly why
+    # SENTINEL_SSCB_ROOT is a separate setting and a separate mount from
+    # SENTINEL_BACKEND_ROOT. Labelling CBAND's backend row "K2" is simply
+    # false, and the dashboard has no way to know better unless the check that
+    # did the reading says so.
+    #
+    # `source_tag` is the compact form the rails show beside each trace;
+    # `source_label` is the full name for row labels and tooltips. Two fields
+    # rather than one plus a truncation rule, because abbreviating "Trinity"
+    # to "TR" is a judgement the source owner should make, not a string
+    # operation the UI invents.
+    #
+    # === source_tag is EXACTLY two characters ===
+    #
+    # Not a style preference. The tag sits between the status dot and the
+    # sparkline in the home rails, so its width sets where every trace in that
+    # column begins. A three-character tag on one row shifts that row's
+    # sparkline right and the column stops being scannable, which is most of
+    # what a column of sparklines is for. "RC", "K2" and "TR" are all two.
+    # test_sparkline_metric.py asserts it.
+    source_tag: str | None = None
+    source_label: str | None = None
     # Emit a `timed_out` metric (0 on success, 1 on read timeout) so
     # avg(timed_out) over this check is a true truncation rate.
     #

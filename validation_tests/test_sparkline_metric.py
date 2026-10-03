@@ -124,6 +124,43 @@ def main() -> int:
     check("...and that table is the one LB2 defaults from",
           "RADAR_SILENT_FAIL_S" in lb2 and bool(RADAR_SILENT_FAIL_S))
 
+    print("\nsource labelling — which published tree each backend check read:")
+    import backend.checks.layer2_backend_radar as _lb2
+    tagged = {cid: c for cid, c in registry.CHECKS.items()
+              if getattr(c, "source_tag", None)}
+    check("the backend-reading checks declare a source",
+          len(tagged) >= 13, f"{len(tagged)} tagged")
+
+    # CBAND is the whole reason this field exists. It reads Trinity while every
+    # other backend row reads K2, and the dashboard cannot know that -- it was
+    # labelled "K2" until someone noticed. SENTINEL_SSCB_ROOT being a separate
+    # setting and a separate mount is the same fact stated in the compose file.
+    cb = registry.CHECKS.get("layer2.backend.CBAND")
+    check("CBAND's backend check exists (needs SENTINEL_SSCB_ROOT)", cb is not None)
+    if cb is not None:
+        check("...and says it read Trinity, not K2",
+              cb.source_label == "Trinity" and cb.source_tag == "TR",
+              f"{cb.source_tag}/{cb.source_label}")
+        check("...consistent with _special_trees(), which is what it actually read",
+              "CBAND" in _lb2._special_trees())
+
+    others = [c for cid, c in tagged.items()
+              if cid.startswith("layer2.backend.") and cid != "layer2.backend.CBAND"]
+    check("every other radar says K2",
+          bool(others) and all(c.source_label == "K2" for c in others),
+          f"{len(others)} radars")
+    prods = [c for cid, c in tagged.items() if cid.startswith("layer1.backend.")]
+    check("every product says K2 (nothing under product_images is on Trinity)",
+          bool(prods) and all(c.source_label == "K2" for c in prods),
+          f"{len(prods)} products")
+
+    # The tag's width sets where every sparkline in that rail column starts.
+    # A three-character tag on one row shifts that row's trace and the column
+    # stops lining up. See Check.source_tag.
+    bad = {c.source_tag for c in tagged.values() if len(c.source_tag or "") != 2}
+    check("every source tag is exactly two characters (column alignment)",
+          not bad, ", ".join(sorted(bad)) or "all 2")
+
     print()
     if failures:
         print(f"{len(failures)} FAILED: {', '.join(failures)}")

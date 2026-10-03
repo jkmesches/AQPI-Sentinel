@@ -17,6 +17,10 @@ async def list_checks():
             "target":     c.target,
             "cadence_s":  c.cadence_s,
             "depends_on": c.depends_on,
+            # None for everything that does not read a published tree, which
+            # is most checks. The dashboard falls back to a neutral label.
+            "source_tag":   getattr(c, "source_tag", None),
+            "source_label": getattr(c, "source_label", None),
         }
         for c in CHECKS.values()
     ]
