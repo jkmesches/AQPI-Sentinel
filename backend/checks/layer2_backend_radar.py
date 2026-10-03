@@ -123,6 +123,9 @@ class Layer2BackendRadarCheck(Check):
             RADAR_SILENT_FAIL_S.get(self.radar_id, 900),
         )
         metrics["backend_silent_s"] = float(silent_s)
+        # See layer1_backend_product: payload is what the reprocess engine can read.
+        payload["age_s"] = round(age_s, 1)
+        payload["silent_s"] = float(silent_s)
 
         # One threshold, three bands: a radar at 0.8x its characterised silence limit is
         # worth seeing before it crosses.

@@ -14,8 +14,12 @@
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
 
+	// L2 + LB2 together: the same radar seen through radarca and read off the
+	// backend. Sorting by target pairs them, and prettyCheckLabel suffixes the
+	// backend row, so the two verdicts sit side by side.
 	const radarRows = $derived(
-		(sentinel.rollup?.stages?.L2 ?? []).slice().sort((a, b) => a.target.localeCompare(b.target))
+		[...(sentinel.rollup?.stages?.L2 ?? []), ...(sentinel.rollup?.stages?.LB2 ?? [])]
+			.slice().sort((a, b) => a.target.localeCompare(b.target))
 	);
 	// CheckMeta lookup by check_id — used per-row to feed cadence into the
 	// Sparkline so its visible window auto-sizes to each check (radars at
@@ -33,7 +37,7 @@
 	// grouped under "Edge" alongside L0 site checks which made the labels
 	// inconsistent — flagged in the 2026-05-18 review.
 	const productRows = $derived(
-		(sentinel.rollup?.stages?.L1 ?? [])
+		[...(sentinel.rollup?.stages?.L1 ?? []), ...(sentinel.rollup?.stages?.LB1 ?? [])]
 			.slice()
 			.sort((a, b) => a.target.localeCompare(b.target))
 	);
@@ -132,7 +136,7 @@
 			{/each}
 		</ul>
 
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={stageLabel('L2')} />
+		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right="{stageLabel('L2')} + {stageLabel('LB2')}" />
 		<ul class="divide-y divide-[var(--color-border)]">
 			{#each radarRows as r}
 				{@const spark = sentinel.metrics[`${r.check_id}|images_Reflectivity`] ?? []}
@@ -175,7 +179,7 @@
 
 	<!-- RIGHT RAIL: PRODUCTS --------------------------------------------------------- -->
 	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
-		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={stageLabel('L1')} />
+		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right="{stageLabel('L1')} + {stageLabel('LB1')}" />
 		<div class="overflow-y-auto">
 			{#each productGroups as g}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
