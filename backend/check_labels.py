@@ -77,9 +77,14 @@ def pretty_check_label(check_id: str | None, target: str = "") -> str:
     if cid.startswith("layer0.net.dns"):        return "Sentinel DNS"
     if cid.startswith("layer0."):               return _L0_TARGETS.get(t) or _title(t)
     if cid.startswith("layer1.product."):       return _product(t)
+    # LB1/LB2 reuse the same targets as their radarca counterparts, so _PRODUCTS needs
+    # no new entries — only a suffix making the two distinguishable in an email or push
+    # payload, where the stage name is not adjacent.
+    if cid.startswith("layer1.backend."):       return f"{_product(t)} — backend"
     if cid.startswith("layer1.stream."):        return "Stream Reach canary"
     if cid.startswith("layer1.vector."):        return _VECTORS.get(t) or _title(t)
     if cid.startswith("layer2.radar."):         return t or cid
+    if cid.startswith("layer2.backend."):       return f"{t or cid} — backend arrival"
     if cid.startswith("layer3."):               return f"Overlay reconcile — {_product(t)}" if t else "Overlay reconcile"
     if cid.startswith("layer4.xband."):         return t or cid
     if cid.startswith("layer4."):               return _product(t)
