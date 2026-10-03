@@ -28,6 +28,41 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-03
+
+### Fixed
+
+- **`LB2` radar checks crashed on every run.** `_special_trees()` called `.rstrip("/")`
+  on `SETTINGS.sscb_root`, which `config._opt_path()` returns as a `Path` — and `Path`
+  has no `rstrip`. Every `layer2.backend.*` run raised `AttributeError` immediately.
+  Now `str()`-converted first.
+
+- **The new `LB1` / `LB2` stages were invisible across most of the UI.** v0.5.0 added
+  them to the stage *label* lookups but not to the eight separate hard-coded stage
+  *enumerations*, so the checks registered and ran while being silently dropped from the
+  timeline, history, mobile history, mobile uptime rollups, report export, the silence
+  matcher and the admin alert-route picker.
+
+  Two of those were worse than cosmetic: an `LB` alarm could not be silenced from the UI,
+  and `LB` routes could not be configured from the admin page.
+
+### Changed
+
+- **One canonical stage list.** `ALL_STAGES` and `stageOptions()` are now exported from
+  `frontend/src/lib/format.ts`, and every enumeration derives from them. Eight copies of
+  `['L0','L1','L2','L3','L4-T1T2']` is exactly why seven of them were missed; adding a
+  stage is now a one-line change in one file.
+
+  Backend stages are ordered immediately after the radarca stage they correspond to
+  (`L0, L1, LB1, L2, LB2, L3, L4-T1T2`), so the two views of the same thing are adjacent
+  wherever stages are listed. The timeline's Products tab now covers `L1 + LB1` and its
+  Radars tab `L2 + LB2 + L3 + L4-T1T2`, which is the side-by-side comparison the
+  backend-vs-radarca rollout depends on.
+
+- `m/history`'s stage filter now uses the shared labels, so "Products" there reads
+  "Product Freshness" as it does everywhere else.
+
+
 ## [0.5.0] — 2026-10-03
 
 ### Added

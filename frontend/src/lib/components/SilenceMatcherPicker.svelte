@@ -11,7 +11,7 @@
 	 *  stageLabel. Custom is a power-user escape hatch — laypeople pick from
 	 *  the presets, advanced users edit the keys.
 	 */
-	import { stageLabel } from '$lib/format';
+	import { stageLabel, ALL_STAGES } from '$lib/format';
 
 	let {
 		value = $bindable<Record<string, string>>({}),
@@ -126,7 +126,7 @@
 		}
 	});
 
-	const STAGE_OPTIONS = ['L0', 'L1', 'L2', 'L3', 'L4-T1T2'];
+	const STAGE_OPTIONS = [...ALL_STAGES];
 </script>
 
 <div bind:this={rootEl} class="relative inline-block text-[11.5px]">

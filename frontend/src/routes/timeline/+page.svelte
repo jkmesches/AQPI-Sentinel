@@ -2,10 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket, type TimelineCell } from '$lib/api';
 	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
-	import {
-		prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText,
-		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL
-	} from '$lib/format';
+	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES } from '$lib/format';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
 	import ReportExportModal from '$lib/components/ReportExportModal.svelte';
@@ -33,7 +30,7 @@
 		'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '6h': 21600, '1d': 86400
 	};
 
-	const STAGE_ORDER = ['L0', 'L1', 'L2', 'L3', 'L4-T1T2'];
+	const STAGE_ORDER = [...ALL_STAGES];
 
 	// Tabs slice the columns into digestible chunks. Each tab maps to the
 	// stages that belong to it.
@@ -41,10 +38,10 @@
 	const TABS: { key: Tab; label: string; stages: string[]; desc: string }[] = [
 		{ key: 'website',  label: 'Website',  stages: ['L0'],
 		  desc: 'Site liveness, TLS, public page.' },
-		{ key: 'products', label: 'Products', stages: ['L1'],
-		  desc: 'Per-product image freshness, streams, overlays.' },
-		{ key: 'radars',   label: 'Radars',   stages: ['L2', 'L3', 'L4-T1T2'],
-		  desc: 'Per-radar rollup, cross-checks, and image quality control.' }
+		{ key: 'products', label: 'Products', stages: ['L1', 'LB1'],
+		  desc: 'Per-product freshness on the backend and as radarca serves it.' },
+		{ key: 'radars',   label: 'Radars',   stages: ['L2', 'LB2', 'L3', 'L4-T1T2'],
+		  desc: 'Per-radar arrival on the backend, radarca rollup, cross-checks, image QC.' }
 	];
 
 	// Static cell+row geometry. Rows = checks (horizontal labels on the left,

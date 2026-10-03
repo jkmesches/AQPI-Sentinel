@@ -3,7 +3,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import MultiSelectChips from '$lib/components/MultiSelectChips.svelte';
 	import HistoryDetailModal from '$lib/components/HistoryDetailModal.svelte';
-	import { severityChip, stageLabel } from '$lib/format';
+	import { severityChip, stageLabel, stageOptions } from '$lib/format';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { url as apiUrl } from '$lib/origin';
 	import { page } from '$app/state';
@@ -38,13 +38,7 @@
 	// Stage options mirror the canonical descriptor map. Labels stay sortable
 	// alphabetically; hints surface the technical code so power users can
 	// still recognize "L4" without expanding the chip.
-	const STAGE_OPTIONS = [
-		{ value: 'L0',      label: 'Connectivity',     hint: 'L0' },
-		{ value: 'L1',      label: 'Product Freshness', hint: 'L1' },
-		{ value: 'L2',      label: 'Radar Scans',      hint: 'L2' },
-		{ value: 'L3',      label: 'Map Overlays',     hint: 'L3' },
-		{ value: 'L4-T1T2', label: 'Image Quality',    hint: 'L4' }
-	];
+	const STAGE_OPTIONS = stageOptions(true);
 	const SEVERITY_OPTIONS = [
 		{ value: 'info',     label: 'Info' },
 		{ value: 'warn',     label: 'Warn' },

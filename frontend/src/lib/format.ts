@@ -91,6 +91,26 @@ export function statusText(s: string): string {
 // and email footers so the mapping is still discoverable.
 //
 // Names approved 2026-05-18.
+// The canonical stage list. EVERY enumeration of stages must derive from this —
+// filters, pickers, timeline ordering, rollup groupings. v0.5.0 added LB1/LB2 and
+// updated only the label lookups below, which left eight separate hard-coded copies
+// of ['L0','L1','L2','L3','L4-T1T2'] silently dropping the new stages from the
+// timeline, history, silence picker, report export and mobile views.
+//
+// Backend stages sit immediately after the radarca stage they correspond to, so the
+// two views of the same thing are adjacent wherever stages are listed in order.
+export const ALL_STAGES = ['L0', 'L1', 'LB1', 'L2', 'LB2', 'L3', 'L4-T1T2'] as const;
+export type Stage = (typeof ALL_STAGES)[number];
+
+/** Dropdown/filter options. `hint` carries the short technical code where the UI shows it. */
+export function stageOptions(withHint = false): { value: string; label: string; hint?: string }[] {
+	return ALL_STAGES.map((s) =>
+		withHint
+			? { value: s, label: stageLabel(s), hint: stageTechCode(s) }
+			: { value: s, label: stageLabel(s) }
+	);
+}
+
 export function stageColor(s: string): string {
 	return (
 		{
