@@ -75,14 +75,9 @@
 				.map((o) => o.value);
 		}
 	});
-	// Mirror the canonical stage→descriptor map. Duplicated here so the
-	// modal doesn't need the caller to pre-stamp options with stage IDs.
-	function stageDescriptor(s: string): string {
-		return ({
-			L0: 'Connectivity', L1: 'Product Freshness', L2: 'Radar Scans',
-			L3: 'Map Overlays', 'L4-T1T2': 'Image Quality'
-		} as Record<string, string>)[s] ?? s;
-	}
+	// Was a duplicated copy of the stage→descriptor map, which is how it missed
+	// LB1/LB2. Delegates to the canonical one now.
+	const stageDescriptor = stageLabel;
 	function markTargetsTouched() { targetsTouched = true; }
 
 	const STAGE_OPTIONS = stageOptions(true);

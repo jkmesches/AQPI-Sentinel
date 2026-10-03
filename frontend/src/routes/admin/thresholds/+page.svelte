@@ -165,7 +165,17 @@
 	let oneDayAgoIso = new Date(Date.now() - 86400_000).toISOString().slice(0, 16);
 	let reSince = $state(oneDayAgoIso);
 	let reUntil = $state(nowIso);
-	let reStages = $state<Record<string, boolean>>({ L1: true, L2: true, 'L4-T1T2': true });
+	// Stages the reprocess engine can re-verdict. Must match the dispatch in
+	// backend/reprocess_engine.py — a stage listed here that the engine cannot
+	// handle produces a job that reports success having evaluated nothing.
+	const REPROCESSABLE: [string, string][] = [
+		['L1', 'Product Freshness'], ['LB1', 'Backend Products'],
+		['L2', 'Radar Scans'],       ['LB2', 'Backend Radar Arrival'],
+		['L4-T1T2', 'Image Quality']
+	];
+	let reStages = $state<Record<string, boolean>>(
+		Object.fromEntries(REPROCESSABLE.map(([k]) => [k, true]))
+	);
 	let reConfirmText = $state('');
 	let reJob = $state<any>(null);
 	let rePoller: ReturnType<typeof setInterval> | undefined;
@@ -441,7 +451,7 @@
 					</label>
 					<div class="flex items-center gap-3">
 						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">stages</span>
-						{#each [['L1','Product Freshness'],['L2','Radar Scans'],['L4-T1T2','Image Quality']] as [k, lbl]}
+						{#each REPROCESSABLE as [k, lbl]}
 							<label class="flex items-center gap-1 text-[11px]">
 								<input type="checkbox"
 									checked={reStages[k]}

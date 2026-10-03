@@ -28,6 +28,40 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-10-03
+
+### Fixed
+
+- **Threshold reprocessing silently skipped `LB1` / `LB2` rows.** The engine
+  dispatches on stage and had branches for `L1`, `L2` and `L4-T1T2` only; anything
+  else fell through to `continue`. A reprocess job therefore reported success having
+  evaluated nothing — the same failure mode the `_reverdict_l2` docstring records
+  from 2026-08-26, for the same reason.
+
+  `_reverdict_lb1` and `_reverdict_lb2` now re-apply the current
+  `backend_max_age_s` / `backend_silent_s` to a stored observation.
+
+- **Backend checks now record `age_s` in the payload, not only in metrics.**
+  `check_runs` stores `payload` but not `metrics` (those go to `metric_samples`), and
+  the reprocess engine reads only `check_runs` — so the observation it needed was not
+  reachable. **Rows written before 0.5.3 carry no `age_s` and cannot be reprocessed**;
+  they are skipped rather than guessed at.
+
+- **Four more places that enumerated stages by hand**, found by auditing every
+  `stage ==` / stage-literal in both codebases rather than waiting to trip over them:
+  the reprocess stage selector (which offered three stages the engine could handle and
+  none of the new ones), the timeline's product-category subgrouping, the home page's
+  Radars and Products sections, and a duplicated stage→label map in the report-export
+  modal that now delegates to the canonical one.
+
+### Changed
+
+- **The home page shows backend and radarca rows together.** `L2 + LB2` under Radars,
+  `L1 + LB1` under Products, sorted by target so the two views of the same thing are
+  adjacent and `prettyCheckLabel` distinguishes them. This is the comparison the
+  backend-primary rollout depends on, and the home page is where it is most useful.
+
+
 ## [0.5.2] — 2026-10-03
 
 ### Added

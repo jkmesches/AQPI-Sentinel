@@ -151,7 +151,7 @@
 			const cols = byStage.get(s);
 			if (!cols?.length) continue;
 			cols.sort((a, b) => a.id.localeCompare(b.id));
-			if (s === 'L1') {
+			if (s === 'L1' || s === 'LB1') {
 				const byCat: Record<string, CheckMeta[]> = {};
 				for (const cat of PRODUCT_CATEGORY_ORDER) byCat[cat] = [];
 				for (const c of cols) byCat[productCategory(c.target)].push(c);

@@ -161,6 +161,11 @@ class Layer1BackendProductCheck(Check):
         )
         metrics["backend_max_age_s"] = float(max_age)
         sub["B_freshness"] = "pass" if age_s <= max_age else "fail"
+        # Also in the payload, not just metrics: check_runs stores payload but NOT
+        # metrics (those go to metric_samples), and the reprocess engine reads only
+        # check_runs. Without this a threshold change cannot be applied retroactively.
+        payload["age_s"] = round(age_s, 1)
+        payload["max_age_s"] = float(max_age)
 
         mins = age_s / 60.0
         summary = (f"newest {info['newest_name']} {mins:.0f} min old"

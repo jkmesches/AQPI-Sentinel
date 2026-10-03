@@ -5,7 +5,7 @@ Walks `check_runs` rows in a time window and re-classifies them under the
 carry enough state — last_ts / image_bytes / tier2 stats / moment_newest —
 to recompute the verdict without re-fetching anything from upstream.
 
-Three stages are supported:
+Five stages are supported:
   * L1: C_freshness, E_step_count, G_image_size sub-checks. D_cadence is
     out of scope (its inputs live in metrics, not payload). Everything
     else folded by worst_of from the existing sub_status dict.
@@ -266,6 +266,68 @@ def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
     return new_status, new_payload
 
 
+def _reverdict_lb1(row: dict) -> tuple[str, dict] | None:
+    """Re-evaluate an LB1 backend-product freshness verdict.
+
+    Simpler than its L1 counterpart: the backend check has exactly one
+    threshold-sensitive sub-check (B_freshness), and the observed age is recorded
+    in the payload for exactly this purpose.
+
+    Rows written before v0.5.3 carry no `age_s` and are skipped — there is nothing
+    to recompute from, and inventing one would be worse than leaving the row alone.
+    """
+    payload = row["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+
+    age = payload.get("age_s")
+    if age is None:
+        return None                      # pre-0.5.3 row, or an error/absent run
+    sub = dict(payload.get("sub_status") or {})
+    if "B_freshness" not in sub:
+        return None                      # never got as far as the freshness check
+
+    max_age = _thresholds.get_product(row["target"], "backend_max_age_s")
+    if max_age is None:
+        max_age = payload.get("max_age_s")
+    if max_age is None:
+        return None
+
+    sub["B_freshness"] = "pass" if float(age) <= float(max_age) else "fail"
+    new_payload = {**payload, "sub_status": sub, "max_age_s": float(max_age)}
+    return _worst_of(*sub.values()), new_payload
+
+
+def _reverdict_lb2(row: dict) -> tuple[str, dict] | None:
+    """Re-evaluate an LB2 backend radar-arrival verdict.
+
+    Mirrors the live check's three bands: pass at or under 0.8x the silence limit,
+    warn up to the limit, fail beyond it.
+    """
+    payload = row["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+
+    age = payload.get("age_s")
+    if age is None:
+        return None
+    sub = dict(payload.get("sub_status") or {})
+    if "A_arriving" not in sub:
+        return None
+
+    silent = _thresholds.get_radar(row["target"], "backend_silent_s")
+    if silent is None:
+        silent = payload.get("silent_s")
+    if silent is None:
+        return None
+
+    age, silent = float(age), float(silent)
+    sub["A_arriving"] = ("pass" if age <= silent * 0.8
+                         else "warn" if age <= silent else "fail")
+    new_payload = {**payload, "sub_status": sub, "silent_s": silent}
+    return _worst_of(*sub.values()), new_payload
+
+
 def _reverdict_l2(row: dict) -> tuple[str, dict] | None:
     """Re-evaluate the GHOST_UP freshness verdict under current thresholds.
 
@@ -486,6 +548,10 @@ async def run_reprocess(pool, job: ReprocessJob) -> None:
                 new = _reverdict_l2(row)
             elif row["stage"] == "L4-T1T2":
                 new = _reverdict_l4(row, l4_phash, l4_source)
+            elif row["stage"] == "LB1":
+                new = _reverdict_lb1(row)
+            elif row["stage"] == "LB2":
+                new = _reverdict_lb2(row)
 
             if new is None:
                 continue
