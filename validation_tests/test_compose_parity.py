@@ -113,7 +113,12 @@ def main() -> int:
     # BOTH the same way — which is exactly what str.split(':') did, and why
     # this suite passed while measuring nothing. If these literals ever need
     # changing, change them deliberately.
-    EXPECTED_BACKEND_MOUNTS = {"/data/archive", "/data/cold", "/data/backups"}
+    # /backend and /sscb arrived with the LB1/LB2 filesystem checks in v0.5.0
+    # (read-only mounts of K2 and trinity). They were added to both compose
+    # files but not here, so this assertion has been red — and therefore
+    # measuring nothing — since that release.
+    EXPECTED_BACKEND_MOUNTS = {"/data/archive", "/data/cold", "/data/backups",
+                               "/backend", "/sscb"}
     for label, doc in (("prod.yml", prod), ("ghcr.yml", ghcr)):
         got = volume_targets(doc["services"]["backend"])
         check(f"{label}: backend mounts parse to real container paths",

@@ -39,8 +39,18 @@ from backend import retention                         # noqa: E402
 
 DSN = os.environ.get("SENTINEL_TEST_DSN")
 if not DSN:
-    sys.exit("SENTINEL_TEST_DSN is required — see this file's docstring. "
-             "Point it at a scratch database; this test drops tables.")
+    # Exit 0, not 1. `sys.exit(str)` exits with status 1, so an absent
+    # prerequisite was reported as a FAILURE for a test that had simply not
+    # run. That normalised a red line in every suite run, and normalised red
+    # is how a real break hides: test_compose_parity went red when v0.5.0
+    # added two mounts and stayed red unnoticed, because by then four red
+    # lines looked like the two we had learned to ignore.
+    #
+    # Having nothing to say is not the same as failing.
+    print("SKIP test_retention_offload — SENTINEL_TEST_DSN is unset. "
+          "See this file's docstring; point it at a scratch database "
+          "(this test drops tables).")
+    sys.exit(0)
 if "sentinel_test" not in DSN:
     sys.exit(f"refusing to run against {DSN!r}: database name must contain "
              "'sentinel_test' so we can never drop a real one.")
