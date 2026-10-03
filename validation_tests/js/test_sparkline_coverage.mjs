@@ -51,16 +51,67 @@ check('...and does not reach for individual stages by name',
 check('...and walks whatever stages the rollup actually has',
       /Object\.values\(this\.rollup\?\.stages/.test(series[0]));
 
+// All four plot the SAME metric now, which is the point: two shapes in one
+// rail meant a reader had to know which family a row was before the trace
+// meant anything. If someone reintroduces a per-family metric, the fixed axis
+// below stops being meaningful and this says so.
+check('every family plots one comparable metric',
+      (fn[0].match(/return '(\w+)'/g) || []).every((m) => m === "return 'headroom'"),
+      [...new Set(fn[0].match(/return '\w+'/g) || [])].join(', '));
+
+// ---- the fixed axis is wired, not just available ------------------------
+// headroom without a fixed domain is pointless: autoscale would rescale 0..1
+// back to the window's own extremes and restore the exact bug it was added to
+// fix (a steady series and a dead one both on the baseline).
+check('format.ts exports sparklineDomain', /export function sparklineDomain/.test(fmt));
+check('...and gives headroom a fixed range',
+      /sparklineDomain[\s\S]*?metric === 'headroom' \? \[0, 1\]/.test(fmt));
+check('format.ts exports sparklineWarnAt', /export function sparklineWarnAt/.test(fmt));
+
+const spark = read('frontend/src/lib/components/Sparkline.svelte');
+check('the component accepts a domain', /domain\?:/.test(spark));
+check('...and delegates its geometry rather than inlining the scale',
+      /sparklineGeometry\(/.test(spark) && !/Math\.min\(\.\.\.nonEmpty\)/.test(spark));
+
 // ---- the rails draw what the store fetched ------------------------------
 // A rail naming a metric literally is how the two drift: the store can fetch
-// age_s for a backend row while the rail looks up images_Reflectivity and
-// finds nothing.
-const literalLookups = home.match(/metrics\[`\$\{r\.check_id\}\|(?!\$\{)[a-z_A-Z]+`\]/g) || [];
+// headroom for a row while the rail looks up age_s and finds nothing.
+const literalLookups = home.match(/metrics\[`\$\{\w+\.check_id\}\|(?!\$\{)[a-z_A-Z]+`\]/g) || [];
 check('no rail looks up a hard-coded metric name', literalLookups.length === 0,
       literalLookups.join(', '));
-const viaHelper = (home.match(/sparklineMetric\(r\.check_id\)/g) || []).length;
-check('both rails resolve their metric through the helper', viaHelper >= 2,
-      `${viaHelper} call site(s)`);
+check('the rails resolve their metric through the helper',
+      /sparklineMetric\(\w+\.check_id\)/.test(home));
+// Passing the metric but not its domain is the silent half-failure: the right
+// series is fetched and then drawn on the wrong axis.
+check('...and pass its domain to the sparkline',
+      /domain=\{sparklineDomain\(/.test(home));
+check('...and its warn rule', /warnAt=\{sparklineWarnAt\(/.test(home));
+
+// ---- numbers the rails print must be fetched too -------------------------
+// Same failure as the sparkline one, wearing a different hat: the products
+// rail prints an age beside each row, which used to arrive free because the
+// trace plotted age_s. The moment the trace became headroom, nothing fetched
+// age_s and that column read "—" on every row. A displayed metric that nobody
+// fetches is silent — no error, just a dash.
+const readout = fmt.match(/export function readoutMetric\(checkId: string\)[\s\S]*?\n\}/);
+check('format.ts exports readoutMetric', !!readout);
+const printed = [...home.matchAll(/ageFromMetrics\([^,]+,\s*'([^']+)'\)/g)].map((m) => m[1]);
+for (const metric of new Set(printed)) {
+  check(`the rails print '${metric}', so something must fetch it`,
+        !!readout && readout[0].includes(`'${metric}'`));
+}
+check('the store fetches readouts alongside traces',
+      /readoutMetric\(/.test(store));
+
+// ---- deployment awareness ------------------------------------------------
+// The backend checks are registered behind `if SETTINGS.backend_root:`, so a
+// deployment without the mount has none. Deciding the layout from the rollup
+// instead of the catalog renders the one-column form until the first LB run
+// lands and then jumps — correct eventually, wrong on every first paint.
+check('the layout asks the checks catalog whether the backend exists',
+      /sentinel\.checks\.map\(\(c\) => c\.stage\)/.test(home));
+check('...and not an empty rollup stage',
+      !/stages\?\.LB\d\s*\?\?\s*\[\]\)\.length/.test(home));
 
 console.log(failures.length
   ? `\n${failures.length} FAILED: ${failures.join(', ')}`
