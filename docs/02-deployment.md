@@ -216,7 +216,8 @@ Postgres — it's not a no-op restart.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `SENTINEL_BASE` | no | `https://radarca.engr.colostate.edu` | Upstream root URL. Change to point Sentinel at a different deployment. |
+| `SENTINEL_PROFILE` | no | `aqpi` | Which radar network this instance watches. `xqpi` monitors FLOW off a trinity filesystem tree instead, registering only the filesystem checks. Any other value refuses to start. See [Deployment profiles](07-deployment-profiles.md). |
+| `SENTINEL_BASE` | no | `https://radarca.engr.colostate.edu` | Upstream root URL. Change to point Sentinel at a different deployment. Unused under `SENTINEL_PROFILE=xqpi`, which has no HTTP display tier. |
 | `SENTINEL_LOG_LEVEL` | no | `INFO` | Standard Python log levels. `DEBUG` is loud (every probe). Use `WARNING` if you want quieter logs. |
 | `SENTINEL_ARCHIVE_ENABLED` | no | `1` | Persist L4 captured images. Disable to save disk if you don't need image history. |
 | `SENTINEL_ARCHIVE_ROOT` | no | `/data/archive` | Mount path inside the backend container. Volume-mapped from `sentinel_archive`. |

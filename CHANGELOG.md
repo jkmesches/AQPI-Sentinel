@@ -28,6 +28,71 @@ unknown`.
 
 ## [Unreleased]
 
+Documentation and threshold characterisation. No behavior change on either
+profile; the only value that moves is a threshold nothing reads yet.
+
+### Added
+
+- **[Deployment profiles](07-deployment-profiles.md)** — the profile system had
+  two live deployments and no documentation. Covers what a profile owns, how to
+  add one, why a check is excluded by `register()` rather than by the import
+  skip, and why `xqpi` cannot use file mtime.
+- `SENTINEL_PROFILE` in the environment-variable reference, where it was
+  missing.
+
+### Changed
+
+- **Every figure in `backend/profiles/xqpi.py` now carries its provenance** —
+  `[M]` measured here, `[V]` reproduced here, `[Q]` taken on trust. Tagging
+  made the untested set enumerable, which showed it was *exactly* the four
+  thresholds that gate alarms: the interesting values had been checked and the
+  load-bearing ones had not.
+
+  Three of the four are now measured. `_FAIL_AGE_S` (1500 s) sits in a real gap
+  — largest normal interval 16.0 min against smallest outage 28.0 min, over
+  3,306 composite source files spanning 6 days. `RADAR_SILENT_FAIL_S` (1800 s)
+  likewise, over 193 days and 496,022 arrivals: largest normal gap 25.7 min,
+  smallest outage 30.8 min. Neither value changes. The recorded margin on the
+  second is asymmetric — 4.3 min below, 0.8 min above — so the exposure is a
+  false negative on a ~29-minute gap, which is a coverage gap rather than a
+  defect given the distribution is empty there.
+
+- **`min_png_bytes` 5000 → 2000 on the `xqpi` profile.** The check exists to
+  catch a truncated write, and a truncated PNG is hundreds of bytes, while a
+  legitimately *empty* frame is 8,496 B — a transparent raster still carries
+  its IHDR. 5000 passed everything measured but sat only 1.7× under the
+  smallest legitimate frame with no reasoning behind it. Inert today, since
+  `layer1_product` does not register without an HTTP origin; AQPI made the same
+  recalibration after the fact and needed a reprocess of stored verdicts.
+
+### Fixed
+
+- **A scope narrowing that was wrong.** The mtime hazard was recorded as
+  confined to the raw volume tree, on the grounds that newest-by-mtime was the
+  same *file* as newest-by-filename in the composite families. That is not a
+  test for masking: a publisher re-touching only its newest frame satisfies it
+  while mtime reads 1 minute against a declared timestamp 121 minutes old.
+
+  AQPI's basis is unchanged but its justification is replaced, because it cited
+  the same non-test. The discriminating measure is the per-frame offset: every
+  K2 frame is written 2.25–2.48 min after its own declared time with 0.04–0.18
+  min of spread, which is a fixed publish latency and not the signature
+  re-touching leaves.
+
+  The freshness fixture gains the case it was missing — a tree where *only* the
+  newest frame is re-touched — and asserts the mtime basis calls it healthy
+  while the declared basis fails it.
+
+- **A cadence figure quoted without being checked.** "max 12 min" came from the
+  backend survey and was wrong (a directory glob picking up month-old orphans);
+  a 28-minute gap measured directly sat thirty lines below it in the same file,
+  unreconciled. `cadence_s` and the thresholds are unaffected, since those
+  encode the p50 and p90, which a single outlier does not move — the figure
+  that would have exposed the bad method was the one nobody was using.
+
+- `backend/checks/__init__.py`'s wiring instructions in *Adding a check*, which
+  described a single import list that no longer exists.
+
 ## [0.6.2] — 2026-10-04
 
 The UI side of the profile work: the interface now says which deployment it is

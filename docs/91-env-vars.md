@@ -30,7 +30,8 @@ inside Postgres.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `SENTINEL_DB_URL` | no | computed from `POSTGRES_*` | asyncpg connection string. Override only for non-standard setups (external DB, custom auth). |
-| `SENTINEL_BASE` | no | `https://radarca.engr.colostate.edu` | The monitored upstream's root URL. |
+| `SENTINEL_PROFILE` | no | `aqpi` | Which radar network this instance watches. `aqpi` monitors AQPI through radarca; `xqpi` monitors the FLOW radar off a trinity filesystem tree and registers only the filesystem checks. **Any other value refuses to start** — an instance quietly watching the wrong network is worse than one that will not boot. See [Deployment profiles](07-deployment-profiles.md). |
+| `SENTINEL_BASE` | no | `https://radarca.engr.colostate.edu` | The monitored upstream's root URL. Unused under `SENTINEL_PROFILE=xqpi`, which has no HTTP display tier. |
 | `SENTINEL_API_HOST` | no | `0.0.0.0` | Listen address inside the container. |
 | `SENTINEL_API_PORT` | no | `8000` | Listen port inside the container. The compose `ports:` block maps this to the host. |
 | `SENTINEL_LOG_LEVEL` | no | `INFO` | Python log level. `DEBUG` is loud (every probe). |
