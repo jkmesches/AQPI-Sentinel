@@ -24,7 +24,7 @@ export interface CheckMeta {
 	target: string;
 	cadence_s: number;
 	depends_on: string[];
-	/** Which published tree a backend-reading check read — "K2" or "TRIN".
+	/** Which published tree a backend-reading check read — e.g. "K2" or "TR".
 	 *  Null for everything that does not read one. CBAND is the reason this
 	 *  exists: it comes off Trinity while every other backend row comes off
 	 *  K2, and the UI cannot know that. */
