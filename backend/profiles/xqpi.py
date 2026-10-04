@@ -181,7 +181,21 @@ MOMENTS = (
 
 # Raw volume arrival: 120/hour, p50 24 s, p90 50 s (16-§2). 1800 s gives the
 # LB2 banding pass <=24 min / warn <=30 min / fail >30 min.
-RADAR_SILENT_FAIL_S = {"FLOW": 1_800}     # [Q] from survey arrival stats
+# [V] Reproduced here over 193 days: 496,022 distinct arrival times parsed
+# from raw filenames across the dated tree (dotfiles excluded). p50 0.40 min,
+# p90 0.83 min, p99 0.85 min — the four elevations of a volume arrive ~24 s
+# apart, so these are per-sweep.
+#
+# 1800 s sits in dead space, which is the property that matters rather than
+# the value: the largest normal gap is 25.7 min and the smallest outage is
+# 30.8 min, with nothing in between. 103 gaps of 496,021 exceed it.
+#
+# Margin is asymmetric and worth knowing: 4.3 min of room below (to the
+# largest normal gap) but only 0.8 min above (to the smallest observed
+# outage). So the exposure is false NEGATIVES — a 29-minute gap would pass
+# while being well outside anything normal. Tightening buys little, since the
+# distribution is empty there; it is a gap in coverage, not a defect.
+RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
 
 # --------------------------------------------------------------------------
 # Published product families
@@ -249,7 +263,33 @@ _CYCLE_S = 120        # [V] 2.0-min gaps observed between healthy steps
 # — so changing it now costs nothing, where changing it after an image check
 # ships would cost that same reprocess.
 _MIN_PNG = 2_000      # [V] measured against all four families
-_FAIL_AGE_S = 1_500   # [Q] the survey's proposed FAIL; never derived here
+# AVAILABILITY, for whoever sizes expectations. Measured over ONE 6-day window
+# so the layers are comparable — figures from different spans are not, and
+# reading a 6-day product number against a 193-day ingest number makes the
+# product layer look twice as bad as it is:
+#
+#     raw volume ingest    17.3% unavailable   (24.84 h of 144.0 h)
+#     composite products   22.5% unavailable   (32.40 h of 144.0 h)
+#
+# The gap is 5.2 points, not a doubling. And the dominant outage is SHARED
+# rather than independent: raw's largest gap is 647 min against the
+# composites' 672 min — essentially one event propagating from ingest to
+# products. The products do also fail on their own (a 131-minute QPE stall was
+# observed while volumes landed every 2 minutes), but that mechanism accounts
+# for the 5.2 points, not the bulk of the downtime.
+#
+# Over its own 193 days the ingest tree runs 10.6% unavailable, so this window
+# was worse than typical for both layers.
+
+# [V] Reproduced here over 6 days from the composite source tree,
+# PRODUCTS/Composite_QPE/tmp_SRI — 3,306 COMP_*.nc files, the inputs all four
+# published families render from, timestamps parsed from filenames rather than
+# taken from a directory listing. p50 = p90 = p99 = 2.00 min exactly:
+# metronomic when running.
+#
+# 1500 s (25 min) lands in a real gap. Largest normal interval 16.0 min,
+# smallest outage 28.0 min, nothing between — 9 min of margin below, 3 above.
+_FAIL_AGE_S = 1_500
 
 # `expected_steps` is NOT a window size. Measured 2026-10-04 00:00 UTC, all
 # five manifests read 8 steps spanning 22:54 -> 23:54, with inter-step gaps of
