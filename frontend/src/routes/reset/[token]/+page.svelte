@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { getSite } from '$lib/site';
+	let siteName = $state('AQPI Sentinel');
+	$effect(() => { getSite().then((x) => (siteName = x.name)); });
+
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -56,7 +60,7 @@
 
 <div class="flex h-full items-center justify-center bg-[var(--color-canvas)]">
 	<div class="w-[22rem] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-6 shadow-xl">
-		<div class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)] mb-1">AQPI SENTINEL</div>
+		<div class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)] mb-1">{siteName.toUpperCase()}</div>
 		<div class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] mb-4">set password</div>
 
 		{#if loading}

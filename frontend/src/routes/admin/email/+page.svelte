@@ -15,7 +15,7 @@
 
 	let v = $state<SmtpValue>({
 		host: '', port: 587, username: '', password: '',
-		from_addr: '', from_name: 'AQPI Sentinel',
+		from_addr: '', from_name: '',  // filled from /api/admin settings; the backend default follows the profile
 		use_tls: false, use_starttls: true
 	});
 	let updatedAt = $state<string | null>(null);

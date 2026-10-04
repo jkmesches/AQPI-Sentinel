@@ -1,4 +1,15 @@
 <script lang="ts">
+	// Deployment identity, from /api/version. Both of these were hard-coded to
+	// AQPI, so an XQPI instance called itself AQPI Sentinel and named radarca
+	// as its data source on a page that never contacts radarca. getSite is
+	// memoised, so this shares one request with the map.
+	import { getSite } from '$lib/site';
+	let siteName = $state('AQPI Sentinel');
+	let dataSource = $state('radarca.engr.colostate.edu');
+	$effect(() => {
+		getSite().then((s) => { siteName = s.name; dataSource = s.dataSource; });
+	});
+
 	import '../app.css';
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
@@ -74,6 +85,8 @@
 	let { children }: { children: any } = $props();
 </script>
 
+<svelte:head><title>{siteName}</title></svelte:head>
+
 {#if isMobile}
 	<!-- /m/* routes render their own shell via src/routes/m/+layout.svelte -->
 	{@render children?.()}
@@ -86,9 +99,9 @@
 		<div class="flex items-baseline gap-3">
 			<span
 				class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]"
-			>AQPI SENTINEL</span>
+			>{siteName.toUpperCase()}</span>
 			<span class="text-[var(--color-faint)] text-[11px]">·</span>
-			<span class="text-[11px] text-[var(--color-muted)] num">radarca.engr.colostate.edu</span>
+			<span class="text-[11px] text-[var(--color-muted)] num">{dataSource}</span>
 		</div>
 
 		<nav class="flex items-center gap-1 border-l border-[var(--color-border)] pl-3">

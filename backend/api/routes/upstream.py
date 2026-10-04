@@ -2,16 +2,38 @@
 can use them as MapLibre raster sources without CORS issues."""
 from __future__ import annotations
 import asyncio as _asyncio
+import json
 import datetime as _dt
 import time as _time_mod
 from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from ...config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
+from ...config import HAS_RADARCA, PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
+from ... import fs_products as _fs
 from ...errors import humanize_error
 
 router = APIRouter(prefix="/api/upstream")
+
+
+def _product_fetcher(source: str):
+    """Fetcher for `_serve_source`, or None to use radarca's imageData.
+
+    Only the PRODUCT routes get one. xband and tilt have their own origins and
+    are untouched — xband is served by radarca's Django app and tilt by
+    radar-display, neither of which has a filesystem equivalent here.
+    """
+    if HAS_RADARCA:
+        return None
+
+    async def _fetch():
+        # No semaphore: these are local reads off a mount, not connections to
+        # a shared origin, so the concurrency limit the radarca path needs
+        # would only add latency. The 5 s timeout inside read_image is what
+        # bounds a wedged mount.
+        return await _fs.read_image(source)
+
+    return _fetch
 
 
 @router.get("/product_latest.png")
@@ -33,7 +55,8 @@ async def latest_product_image(product_id: str, request: Request):
     latest = steps[-1]["imageName"]
     file_path = image_path(product_id, latest)
     try:
-        body, ct, prov = await _serve_source(request.app, ctx, file_path)
+        body, ct, prov = await _serve_source(
+            request.app, ctx, file_path, fetcher=_product_fetcher(file_path))
     except HTTPException:
         raise
     except Exception as e:
@@ -75,15 +98,12 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
         raise HTTPException(404, f"Unknown product: {product_id}")
     cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    try:
-        pd = await ctx.http.get(
-            f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
-    if pd.status_code != 200:
-        raise HTTPException(502, f"Upstream returned HTTP {pd.status_code}")
-    steps = pd.json().get("steps") or []
+    # Was an inline productDetail call, duplicating _product_steps_cached and
+    # costing a second upstream hit per scrubbed frame. Going through the cache
+    # removes that AND is what lets this route read a filesystem manifest on a
+    # profile with no HTTP origin — the inline fetch could only ever talk to
+    # radarca.
+    steps = await _product_steps_cached(ctx, product_id, cfg["details"])
     if not steps:
         raise HTTPException(404, "No scans available")
     if step < 0:
@@ -92,11 +112,12 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
         raise HTTPException(400, f"Step out of range (0..{len(steps)-1})")
     name = steps[step]["imageName"]
     file_path = image_path(product_id, name)
+    _fetch = _product_fetcher(file_path)
 
     # LRU -> local archive -> upstream. Scrubbing over frames Sentinel has
     # already captured now costs radarca nothing at all.
     try:
-        body, ct, prov = await _serve_source(request.app, ctx, file_path)
+        body, ct, prov = await _serve_source(request.app, ctx, file_path, fetcher=_fetch)
     except HTTPException:
         raise
     except Exception as e:
@@ -272,7 +293,27 @@ async def _xband_listing_cached(ctx, folder: str, prefix: str, pool=None) -> lis
     return imgs
 
 
-async def _pd_fetch(ctx, details_path: str) -> list:
+async def _pd_fetch(ctx, details_path: str, product_id: str | None = None) -> list:
+    # No display tier means no productDetail to call. Read the manifest the
+    # publisher wrote instead — same document, one hop earlier. See
+    # backend/fs_products.
+    if not HAS_RADARCA:
+        if product_id is None:
+            raise HTTPException(500, "filesystem manifest needs a product id")
+        try:
+            return await _fs.read_steps(product_id)
+        except _asyncio.TimeoutError:
+            raise HTTPException(
+                504, f"backend read timed out after {_fs.FS_TIMEOUT_S:g}s "
+                     f"— mount may be hung")
+        except FileNotFoundError:
+            raise HTTPException(404, f"no manifest published for {product_id}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Caught mid-rewrite by the publisher. A retry succeeds, so this
+            # is a transient read fault rather than a missing product.
+            raise HTTPException(502, f"manifest is not valid JSON: {e}")
+        except OSError as e:
+            raise HTTPException(502, f"backend read failed: {humanize_error(e)}")
     try:
         pd = await ctx.http.get(
             f"{SETTINGS.base}/api/productDetail", params={"file": details_path},
@@ -287,7 +328,7 @@ async def _pd_fetch(ctx, details_path: str) -> list:
 async def _pd_refresh_bg(ctx, product_id: str, details_path: str) -> None:
     try:
         _PD_CACHE[product_id] = (_time_mod.monotonic() + _PD_TTL_S,
-                                 await _pd_fetch(ctx, details_path))
+                                 await _pd_fetch(ctx, details_path, product_id))
     except Exception:
         pass
     finally:
@@ -304,7 +345,7 @@ async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list
             _PD_REFRESHING.add(product_id)
             _asyncio.create_task(_pd_refresh_bg(ctx, product_id, details_path))
         return hit[1]
-    steps = await _pd_fetch(ctx, details_path)
+    steps = await _pd_fetch(ctx, details_path, product_id)
     _PD_CACHE[product_id] = (now + _PD_TTL_S, steps)
     return steps
 

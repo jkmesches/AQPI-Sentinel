@@ -80,46 +80,66 @@ export function runTests(mod) {
       check('...while the correct order is accepted', r.home.center[1] === 34.2048);
     }
 
-    console.log('\nthe composite extent, and whether it is sourced:');
+    console.log('\ncomposite extents are PER PRODUCT, not one box per site:');
     {
-      const EXT = { west: -118.609, east: -117.733, south: 33.840, north: 34.570 };
-      const r = await run({ comp_extent: EXT, comp_extent_provisional: true });
-      check('a valid extent is carried through', r.compExtent?.west === -118.609,
+      // XQPI's real case: composite_ref sits on a sourced UTM grid while the
+      // three QPE families render at a different aspect entirely, so applying
+      // one box to all four would place three of them from a fourth's
+      // geometry.
+      const GOOD = { west: -119.564, east: -117.0, south: 33.2877, north: 35.0267 };
+      const r = await run({ comp_extent: { composite_ref: GOOD }, comp_extent_provisional: [] });
+      check('the named product gets its box', r.compExtent?.composite_ref?.west === -119.564,
         JSON.stringify(r.compExtent));
-      check('and flagged provisional', r.compExtentProvisional === true);
+      check('a product with no entry has none', !r.compExtent?.qpe_15min);
+      check('nothing is flagged provisional', r.compExtentProvisional.length === 0);
     }
     {
-      const r = await run({ version: '0.6.0' });
-      check('no extent -> null, so the per-product table is kept',
+      const r = await run({
+        comp_extent: { a: { west: -1, east: 1, south: -1, north: 1 },
+                       b: { west: 1, east: -1, south: -1, north: 1 } },
+        comp_extent_provisional: ['a']
+      });
+      // One bad entry must cost that product its overlay, not the whole table.
+      check('a malformed entry is dropped', !r.compExtent?.b, JSON.stringify(r.compExtent));
+      check('...while its valid siblings survive', !!r.compExtent?.a);
+      check('provisional is a list of product ids',
+        r.compExtentProvisional.length === 1 && r.compExtentProvisional[0] === 'a',
+        JSON.stringify(r.compExtentProvisional));
+    }
+    {
+      const r = await run({ version: '0.6.1' });
+      check('no extents -> null, so the frontend keeps its own table',
         r.compExtent === null);
-      check('...and nothing is flagged provisional', r.compExtentProvisional === false);
-    }
-    {
-      // An unlabelled box from an unknown source is not evidence of a survey.
-      const r = await run({ comp_extent: { west: -1, east: 1, south: -1, north: 1 } });
-      check('an extent with NO provisional flag defaults to provisional',
-        r.compExtentProvisional === true);
-    }
-    {
-      const r = await run({ comp_extent: { west: -1, east: 1, south: -1, north: 1 },
-                            comp_extent_provisional: false });
-      check('...and an explicit false is honoured', r.compExtentProvisional === false);
     }
     for (const [label, ext] of [
-      ['reversed longitude', { west: 1, east: -1, south: -1, north: 1 }],
-      ['reversed latitude',  { west: -1, east: 1, south: 1, north: -1 }],
-      ['zero area',          { west: 1, east: 1, south: 1, north: 1 }],
-      ['out of range',       { west: -200, east: 1, south: -1, north: 1 }],
-      ['NaN edge',           { west: NaN, east: 1, south: -1, north: 1 }],
-      ['missing edge',       { west: -1, east: 1, south: -1 }],
-      ['not an object',      'everywhere'],
+      ['an array',       [1, 2]],
+      ['a string',       'everywhere'],
+      ['all entries bad', { a: { west: 1, east: 1, south: 1, north: 1 } }],
     ]) {
-      const r = await run({ comp_extent: ext, comp_extent_provisional: true });
-      // A reversed or zero-area box renders mirrored or invisible rather than
-      // erroring, so it must be rejected here, and rejecting it must also
-      // clear the provisional flag — there is no box left to caveat.
-      check(`${label} -> rejected`, r.compExtent === null && !r.compExtentProvisional,
-        JSON.stringify(r.compExtent));
+      const r = await run({ comp_extent: ext });
+      check(`${label} -> null`, r.compExtent === null, JSON.stringify(r.compExtent));
+    }
+
+    console.log('\nthe deployment identifies itself:');
+    {
+      const r = await run({ site_name: 'XQPI Sentinel', data_source: 'trinity',
+                            has_radarca: false,
+                            products: [{ id: 'composite_ref', label: 'Reflectivity' },
+                                       { id: 'junk' }] });
+      check('name', r.name === 'XQPI Sentinel', r.name);
+      check('data source', r.dataSource === 'trinity', r.dataSource);
+      check('has_radarca false is honoured', r.hasRadarca === false);
+      check('malformed product entries are dropped',
+        r.products?.length === 1 && r.products[0].id === 'composite_ref',
+        JSON.stringify(r.products));
+    }
+    {
+      const r = await run({ version: '0.6.1' });
+      check('an older payload keeps the AQPI identity',
+        r.name === 'AQPI Sentinel' && r.dataSource === 'radarca.engr.colostate.edu');
+      check('...and assumes a display tier exists, as AQPI has one',
+        r.hasRadarca === true);
+      check('...with no product override', r.products === null);
     }
 
     console.log('\nunknown overlay names are dropped, not passed through:');
@@ -132,7 +152,7 @@ export function runTests(mod) {
 
     console.log(failures.length
       ? `\n${failures.length} FAILED: ${failures.join(', ')}`
-      : '\nall home-view assertions passed');
+      : '\nall site assertions passed');
     return failures.length ? 1 : 0;
   })();
 }

@@ -80,44 +80,64 @@ HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}
 MAP_OVERLAYS: tuple[str, ...] = ()
 
 # --------------------------------------------------------------------------
-# Composite overlay bounds — PROVISIONAL, NOT SOURCED
+# Composite overlay bounds — PER PRODUCT, because the families do not share one
 # --------------------------------------------------------------------------
-# *** This is a guess, shipped deliberately and knowingly. ***
+# composite_ref is SOURCED, from the composite grid's own CRS:
+# PRODUCTS/Composite_QPE/tmp_SRI/COMP_*.nc carries
+# PROJCS["WGS 84 / UTM zone 11N"] with explicit coordinate arrays — x 936 by
+# y 760 cells on 250 m spacing, so 234.0 x 190.0 km, and
+# RadarFilesInComposite names FLOW alone.
 #
-# The publisher gives no bounds: the manifests carry only product/time/steps,
-# there is no worldfile, and the rasters are fully transparent RGBA with no
-# coastline or graticule to register against. So this box is an ASSUMPTION —
-# that a composite built from one radar covers that radar's own coverage —
-# expressed as the bounding box of FLOW's 40.35 km range ring:
+# Converting the cell EDGES (centres +/- 125 m) through an inverse transverse
+# Mercator, independently on both sides and agreeing to sub-metre:
 #
-#     lat 34.2048 +/- 0.36488 deg      (40.35 km / 110.574 km per deg)
-#     lon -118.17081 +/- 0.43823 deg      (/ 111.320 * cos(lat))
+#     SW 33.28770 / -119.51279      NW 34.99957 / -119.56403
+#     SE 33.31312 / -117.00000      NE 35.02666 / -117.00000
 #
-# WHY IT MAY BE WRONG. AQPI's composites are network-wide, not per-radar: one
-# extent spanning 244 x 332 km across nine radars. If XQPI's publisher works
-# the same way, its domain is regional too and this box is far too small. The
-# pixel geometry hints that way — XQPI's qpe_15min is 1697x2310, byte-identical
-# to AQPI's rain15min, and at AQPI's ~144 m/px that is a 244 x 332 km domain,
-# in which FLOW's coverage would occupy about a third of the width. Against
-# that, composite_ref is 1365x1108 here versus 843x1108 on AQPI, so the two
-# deployments do not share a domain shape and the resolution may differ too.
+# Two things say this is the right domain rather than a plausible one. The grid
+# aspect 936/760 = 1.2316 matches the PNG's 1365/1108 = 1.2319 to 0.02%. And
+# the east edge falls on exactly -117.00000 because x_max is exactly 500000,
+# the zone's false easting — the domain is pinned to the central meridian,
+# which is not something a coincidence does.
 #
-# A misplaced QPE overlay reports rain on the wrong watershed and looks
-# authoritative doing it, so this is flagged provisional all the way to the
-# API and must not be mistaken for a sourced figure.
+# This replaces a guess. The first shipped value was the bounding box of FLOW's
+# 40.3 km range ring, on the assumption that a one-radar composite covers that
+# radar's coverage. It does not: the real domain is ~2.9x wider and ~2.4x
+# taller, with FLOW centred at 53.9% x 52.4% and its ring spanning 34.5% of the
+# width. The regional-domain reading was right and the per-radar one was wrong.
 #
-# TO REPLACE IT, either of:
-#   1. the four corners from whoever publishes the imagery — definitive;
-#   2. fit the echo's outer edge in the first frame carrying weather. A
-#      single-radar composite is bounded by that radar's own range circle, so
-#      the fitted centre and radius give the transform outright. Everything in
-#      the window is currently empty (clear over Pasadena).
-COMP_EXTENT_PROVISIONAL = True
+# CAVEAT, and it is a real error rather than rounding: a UTM-aligned grid is a
+# TRAPEZOID in lat/lon, not a rectangle. The west edge runs -119.51279 at the
+# south to -119.56403 at the north, about 4.7 km of skew. MapView places
+# overlays as axis-aligned lat/lon rectangles, so that skew is baked into the
+# corners and the image sits very slightly rotated against the basemap.
+# Acceptable over 234 km; noted so the next person does not chase it as a bug.
+#
+# The three QPE families deliberately have NO entry. Their PNGs are 1697x2310
+# (aspect 0.7346) against composite_ref's 1365x1108 (1.2319) — a portrait
+# render of what is underneath the same landscape 936x760 grid, so the
+# renderer is cropping, padding or adding furniture, and which of those cannot
+# be read off the pixel dimensions. Applying composite_ref's box to them would
+# place them with confident-looking numbers taken from a different product's
+# geometry, which is exactly the failure this is avoiding. They are omitted
+# from the picker until their geometry is known.
 COMP_EXTENT = {
-    "west": -118.60904, "east": -117.73258,
-    "south": 33.83992, "north": 34.56968,
+    "composite_ref": {"west": -119.5640, "east": -117.0000,
+                      "south": 33.2877, "north": 35.0267},
 }
 
+# Product ids whose extent is assumed rather than sourced. Empty: the one
+# extent above is derived from the grid's own CRS.
+COMP_EXTENT_PROVISIONAL: tuple[str, ...] = ()
+
+# Picker labels. The frontend's own table is keyed on AQPI's product ids and
+# has no entry for any of these.
+PRODUCT_LABELS = {
+    "composite_ref":     "Reflectivity",
+    "qpe_15min":         "Total Precip · 15 min QPE",
+    "qpe_1hr":           "Total Precip · 1 h QPE",
+    "radar_precip_rate": "Precip Rate",
+}
 RADAR_META = {
     "FLOW": {"lat": FLOW_LAT, "lon": FLOW_LON, "range_m": 40_346,
              "kind": "xband", "name": "FLOW (JPL)",
@@ -278,6 +298,10 @@ UNITS = ("in", "mm")
 # source. Two characters, by the constraint in Check.source_tag.
 # What this deployment calls itself, everywhere a human reads it.
 SITE_NAME = "XQPI Sentinel"
+
+# Shown in the header where AQPI names radarca. There is no HTTP origin here;
+# everything is read off the trinity mount.
+DATA_SOURCE = "trinity · /projects/xqpi"
 
 SOURCE_TAG = "TR"
 SOURCE_LABEL = "Trinity"
