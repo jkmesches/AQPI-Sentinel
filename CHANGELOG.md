@@ -28,6 +28,100 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-10-04
+
+The UI side of the profile work: the interface now says which deployment it is
+and offers only what that deployment has. **No behavior change for AQPI** —
+same name, same products, same picker, same map.
+
+### Fixed
+
+- **The UI called every deployment "AQPI Sentinel".** The page title, the
+  navbar, the FAQ heading, the password-reset page and the mobile more-page all
+  carried it literally, and two of them named `radarca.engr.colostate.edu` as
+  the data source on an instance that never contacts radarca. All now read
+  `/api/version` through a single memoised fetch shared with the map, so five
+  call sites cost one request. `app.html` keeps its static title as the
+  pre-hydration fallback, so the correct name appears once the layout mounts.
+
+- **Alert email would have gone out signed as AQPI.** `DEFAULT_FROM_NAME` was
+  the literal string; it now follows the profile's `SITE_NAME`. This is the one
+  branding slip with consequences outside the browser — a recipient has no
+  other way to tell two deployments apart.
+
+- **The composite picker offered products the deployment does not publish.** It
+  was a fixed list of AQPI's thirteen, so XQPI showed CoSMoS water-level layers
+  and Bay Area atmospheric forecasts while two of its own four ids were missing
+  from the list entirely. It is now derived from the profile's products, and in
+  every case filtered to those that can be *placed* — a product with no extent
+  can only draw nothing or draw it in the wrong place. A persisted selection
+  the deployment cannot place is reset rather than left rendering nothing.
+
+- **The tilt elevation control was dead on a profile with no display tier.** It
+  listed FLOW's four swept elevations and could fetch none of them: its
+  "Default" option comes from radarca and its numbered options from
+  radar-display, both the CSU display stack. Hidden when there is no such tier,
+  and the remaining label names the deployment's own data source rather than
+  the literal "radarca".
+
+- **Composite imagery could not be fetched at all without an HTTP origin.**
+  Every product path went to radarca — the manifest through
+  `/api/productDetail`, the frames through `/api/imageData` — so on XQPI every
+  composite returned 502. `backend/fs_products` reads both off the mounted
+  tree, keyed on the *same* logical source string, so the filesystem path
+  inherits `_serve_source`'s LRU, archive, single-flight and negative cache
+  instead of reimplementing them. Verified against the live trinity tree: all
+  four products resolve their manifests and return real frames.
+
+  Paths are confined to the published root, since the source string is
+  reachable from a query parameter. Frames must start with the PNG magic, so a
+  half-written file is not cached and archived as valid. Reads carry the same
+  5 s timeout the LB1 check uses, because a wedged NFS mount blocks a request a
+  browser is waiting on rather than just stalling one check cycle.
+
+- `product_image.png` refetched `productDetail` inline, duplicating
+  `_product_steps_cached` at the cost of a second upstream call per scrubbed
+  frame — and that inline call was why this one route could never read a
+  filesystem manifest.
+
+### Changed
+
+- **XQPI's composite extent is now sourced, replacing the guess shipped in
+  v0.6.1.** The composite grid carries its own CRS:
+  `PRODUCTS/Composite_QPE/tmp_SRI/COMP_*.nc` is
+  `PROJCS["WGS 84 / UTM zone 11N"]`, 936 × 760 cells at 250 m, naming FLOW
+  alone as its input. Inverse transverse Mercator on the cell edges, derived
+  independently on two sides and agreeing to sub-metre:
+
+      W -119.5640   E -117.0000   S 33.2877   N 35.0267
+
+  Two things identify it as the real domain rather than a plausible one: the
+  grid aspect 936/760 = 1.2316 matches the PNG's 1365/1108 = 1.2319 to 0.02%,
+  and the east edge falls on exactly −117.00000 because `x_max` is exactly
+  500000, the zone's false easting. The provisional range-ring box was ~2.9×
+  too narrow.
+
+  Extents are now **per product**. The three QPE families deliberately get
+  none: they render 1697 × 2310 against `composite_ref`'s 1365 × 1108 over the
+  same underlying grid, so the renderer crops or pads and the pixel dimensions
+  cannot say which. Giving them `composite_ref`'s box would place three
+  products from a fourth's geometry.
+
+  Noted beside the constant: a UTM-aligned grid is a trapezoid in lat/lon, so
+  the west edge runs −119.51279 south to −119.56403 north — about 4.7 km of
+  skew baked into an axis-aligned overlay. Acceptable over 234 km, and recorded
+  so it is not chased as a bug.
+
+### Notes for operators
+
+- No migration, no new environment variable.
+- **XQPI's picker will show one product, Reflectivity**, until the QPE families'
+  geometry is known.
+- An XQPI deployment should expect LB1 to alarm on the three QPE families
+  immediately: at the time of the pre-release check they had not published
+  since 23:54 while `composite_ref` was current, roughly 1 h 44 m past a
+  25-minute threshold. That is the monitoring working on a real publisher gap.
+
 ## [0.6.1] — 2026-10-04
 
 Everything v0.6.0 got wrong about running a second profile, found by standing
