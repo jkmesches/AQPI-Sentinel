@@ -213,6 +213,42 @@ RADAR_SILENT_FAIL_S = {"FLOW": 1_800}     # [Q] from survey arrival stats
 # banding. Raised with the laptop session; until LB1 grows a warn band the
 # 25-minute fail is the whole of it.
 _CYCLE_S = 120        # [V] 2.0-min gaps observed between healthy steps
+
+# Floor for G_image_size, per product. Was 5000 carried over from AQPI and
+# tagged [Q]; now measured, and lowered on the measurement.
+#
+# WHAT IT IS FOR. Catching a truncated or empty write, not judging content. A
+# truncated PNG is hundreds of bytes; a legitimately EMPTY frame is not small
+# at all here — composite_ref's blank frames are a stable 8496 bytes, because
+# a fully transparent raster still carries its full IHDR and a compressed
+# all-zero image. So the floor wants to sit far below the smallest legitimate
+# frame rather than just under it.
+#
+# MEASURED on the four families this key actually applies to:
+#     composite_ref      8,496 - 8,686 B
+#     qpe_15min/1hr/pr  20,563 - 22,028 B
+# 5000 would have passed all of them, so it was not wrong — it was
+# under-motivated, with only 1.7x headroom under composite_ref's blank. 2000
+# is set from the failure it exists to catch instead, and keeps ~4x.
+#
+# DO NOT REUSE THIS FOR THE MOMENT TREE. Byte floors scale with pixel count
+# and the moment frames are 697x693 against composite_ref's 1365x1108 and the
+# QPE families' 1697x2310 — an 8x difference. Measured on the moment tree,
+# Reflectivity runs 3,920-5,971 B on an active day and 4,431-5,625 B on a
+# quiet one, so a 5000 floor would fail 45% of frames on the first and 95% on
+# the second. Frame size tracks echo content, so any floor there must survive
+# the clearest conditions the radar will ever see, and a dry winter week will
+# be smaller than anything measured yet. When an image check is pointed at
+# that tree it needs its own floor, around 2000 for the same truncation
+# reason — not this one.
+#
+# The same recalibration already happened on AQPI: its four forecast products
+# went 5000 -> 1500, needing a one-shot reprocess of stored verdicts
+# (backend/reprocess_l1_forecasts.py). Nothing on this profile reads
+# min_png_bytes yet — layer1_product does not register without an HTTP origin
+# — so changing it now costs nothing, where changing it after an image check
+# ships would cost that same reprocess.
+_MIN_PNG = 2_000      # [V] measured against all four families
 _FAIL_AGE_S = 1_500   # [Q] the survey's proposed FAIL; never derived here
 
 # `expected_steps` is NOT a window size. Measured 2026-10-04 00:00 UTC, all
@@ -324,26 +360,26 @@ PRODUCTS = {
                           "image_dir": "composite_ref/images/",
                           "cadence_s": _CYCLE_S, "expected_steps": _WINDOW_FRAMES,
                           "max_freshness_s": _FAIL_AGE_S,
-                          "min_png_bytes": 5_000,   # [Q] carried from AQPI
+                          "min_png_bytes": _MIN_PNG,
                           "backend_max_age_s": _FAIL_AGE_S,
                           "unit": "dBZ"},
     # details_in.json + details_mm.json over images/in/ and images/mm/.
     "qpe_15min":         {"details": "qpe_15min/details_in.json",
                           "image_dir": "qpe_15min/images/",
                           "cadence_s": _CYCLE_S, "expected_steps": _WINDOW_FRAMES,
-                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": 5_000,
+                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": _MIN_PNG,
                           "backend_max_age_s": _FAIL_AGE_S,
                           "unit": "in", "unit_subdir": True},
     "qpe_1hr":           {"details": "qpe_1hr/details_in.json",
                           "image_dir": "qpe_1hr/images/",
                           "cadence_s": _CYCLE_S, "expected_steps": _WINDOW_FRAMES,
-                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": 5_000,
+                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": _MIN_PNG,
                           "backend_max_age_s": _FAIL_AGE_S,
                           "unit": "in", "unit_subdir": True},
     "radar_precip_rate": {"details": "radar_precip_rate/details_in.json",
                           "image_dir": "radar_precip_rate/images/",
                           "cadence_s": _CYCLE_S, "expected_steps": _WINDOW_FRAMES,
-                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": 5_000,
+                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": _MIN_PNG,
                           "backend_max_age_s": _FAIL_AGE_S,
                           "unit": "in/h", "unit_subdir": True},
 }
