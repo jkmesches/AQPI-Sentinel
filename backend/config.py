@@ -429,6 +429,12 @@ HAS_RADARCA: bool = True
 # rather than a fifth table that knows the answer independently.
 SITE_NAME: str = "AQPI Sentinel"
 
+# What the header names as this deployment's data source. AQPI's was the
+# literal string "radarca.engr.colostate.edu" in the navbar and again on the
+# mobile more-page, which asserts radarca as the source on an instance that
+# never contacts it.
+DATA_SOURCE: str = "radarca.engr.colostate.edu"
+
 # Radar map geography, when the profile supplies its own. Empty means "use the
 # AQPI table in api/routes/radars.py", which stays where it is because it
 # carries a long provenance comment per radar and is not profile data.
@@ -462,8 +468,22 @@ MAP_OVERLAYS: tuple[str, ...] = ("watersheds", "reservoirs", "stream_gauges")
 # exactly as authoritative as one placed on surveyed corners, and the
 # difference matters: a QPE layer off by kilometres attributes rainfall to the
 # wrong watershed.
-COMP_EXTENT: dict[str, float] = {}
-COMP_EXTENT_PROVISIONAL: bool = False
+# Per PRODUCT, not one box for the deployment: XQPI's composite_ref sits on a
+# 936x760 UTM grid while its three QPE families render at a different aspect
+# entirely, so a single extent would place three of them from a fourth's
+# geometry. A product with no entry here cannot be placed and is left out of
+# the map picker rather than offered and drawn wrong.
+COMP_EXTENT: dict[str, dict[str, float]] = {}
+
+# Which of those extents are assumed rather than sourced. Carried to the API
+# and shown on the map: a placed overlay is pixel-for-pixel as convincing as a
+# surveyed one, and a QPE layer off by kilometres attributes rain to the wrong
+# watershed.
+COMP_EXTENT_PROVISIONAL: tuple[str, ...] = ()
+
+# Display names for the map's composite picker, when the profile's product ids
+# are not the ones the frontend's own table knows.
+PRODUCT_LABELS: dict[str, str] = {}
 
 # Check modules that exist only because radarca does — every one of them talks
 # to SETTINGS.base. Canonical here rather than in checks/__init__ because
@@ -532,11 +552,13 @@ if SETTINGS.profile == "xqpi":
     LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
     SITE_NAME = _xqpi.SITE_NAME
+    DATA_SOURCE = _xqpi.DATA_SOURCE
     RADAR_META_OVERRIDE = _xqpi.RADAR_META
     HOME_VIEW = _xqpi.HOME_VIEW
     MAP_OVERLAYS = _xqpi.MAP_OVERLAYS
     COMP_EXTENT = _xqpi.COMP_EXTENT
     COMP_EXTENT_PROVISIONAL = _xqpi.COMP_EXTENT_PROVISIONAL
+    PRODUCT_LABELS = _xqpi.PRODUCT_LABELS
     HAS_RADARCA = False
 elif SETTINGS.profile != "aqpi":
     # Fail loudly. A typo here would otherwise start a Sentinel that silently

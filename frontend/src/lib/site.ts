@@ -1,5 +1,6 @@
 /**
- * Where the map opens, and where Reset returns to.
+ * What this deployment is: its name, its data source, where its map opens and
+ * which products it can place.
  *
  * The Bay Area centre and zoom were hard-coded in both map components, so an
  * XQPI instance — watching one radar in Pasadena, 375 km outside both AQPI
@@ -28,7 +29,27 @@ export interface Extent {
 	north: number;
 }
 
+export interface Product {
+	id: string;
+	label: string;
+}
+
 export interface SiteMap {
+	/** What this deployment calls itself, e.g. "AQPI Sentinel". */
+	name: string;
+	/** What the header names as the data source. */
+	dataSource: string;
+	/**
+	 * Whether there is an HTTP display tier in front of the data. False means
+	 * no radarca AND no radar-display, so controls fed by either — the tilt
+	 * elevation picker — have nothing behind them and are hidden.
+	 */
+	hasRadarca: boolean;
+	/**
+	 * The products this deployment publishes, when its ids are not the ones
+	 * the map's own picker table knows. Null keeps that table.
+	 */
+	products: Product[] | null;
 	home: HomeView;
 	/** Which overlay toggles to offer. Empty means offer none. */
 	overlays: readonly Overlay[];
@@ -36,13 +57,13 @@ export interface SiteMap {
 	 * One box applied to every composite this deployment publishes, replacing
 	 * the per-product table. Null keeps that table, which is AQPI's.
 	 */
-	compExtent: Extent | null;
+	compExtent: Record<string, Extent> | null;
 	/**
-	 * Whether `compExtent` is sourced or assumed. XQPI's is a guess — the
-	 * publisher supplies no bounds — so the map says so rather than presenting
-	 * a placed overlay with the same confidence as a surveyed one.
+	 * Which of those extents are assumed rather than sourced, by product id.
+	 * A placed overlay is pixel-for-pixel as convincing as a surveyed one, so
+	 * the map says which is which rather than letting them look alike.
 	 */
-	compExtentProvisional: boolean;
+	compExtentProvisional: readonly string[];
 }
 
 export interface HomeView {
@@ -50,6 +71,9 @@ export interface HomeView {
 	center: [number, number];
 	zoom: number;
 }
+
+const FALLBACK_NAME = 'AQPI Sentinel';
+const FALLBACK_SOURCE = 'radarca.engr.colostate.edu';
 
 function looksLikeExtent(v: unknown): v is Extent {
 	if (!v || typeof v !== 'object') return false;
@@ -62,6 +86,15 @@ function looksLikeExtent(v: unknown): v is Extent {
 		Math.abs(e.west) <= 180 && Math.abs(e.east) <= 180 &&
 		Math.abs(e.south) <= 90 && Math.abs(e.north) <= 90
 	);
+}
+
+function parseExtents(v: unknown): Record<string, Extent> | null {
+	if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+	const out: Record<string, Extent> = {};
+	for (const [k, ext] of Object.entries(v as Record<string, unknown>)) {
+		if (looksLikeExtent(ext)) out[k] = ext;
+	}
+	return Object.keys(out).length ? out : null;
 }
 
 function looksLikeHomeView(v: unknown): v is HomeView {
@@ -89,14 +122,30 @@ function looksLikeHomeView(v: unknown): v is HomeView {
  * supplies no home view (every AQPI deployment) also lands on the fallback,
  * which is why that path is the common one rather than the error one.
  */
+let _cached: Promise<SiteMap> | null = null;
+
+/**
+ * The deployment's identity and map configuration, fetched once.
+ *
+ * Memoised because four call sites want it — the navbar, the page title, the
+ * desktop map and the mobile map — and they must not each issue a request.
+ * The result never changes for the life of the page: a profile switch means a
+ * restart.
+ */
+export function getSite(fallback: HomeView = { center: [-122.6, 37.95], zoom: 7.2 }): Promise<SiteMap> {
+	if (!_cached) _cached = resolveHomeView(fallback);
+	return _cached;
+}
+
 export async function resolveHomeView(
 	fallback: HomeView,
 	fetcher: typeof fetch = fetch,
 	url = '/api/version'
 ): Promise<SiteMap> {
 	const miss: SiteMap = {
-		home: fallback, overlays: ALL_OVERLAYS,
-		compExtent: null, compExtentProvisional: false
+		name: FALLBACK_NAME, dataSource: FALLBACK_SOURCE, hasRadarca: true,
+		products: null, home: fallback, overlays: ALL_OVERLAYS,
+		compExtent: null, compExtentProvisional: []
 	};
 	try {
 		const resp = await fetcher(url);
@@ -114,13 +163,24 @@ export async function resolveHomeView(
 			overlays: Array.isArray(ov)
 				? ov.filter((o): o is Overlay => (ALL_OVERLAYS as readonly string[]).includes(o))
 				: ALL_OVERLAYS,
-			compExtent: looksLikeExtent(body?.comp_extent) ? body.comp_extent : null,
-			// Only meaningful alongside an extent, and defaults to "assumed"
-			// when an extent is present but the flag is missing: an unlabelled
-			// box from an unknown source is not evidence that it was surveyed.
-			compExtentProvisional: looksLikeExtent(body?.comp_extent)
-				? body?.comp_extent_provisional !== false
-				: false
+			// Per product id. Anything that does not parse as a usable box is
+			// dropped, so a bad entry costs that one product its overlay
+			// rather than the whole table.
+			compExtent: parseExtents(body?.comp_extent),
+			compExtentProvisional: Array.isArray(body?.comp_extent_provisional)
+				? body.comp_extent_provisional.filter((x: unknown) => typeof x === 'string')
+				: [],
+			name: typeof body?.site_name === 'string' && body.site_name
+				? body.site_name : FALLBACK_NAME,
+			dataSource: typeof body?.data_source === 'string' && body.data_source
+				? body.data_source : FALLBACK_SOURCE,
+			hasRadarca: body?.has_radarca !== false,
+			products: Array.isArray(body?.products)
+				? body.products
+						.filter((p: unknown): p is Product =>
+							!!p && typeof (p as Product).id === 'string'
+							&& typeof (p as Product).label === 'string')
+				: null
 		};
 	} catch {
 		return miss;

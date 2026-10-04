@@ -1,4 +1,9 @@
 <script lang="ts">
+	// Deployment name, from /api/version (memoised — shares the map's request).
+	import { getSite } from '$lib/site';
+	let siteName = $state('AQPI Sentinel');
+	$effect(() => { getSite().then((x) => (siteName = x.name)); });
+
 	/** /faq — in-app FAQ for the lab team.
 	 *
 	 * Content lives in $lib/faq.ts as data; this file is presentation only.
@@ -33,7 +38,7 @@
 	}
 </script>
 
-<svelte:head><title>FAQ · AQPI Sentinel</title></svelte:head>
+<svelte:head><title>FAQ · {siteName}</title></svelte:head>
 
 <!-- The app shell is `<main class="flex-1 overflow-hidden">`, so every page
      owns its own scroll region. Without this wrapper the FAQ was simply

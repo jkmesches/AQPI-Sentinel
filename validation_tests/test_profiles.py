@@ -339,29 +339,53 @@ def main() -> int:
     check("aqpi keeps the frontend's per-product table",
           aqpi["comp_extent"] is None, str(aqpi["comp_extent"]))
     check("...and claims nothing provisional", not aqpi["comp_extent_provisional"])
-    ext = xqpi["comp_extent"]
-    check("xqpi supplies one box", ext is not None)
-    check("...flagged provisional, because it is assumed not sourced",
-          xqpi["comp_extent_provisional"] is True)
+    extents = xqpi["comp_extent"] or {}
+    check("xqpi places composite_ref", "composite_ref" in extents, str(sorted(extents)))
+    # The QPE families render at 1697x2310 (aspect 0.735) where composite_ref
+    # is 1365x1108 (1.232) over the sourced 936x760 grid. Giving them
+    # composite_ref's box would place three products from a fourth's geometry.
+    check("...and deliberately does NOT place the QPE families",
+          not ({"qpe_15min", "qpe_1hr", "radar_precip_rate"} & set(extents)),
+          str(sorted(extents)))
+    check("nothing is flagged provisional now the extent is sourced",
+          not xqpi["comp_extent_provisional"],
+          str(xqpi["comp_extent_provisional"]))
+    ext = extents.get("composite_ref")
     if ext:
         check("the box is not inside out",
               ext["west"] < ext["east"] and ext["south"] < ext["north"], str(ext))
-        # The whole basis of the guess is "a one-radar composite covers that
-        # radar's coverage". If the box does not contain the radar, the guess
-        # is not even self-consistent.
+        # The composite is built from FLOW alone, so whatever the domain is, it
+        # has to contain the radar.
         check("the box contains FLOW",
               ext["west"] < flow["lon"] < ext["east"]
               and ext["south"] < flow["lat"] < ext["north"],
               f"{flow['lon']},{flow['lat']} vs {ext}")
         import math as _m
-        half_ns = (ext["north"] - ext["south"]) / 2 * 110.574
-        half_ew = (ext["east"] - ext["west"]) / 2 * 111.320 * _m.cos(
-            _m.radians(flow["lat"]))
+        ns = (ext["north"] - ext["south"]) * 110.574
+        ew = (ext["east"] - ext["west"]) * 111.320 * _m.cos(_m.radians(flow["lat"]))
+        # The grid is 936 x 760 cells at 250 m = 234.0 x 190.0 km in UTM. The
+        # lat/lon box is its ENVELOPE, so it must come out slightly LARGER: a
+        # UTM-aligned rectangle is a trapezoid in lat/lon, and the axis-aligned
+        # bounds take the widest row and the tallest column. Measured 236.1 x
+        # 192.3 km, i.e. 0.9% and 1.2% over, which is the ~4.7 km west-edge
+        # skew showing up as expected rather than a transcription error.
+        #
+        # Asserted as a band, not a point, because these numbers are
+        # hand-carried from an inverse transverse Mercator and a fat-fingered
+        # digit would otherwise surface only as an overlay nobody can check by
+        # eye. Too small would mean a lost corner; too large, a wrong zone.
+        check("the box envelopes the 234 x 190 km grid, 0-3% over",
+              1.0 <= ew / 234.0 < 1.03 and 1.0 <= ns / 190.0 < 1.03,
+              f"{ew:.1f} x {ns:.1f} km "
+              f"({ew / 234.0:.3f}x, {ns / 190.0:.3f}x)")
+        # The east edge is exactly the UTM zone-11N false easting, which is
+        # what identifies the domain as pinned to the central meridian rather
+        # than arbitrarily placed.
+        check("...with its east edge on the zone's central meridian",
+              abs(ext["east"] + 117.0) < 1e-6, str(ext["east"]))
         rng_km = flow["range_m"] / 1000
-        check("...and spans the range ring to within 1%",
-              abs(half_ns - rng_km) / rng_km < 0.01
-              and abs(half_ew - rng_km) / rng_km < 0.01,
-              f"NS {half_ns:.2f} km, EW {half_ew:.2f} km vs range {rng_km:.2f} km")
+        check("FLOW's ring is about a third of the domain width",
+              0.30 < (2 * rng_km) / ew < 0.40, f"{(2 * rng_km) / ew:.3f}")
 
     print("\nthe deployment names itself:")
     check("aqpi is AQPI Sentinel", aqpi["site_name"] == "AQPI Sentinel",

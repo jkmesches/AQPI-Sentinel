@@ -12,7 +12,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { url as apiUrl } from '$lib/origin';
-	import { resolveHomeView, type HomeView } from '$lib/homeView';
+	import { resolveHomeView, type HomeView } from '$lib/site';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 
 	// Stadia styles — same as desktop MapView. Theme-locked at mount.
@@ -416,7 +416,7 @@
 			// Where this deployment's map opens. Hard-coded Bay Area until now,
 			// which put XQPI's only radar 375 km off-screen. Resolved before the
 			// map is constructed so it builds at the right camera rather than
-			// snapping. See $lib/homeView.
+			// snapping. See $lib/site.
 			const site = await resolveHomeView(FALLBACK_HOME, fetch,
 			                                   apiUrl('/api/version'));
 

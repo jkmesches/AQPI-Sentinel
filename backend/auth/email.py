@@ -15,14 +15,18 @@ import aiosmtplib
 log = logging.getLogger(__name__)
 
 
-DEFAULT_FROM_NAME = "AQPI Sentinel"
+# Who alert and password-reset mail is signed as when no from_name is saved.
+# Was the literal "AQPI Sentinel", so an XQPI instance would have sent its
+# alerts signed as AQPI — the one branding slip with consequences outside the
+# browser, since the recipient has no other way to tell the deployments apart.
+from ..config import SITE_NAME as DEFAULT_FROM_NAME  # noqa: F401
 
 
 async def load_smtp_settings(pool) -> dict | None:
     """Return the saved settings.smtp dict, or None if not configured.
 
     Keys: host, port, username, password, from_addr, from_name (optional,
-    defaults to ``AQPI Sentinel`` when composing headers), use_tls,
+    defaults to the profile's SITE_NAME when composing headers), use_tls,
     use_starttls. Missing host or from_addr → returns None.
     """
     try:

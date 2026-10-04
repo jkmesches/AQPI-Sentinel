@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
-	import { resolveHomeView, ALL_OVERLAYS, type HomeView, type Overlay,
-	         type Extent } from '$lib/homeView';
+	import { getSite, ALL_OVERLAYS, type HomeView, type Overlay,
+	         type Extent, type Product } from '$lib/site';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
@@ -315,7 +315,7 @@
 	// watches a different network supplies its own over /api/version, resolved
 	// in onMount BEFORE the map is constructed — XQPI watches one radar in
 	// Pasadena, 375 km outside both AQPI extents, so opening here would put
-	// its only radar off-screen. See $lib/homeView.
+	// its only radar off-screen. See $lib/site.
 	const FALLBACK_HOME: HomeView = { center: [-122.6, 37.95], zoom: 7.2 };
 	let home = $state<HomeView>(FALLBACK_HOME);
 	// Which regional overlays this deployment has data for. AQPI's three are
@@ -323,14 +323,32 @@
 	// toggle that silently does nothing.
 	let overlays = $state<readonly Overlay[]>(ALL_OVERLAYS);
 	const hasOverlay = (o: Overlay) => overlays.includes(o);
+	/** Can this composite be put on the map at all? */
+	function placeable(id: string): boolean {
+		if (id === 'none') return true;
+		return compExtent ? id in compExtent : id in COMP_EXTENT;
+	}
+	function firstPlaceable(): Composite {
+		if (!compExtent) return 'comp_ref';
+		const first = Object.keys(compExtent)[0];
+		return (first ?? 'none') as Composite;
+	}
 	// One box for every composite, when the profile supplies it; otherwise the
 	// per-product COMP_EXTENT table below, which is AQPI's and is sourced.
-	let compExtent = $state<Extent | null>(null);
+	let compExtent = $state<Record<string, Extent> | null>(null);
 	// True when that box is an assumption rather than surveyed corners. Shown
 	// on the map: a guessed overlay is pixel-for-pixel as convincing as a
 	// sourced one, and a QPE layer off by kilometres attributes rain to the
 	// wrong watershed.
-	let compExtentProvisional = $state(false);
+	let compExtentProvisional = $state<readonly string[]>([]);
+	// What this deployment is. Drives the header, the page title and the tilt
+	// control, which were all hard-coded to AQPI.
+	let siteName = $state('AQPI Sentinel');
+	let dataSource = $state('radarca.engr.colostate.edu');
+	let hasRadarca = $state(true);
+	// The products this deployment publishes, when its ids are not the ones
+	// COMPOSITE_GROUPS below knows. Null keeps that table.
+	let siteProducts = $state<Product[] | null>(null);
 
 	// --- persisted map settings -------------------------------------------
 	// Restored on mount, saved on change, cleared by Reset. Playback position
@@ -749,7 +767,9 @@
 		// The profile's box replaces the per-product table wholesale: its
 		// product ids are not AQPI's, so a lookup would miss and silently draw
 		// nothing. `composite === 'none'` still means no overlay.
-		const e = composite === 'none' ? null : (compExtent ?? COMP_EXTENT[composite]);
+		const e = composite === 'none'
+			? null
+			: (compExtent?.[composite] ?? (compExtent ? null : COMP_EXTENT[composite]));
 		if (!e || stepIdx < 0) {
 			if (map.getLayer('comp-overlay-layer')) map.removeLayer('comp-overlay-layer');
 			if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
@@ -1813,13 +1833,20 @@
 		// same reason the saved camera is applied at construction below.
 		const [meta, site] = await Promise.all([
 			fetch('/api/radars/meta').then((r) => r.json()),
-			resolveHomeView(FALLBACK_HOME)
+			getSite(FALLBACK_HOME)
 		]);
 		radars = meta;
 		home = site.home;
 		overlays = site.overlays;
 		compExtent = site.compExtent;
 		compExtentProvisional = site.compExtentProvisional;
+		siteName = site.name;
+		dataSource = site.dataSource;
+		hasRadarca = site.hasRadarca;
+		siteProducts = site.products;
+		// A persisted composite this deployment cannot place would otherwise
+		// stay selected and render nothing with no explanation.
+		if (!placeable(composite)) composite = firstPlaceable();
 		// A persisted toggle for an overlay this deployment does not have would
 		// otherwise stay on and fetch a dataset for the wrong region.
 		if (!hasOverlay('watersheds')) watershedsOn = false;
@@ -1945,7 +1972,9 @@
 
 	// Composites grouped by upstream source so a 10-item dropdown stays
 	// readable. Order matches the Live page's grouped Products section.
-	const compGroups: { label: string; options: { key: Composite; label: string }[] }[] = [
+	// AQPI's product vocabulary. Kept as the fallback for any deployment that
+	// does not rename its products; `compGroups` below filters it.
+	const COMPOSITE_GROUPS: { label: string; options: { key: Composite; label: string }[] }[] = [
 		{
 			label: '',  // top-level "Off" — no group heading
 			options: [
@@ -1986,6 +2015,29 @@
 		}
 	];
 
+	// What the picker actually offers.
+	//
+	// Was a fixed list of AQPI's thirteen products, so XQPI showed CoSMoS
+	// water-level layers and Bay Area forecasts it does not publish, while two
+	// of its own four ids were absent from the type entirely. Now: the
+	// profile's products when it renames them, otherwise the table above —
+	// and in both cases only those with an extent, because a product that
+	// cannot be placed can only draw nothing or draw wrong.
+	const compGroups = $derived.by(() => {
+		if (siteProducts) {
+			const opts = siteProducts
+				.filter((p) => placeable(p.id))
+				.map((p) => ({ key: p.id as Composite, label: p.label }));
+			return [
+				{ label: '', options: [{ key: 'none' as Composite, label: 'Off' }] },
+				...(opts.length ? [{ label: 'Radar Data', options: opts }] : [])
+			];
+		}
+		return COMPOSITE_GROUPS
+			.map((g) => ({ ...g, options: g.options.filter((o) => placeable(o.key)) }))
+			.filter((g) => g.options.length > 0);
+	});
+
 	const statusLabel = (s: string) =>
 		({ pass: 'UP', fail: 'DOWN', warn: 'WARN', error: 'ERR', skip: '—' })[s] ?? s.toUpperCase();
 </script>
@@ -2004,7 +2056,7 @@
 		     Bottom-left, unlike the stale banner: that one is about data an
 		     operator must not act on at all, this is about data that is real
 		     but whose POSITION is unverified. Non-interactive. -->
-		{#if compExtentProvisional && composite !== 'none'}
+		{#if composite !== 'none' && compExtentProvisional.includes(composite)}
 			<div class="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[60%]">
 				<div class="rounded-sm border border-[var(--color-warn)]/70 bg-[var(--color-canvas)]/90 px-2 py-1 shadow-lg backdrop-blur">
 					<div class="num text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]">
@@ -2275,10 +2327,15 @@
 			</div>
 
 			<!-- Tilt (elevation) selector — only when exactly one X-band radar
-			     is active. "Default" = radarca's single pre-rendered sweep;
-			     1..4 = radar-display per-elevation PPI (Phase 1: newest frame,
-			     no scrubbing). -->
-			{#if tiltRadarMeta}
+			     is active. "Default" = the display tier's single pre-rendered
+			     sweep; 1..4 = radar-display per-elevation PPI (Phase 1: newest
+			     frame, no scrubbing).
+			     Gated on hasRadarca: BOTH sources here are the CSU display
+			     stack — the default option comes from radarca and the numbered
+			     ones from radar-display — so on a deployment with neither,
+			     every option in this control is dead. It listed FLOW's four
+			     swept elevations, none of which it could fetch. -->
+			{#if tiltRadarMeta && hasRadarca}
 				<div class="mt-2 flex items-center gap-2">
 					<span class="num text-[9.5px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
 					<select
@@ -2296,9 +2353,9 @@
 								if (!MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
 							}
 						}}
-						title="Pick a scan elevation. Default uses radarca's single sweep. Drives the time strip on the radar's 7-frame loop."
+						title={`Pick a scan elevation. Default uses ${dataSource}'s single sweep. Drives the time strip on the radar's 7-frame loop.`}
 					>
-						<option value={0}>Default (radarca)</option>
+						<option value={0}>Default ({dataSource})</option>
 						{#each tiltRadarMeta.elevations ?? [] as ang, i}
 							<option value={i + 1}>{ang}° EL</option>
 						{/each}

@@ -1,4 +1,13 @@
 <script lang="ts">
+	// This line asserted radarca as the data source on every deployment,
+	// including one that never contacts it. Both now come from /api/version.
+	import { getSite } from '$lib/site';
+	let siteName = $state('AQPI Sentinel');
+	let dataSource = $state('radarca.engr.colostate.edu');
+	$effect(() => {
+		getSite().then((s) => { siteName = s.name; dataSource = s.dataSource; });
+	});
+
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
@@ -232,7 +241,7 @@
 <section>
 	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">about</div>
 	<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 text-[12px] text-[var(--color-muted)]">
-		<div class="num">AQPI Sentinel — radarca.engr.colostate.edu</div>
+		<div class="num">{siteName} — {dataSource}</div>
 		<div class="num mt-1 text-[var(--color-faint)]">v0.1.0 · mobile</div>
 	</div>
 </section>
