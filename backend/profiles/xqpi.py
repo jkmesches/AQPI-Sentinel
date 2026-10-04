@@ -168,8 +168,26 @@ RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
 # --------------------------------------------------------------------------
 # Published product families
 # --------------------------------------------------------------------------
-# Measured cadence is one 2-minute publisher cycle across every family, with a
-# 14-frame rolling window: p50 2 min, p90 8 min, max 12 min (16-§2).
+# One 2-minute publisher cycle across every family: p50 2 min, p90 8 min
+# (16-§2). Those two hold and are what `cadence_s` encodes.
+#
+# The same table's "max 12 min" and "14-frame window" do NOT hold, and both
+# were quoted here before being checked:
+#
+#   * the max was an artifact of globbing the images directory, which picks up
+#     eleven 2026-09-03 orphans the window never reclaims; the real span for
+#     the `in` unit is 43,184 min, i.e. a 29.9-day jump onto stale files. A
+#     percentile is unmoved by one outlier, which is why p50 and p90 survive
+#     and the max does not.
+#   * the frame count is not a window size at all — see `expected_steps` below.
+#
+# Worth recording how this got through: the gap measurement thirty lines down
+# observed 28 minutes between consecutive steps, in this same file, and I did
+# not reconcile it against the 12 I had quoted from the survey. A borrowed
+# figure and a first-hand one disagreeing by more than 2x should have been the
+# cheapest catch of the lot. The lesson is not to re-read harder — it is that a
+# number taken from someone else's document is not evidence until it has been
+# reproduced or contradicted by something measured here.
 #
 # `backend_max_age_s` is 1500 (25 min) — the FAIL threshold from 16-§7. The
 # survey also proposes a 15-minute WARN, which LB1 cannot express: its
