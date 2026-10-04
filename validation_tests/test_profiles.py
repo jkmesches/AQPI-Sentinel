@@ -84,7 +84,24 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 _PROBE = r"""
 import json, sys
 from datetime import datetime, timezone
+# Import what the APPLICATION imports, not just the check package.
+#
+# This probe used to import backend.checks alone, which measured a module
+# graph the app never runs in — and therefore validated nothing about the
+# deployed registry. prewarm.py imports backend.checks.layer2_radar at module
+# scope (for EXPECTED_ABSENT_MOMENTS), which executed that module's
+# registrations regardless of profile and put layer2.radar.FLOW and
+# layer2.xband.fleet back into the xqpi registry. The assertions below said
+# "no radarca-derived check reaches xqpi" and passed, while the live instance
+# on cira-aqpi served 11 checks instead of 9.
+#
+# So the probe imports the app, and the gate it tests is now
+# registry.register()'s own refusal rather than an import that happens not to
+# occur. A future module imported from some unrelated helper cannot slip
+# through the way this one did.
 import backend.checks                       # must precede registry
+import backend.prewarm                      # the importer that bypassed the gate
+import backend.api.app                       # everything the server pulls in
 from backend import config
 from backend.registry import CHECKS
 from backend.checks.layer1_backend_product import _product_dir
@@ -100,6 +117,7 @@ print("@@" + json.dumps({
     "radars":         sorted(config.RADAR_FOLDER),
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
+    "declined": dict(__import__("backend.registry", fromlist=["x"]).DECLINED),
     "checks": [{"id": c.id, "stage": c.stage, "target": c.target,
                 "module": type(c).__module__.rsplit(".", 1)[-1],
                 "source_tag": c.source_tag, "source_label": c.source_label}
@@ -196,6 +214,19 @@ def main() -> int:
                               if c["module"] in radarca_mods)
     check("no xqpi check comes from a radarca-only module", not from_radarca_mod,
           ", ".join(from_radarca_mod))
+    # The registry must have actively DECLINED the checks prewarm's import
+    # re-registered, rather than merely not having seen them. If this is empty
+    # the import skip is carrying the whole load again and the guard is
+    # untested — which is how 11 checks reached production looking like 9.
+    declined = xqpi["declined"]
+    check("registry.register() actively declined the leaked L2 checks",
+          set(declined) >= {"layer2.radar.FLOW", "layer2.xband.fleet"},
+          f"declined={sorted(declined)}")
+    check("...and attributes each to its radarca-only module",
+          all(m in radarca_mods for m in declined.values()),
+          str(sorted(set(declined.values()))))
+    check("aqpi declines nothing", not aqpi["declined"],
+          str(sorted(aqpi["declined"])))
     check("the two profiles agree on which modules are radarca-only",
           set(aqpi["radarca_mods"]) == radarca_mods)
     overlap = set(xqpi["always_mods"]) & radarca_mods

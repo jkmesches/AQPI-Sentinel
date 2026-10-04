@@ -421,6 +421,37 @@ BACKEND_SOURCE: tuple[str, str] = ("K2", "K2")
 # which is how a check that can only ever fail gets shipped.
 HAS_RADARCA: bool = True
 
+# Human-facing name for this deployment. The frontend had "AQPI Sentinel"
+# hard-coded in four places (the page title, the FAQ heading, the mobile
+# "more" page's data-source line and the alert-email from_name), so an XQPI
+# instance announced itself as AQPI and its alert emails would have been
+# signed as AQPI. Served over /api/version so there is one source of truth
+# rather than a fifth table that knows the answer independently.
+SITE_NAME: str = "AQPI Sentinel"
+
+# Check modules that exist only because radarca does — every one of them talks
+# to SETTINGS.base. Canonical here rather than in checks/__init__ because
+# backend.registry needs it too and cannot import that package without a
+# cycle, and because it is the same list on every profile: it describes which
+# modules need an HTTP origin, not which network is being watched.
+#
+# Two things consume it. checks/__init__ skips importing these on a profile
+# with no origin, and registry.register() REFUSES a check defined in one of
+# them. The second is what actually makes it safe: the import skip only works
+# while nothing else imports the module, and prewarm.py imports
+# layer2_radar at module scope for EXPECTED_ABSENT_MOMENTS, which silently
+# re-registered two permanently-failing L2 checks on the xqpi profile.
+RADARCA_ONLY_MODULES: tuple[str, ...] = (
+    "layer0_latency",          # 1 latency canary — probes SETTINGS.base directly
+    "layer0_website",          # 4 L0 checks
+    "layer1_product",          # 13 product checks (L1 + L3B parity inline)
+    "layer1_vector",           # 3 static-asset checks
+    "layer1_stream",           # 1 stream-canary check
+    "layer2_radar",            # 6 per-radar checks + 1 fleet correlation
+    "layer3_overlay",          # 1 Playwright overlay parity check
+    "layer4_image",            # 5 X-band + 3 mosaic image checks
+)
+
 # Published-image tree layout, relative to SETTINGS.backend_root. K2 nests the
 # products under realtime/product_images/; trinity's XQPI tree puts them
 # directly under PRODUCT_IMAGES/. Getting this wrong does not raise -- LB1
@@ -464,6 +495,7 @@ if SETTINGS.profile == "xqpi":
     LB1_FRESHNESS = _xqpi.LB1_FRESHNESS
     LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
+    SITE_NAME = _xqpi.SITE_NAME
     HAS_RADARCA = False
 elif SETTINGS.profile != "aqpi":
     # Fail loudly. A typo here would otherwise start a Sentinel that silently

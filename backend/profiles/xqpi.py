@@ -181,20 +181,14 @@ UNITS = ("in", "mm")
 
 # Everything XQPI reads is on trinity, so every backend check reports the same
 # source. Two characters, by the constraint in Check.source_tag.
+# What this deployment calls itself, everywhere a human reads it.
+SITE_NAME = "XQPI Sentinel"
+
 SOURCE_TAG = "TR"
 SOURCE_LABEL = "Trinity"
 
-# The radarca-derived check modules have nothing to talk to on this profile.
-# checks/__init__ reads this rather than hard-coding the list at the import
-# site, so adding a radarca-only module in future fails loudly here instead of
-# registering checks against an origin that does not exist.
-RADARCA_ONLY_MODULES = (
-    "layer0_latency",
-    "layer0_website",
-    "layer1_product",
-    "layer1_vector",
-    "layer1_stream",
-    "layer2_radar",
-    "layer3_overlay",
-    "layer4_image",
-)
+# NOTE: this profile does NOT list the radarca-only check modules. That list
+# is config.RADARCA_ONLY_MODULES, canonical in one place because it describes
+# which modules need an HTTP origin rather than which network is watched — the
+# same list on every profile. It used to be restated here with an assert
+# keeping the two in step, which was two places to get right for no gain.

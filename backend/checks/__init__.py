@@ -1,13 +1,13 @@
 """Importing this package triggers every ``@register`` decorator beneath it.
 
-Add a new module to one of the two tuples below to bring its checks into the
-registry — `_ALWAYS` if it reads the filesystem or the host, `_RADARCA` if it
-talks to the HTTP display tier. A module in neither is never imported, which
-test_profiles.py fails on rather than letting its checks go quiet.
+Add a new module to `_ALWAYS` below if it reads the filesystem or the host, or
+to `config.RADARCA_ONLY_MODULES` if it talks to the HTTP display tier. A module
+in neither is never imported, which test_profiles.py fails on rather than
+letting its checks go quiet.
 """
 import importlib
 
-from ..config import SETTINGS
+from ..config import HAS_RADARCA, RADARCA_ONLY_MODULES, SETTINGS
 
 # Modules that read the filesystem or the host, and are profile-independent.
 # Imported on every profile. Two of these modules register MORE than their
@@ -24,41 +24,19 @@ _ALWAYS = (
     "layer0_episode",          # attach_episode_suppression (+1 radarca-gated)
 )
 
-# Modules that exist only because radarca does.
+# The radarca-only module list is config.RADARCA_ONLY_MODULES — one canonical
+# copy, because registry.register() needs it too (it refuses a check from one
+# of these modules when HAS_RADARCA is false, which is the guarantee; skipping
+# the import here is only an optimisation on top of it).
 #
-# === Skipped wholesale on a profile with no HTTP origin ===
-#
-# XQPI monitors FLOW straight off trinity; nothing serves it over HTTP. Every
-# module below talks to SETTINGS.base, so on that profile they would register
-# checks against an origin that does not exist — each one failing forever,
-# each one paging, and L0 failures cascade-suppressing the backend checks that
-# ARE working. Gating here rather than in each module keeps it to one place
-# and one list, and the list lives in the profile so adding a radarca-only
-# module later fails there rather than silently registering.
-_RADARCA = (
-    "layer0_latency",          # 1 latency canary — probes SETTINGS.base directly
-    "layer0_website",          # 4 L0 checks
-    "layer1_product",          # 13 product checks (L1 + L3B parity inline)
-    "layer1_vector",           # 3 static-asset checks
-    "layer1_stream",           # 1 stream-canary check
-    "layer2_radar",            # 6 per-radar checks + 1 fleet correlation
-    "layer3_overlay",          # 1 Playwright overlay parity check
-    "layer4_image",            # 5 X-band + 3 mosaic image checks
-)
+# Skipped wholesale on a profile with no HTTP origin: XQPI monitors FLOW
+# straight off trinity and nothing serves it over HTTP, so every module below
+# would register checks against an origin that does not exist — each failing
+# forever, each paging, and L0 failures cascade-suppressing the backend checks
+# that ARE working.
+_RADARCA = RADARCA_ONLY_MODULES
 
-if SETTINGS.profile == "xqpi":
-    from ..profiles import xqpi as _profile_mod
-    _skip = frozenset(_profile_mod.RADARCA_ONLY_MODULES)
-    # The profile's list and this one must agree, or a module gets registered
-    # against a nonexistent origin because two places drifted apart.
-    assert _skip == frozenset(_RADARCA), (
-        f"profile/registry disagree on radarca-only modules: "
-        f"{_skip ^ frozenset(_RADARCA)}"
-    )
-else:
-    _skip = frozenset()
-
-for _name in (*_ALWAYS, *(m for m in _RADARCA if m not in _skip)):
+for _name in (*_ALWAYS, *(_RADARCA if HAS_RADARCA else ())):
     importlib.import_module(f".{_name}", __name__)
 
 # Wire alarm suppression LAST: attach_episode_suppression walks the registry,
