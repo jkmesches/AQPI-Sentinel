@@ -25,6 +25,7 @@ it is here. The failure this prevents is not a crash — it is a deployment that
 looks like it worked.
 """
 from __future__ import annotations
+import re
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 PROD = ROOT / "ops" / "docker-compose.prod.yml"
 GHCR = ROOT / "ops" / "docker-compose.ghcr.yml"
+ENV_EXAMPLE = ROOT / "ops" / ".env.prod.example"
 
 failures: list[str] = []
 
@@ -107,6 +109,62 @@ def main() -> int:
 
     prod = yaml.safe_load(PROD.read_text())
     ghcr = yaml.safe_load(GHCR.read_text())
+
+    # --- every documented knob must actually reach a container ------------
+    #
+    # The checks below compare the two compose files to EACH OTHER, which
+    # cannot see a variable missing from both — the same blind spot the
+    # parser note above describes. v0.6.0 walked straight into it: it added
+    # SENTINEL_PROFILE to ops/.env.prod.example, with a comment explaining
+    # that an unknown value refuses to boot, and wired it into neither compose
+    # file. Neither has an `env_file:`, so --env-file supplies ${...}
+    # interpolation ONLY; a variable reaches the container solely by being
+    # named in an `environment:` block. Setting the documented knob therefore
+    # did nothing, and an XQPI stack would have come up healthy while
+    # monitoring AQPI's product list — the exact failure config.py refuses a
+    # bad VALUE to prevent, reached instead through an unset one.
+    #
+    # So this asserts against the example file, which is what an operator
+    # actually reads, rather than against the sibling compose file.
+    #
+    # Vars that are legitimately interpolation-only: volume SOURCES (a host
+    # path or volume name, consumed by the volumes: block, never read by the
+    # process) and the image tag.
+    INTERPOLATION_ONLY = {
+        "SENTINEL_ARCHIVE_HOST_PATH": "volume source for /data/archive",
+        "SENTINEL_COLD_HOST_PATH":    "volume source for /data/cold",
+        "SENTINEL_BACKUP_HOST_PATH":  "volume source for /data/backups",
+        "SENTINEL_BACKEND_HOST_PATH": "volume source for /backend",
+        "SENTINEL_SSCB_HOST_PATH":    "volume source for /sscb",
+        "SENTINEL_TAG":               "selects the image tag, not process env",
+    }
+    documented = set(re.findall(r"^#?((?:SENTINEL|POSTGRES)_[A-Z0-9_]+)=",
+                                ENV_EXAMPLE.read_text(), re.M))
+    check("the example documents the knobs we expect to find",
+          len(documented) >= 15, f"{len(documented)} found")
+    for label, doc in (("prod.yml", prod), ("ghcr.yml", ghcr)):
+        named: set[str] = set()
+        for svc in (doc.get("services") or {}).values():
+            env = svc.get("environment") or {}
+            named |= set(env)
+            # a var interpolated INTO an environment value also arrives
+            for v in env.values():
+                named |= set(re.findall(r"\$\{([A-Z0-9_]+)", str(v)))
+        for var in sorted(documented):
+            if var in INTERPOLATION_ONLY:
+                continue
+            check(f"{label}: {var} reaches the container",
+                  var in named,
+                  "" if var in named else
+                  "documented in ops/.env.prod.example but named in no "
+                  "environment: block — setting it has no effect")
+        # And the converse: an entry can't sit in the allowlist while also
+        # being passed, or the allowlist stops describing reality.
+        for var, why in sorted(INTERPOLATION_ONLY.items()):
+            check(f"{label}: {var} is interpolation-only ({why})",
+                  var not in named,
+                  "" if var not in named else
+                  "now passed to a container — drop it from INTERPOLATION_ONLY")
 
     # Anchor the parsed result to known-good values, not just to the other
     # file. Comparing the two files alone cannot catch a parser that mangles
