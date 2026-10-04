@@ -524,17 +524,32 @@ RADAR_DATED_TREE: dict[str, str] = {}
 # How a backend check decides HOW FRESH the data is. This is a property of the
 # published tree, not a preference, so it is declared per profile.
 #
-# AQPI stays on mtime, deliberately. Verified on csu-aqpi 2026-10-03: every
-# sampled K2 product directory has newest-by-mtime == newest-by-filename, no
-# dotfiles and no compression pass, so mtime there does mean what it says. And
-# AQPI's DROPS tree is not uniform — ebay holds flat `.drops` files while scvw
-# holds a nested `2026/` directory — so the directory's own mtime is the only
-# basis that works across all six radars. Changing it would be a behavior
-# change on a live deployment (cira-aqpi, v0.5.6) to fix a defect that tree
-# does not have.
+# AQPI stays on mtime, deliberately — but the FIRST justification for that was
+# the wrong test, so it is worth stating which evidence actually holds.
 #
-# XQPI must NOT use mtime: a daily gzip sweep rewrites its archive and masks
-# outages. See backend/profiles/xqpi.py for the evidence.
+# The wrong test was "newest-by-mtime is the same FILE as newest-by-filename".
+# Masking does not require mtime to pick a different file. It only requires
+# mtime to be newer than the observation the file DECLARES, and a publisher
+# that re-touches its newest frame each cycle satisfies that while the two
+# measures keep agreeing. Measured on XQPI's qpe_15min while its pipeline was
+# stalled: newest frame mtime 1 minute old, declared timestamp 121 minutes
+# old, and the two measures agreeing throughout because it is one file.
+#
+# The right test is the per-frame offset. Measured on csu-aqpi 2026-10-04
+# across all 31 frames of rain15min, composite_ref_max and rainrate: every
+# frame is written 2.25-2.48 min after its own declared time, with a spread of
+# 0.04-0.18 min within a product. That is a fixed publish latency, not
+# re-touching — anything re-touching would leave the older frames with large,
+# scattered offsets the way XQPI's do (119, 121, 149 minutes). So on K2, mtime
+# tracks declared time frame for frame and means what it says.
+#
+# AQPI's DROPS tree is separately not uniform — ebay holds flat `.drops` files
+# while scvw holds a nested `2026/` directory — so the directory's own mtime is
+# the only LB2 basis that works across all six radars.
+#
+# XQPI must NOT use mtime anywhere, and that is broader than it first looked:
+# the daily gzip sweep is confined to the raw volume tree, but the newest-frame
+# re-touch above affects the published products too. See profiles/xqpi.py.
 LB1_FRESHNESS: str = "newest_mtime"   # newest file's mtime in the images dir
 LB2_FRESHNESS: str = "dir_mtime"      # the data directory's own mtime
 RAW_VOLUME_TS_RE: str | None = None   # only used by LB2_FRESHNESS="filename"
