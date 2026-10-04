@@ -296,7 +296,16 @@ def create_app() -> FastAPI:
     version_router = APIRouter(prefix="/api")
     @version_router.get("/version")
     async def _version() -> dict:
-        return {"version": __version__}
+        # `profile` and `site_name` ride along here because the frontend had no
+        # way to learn which radar network it was serving. It could not adapt
+        # even in principle: branding, radar metadata and the map extents were
+        # each hard-coded to AQPI independently, so an XQPI instance showed
+        # "AQPI Sentinel", claimed radarca as its data source on a page that
+        # never contacts radarca, and listed nine Bay Area radars with no FLOW.
+        # One endpoint the frontend already polls, rather than a fourth table.
+        from ..config import HAS_RADARCA, SETTINGS, SITE_NAME
+        return {"version": __version__, "profile": SETTINGS.profile,
+                "site_name": SITE_NAME, "has_radarca": HAS_RADARCA}
     app.include_router(version_router)
 
     app.include_router(status_routes.router)
