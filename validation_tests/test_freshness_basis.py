@@ -85,12 +85,24 @@ def build_tree(base: Path, now: datetime, last_obs_min_ago: float,
             ext = ".netcdf" if i < 2 else ".netcdf.gz"
             (vol / f"flow-{t:%Y%m%d-%H%M%S}_1_21_{elev}_PPI{ext}").write_bytes(b"x")
 
-    # gzip's leftovers: dot-prefixed, embedding a FUTURE-looking timestamp so a
-    # basis that fails to exclude them reads as fresher than reality.
+    # Two classes of litter, both dot-prefixed, which is why the exclusion keys
+    # on the leading dot rather than on failing to parse a timestamp.
+    #
+    # 1. gzip's leftovers. Observed nine suffixes for ONE source volume inside a
+    #    30 ms window -- gzip started nine times on the same file and left every
+    #    attempt behind. Their names embed a real, parseable timestamp, so a
+    #    pattern-only rule would accept them. Dated in the FUTURE here so a
+    #    basis that reads them looks fresher than reality.
     bogus = now + timedelta(minutes=90)
-    for suffix in ("4u4pxw", "DV6tds", "FnTh1g"):
+    for suffix in ("faGvNy", "r3oxBg", "bnIjhZ", "iMHNAl", "FnTh1g",
+                   "LIwYfB", "4u4pxw", "Zh16fg", "DV6tds"):
         (vol / f".flow-{bogus:%Y%m%d-%H%M%S}_1_21_2.5_PPI.netcdf.gz.{suffix}"
          ).write_bytes(b"x")
+    # 2. An NFS silly-rename -- what the server leaves when a file is unlinked
+    #    while still open. Carries NO timestamp at all, so no rule that works by
+    #    extracting a time from the name can classify it either way. Only the
+    #    leading dot catches both classes.
+    (vol / ".nfs000000000b4a37d80000000a").write_bytes(b"x")
 
     pi = base / "PRODUCT_IMAGES"
     families = {
@@ -216,6 +228,11 @@ def main() -> int:
         check("...and is not pulled toward the temps' future stamp",
               (lb2["age_s"] or 0) / 60 > STALE_MIN - 3,
               f"{(lb2['age_s'] or 0) / 60:.1f} min vs {STALE_MIN}")
+        # The NFS silly-rename is the case a timestamp-extracting rule cannot
+        # classify at all: there is no time in the name to accept or reject.
+        check("an NFS silly-rename neither matches nor breaks the scan",
+              lb2["status"] == "fail" and (lb2["age_s"] or 0) > 0,
+              f"{lb2['status']} @ {(lb2['age_s'] or 0) / 60:.1f} min")
 
         print("\na fresh tree passes, so the basis is not simply always-fail:")
         fresh = Path(td) / "fresh"
