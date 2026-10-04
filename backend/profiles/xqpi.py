@@ -64,14 +64,22 @@ RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
 _CYCLE_S = 120
 _FAIL_AGE_S = 1_500
 
-# The rolling window is 14-15 frames in steady state, but it SHRINKS after a
-# gap rather than holding: observed at 15 steps at 23:50 UTC on 2026-10-03,
-# then 8 steps at 23:57 while recovering from a ~33-minute publication gap.
-# So `expected_steps` is a centre for the steady state, not an assertion, and
-# a count check keyed on it would fire during every recovery. The global ±4
-# `step_count_tol` does not cover a drop to 8 — if an L1-shaped check is ever
-# pointed at this profile, it needs a recovery-aware count rule, not a wider
-# tolerance.
+# `expected_steps` is NOT a window size. Measured 2026-10-04 00:00 UTC, all
+# five manifests read 8 steps spanning 22:54 -> 23:54, with inter-step gaps of
+# 14, 2, 10, 2, 2, 28, 2 minutes. The 2-minute cadence is real; the rest are
+# frames that were never produced. The on-disk PNG count equalled the step
+# count exactly, so nothing had been evicted — the deficit is missing
+# production, not a rolling window turning over.
+#
+# So the step count measures PRODUCTION COMPLETENESS over whatever span the
+# manifest covers, and the observed range is 8-15 (the earlier "14-15" was two
+# samples that both happened to catch healthy operation). A count check keyed
+# on `expected_steps` with a ±tolerance would therefore fire on exactly the
+# gappy periods it would be worth reporting, but report them as a count error
+# rather than as the gap they are. If an L1-shaped check is ever pointed here,
+# the useful form is "largest gap in the declared span", not "step count
+# within ±N" — and it is a different check from freshness, which only reads
+# the newest step.
 #
 # It is also inert on this profile today: `expected_steps` is read by
 # layer1_product (manifest step count), which does not register here. Kept so
