@@ -70,6 +70,19 @@ services:
         condition: service_healthy
     environment:
       SENTINEL_DB_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentinel}
+      # Which radar network this instance watches. Neither compose file has an
+      # `env_file:`, so --env-file supplies ${...} interpolation ONLY and a
+      # variable reaches the container only by being named here. v0.6.0 shipped
+      # ops/.env.prod.example documenting SENTINEL_PROFILE without this line,
+      # so setting it there did nothing and the backend stayed on its default.
+      #
+      # That failed in the worst direction: an XQPI stack would start clean,
+      # pass its health checks, and monitor AQPI's product list against a
+      # trinity mount — every check reporting missing products, reading as a
+      # broken XQPI rather than a misconfigured one. Precisely the "quietly
+      # watching the wrong network" case config.py refuses a bad VALUE to
+      # prevent, arriving instead through an unset one.
+      SENTINEL_PROFILE: ${SENTINEL_PROFILE:-aqpi}
       SENTINEL_BASE:   ${SENTINEL_BASE:-https://radarca.engr.colostate.edu}
       SENTINEL_API_HOST: 0.0.0.0
       SENTINEL_API_PORT: 8000

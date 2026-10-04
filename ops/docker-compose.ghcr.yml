@@ -47,6 +47,19 @@ services:
         condition: service_healthy
     environment:
       SENTINEL_DB_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentinel}
+      # Which radar network this instance watches. Neither compose file has an
+      # `env_file:`, so --env-file supplies ${...} interpolation ONLY and a
+      # variable reaches the container only by being named here. v0.6.0 shipped
+      # ops/.env.prod.example documenting SENTINEL_PROFILE without this line,
+      # so setting it there did nothing and the backend stayed on its default.
+      #
+      # That failed in the worst direction: an XQPI stack would start clean,
+      # pass its health checks, and monitor AQPI's product list against a
+      # trinity mount — every check reporting missing products, reading as a
+      # broken XQPI rather than a misconfigured one. Precisely the "quietly
+      # watching the wrong network" case config.py refuses a bad VALUE to
+      # prevent, arriving instead through an unset one.
+      SENTINEL_PROFILE: ${SENTINEL_PROFILE:-aqpi}
       SENTINEL_BASE:   ${SENTINEL_BASE:-https://radarca.engr.colostate.edu}
       SENTINEL_API_HOST: 0.0.0.0
       SENTINEL_API_PORT: 8000
@@ -81,11 +94,19 @@ services:
       # A bare name is a named volume; a leading slash is a bind mount. This
       # file used to hard-code `sentinel_archive`, with no way to point it
       # anywhere — while claiming in its header to mirror prod.yml exactly.
-      # Switching a production host from prod.yml to this one therefore
-      # detached the real archive silently: the container came up healthy,
-      # served an empty gallery, and began writing new images to the container
-      # disk while 22GB sat unreferenced on the NFS share. Nothing errored,
-      # because an empty archive is indistinguishable from a new one.
+      # Switching a production host from prod.yml to this one WOULD therefore
+      # have detached the real archive silently: the container comes up
+      # healthy, serves an empty gallery, and begins writing new images to a
+      # fresh volume while the existing archive sits unreferenced. Nothing
+      # errors, because an empty archive is indistinguishable from a new one.
+      #
+      # Conditional, not history: the hole was found and closed by the
+      # parity work, never hit in production. Verified 2026-10-04 on
+      # aqpisentinel — the sentinel_archive and sentinel_cold named volumes are
+      # both empty (0 entries), the container binds /mnt/aqpi-data/archive, and
+      # image_archive spans 2026-05-16 to date with day-one frames still on
+      # disk. The earlier past tense here was read by a teammate as a real
+      # 22 GB loss; it was not. (The archive is ~64 GB now, not 22.)
       #
       # Set SENTINEL_ARCHIVE_HOST_PATH / SENTINEL_COLD_HOST_PATH to the same
       # values prod.yml uses on that host.
