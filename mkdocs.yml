@@ -105,6 +105,7 @@ nav:
       - Maintenance: MAINTENANCE.md
       - Troubleshooting: 05-troubleshooting.md
       - Porting to other upstreams: 06-porting-to-other-upstreams.md
+      - Deployment profiles: 07-deployment-profiles.md
   - Develop:
       - Architecture: ARCHITECTURE.md
       - Adding a check: 13-extending-checks.md

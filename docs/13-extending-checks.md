@@ -135,17 +135,41 @@ class ObservatoryStatusCheck(Check):
 register(ObservatoryStatusCheck())
 ```
 
-### 3. Wire it into `backend/checks/__init__.py`
+### 3. Declare which deployments it applies to
 
-Add the import so the module loads at package import time:
+Modules are imported from one of two lists, and a module in **neither
+is never imported at all** — its checks are silently absent rather than
+broken.
 
 ```python
-# backend/checks/__init__.py
-from . import layer0_observatory  # noqa: F401
+# backend/checks/__init__.py — reads the filesystem or the host, so
+# it applies to every deployment:
+_ALWAYS = (
+    ...,
+    "layer0_observatory",
+)
 ```
+
+If the check talks to the HTTP display tier instead, add it to
+`config.RADARCA_ONLY_MODULES`. Those modules are skipped on a profile
+with no such tier, and `register()` **refuses** any check defined in
+them on that profile — so a check that needs radarca cannot reach a
+deployment that has none, however the module gets imported.
+
+`validation_tests/test_profiles.py` fails if a module is in neither
+list. See [Deployment profiles](07-deployment-profiles.md).
 
 `register()` runs at import time, which means the check is in the
 `CHECKS` global by the time the scheduler asks for it.
+
+!!! warning "Importing a check module for one constant registers its checks"
+    `prewarm.py` imports `layer2_radar` at module scope for
+    `EXPECTED_ABSENT_MOMENTS`, which executed that module's
+    registrations on a profile that had skipped it — two
+    permanently-failing checks in a live instance with the gate
+    apparently in place. That is why the refusal lives in `register()`
+    and not at the import site. A declined check is recorded in
+    `registry.DECLINED` rather than disappearing.
 
 ### 4. Add the user-facing label
 
