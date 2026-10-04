@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
+	import { resolveHomeView, ALL_OVERLAYS, type HomeView, type Overlay } from '$lib/homeView';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
@@ -308,8 +309,19 @@
 
 	// The map's home view. Shared by first load and by Reset, so the two
 	// cannot drift apart.
-	const DEFAULT_CENTER: [number, number] = [-122.6, 37.95];
-	const DEFAULT_ZOOM = 7.2;
+	//
+	// These are AQPI's tuned values and remain the fallback. A profile that
+	// watches a different network supplies its own over /api/version, resolved
+	// in onMount BEFORE the map is constructed — XQPI watches one radar in
+	// Pasadena, 375 km outside both AQPI extents, so opening here would put
+	// its only radar off-screen. See $lib/homeView.
+	const FALLBACK_HOME: HomeView = { center: [-122.6, 37.95], zoom: 7.2 };
+	let home = $state<HomeView>(FALLBACK_HOME);
+	// Which regional overlays this deployment has data for. AQPI's three are
+	// all Northern California; a profile without them should not offer a
+	// toggle that silently does nothing.
+	let overlays = $state<readonly Overlay[]>(ALL_OVERLAYS);
+	const hasOverlay = (o: Overlay) => overlays.includes(o);
 
 	// --- persisted map settings -------------------------------------------
 	// Restored on mount, saved on change, cleared by Reset. Playback position
@@ -373,7 +385,7 @@
 	function resetMapSettings() {
 		const d = clearPrefs();
 		applyPrefs(d);
-		if (map) map.jumpTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, bearing: 0, pitch: 0 });
+		if (map) map.jumpTo({ center: home.center, zoom: home.zoom, bearing: 0, pitch: 0 });
 	}
 	const isActive = (id: string) => activeRadars.includes(id);
 
@@ -1784,7 +1796,21 @@
 		// Toggles that need no vocabulary can be applied before the radar list
 		// arrives; radars and composite are validated once we know what exists.
 		applyPrefs(loadPrefs());
-		radars = await fetch('/api/radars/meta').then((r) => r.json());
+		// Both before the map is constructed: building at the right camera
+		// avoids rendering the fallback view first and visibly snapping, the
+		// same reason the saved camera is applied at construction below.
+		const [meta, site] = await Promise.all([
+			fetch('/api/radars/meta').then((r) => r.json()),
+			resolveHomeView(FALLBACK_HOME)
+		]);
+		radars = meta;
+		home = site.home;
+		overlays = site.overlays;
+		// A persisted toggle for an overlay this deployment does not have would
+		// otherwise stay on and fetch a dataset for the wrong region.
+		if (!hasOverlay('watersheds')) watershedsOn = false;
+		if (!hasOverlay('reservoirs')) reservoirsOn = false;
+		if (!hasOverlay('stream_gauges')) streamGaugesOn = false;
 		// Second pass, now able to drop a decommissioned radar or a renamed
 		// product rather than handing a stale id to MapLibre.
 		const restored = loadPrefs(prefsVocabulary());
@@ -1796,8 +1822,8 @@
 		map = new maplibregl.Map({
 			container: mapDiv,
 			style: styleUrl(),
-			center: cam ? [cam.lng, cam.lat] : DEFAULT_CENTER,
-			zoom: cam ? cam.zoom : DEFAULT_ZOOM,
+			center: cam ? [cam.lng, cam.lat] : home.center,
+			zoom: cam ? cam.zoom : home.zoom,
 			pitch: cam ? cam.pitch : 0,
 			bearing: cam ? cam.bearing : defaultBearingFromRadars(radars),
 			attributionControl: { compact: true },
@@ -2086,6 +2112,7 @@
 		<div class="px-3 pt-2 pb-1">
 			<span class="label">Geography</span>
 		</div>
+		{#if hasOverlay('watersheds')}
 		<button
 			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={() => (watershedsOn = !watershedsOn)}
@@ -2103,6 +2130,8 @@
 				{watershedsOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{/if}
+		{#if hasOverlay('reservoirs')}
 		<button
 			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={() => (reservoirsOn = !reservoirsOn)}
@@ -2120,6 +2149,7 @@
 				{reservoirsOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{/if}
 		<button
 			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={() => (terrainOn = !terrainOn)}
@@ -2155,6 +2185,7 @@
 				{terrain3DOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{#if hasOverlay('stream_gauges')}
 		<button
 			class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={() => (streamGaugesOn = !streamGaugesOn)}
@@ -2172,6 +2203,7 @@
 				{streamGaugesOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{/if}
 
 		<!-- Radars section header with inline moment tabs -->
 		<div class="px-3 pt-2 pb-1">

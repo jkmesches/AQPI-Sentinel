@@ -29,15 +29,71 @@ FLOW_LAT = 34.2048
 FLOW_LON = -118.17081
 FLOW_GATES = 675
 
+ELEVATIONS_SWEPT = (2.5, 3.5, 4.5, 5.5)
+ELEVATION_PUBLISHED = 3.5
+
 RADAR_FOLDER = {"FLOW": "flow"}
+
+# Map geography, same shape as the AQPI table in api/routes/radars.py. Every
+# figure here is read from FLOW's own volume headers rather than sourced
+# second-hand, which makes it the best-attested entry in either table.
+#
+# BAND: X. TxFrequency 9.3993 GHz (AfcFrequency agrees), so lambda = 3.19 cm —
+# X-band is 8-12 GHz, C-band 4-8, and it is not near the boundary. Confirmed
+# independently by the antenna: AntennaBeamwidth 1.4 deg implies a 1.59 m dish
+# at this wavelength and AntennaGain 42.0 dB implies 1.65 m, agreeing within
+# 4%, which they only do at X. The same 1.4 deg beam at C-band would need a
+# 2.68 m dish. Worth recording because "FLOW" carries no band in its name,
+# unlike AQPI's X-prefixed fleet.
+#
+# RANGE: derived, not nominal. GateWidth and StartRange are per-radial
+# VARIABLES in millimetres, not global attributes, which is why a header dump
+# does not show them:
+#     StartRange -113.657 m + 675 gates x 59.941 m = 40,346.5 m
+# GateWidth is a processing constant — bit-identical across every radial and
+# across volumes 40 minutes apart — so this is a fixed instrument geometry,
+# not a measurement that drifts. It agrees with the 40 km nominal class of
+# AQPI's five X-bands to 0.9%, which is an independent check on the
+# arithmetic; the other five entries are vendor-nominal MaxRange figures,
+# while this one is the real last-gate range, so it is kept rather than
+# rounded to match its neighbours. The 346 m difference is invisible as a ring.
+# The map's home view: where it opens, and where Reset returns to.
+#
+# Explicit profile data rather than derived from RADAR_META, because deriving
+# it would move AQPI. Fitting AQPI's nine radars plus their rings puts the
+# centre near 38.5N 121.9W — the three NEXRADs at 100 km drag it ~85 km
+# north-east of the tuned [-122.6, 37.95] the map has always opened at, and
+# changing a live deployment's startup view is not a side effect worth having.
+#
+# Zoom 9.5 frames FLOW's 40.35 km ring: at latitude 34.2 that is
+# 156543*cos(lat)/2^9.5 = 179 m/px, so the 80.7 km ring spans ~450 px — about
+# half the height of a typical map pane, leaving surrounding context visible.
+# One radar, so there is nothing to fit between; the ring IS the extent.
+HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}
+
+# No regional overlays. AQPI's watersheds, reservoirs and stream gauges are all
+# Northern California datasets — two static NorCal files and one radarca-served
+# feed — none of which describes the ground under FLOW. Offering the toggles
+# anyway would draw Bay Area geography far off-screen or silently fail, and a
+# control that does nothing is worse than an absent one. Southern California
+# equivalents can be added here when they exist.
+MAP_OVERLAYS: tuple[str, ...] = ()
+
+RADAR_META = {
+    "FLOW": {"lat": FLOW_LAT, "lon": FLOW_LON, "range_m": 40_346,
+             "kind": "xband", "name": "FLOW (JPL)",
+             # What the radar SWEEPS. Only 3.5 is ever imaged (see
+             # ELEVATION_PUBLISHED) — the imagery resolver stays pinned there,
+             # and the UI must not offer a selector for a choice that does not
+             # exist. Listed because the sweep is a property of the radar.
+             "elevations": list(ELEVATIONS_SWEPT)},
+}
 
 # Elevations the radar sweeps vs the one it publishes. The gap is deliberate
 # to record: a resolver takes elevation as a parameter with a single legal
 # value, so the axis can appear later if publishing 1-of-4 turns out to be an
 # oversight — but the UI must not offer a selector for a choice that does not
 # exist. See 16-§5.2.
-ELEVATIONS_SWEPT = (2.5, 3.5, 4.5, 5.5)
-ELEVATION_PUBLISHED = 3.5
 
 MOMENTS = (
     "Reflectivity",

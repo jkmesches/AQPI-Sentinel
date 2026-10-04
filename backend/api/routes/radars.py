@@ -3,7 +3,7 @@ frontend MapView component."""
 from __future__ import annotations
 from fastapi import APIRouter
 
-from ...config import RADAR_FOLDER
+from ...config import RADAR_FOLDER, RADAR_META_OVERRIDE
 
 router = APIRouter(prefix="/api/radars")
 
@@ -37,9 +37,17 @@ RADAR_META = {
 }
 
 
+# The table above is AQPI's. A profile watching a different network supplies
+# its own and REPLACES this one rather than adding to it — the nine radars
+# below do not exist on another network, and returning them anyway is what put
+# nine Bay Area radars with folder=None, and no FLOW, on the XQPI instance.
+def _meta() -> dict[str, dict]:
+    return RADAR_META_OVERRIDE or RADAR_META
+
+
 @router.get("/meta")
 async def list_radar_meta():
     return [
         {"id": rid, **meta, "folder": RADAR_FOLDER.get(rid)}
-        for rid, meta in RADAR_META.items()
+        for rid, meta in _meta().items()
     ]

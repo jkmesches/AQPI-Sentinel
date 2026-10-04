@@ -106,6 +106,9 @@ from backend import config
 from backend.registry import CHECKS
 from backend.checks.layer1_backend_product import _product_dir
 from backend.checks.layer2_backend_radar import _radar_path
+import asyncio as _aio
+from backend.api.routes.radars import list_radar_meta
+def _radar_meta(): return _aio.run(list_radar_meta())
 _NOW = datetime(2026, 10, 3, 22, 14, tzinfo=timezone.utc)
 print("@@" + json.dumps({
     "profile":        config.SETTINGS.profile,
@@ -115,6 +118,8 @@ print("@@" + json.dumps({
     "backend_source": list(config.BACKEND_SOURCE),
     "products":       sorted(config.PRODUCTS),
     "radars":         sorted(config.RADAR_FOLDER),
+    "site_name": config.SITE_NAME,
+    "radar_meta": {r["id"]: r for r in _radar_meta()},
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
     "declined": dict(__import__("backend.registry", fromlist=["x"]).DECLINED),
@@ -284,6 +289,54 @@ def main() -> int:
     check("no xqpi path carries K2's realtime/product_images/ prefix",
           not any("realtime/product_images" in v for v in
                   (*xqpi["lb1_paths"].values(), *xqpi["lb2_paths"].values())))
+
+    # ---- a monitored radar must be placeable on the map ------------------
+    # /api/radars/meta served AQPI's nine hard-coded Bay Area radars on every
+    # profile: folder=None throughout and no FLOW at all. That is upstream of
+    # any map-extent work — extents cannot place a radar absent from the
+    # payload. The invariant is that anything the profile MONITORS has
+    # geography; the converse is fine, since AQPI's three NEXRADs are drawn
+    # for context and deliberately not monitored.
+    print("\nevery monitored radar has map geography:")
+    for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):
+        meta = prof["radar_meta"]
+        missing = sorted(set(prof["radars"]) - set(meta))
+        check(f"{name}: every radar in RADAR_FOLDER appears in /meta",
+              not missing, ", ".join(missing))
+        check(f"{name}: each one resolves a publish folder",
+              all(meta[r].get("folder") for r in prof["radars"] if r in meta),
+              ", ".join(r for r in prof["radars"]
+                        if r in meta and not meta[r].get("folder")))
+        # range_m is consumed numerically to draw a coverage ring
+        # (MapView: r.range_m / 1000), so a null would break the map rather
+        # than omit a ring.
+        bad = sorted(r for r, m in meta.items()
+                     if not isinstance(m.get("range_m"), (int, float)))
+        check(f"{name}: every entry carries a numeric range_m", not bad,
+              ", ".join(bad))
+    check("aqpi still serves all nine radars",
+          len(aqpi["radar_meta"]) == 9, str(sorted(aqpi["radar_meta"])))
+    check("...and does not leak FLOW into the AQPI map",
+          "FLOW" not in aqpi["radar_meta"])
+    check("xqpi serves FLOW and nothing else",
+          sorted(xqpi["radar_meta"]) == ["FLOW"], str(sorted(xqpi["radar_meta"])))
+    flow = xqpi["radar_meta"].get("FLOW", {})
+    # X-band, from TxFrequency 9.3993 GHz in FLOW's own volume headers; the
+    # kind drives the map's marker styling and legend grouping.
+    check("FLOW is typed as an X-band", flow.get("kind") == "xband",
+          str(flow.get("kind")))
+    check("FLOW sits where its volumes say it does",
+          abs(flow.get("lat", 0) - 34.2048) < 1e-4
+          and abs(flow.get("lon", 0) + 118.17081) < 1e-4,
+          f"{flow.get('lat')},{flow.get('lon')}")
+    check("FLOW's range is the derived last-gate range, not a guess",
+          flow.get("range_m") == 40_346, str(flow.get("range_m")))
+
+    print("\nthe deployment names itself:")
+    check("aqpi is AQPI Sentinel", aqpi["site_name"] == "AQPI Sentinel",
+          aqpi["site_name"])
+    check("xqpi is XQPI Sentinel", xqpi["site_name"] == "XQPI Sentinel",
+          xqpi["site_name"])
 
     print("\nsource tags stay renderable in a two-character column:")
     for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):

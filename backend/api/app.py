@@ -303,9 +303,15 @@ def create_app() -> FastAPI:
         # "AQPI Sentinel", claimed radarca as its data source on a page that
         # never contacts radarca, and listed nine Bay Area radars with no FLOW.
         # One endpoint the frontend already polls, rather than a fourth table.
-        from ..config import HAS_RADARCA, SETTINGS, SITE_NAME
+        from ..config import (HAS_RADARCA, HOME_VIEW, MAP_OVERLAYS, SETTINGS,
+                              SITE_NAME)
         return {"version": __version__, "profile": SETTINGS.profile,
-                "site_name": SITE_NAME, "has_radarca": HAS_RADARCA}
+                "site_name": SITE_NAME, "has_radarca": HAS_RADARCA,
+                # {center: [lon, lat], zoom} when the profile wants the map
+                # opened somewhere other than MapView's tuned Bay Area view.
+                "home_view": HOME_VIEW or None,
+                # Which regional overlay toggles the map should offer at all.
+                "map_overlays": list(MAP_OVERLAYS)}
     app.include_router(version_router)
 
     app.include_router(status_routes.router)
