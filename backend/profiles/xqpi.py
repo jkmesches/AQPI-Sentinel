@@ -18,6 +18,23 @@ What makes this a different shape from AQPI, not just different values:
     ScanPattern 21 but only 3.5 is ever imaged, so there is no tilt axis to
     render and no elevation selector to offer.
 """
+# --------------------------------------------------------------------------
+# PROVENANCE
+# --------------------------------------------------------------------------
+# Every figure below is tagged, because a borrowed number and a measured one
+# look identical once they are both constants in a file — and that is not
+# hypothetical here. A "max 12 min" quoted from the survey sat thirty lines
+# from a 28-minute gap measured directly, in this file, and the two were never
+# read against each other.
+#
+#   [M] measured here, against the live tree or the files' own headers.
+#   [V] taken from the survey AND independently reproduced here.
+#   [Q] taken from the survey and NOT independently checked. Treat as a
+#       starting value, not as evidence. Every [Q] below is a threshold that
+#       gates an alarm, which is the class worth knowing you are trusting.
+#
+# The rule this encodes: a number from someone else's document is not evidence
+# until something measured here has reproduced or contradicted it.
 from __future__ import annotations
 
 # --------------------------------------------------------------------------
@@ -25,11 +42,11 @@ from __future__ import annotations
 # --------------------------------------------------------------------------
 # Pasadena, 0.39 km from JPL's campus — ~375 km outside the AQPI map extents,
 # which is why XQPI needs its own georeferencing rather than inheriting any.
-FLOW_LAT = 34.2048
-FLOW_LON = -118.17081
-FLOW_GATES = 675
+FLOW_LAT = 34.2048        # [M] volume globals, Latitude
+FLOW_LON = -118.17081     # [M] volume globals, Longitude
+FLOW_GATES = 675          # [M] volume globals, NumGates
 
-ELEVATIONS_SWEPT = (2.5, 3.5, 4.5, 5.5)
+ELEVATIONS_SWEPT = (2.5, 3.5, 4.5, 5.5)   # [V] all four seen in raw filenames
 ELEVATION_PUBLISHED = 3.5
 
 RADAR_FOLDER = {"FLOW": "flow"}
@@ -69,7 +86,7 @@ RADAR_FOLDER = {"FLOW": "flow"}
 # 156543*cos(lat)/2^9.5 = 179 m/px, so the 80.7 km ring spans ~450 px — about
 # half the height of a typical map pane, leaving surrounding context visible.
 # One radar, so there is nothing to fit between; the ring IS the extent.
-HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}
+HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}  # [M] computed here
 
 # No regional overlays. AQPI's watersheds, reservoirs and stream gauges are all
 # Northern California datasets — two static NorCal files and one radarca-served
@@ -121,7 +138,7 @@ MAP_OVERLAYS: tuple[str, ...] = ()
 # place them with confident-looking numbers taken from a different product's
 # geometry, which is exactly the failure this is avoiding. They are omitted
 # from the picker until their geometry is known.
-COMP_EXTENT = {
+COMP_EXTENT = {   # [M] both sides derived it independently, agreeing sub-metre
     "composite_ref": {"west": -119.5640, "east": -117.0000,
                       "south": 33.2877, "north": 35.0267},
 }
@@ -140,7 +157,8 @@ PRODUCT_LABELS = {
 }
 RADAR_META = {
     "FLOW": {"lat": FLOW_LAT, "lon": FLOW_LON, "range_m": 40_346,
-             "kind": "xband", "name": "FLOW (JPL)",
+             "kind": "xband",   # [M] TxFrequency 9.3993 GHz
+             "name": "FLOW (JPL)",
              # What the radar SWEEPS. Only 3.5 is ever imaged (see
              # ELEVATION_PUBLISHED) — the imagery resolver stays pinned there,
              # and the UI must not offer a selector for a choice that does not
@@ -163,7 +181,7 @@ MOMENTS = (
 
 # Raw volume arrival: 120/hour, p50 24 s, p90 50 s (16-§2). 1800 s gives the
 # LB2 banding pass <=24 min / warn <=30 min / fail >30 min.
-RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
+RADAR_SILENT_FAIL_S = {"FLOW": 1_800}     # [Q] from survey arrival stats
 
 # --------------------------------------------------------------------------
 # Published product families
@@ -194,8 +212,8 @@ RADAR_SILENT_FAIL_S = {"FLOW": 1_800}
 # B_freshness is a two-way pass/fail against one limit, unlike LB2's three-way
 # banding. Raised with the laptop session; until LB1 grows a warn band the
 # 25-minute fail is the whole of it.
-_CYCLE_S = 120
-_FAIL_AGE_S = 1_500
+_CYCLE_S = 120        # [V] 2.0-min gaps observed between healthy steps
+_FAIL_AGE_S = 1_500   # [Q] the survey's proposed FAIL; never derived here
 
 # `expected_steps` is NOT a window size. Measured 2026-10-04 00:00 UTC, all
 # five manifests read 8 steps spanning 22:54 -> 23:54, with inter-step gaps of
@@ -229,20 +247,20 @@ _WINDOW_FRAMES = 14
 # a freshness scan over those directories must still exclude it. The composite
 # families below contain no stray entries at all, so they need no exclusion.
 # See 16-§9.
-COLORBAR_GLOB = "*colorbar*"
+COLORBAR_GLOB = "*colorbar*"   # [Q] not observed directly; no check reads it yet
 
 # Raw volumes arrive both compressed and not.
-RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")
+RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")   # [V] both extensions seen in flow/
 
 # Published composites sit directly under PRODUCT_IMAGES/, undated, as a
 # rolling window — NOT under K2's realtime/product_images/. Different case,
 # different depth, no date partition. See 16-§1.
-PRODUCT_IMAGES_PREFIX = ("PRODUCT_IMAGES",)
+PRODUCT_IMAGES_PREFIX = ("PRODUCT_IMAGES",)   # [M] observed on the live tree
 
 # FLOW's raw volumes are date-partitioned, the same shape as AQPI's CBAND tree
 # but rooted inside the profile's own mount rather than a separate one.
 # strftime template, relative to SETTINGS.backend_root, evaluated in UTC.
-RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}
+RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}  # [M] observed; UTC-partitioned
 
 # --------------------------------------------------------------------------
 # Freshness basis — DO NOT use mtime on this tree
@@ -288,8 +306,8 @@ RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}
 #
 # So the observation-time rule applies to every tree on this profile, not only
 # the raw volumes the gzip sweep rewrites.
-LB1_FRESHNESS = "manifest"      # the per-step timestamp the manifest declares
-LB2_FRESHNESS = "filename"      # flow-<YYYYMMDD>-<HHMMSS>_...
+LB1_FRESHNESS = "manifest"      # [M] the per-step timestamp the manifest declares
+LB2_FRESHNESS = "filename"      # [M] flow-<YYYYMMDD>-<HHMMSS>_...
 
 # Anchored at the start and excluding dotfiles upstream, so a gzip temp file
 # cannot match even though its name embeds the same timestamp.
@@ -305,7 +323,8 @@ PRODUCTS = {
     "composite_ref":     {"details": "composite_ref/details.json",
                           "image_dir": "composite_ref/images/",
                           "cadence_s": _CYCLE_S, "expected_steps": _WINDOW_FRAMES,
-                          "max_freshness_s": _FAIL_AGE_S, "min_png_bytes": 5_000,
+                          "max_freshness_s": _FAIL_AGE_S,
+                          "min_png_bytes": 5_000,   # [Q] carried from AQPI
                           "backend_max_age_s": _FAIL_AGE_S,
                           "unit": "dBZ"},
     # details_in.json + details_mm.json over images/in/ and images/mm/.
