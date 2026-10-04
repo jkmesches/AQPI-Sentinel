@@ -19,6 +19,7 @@
 	// about what a cell means — see $lib/timelineFill.
 	import { STATUS_BG, cellFill, cellRatioText } from '$lib/timelineFill';
 	import { prettyCheckLabel, stageLabel, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES } from '$lib/format';
+	import { isBackendStage, BACKEND_STAGE_OF } from '$lib/format';
 	import MobileDrillDown from '$lib/components/mobile/MobileDrillDown.svelte';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import { url as apiUrl } from '$lib/origin';
@@ -143,7 +144,16 @@
 		}
 
 		const inTab = columns.filter((c) => tabCfg.stages.includes(c.stage));
-		inTab.sort((a, b) => a.id.localeCompare(b.id));
+		// Order by TARGET first, not by id. Sorting by id clusters every
+		// `layer1.backend.*` column before every `layer1.product.*` one, which
+		// puts the two readings of one product at opposite ends of the group --
+		// the same "far from each other" complaint that produced the paired
+		// desktop rails. By target they land side by side, radarca first within
+		// a target, matching the timeline's primary-then-secondary order.
+		inTab.sort((a, b) =>
+			(a.target || '').localeCompare(b.target || '')
+			|| Number(isBackendStage(a.stage)) - Number(isBackendStage(b.stage))
+			|| a.id.localeCompare(b.id));
 
 		if (subtab === 'connectivity') {
 			return inTab.length ? [{ label: 'Connectivity', cols: inTab }] : [];
@@ -156,14 +166,20 @@
 				.map((cat) => ({ label: PRODUCT_CATEGORY_LABEL[cat], cols: byCat[cat] }))
 				.filter((sg) => sg.cols.length > 0);
 		}
-		// radar: group by stage
+		// radar: group by stage, except that a backend stage gets no group of
+		// its own -- it folds into the stage it mirrors, so LB2's columns sit
+		// beside their L2 counterparts rather than in a separate block further
+		// along a grid the user scrolls sideways.
 		const byStage = new Map<string, CheckMeta[]>();
 		for (const c of inTab) {
-			if (!byStage.has(c.stage)) byStage.set(c.stage, []);
-			byStage.get(c.stage)!.push(c);
+			const key = isBackendStage(c.stage) ? (mirrorOf(c.stage) ?? c.stage) : c.stage;
+			if (!byStage.has(key)) byStage.set(key, []);
+			byStage.get(key)!.push(c);
 		}
 		const out: Subgroup[] = [];
-		for (const s of ['L2', 'LB2', 'L3', 'L4-T1T2']) {
+		// 'LB2' stays listed, last, for a profile that registers it with no L2
+		// to fold into -- XQPI, where it is the only radar group there is.
+		for (const s of ['L2', 'L3', 'L4-T1T2', 'LB2']) {
 			const cols = byStage.get(s);
 			if (cols?.length) out.push({ label: stageLabel(s), cols });
 		}
@@ -182,10 +198,36 @@
 	);
 
 	const cellKey = (c: CheckMeta) => `${c.id}|${c.target}`;
+	// Which primary stage a backend stage mirrors -- the inverse of
+	// BACKEND_STAGE_OF, so LB2 folds into L2.
+	function mirrorOf(backendStage: string): string | null {
+		for (const [primary, bk] of Object.entries(BACKEND_STAGE_OF)) {
+			if (bk === backendStage) return primary;
+		}
+		return null;
+	}
+
+	// Targets carrying a reading from BOTH sources in the current tab. Only
+	// these need a tag: a lone column is unambiguous, and these headers are
+	// rotated -45deg and truncated at 68px, so every character is costly.
+	const pairedTargets = $derived.by(() => {
+		const rc = new Set<string>();
+		const bk = new Set<string>();
+		for (const c of flatCols) (isBackendStage(c.stage) ? bk : rc).add(c.target);
+		return new Set([...bk].filter((t) => rc.has(t)));
+	});
+
 	function shortLabel(c: CheckMeta): string {
 		// Compact column header. Strip prefixes, drop underscores.
 		const t = c.target || c.id.split('.').pop() || c.id;
-		return t.replace(/_/g, ' ');
+		const base = t.replace(/_/g, ' ');
+		// Without this a paired target renders two IDENTICAL headers side by
+		// side, with nothing saying which column read which tree. Joined with
+		// the same non-breaking space the label already uses, so the tag
+		// cannot wrap away from the name it belongs to.
+		if (!pairedTargets.has(c.target)) return base;
+		const tag = isBackendStage(c.stage) ? (c.source_tag ?? 'BK') : 'RC';
+		return `${base} ${tag}`;
 	}
 
 	async function loadInitial() {
