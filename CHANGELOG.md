@@ -28,6 +28,115 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-04
+
+Everything v0.6.0 got wrong about running a second profile, found by standing
+one up. **No behavior change for AQPI** — every fix is either inert there or
+restores something that was already true.
+
+### Fixed
+
+- **`SENTINEL_PROFILE` never reached the container.** v0.6.0 documented it in
+  `ops/.env.prod.example`, complete with a note that an unknown value refuses
+  to boot, and wired it into neither compose file. Neither has an `env_file:`,
+  so `--env-file` supplies `${...}` interpolation only and a variable reaches
+  the process solely by being named in an `environment:` block. Setting the
+  documented knob did nothing.
+
+  Harmless for AQPI, which wants the default anyway. For XQPI it failed in the
+  worst direction: the stack starts clean, passes its health checks, and
+  monitors AQPI's product list against a trinity mount, so every check reports
+  missing products and it reads as a broken XQPI rather than a misconfigured
+  one.
+
+  `test_compose_parity` could not have caught it — it compares the two compose
+  files to each other, and the variable was missing from both. It now asserts
+  against `ops/.env.prod.example` instead, which is what an operator actually
+  reads: every documented knob must be named in some service's environment or
+  sit in an explicit allowlist of interpolation-only variables, checked in both
+  directions.
+
+- **Two radarca checks registered on a profile with no radarca.**
+  `layer2.radar.FLOW` asked radarca about a radar it has never heard of, and
+  `layer2.xband.fleet` correlated a fleet that does not exist there. The live
+  XQPI instance served 11 checks where the test measured 9.
+
+  `checks/__init__` skipped the module, but `prewarm.py` imports it at module
+  scope for one constant, which executes its registrations regardless — and
+  loads even with `SENTINEL_PREWARM_ENABLED=0`, because the import sits outside
+  the guard. "This module is not imported" is a property of the whole import
+  graph, not of the gate, so it was never a guarantee.
+
+  `registry.register()` now refuses a check whose defining module is
+  radarca-only when `HAS_RADARCA` is false — one check in the one place every
+  check must pass through. Declined checks are recorded in `registry.DECLINED`
+  rather than vanishing, so "why is this check missing" has an answer. The
+  module list is now canonical in `config.RADARCA_ONLY_MODULES`; the profile no
+  longer restates it.
+
+  The test's probe imported `backend.checks` alone — a module graph the
+  application never runs in. It now imports `prewarm` and `api.app`, and
+  asserts the registry *actively declined* those checks rather than merely
+  never having seen them.
+
+- **`/api/radars/meta` served AQPI's nine Bay Area radars on every profile**,
+  with `folder=None` throughout and no FLOW at all. A profile that supplies its
+  own radar table now replaces it wholesale rather than adding to it.
+
+- `CheckMeta`'s documentation still called the source tag `"TRIN"`.
+
+### Added
+
+- **The profile is served over `/api/version`** — `profile`, `site_name`,
+  `has_radarca`, `home_view`, `map_overlays`, `comp_extent`. It previously did
+  not exist outside the backend, so the frontend could not adapt even in
+  principle: branding, radar metadata and map extents were each hard-coded to
+  AQPI independently.
+
+- **FLOW's radar geography**, derived from its own volume headers rather than
+  sourced second-hand. It is X-band: `TxFrequency` 9.3993 GHz gives λ = 3.19 cm,
+  and the antenna agrees independently — `AntennaBeamwidth` 1.4° implies a
+  1.59 m dish at that wavelength while `AntennaGain` 42.0 dB implies 1.65 m,
+  which only reconcile at X. Range is 40,346 m, from `StartRange` −113.657 m
+  plus 675 × `GateWidth` 59.941 m; both are per-radial variables in
+  millimetres, not global attributes.
+
+### Changed
+
+- **The map opens over the radars the deployment actually has.** XQPI watches
+  one radar in Pasadena, 375 km outside both AQPI extents, and the map opened
+  on the Bay Area with its only radar off-screen. The home view is profile
+  data, deliberately not derived from the radar list — fitting AQPI's nine
+  radars plus their rings centres ~85 km north-east of the view it has always
+  opened at, dragged by the three 100 km NEXRADs.
+
+- **Regional overlays are declared per profile.** Watersheds, reservoirs and
+  stream gauges are all Northern California — two static files literally named
+  `*-norcal`, one feed served through radarca. Their toggles are hidden where
+  the deployment has no data for them, and a persisted toggle for an absent
+  overlay is cleared rather than left fetching the wrong region.
+
+- **XQPI composites are placed on a provisional extent.** The publisher
+  supplies no bounds — no worldfile, nothing in the manifests, and the rasters
+  are fully transparent with no coastline to register against — so the box is
+  an assumption: that a one-radar composite covers that radar's coverage,
+  taken as the bounding box of FLOW's range ring.
+
+  It may be wrong. XQPI's `qpe_15min` is byte-identical in size to AQPI's
+  `rain15min`, and at AQPI's ~144 m/px that implies a 244 × 332 km regional
+  domain in which FLOW would fill a third of the width. So the provisional
+  status travels as data all the way to a marker on the map, because a placed
+  overlay is pixel-for-pixel as convincing as a surveyed one and a QPE layer
+  off by kilometres attributes rainfall to the wrong watershed.
+
+### Notes for operators
+
+- **No migration and no new environment variable.** `SENTINEL_PROFILE` already
+  existed in `ops/.env.prod.example`; it now actually takes effect, which is
+  the point of this release.
+- An AQPI deployment that upgrades gets no visible change: same 63 checks, same
+  map, same radar list, same home view.
+
 ## [0.6.0] — 2026-10-04
 
 Theme: **a second deployment profile.** Dr. Chandrasekar asked for an "XQPI
