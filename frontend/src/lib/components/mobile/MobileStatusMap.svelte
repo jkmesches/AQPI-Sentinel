@@ -12,6 +12,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { url as apiUrl } from '$lib/origin';
+	import { resolveHomeView, type HomeView } from '$lib/homeView';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 
 	// Stadia styles — same as desktop MapView. Theme-locked at mount.
@@ -133,6 +134,9 @@
 	}
 
 	let radars = $state<RadarMeta[]>([]);
+	// The mobile map's own tuned Bay Area view, kept as the fallback. Slightly
+	// wider than the desktop one because the pane is narrower.
+	const FALLBACK_HOME: HomeView = { center: [-122.5, 37.75], zoom: 6.7 };
 	let loadError = $state<string | null>(null);
 	let styleReady = $state(false);
 	// iOS Safari freely drops the WebGL context (backgrounding, memory
@@ -409,6 +413,12 @@
 			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 			const all = (await resp.json()) as RadarMeta[];
 			radars = all.filter((r) => r.kind === 'xband' || r.kind === 'cband');
+			// Where this deployment's map opens. Hard-coded Bay Area until now,
+			// which put XQPI's only radar 375 km off-screen. Resolved before the
+			// map is constructed so it builds at the right camera rather than
+			// snapping. See $lib/homeView.
+			const site = await resolveHomeView(FALLBACK_HOME, fetch,
+			                                   apiUrl('/api/version'));
 
 			const mod = await import('maplibre-gl');
 			maplibregl = (mod as any).default ?? mod;
@@ -417,8 +427,8 @@
 			map = new maplibregl.Map({
 				container: mapDiv,
 				style: theme.resolved === 'light' ? STYLE_LIGHT : STYLE_DARK,
-				center: [-122.5, 37.75],
-				zoom: 6.7,
+				center: site.home.center,
+				zoom: site.home.zoom,
 				bearing: defaultBearing(radars),
 				attributionControl: false,
 				dragRotate: false,

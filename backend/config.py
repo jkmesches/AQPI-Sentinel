@@ -429,6 +429,29 @@ HAS_RADARCA: bool = True
 # rather than a fifth table that knows the answer independently.
 SITE_NAME: str = "AQPI Sentinel"
 
+# Radar map geography, when the profile supplies its own. Empty means "use the
+# AQPI table in api/routes/radars.py", which stays where it is because it
+# carries a long provenance comment per radar and is not profile data.
+#
+# /api/radars/meta returned those nine hard-coded Bay Area radars on EVERY
+# profile, with folder=None throughout and no FLOW at all — so the frontend
+# had nothing to place, which is upstream of any map-extent work.
+RADAR_META_OVERRIDE: dict[str, dict] = {}
+
+# Where the map opens, when the profile wants somewhere other than the Bay
+# Area. Empty means "keep MapView's own tuned constants", which is what every
+# AQPI deployment has always used.
+HOME_VIEW: dict = {}
+
+# Regional map furniture this deployment has data for. All three AQPI layers
+# are Northern California — the static files are literally named
+# `watersheds-huc8-norcal.geojson` and `reservoirs-norcal.json`, and
+# stream_gauges is served through radarca. On a profile watching a radar in
+# Pasadena they would draw Bay Area geography 375 km off-screen, or fail, while
+# still offering a toggle that appears to do nothing. A named list rather than
+# a boolean so a future deployment can have some and not others.
+MAP_OVERLAYS: tuple[str, ...] = ("watersheds", "reservoirs", "stream_gauges")
+
 # Check modules that exist only because radarca does — every one of them talks
 # to SETTINGS.base. Canonical here rather than in checks/__init__ because
 # backend.registry needs it too and cannot import that package without a
@@ -496,6 +519,9 @@ if SETTINGS.profile == "xqpi":
     LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
     SITE_NAME = _xqpi.SITE_NAME
+    RADAR_META_OVERRIDE = _xqpi.RADAR_META
+    HOME_VIEW = _xqpi.HOME_VIEW
+    MAP_OVERLAYS = _xqpi.MAP_OVERLAYS
     HAS_RADARCA = False
 elif SETTINGS.profile != "aqpi":
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
