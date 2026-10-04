@@ -239,7 +239,7 @@ def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,
 
 
 # --------------------------------------------------------------------------
-# Register one instance per radar. FLOW is intentionally excluded for now.
+# Register one instance per radar in the profile's table (FLOW on xqpi).
 # --------------------------------------------------------------------------
 
 # Gated identically to layer1_backend_product. CBAND additionally requires
