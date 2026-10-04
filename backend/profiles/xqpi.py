@@ -79,6 +79,45 @@ HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}
 # equivalents can be added here when they exist.
 MAP_OVERLAYS: tuple[str, ...] = ()
 
+# --------------------------------------------------------------------------
+# Composite overlay bounds — PROVISIONAL, NOT SOURCED
+# --------------------------------------------------------------------------
+# *** This is a guess, shipped deliberately and knowingly. ***
+#
+# The publisher gives no bounds: the manifests carry only product/time/steps,
+# there is no worldfile, and the rasters are fully transparent RGBA with no
+# coastline or graticule to register against. So this box is an ASSUMPTION —
+# that a composite built from one radar covers that radar's own coverage —
+# expressed as the bounding box of FLOW's 40.35 km range ring:
+#
+#     lat 34.2048 +/- 0.36488 deg      (40.35 km / 110.574 km per deg)
+#     lon -118.17081 +/- 0.43823 deg      (/ 111.320 * cos(lat))
+#
+# WHY IT MAY BE WRONG. AQPI's composites are network-wide, not per-radar: one
+# extent spanning 244 x 332 km across nine radars. If XQPI's publisher works
+# the same way, its domain is regional too and this box is far too small. The
+# pixel geometry hints that way — XQPI's qpe_15min is 1697x2310, byte-identical
+# to AQPI's rain15min, and at AQPI's ~144 m/px that is a 244 x 332 km domain,
+# in which FLOW's coverage would occupy about a third of the width. Against
+# that, composite_ref is 1365x1108 here versus 843x1108 on AQPI, so the two
+# deployments do not share a domain shape and the resolution may differ too.
+#
+# A misplaced QPE overlay reports rain on the wrong watershed and looks
+# authoritative doing it, so this is flagged provisional all the way to the
+# API and must not be mistaken for a sourced figure.
+#
+# TO REPLACE IT, either of:
+#   1. the four corners from whoever publishes the imagery — definitive;
+#   2. fit the echo's outer edge in the first frame carrying weather. A
+#      single-radar composite is bounded by that radar's own range circle, so
+#      the fitted centre and radius give the transform outright. Everything in
+#      the window is currently empty (clear over Pasadena).
+COMP_EXTENT_PROVISIONAL = True
+COMP_EXTENT = {
+    "west": -118.60904, "east": -117.73258,
+    "south": 33.83992, "north": 34.56968,
+}
+
 RADAR_META = {
     "FLOW": {"lat": FLOW_LAT, "lon": FLOW_LON, "range_m": 40_346,
              "kind": "xband", "name": "FLOW (JPL)",

@@ -20,16 +20,48 @@
 export const ALL_OVERLAYS = ['watersheds', 'reservoirs', 'stream_gauges'] as const;
 export type Overlay = (typeof ALL_OVERLAYS)[number];
 
+/** Geographic bounds for a raster overlay, in the shape MapView already uses. */
+export interface Extent {
+	west: number;
+	east: number;
+	south: number;
+	north: number;
+}
+
 export interface SiteMap {
 	home: HomeView;
 	/** Which overlay toggles to offer. Empty means offer none. */
 	overlays: readonly Overlay[];
+	/**
+	 * One box applied to every composite this deployment publishes, replacing
+	 * the per-product table. Null keeps that table, which is AQPI's.
+	 */
+	compExtent: Extent | null;
+	/**
+	 * Whether `compExtent` is sourced or assumed. XQPI's is a guess — the
+	 * publisher supplies no bounds — so the map says so rather than presenting
+	 * a placed overlay with the same confidence as a surveyed one.
+	 */
+	compExtentProvisional: boolean;
 }
 
 export interface HomeView {
 	/** [lon, lat] — MapLibre's order, not lat/lon. */
 	center: [number, number];
 	zoom: number;
+}
+
+function looksLikeExtent(v: unknown): v is Extent {
+	if (!v || typeof v !== 'object') return false;
+	const e = v as Extent;
+	return (
+		[e.west, e.east, e.south, e.north].every((n) => Number.isFinite(n)) &&
+		// A reversed or zero-area box renders as an invisible or mirrored
+		// overlay rather than erroring, so reject it here.
+		e.west < e.east && e.south < e.north &&
+		Math.abs(e.west) <= 180 && Math.abs(e.east) <= 180 &&
+		Math.abs(e.south) <= 90 && Math.abs(e.north) <= 90
+	);
 }
 
 function looksLikeHomeView(v: unknown): v is HomeView {
@@ -62,7 +94,10 @@ export async function resolveHomeView(
 	fetcher: typeof fetch = fetch,
 	url = '/api/version'
 ): Promise<SiteMap> {
-	const miss: SiteMap = { home: fallback, overlays: ALL_OVERLAYS };
+	const miss: SiteMap = {
+		home: fallback, overlays: ALL_OVERLAYS,
+		compExtent: null, compExtentProvisional: false
+	};
 	try {
 		const resp = await fetcher(url);
 		if (!resp.ok) return miss;
@@ -78,7 +113,14 @@ export async function resolveHomeView(
 			// profile saying it has none, and must be honoured.
 			overlays: Array.isArray(ov)
 				? ov.filter((o): o is Overlay => (ALL_OVERLAYS as readonly string[]).includes(o))
-				: ALL_OVERLAYS
+				: ALL_OVERLAYS,
+			compExtent: looksLikeExtent(body?.comp_extent) ? body.comp_extent : null,
+			// Only meaningful alongside an extent, and defaults to "assumed"
+			// when an extent is present but the flag is missing: an unlabelled
+			// box from an unknown source is not evidence that it was surveyed.
+			compExtentProvisional: looksLikeExtent(body?.comp_extent)
+				? body?.comp_extent_provisional !== false
+				: false
 		};
 	} catch {
 		return miss;

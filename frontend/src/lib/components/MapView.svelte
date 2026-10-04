@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
-	import { resolveHomeView, ALL_OVERLAYS, type HomeView, type Overlay } from '$lib/homeView';
+	import { resolveHomeView, ALL_OVERLAYS, type HomeView, type Overlay,
+	         type Extent } from '$lib/homeView';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
@@ -322,6 +323,14 @@
 	// toggle that silently does nothing.
 	let overlays = $state<readonly Overlay[]>(ALL_OVERLAYS);
 	const hasOverlay = (o: Overlay) => overlays.includes(o);
+	// One box for every composite, when the profile supplies it; otherwise the
+	// per-product COMP_EXTENT table below, which is AQPI's and is sourced.
+	let compExtent = $state<Extent | null>(null);
+	// True when that box is an assumption rather than surveyed corners. Shown
+	// on the map: a guessed overlay is pixel-for-pixel as convincing as a
+	// sourced one, and a QPE layer off by kilometres attributes rain to the
+	// wrong watershed.
+	let compExtentProvisional = $state(false);
 
 	// --- persisted map settings -------------------------------------------
 	// Restored on mount, saved on change, cleared by Reset. Playback position
@@ -737,7 +746,10 @@
 	let _compositeToken = 0;
 	async function renderCompositeFrame() {
 		if (!map || !styleReady) return;
-		const e = COMP_EXTENT[composite];
+		// The profile's box replaces the per-product table wholesale: its
+		// product ids are not AQPI's, so a lookup would miss and silently draw
+		// nothing. `composite === 'none'` still means no overlay.
+		const e = composite === 'none' ? null : (compExtent ?? COMP_EXTENT[composite]);
 		if (!e || stepIdx < 0) {
 			if (map.getLayer('comp-overlay-layer')) map.removeLayer('comp-overlay-layer');
 			if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
@@ -1806,6 +1818,8 @@
 		radars = meta;
 		home = site.home;
 		overlays = site.overlays;
+		compExtent = site.compExtent;
+		compExtentProvisional = site.compExtentProvisional;
 		// A persisted toggle for an overlay this deployment does not have would
 		// otherwise stay on and fetch a dataset for the wrong region.
 		if (!hasOverlay('watersheds')) watershedsOn = false;
@@ -1981,6 +1995,27 @@
 	<div class="relative flex-1">
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 
+		<!-- Provisional-georeferencing marker. The composite overlay is placed
+		     from an ASSUMED extent on this deployment — the publisher supplies
+		     no bounds — so the pixels may sit kilometres from where the rain
+		     actually fell. A placed overlay is pixel-for-pixel as convincing
+		     as a surveyed one, which is exactly why this has to be said on the
+		     map rather than only in a comment.
+		     Bottom-left, unlike the stale banner: that one is about data an
+		     operator must not act on at all, this is about data that is real
+		     but whose POSITION is unverified. Non-interactive. -->
+		{#if compExtentProvisional && composite !== 'none'}
+			<div class="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[60%]">
+				<div class="rounded-sm border border-[var(--color-warn)]/70 bg-[var(--color-canvas)]/90 px-2 py-1 shadow-lg backdrop-blur">
+					<div class="num text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]">
+						⚠ Overlay position provisional
+					</div>
+					<div class="num mt-0.5 text-[9.5px] text-[var(--color-muted)]">
+						Bounds assumed from the radar's range ring; not supplied by the publisher.
+					</div>
+				</div>
+			</div>
+		{/if}
 		<!-- Stale-composite banner. Deliberately centerd over the map rather
 		     than tucked in a corner: the failure this guards against is an
 		     operator reading a 50-day-old inundation frame as current, and a

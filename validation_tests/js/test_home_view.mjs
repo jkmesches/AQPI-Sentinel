@@ -80,6 +80,48 @@ export function runTests(mod) {
       check('...while the correct order is accepted', r.home.center[1] === 34.2048);
     }
 
+    console.log('\nthe composite extent, and whether it is sourced:');
+    {
+      const EXT = { west: -118.609, east: -117.733, south: 33.840, north: 34.570 };
+      const r = await run({ comp_extent: EXT, comp_extent_provisional: true });
+      check('a valid extent is carried through', r.compExtent?.west === -118.609,
+        JSON.stringify(r.compExtent));
+      check('and flagged provisional', r.compExtentProvisional === true);
+    }
+    {
+      const r = await run({ version: '0.6.0' });
+      check('no extent -> null, so the per-product table is kept',
+        r.compExtent === null);
+      check('...and nothing is flagged provisional', r.compExtentProvisional === false);
+    }
+    {
+      // An unlabelled box from an unknown source is not evidence of a survey.
+      const r = await run({ comp_extent: { west: -1, east: 1, south: -1, north: 1 } });
+      check('an extent with NO provisional flag defaults to provisional',
+        r.compExtentProvisional === true);
+    }
+    {
+      const r = await run({ comp_extent: { west: -1, east: 1, south: -1, north: 1 },
+                            comp_extent_provisional: false });
+      check('...and an explicit false is honoured', r.compExtentProvisional === false);
+    }
+    for (const [label, ext] of [
+      ['reversed longitude', { west: 1, east: -1, south: -1, north: 1 }],
+      ['reversed latitude',  { west: -1, east: 1, south: 1, north: -1 }],
+      ['zero area',          { west: 1, east: 1, south: 1, north: 1 }],
+      ['out of range',       { west: -200, east: 1, south: -1, north: 1 }],
+      ['NaN edge',           { west: NaN, east: 1, south: -1, north: 1 }],
+      ['missing edge',       { west: -1, east: 1, south: -1 }],
+      ['not an object',      'everywhere'],
+    ]) {
+      const r = await run({ comp_extent: ext, comp_extent_provisional: true });
+      // A reversed or zero-area box renders mirrored or invisible rather than
+      // erroring, so it must be rejected here, and rejecting it must also
+      // clear the provisional flag — there is no box left to caveat.
+      check(`${label} -> rejected`, r.compExtent === null && !r.compExtentProvisional,
+        JSON.stringify(r.compExtent));
+    }
+
     console.log('\nunknown overlay names are dropped, not passed through:');
     {
       const r = await run({ map_overlays: ['watersheds', 'tidal_gauges', 'reservoirs'] });

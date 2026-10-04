@@ -120,6 +120,8 @@ print("@@" + json.dumps({
     "radars":         sorted(config.RADAR_FOLDER),
     "site_name": config.SITE_NAME,
     "radar_meta": {r["id"]: r for r in _radar_meta()},
+    "comp_extent": config.COMP_EXTENT or None,
+    "comp_extent_provisional": config.COMP_EXTENT_PROVISIONAL,
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
     "declined": dict(__import__("backend.registry", fromlist=["x"]).DECLINED),
@@ -331,6 +333,35 @@ def main() -> int:
           f"{flow.get('lat')},{flow.get('lon')}")
     check("FLOW's range is the derived last-gate range, not a guess",
           flow.get("range_m") == 40_346, str(flow.get("range_m")))
+
+    # ---- the composite extent, where a profile supplies one --------------
+    print("\nthe composite overlay box is consistent with the radar:")
+    check("aqpi keeps the frontend's per-product table",
+          aqpi["comp_extent"] is None, str(aqpi["comp_extent"]))
+    check("...and claims nothing provisional", not aqpi["comp_extent_provisional"])
+    ext = xqpi["comp_extent"]
+    check("xqpi supplies one box", ext is not None)
+    check("...flagged provisional, because it is assumed not sourced",
+          xqpi["comp_extent_provisional"] is True)
+    if ext:
+        check("the box is not inside out",
+              ext["west"] < ext["east"] and ext["south"] < ext["north"], str(ext))
+        # The whole basis of the guess is "a one-radar composite covers that
+        # radar's coverage". If the box does not contain the radar, the guess
+        # is not even self-consistent.
+        check("the box contains FLOW",
+              ext["west"] < flow["lon"] < ext["east"]
+              and ext["south"] < flow["lat"] < ext["north"],
+              f"{flow['lon']},{flow['lat']} vs {ext}")
+        import math as _m
+        half_ns = (ext["north"] - ext["south"]) / 2 * 110.574
+        half_ew = (ext["east"] - ext["west"]) / 2 * 111.320 * _m.cos(
+            _m.radians(flow["lat"]))
+        rng_km = flow["range_m"] / 1000
+        check("...and spans the range ring to within 1%",
+              abs(half_ns - rng_km) / rng_km < 0.01
+              and abs(half_ew - rng_km) / rng_km < 0.01,
+              f"NS {half_ns:.2f} km, EW {half_ew:.2f} km vs range {rng_km:.2f} km")
 
     print("\nthe deployment names itself:")
     check("aqpi is AQPI Sentinel", aqpi["site_name"] == "AQPI Sentinel",

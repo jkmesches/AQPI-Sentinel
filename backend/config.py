@@ -452,6 +452,19 @@ HOME_VIEW: dict = {}
 # a boolean so a future deployment can have some and not others.
 MAP_OVERLAYS: tuple[str, ...] = ("watersheds", "reservoirs", "stream_gauges")
 
+# Geographic bounds for this profile's composite overlays, when it supplies
+# them. Empty means "use MapView's own per-product table", which is AQPI's and
+# is sourced from the upstream bundle. A profile that fills this in applies ONE
+# box to all of its composites.
+#
+# COMP_EXTENT_PROVISIONAL says whether that box is sourced or assumed. It rides
+# all the way to the API because a composite overlay placed on a guess looks
+# exactly as authoritative as one placed on surveyed corners, and the
+# difference matters: a QPE layer off by kilometres attributes rainfall to the
+# wrong watershed.
+COMP_EXTENT: dict[str, float] = {}
+COMP_EXTENT_PROVISIONAL: bool = False
+
 # Check modules that exist only because radarca does — every one of them talks
 # to SETTINGS.base. Canonical here rather than in checks/__init__ because
 # backend.registry needs it too and cannot import that package without a
@@ -522,6 +535,8 @@ if SETTINGS.profile == "xqpi":
     RADAR_META_OVERRIDE = _xqpi.RADAR_META
     HOME_VIEW = _xqpi.HOME_VIEW
     MAP_OVERLAYS = _xqpi.MAP_OVERLAYS
+    COMP_EXTENT = _xqpi.COMP_EXTENT
+    COMP_EXTENT_PROVISIONAL = _xqpi.COMP_EXTENT_PROVISIONAL
     HAS_RADARCA = False
 elif SETTINGS.profile != "aqpi":
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
