@@ -250,6 +250,26 @@ RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}
 # recency. See 16-§10 for the measurement that exposed it — mtime-derived
 # intervals showed eight multi-hour outages whose magnitudes rose by exactly
 # 1440 min/day going back, all artifacts of the single sweep instant.
+# LB1 reads the manifest for TWO independent reasons, and the second was found
+# after the first:
+#
+#   1. The images directory keeps orphans the window never reclaims — 26
+#      entries against a manifest of 14-15 on qpe_15min.
+#   2. mtime masks a stall outright. Measured 2026-10-04 01:56Z on
+#      qpe_15min/images/in while the QPE pipeline had been down two hours:
+#
+#          mtime     1 min ago   declared 23:54      <- re-touched each cycle
+#          mtime   119 min ago   declared 23:52
+#          mtime   121 min ago   declared 23:24
+#          mtime 43331 min ago   declared 09-03      <- the orphans
+#
+#      Something re-touches only the newest frame, so mtime read 1 minute while
+#      the product was 121 minutes stale. newest-by-mtime and newest-by-name
+#      agreed throughout, because they are the same file — which is why that
+#      comparison is not a test for masking.
+#
+# So the observation-time rule applies to every tree on this profile, not only
+# the raw volumes the gzip sweep rewrites.
 LB1_FRESHNESS = "manifest"      # the per-step timestamp the manifest declares
 LB2_FRESHNESS = "filename"      # flow-<YYYYMMDD>-<HHMMSS>_...
 

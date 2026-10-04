@@ -66,7 +66,7 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 # --------------------------------------------------------------------------
 
 def build_tree(base: Path, now: datetime, last_obs_min_ago: float,
-               sweep: bool) -> None:
+               sweep: bool, retouch_newest: bool = False) -> None:
     """One XQPI day directory plus the four composite families.
 
     `last_obs_min_ago` is how stale the newest real observation is.
@@ -132,6 +132,20 @@ def build_tree(base: Path, now: datetime, last_obs_min_ago: float,
         swept = now.timestamp()
         for p in base.rglob("*"):
             os.utime(p, (swept, swept))
+    elif retouch_newest:
+        # The subtler hazard, and the one actually observed. A publisher that
+        # re-touches ONLY its newest frame each cycle leaves newest-by-mtime
+        # and newest-by-filename pointing at the SAME file, so comparing those
+        # two finds nothing — while mtime still reads minutes where the data
+        # is hours stale. Measured on XQPI's qpe_15min during a two-hour
+        # stall: newest frame mtime 1 min, declared 121 min.
+        fresh = now.timestamp()
+        for d in base.rglob("images"):
+            for sub in ([d] + [c for c in d.iterdir() if c.is_dir()]):
+                pngs = sorted(sub.glob("*.png"))
+                if pngs:
+                    newest = max(pngs, key=lambda f: f.name)
+                    os.utime(newest, (fresh, fresh))
 
 
 # --------------------------------------------------------------------------
@@ -233,6 +247,26 @@ def main() -> int:
         check("an NFS silly-rename neither matches nor breaks the scan",
               lb2["status"] == "fail" and (lb2["age_s"] or 0) > 0,
               f"{lb2['status']} @ {(lb2['age_s'] or 0) / 60:.1f} min")
+
+        print("\nre-touching only the NEWEST frame still masks, and still fails:")
+        retouched = Path(td) / "retouched"
+        build_tree(retouched, now, STALE_MIN, sweep=False, retouch_newest=True)
+        rt = run_checks(retouched, "xqpi")
+        lb1 = [(k, v) for k, v in rt.items() if k.startswith("layer1.")]
+        check("the declared basis still fails every stale product",
+              all(v["status"] == "fail" for _, v in lb1),
+              ", ".join(f"{k}={v['status']}" for k, v in lb1 if v["status"] != "fail"))
+        # The point of this fixture: the two mtime-derived measures AGREE here,
+        # because only one file was touched and it is the newest by both. A
+        # check comparing them would see nothing wrong.
+        fooled_rt = run_checks(retouched, "xqpi", lb1="newest_mtime")
+        f1 = [v for k, v in fooled_rt.items() if k.startswith("layer1.")]
+        check("...while the mtime basis calls the same tree healthy",
+              all(v["status"] == "pass" for v in f1),
+              ", ".join(sorted({v["status"] for v in f1})))
+        check("...so newest-by-mtime == newest-by-name is NOT a test for masking",
+              all(v["status"] == "pass" for v in f1)
+              and all(v["status"] == "fail" for _, v in lb1))
 
         print("\na fresh tree passes, so the basis is not simply always-fail:")
         fresh = Path(td) / "fresh"
