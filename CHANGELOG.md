@@ -28,6 +28,121 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-04
+
+Theme: **a second deployment profile.** Dr. Chandrasekar asked for an "XQPI
+Sentinel" watching the FLOW radar at JPL. One image now serves both networks,
+selected by `SENTINEL_PROFILE`. Every existing deployment is unchanged — the
+default is AQPI, and the AQPI registry is byte-identical before and after.
+
+### Added
+
+- **`SENTINEL_PROFILE` selects which radar network an instance watches.**
+  Unset or `aqpi` keeps everything as it was. `xqpi` watches FLOW, published to
+  trinity.
+
+  This is not a config fork, because FLOW differs in the way that matters most:
+  nothing serves it over HTTP. There is no radarca in front of it. So roughly
+  two thirds of the check stack has no subject under XQPI, and a check with no
+  subject does not go quiet — it fails every cycle, forever, and L0 failures
+  cascade-suppress the backend checks that *are* working.
+
+  `backend/checks/__init__.py` therefore splits into `_ALWAYS` and `_RADARCA`,
+  and the radarca-only list lives in the profile and is asserted against the
+  registry's own copy so the two cannot drift. Two radarca checks sit in
+  modules that must stay importable regardless of profile
+  (`layer0_episode` exports `attach_episode_suppression`), so their
+  registrations are gated on a new `config.HAS_RADARCA` in place. Phrased as a
+  capability rather than a profile-name comparison, so a third profile has to
+  state its answer instead of inheriting one by omission.
+
+  An unrecognised value raises at import rather than falling back to AQPI. An
+  instance quietly watching the wrong radar network is worse than one that will
+  not start.
+
+- **Published-tree layout is profile data.** The two trees do not share one.
+  K2 nests products under `realtime/product_images/`; trinity's XQPI tree puts
+  them directly under `PRODUCT_IMAGES/`, and FLOW's volumes are
+  date-partitioned (UTC) where AQPI's are flat under `PRODUCTS/DROPS`. Carrying
+  the wrong prefix over does not raise — every LB check reports a missing
+  directory, which reads as an outage rather than a misconfiguration.
+
+### Changed
+
+- **XQPI derives freshness from the observation time the data declares, not
+  from mtime.** A root gzip sweep walks the trinity archive daily around
+  07:25 UTC and rewrites files, so mtime there does not mean "when this
+  observation happened". Verified on the host: the last file of `2026/09/25`
+  and of `2026/09/30` both carry mtime `2026-10-03 01:25` local — the same
+  instant five days apart — against an extension mix of 2,880 `.netcdf.gz` to
+  4–9 `.netcdf` per day. The sweep touches the current day's directory too.
+
+  A check reading mtime therefore reports `pass` for up to its whole threshold
+  window after each sweep, whether or not FLOW is producing: a false negative
+  in the one direction monitoring must never fail, recurring daily.
+
+  `LB2` now reads the volume filename, `LB1` the manifest's per-step timestamp
+  — which also sidesteps the orphans the publisher never reclaims (26 image
+  files against a manifest of 14–15 on `qpe_15min`). Directory litter is
+  excluded by the leading dot rather than by failing to parse a timestamp:
+  gzip leaves temp files whose names embed a real, parseable observation time
+  (nine of them observed for a single source volume inside a 30 ms window),
+  and an NFS silly-rename carries no timestamp at all, so nothing narrower
+  catches both.
+
+  **AQPI is deliberately unchanged**, and that is the more consequential half.
+  Every sampled K2 directory has newest-by-mtime equal to newest-by-filename,
+  with no dotfiles and no compression pass; and the `DROPS` tree is too
+  heterogeneous for a filename basis, since `ebay` holds flat `.drops` files
+  while `scvw` holds a nested `2026/` directory. Switching it would have been a
+  behavior change on a live deployment to fix a defect its tree does not have.
+
+- **The timeline separates pair groups.** Consecutive pairs ran together —
+  identical 1px rules down the grid with nothing saying which two rows measured
+  the same target. The last row of each group now carries a 3px rule. Done as a
+  border rather than a margin or a gap row because the cells are `border-box`
+  with an explicit height, so the rule grows into the row and costs no vertical
+  space; `pairRows` had declined a header row for that same reason, and a
+  separator that reintroduced the height would have given it back.
+
+- **Mobile pairs the backend readings instead of giving them their own cards.**
+  Mobile had not tracked the previous three releases. It rendered `LB1`/`LB2`
+  as separate cards, putting the two readings of one product in different
+  places on the surface where scrolling costs most — the same complaint that
+  produced the paired desktop rails in v0.5.4, left unfixed here. No row said
+  which tree it read, so two rows could show the same target with no way to
+  tell K2 from Trinity.
+
+  A backend stage now folds into the stage it mirrors, indented under its
+  primary with a left rule and the source tag. Card headers count what the card
+  shows. The collapsed "problems only" filter operates on the group rather than
+  the row, because per-row it could leave a backend row indented under nothing.
+
+  The mobile uptime grid is transposed (columns are checks), so pairing there
+  is column adjacency: columns order by target first — sorting by id had
+  clustered every `layer1.backend.*` before every `layer1.product.*` — and
+  `LB2` folds into the `L2` group. Paired column headers now carry the source
+  tag; without it a paired target rendered two identical headers side by side.
+
+- **The pairing rule moved to `$lib/pairing`,** shared by all three surfaces,
+  for the same reason `$lib/timelineFill` is shared. Each had grown its own
+  copy. `endsPairGroup` is exported too, so the separator predicate is shared
+  and not just the ordering.
+
+### Fixed
+
+- `CheckMeta`'s documentation still described the source tag as `"TRIN"`; it has
+  been `"TR"` since v0.5.6.
+
+### Notes for operators
+
+- **No migration, no new required env var.** `SENTINEL_PROFILE` is optional and
+  defaults to `aqpi`; see `ops/.env.prod.example`.
+- The `xqpi` profile is config- and check-complete but not yet deployed: it
+  still needs the filesystem fetcher for map imagery, Southern California
+  georeferencing, and its own compose bind. Nothing about it affects an AQPI
+  instance.
+
 ## [0.5.6] — 2026-10-03
 
 ### Changed
