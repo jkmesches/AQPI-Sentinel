@@ -538,10 +538,24 @@ RADAR_DATED_TREE: dict[str, str] = {}
 # The right test is the per-frame offset. Measured on csu-aqpi 2026-10-04
 # across all 31 frames of rain15min, composite_ref_max and rainrate: every
 # frame is written 2.25-2.48 min after its own declared time, with a spread of
-# 0.04-0.18 min within a product. That is a fixed publish latency, not
-# re-touching — anything re-touching would leave the older frames with large,
-# scattered offsets the way XQPI's do (119, 121, 149 minutes). So on K2, mtime
-# tracks declared time frame for frame and means what it says.
+# 0.04-0.18 min within a product. Reproduced independently on ~62 frames per
+# product (both unit subtrees), same medians to a hundredth. That is a fixed
+# publish latency, not re-touching — anything re-touching would leave the
+# older frames with large, scattered offsets the way XQPI's do (119, 121, 149
+# minutes), and would put the NEWEST near zero while the rest scattered. K2's
+# newest-frame offsets are 2.30 / 2.32 / 2.25 against rest-medians of 2.39 /
+# 2.35 / 2.28 — flat. The two signatures differ in a direction nothing else
+# produces, which is what makes this test discriminating rather than merely
+# consistent.
+#
+# TO RE-MEASURE: iterate the MANIFEST's steps and look up each imageName. Do
+# not glob the images directory. The orphans these trees accumulate never age
+# out, so a directory walk picks up deployment-day residue — on K2 that is a
+# pocket of 2026-09-17 files which drag the observed spread from 0.21-0.82 out
+# to 19.76 minutes and invite widening a threshold on the strength of stale
+# files. The manifest is the sampling frame for the same reason it is the
+# freshness basis: it is the product, and the directory is a cache with litter
+# in it.
 #
 # AQPI's DROPS tree is separately not uniform — ebay holds flat `.drops` files
 # while scvw holds a nested `2026/` directory — so the directory's own mtime is
