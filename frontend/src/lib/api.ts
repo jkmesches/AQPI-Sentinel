@@ -24,7 +24,7 @@ export interface CheckMeta {
 	target: string;
 	cadence_s: number;
 	depends_on: string[];
-	/** Which published tree a backend-reading check read — "the main archive" or "TRIN".
+	/** Which published tree a backend-reading check read — e.g. "the main archive" or "TR".
 	 *  Null for everything that does not read one. CBAND is the reason this
 	 *  exists: it comes off the secondary archive while every other backend row comes off
 	 *  the main archive, and the UI cannot know that. */

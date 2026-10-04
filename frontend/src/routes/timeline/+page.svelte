@@ -3,6 +3,7 @@
 	import { api, type CheckMeta, type CheckRun, type TimelineBucket, type TimelineCell } from '$lib/api';
 	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
 	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES, backendStageOf, isBackendStage } from '$lib/format';
+	import { pairByTarget, endsPairGroup, type Paired } from '$lib/pairing';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
 	import ReportExportModal from '$lib/components/ReportExportModal.svelte';
@@ -146,33 +147,12 @@
 	//
 	// Deliberately NOT a header row plus two subrows: that is half again the
 	// height on a grid people scroll, for a row that carries no cells.
-	type PairRole = 'solo' | 'primary' | 'secondary';
-	interface GridRow { col: CheckMeta; role: PairRole }
+	// Shared with the mobile status cards — see $lib/pairing for why the rule
+	// lives in one place and why it keys on target rather than stage presence.
+	type GridRow = Paired<CheckMeta>;
 
-	function pairRows(primary: CheckMeta[], backend: CheckMeta[]): GridRow[] {
-		// No backend on this deployment (SENTINEL_BACKEND_ROOT unset) means no
-		// second reading to pair with, so every row stays flat — the grid is
-		// byte-identical to what it was.
-		if (!backend.length) return primary.map((col) => ({ col, role: 'solo' as PairRole }));
-		const bk = new Map(backend.map((c) => [c.target, c]));
-		const out: GridRow[] = [];
-		for (const col of primary) {
-			const mate = bk.get(col.target);
-			if (mate) {
-				out.push({ col, role: 'primary' });
-				out.push({ col: mate, role: 'secondary' });
-				bk.delete(col.target);
-			} else {
-				// e.g. the vector/stream feeds, which have no backend counterpart
-				// on any deployment.
-				out.push({ col, role: 'solo' });
-			}
-		}
-		// A backend check whose radarca counterpart is missing still deserves a
-		// row; it just has nothing to pair with.
-		for (const orphan of bk.values()) out.push({ col: orphan, role: 'solo' });
-		return out;
-	}
+	const pairRows = (primary: CheckMeta[], backend: CheckMeta[]): GridRow[] =>
+		pairByTarget(primary, backend, (c) => c.target);
 
 	// `subgroups` is populated for L1 only (Products tab) so the grid
 	// renders a category sub-header before each cohort — same four
@@ -207,7 +187,7 @@
 				const byCat: Record<string, GridRow[]> = {};
 				for (const cat of PRODUCT_CATEGORY_ORDER) byCat[cat] = [];
 				// Keyed on target, so both halves of a pair land in one category.
-				for (const r of rows) byCat[productCategory(r.col.target)].push(r);
+				for (const r of rows) byCat[productCategory(r.item.target)].push(r);
 				const subgroups = PRODUCT_CATEGORY_ORDER
 					.map((cat) => ({ label: PRODUCT_CATEGORY_LABEL[cat], rows: byCat[cat] }))
 					.filter((sg) => sg.rows.length > 0);
@@ -218,7 +198,7 @@
 		}
 		return out;
 	});
-	const flatColumns = $derived(groupedColumns.flatMap((g) => g.rows.map((r) => r.col)));
+	const flatColumns = $derived(groupedColumns.flatMap((g) => g.rows.map((r) => r.item)));
 	const totalCols   = $derived(flatColumns.length);
 
 	// Per-bucket column width — wider when fewer buckets so the row doesn't
@@ -729,10 +709,22 @@
   anywhere. It renders exactly as it always did.
 -->
 {#snippet gridRow(r: GridRow)}
-	{@const col = r.col}
+	{@const col = r.item}
 	{@const isSecondary = r.role === 'secondary'}
+	<!-- A 'primary' row is always followed by its 'secondary', so every other
+	     role ends a group. Consecutive pairs otherwise run together: eight
+	     identical 1px rules with nothing saying which two belong to the same
+	     target.
+	     Done as a thicker bottom border rather than a margin or a gap row
+	     because the cells are border-box with an explicit height, so the rule
+	     grows INTO the row and costs no vertical space at all — which is the
+	     same reason pairRows declined a header row (see its comment). -->
+	{@const endsGroup = endsPairGroup(r)}
+	{@const sepB = endsGroup
+		? 'border-b-[3px] border-b-[var(--color-border-strong)]'
+		: 'border-b border-b-[var(--color-border)]'}
 	<div
-		class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center gap-1.5 px-3 text-[12px] num {isSecondary ? 'text-[var(--color-muted)]' : 'text-[var(--color-bright)]'}"
+		class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-r border-[var(--color-border)] {sepB} flex items-center gap-1.5 px-3 text-[12px] num {isSecondary ? 'text-[var(--color-muted)]' : 'text-[var(--color-bright)]'}"
 		style="height:{ROW_H}px;"
 		title={[
 			`${prettyCheckLabel(col.id, col.target)}  —  ${checkBlurb(col)}`,
@@ -770,7 +762,7 @@
 		{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
 		<button
 			type="button"
-			class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent border-b border-[var(--color-border)]"
+			class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent {sepB}"
 			style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
 			onclick={() => openDetail(b, col)}
 			title={cell
@@ -999,13 +991,13 @@
 								class="tl-cell border-b border-[var(--color-border)] bg-[var(--color-canvas)]/60"
 								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px; grid-column: span {orderedBuckets.length};"
 							></div>
-							{#each sg.rows as r (r.col.id)}
+							{#each sg.rows as r (r.item.id)}
 								{@render gridRow(r)}
 							{/each}
 						{/each}
 					{:else}
 					<!-- Per-check rows in this stage -->
-					{#each g.rows as r (r.col.id)}
+					{#each g.rows as r (r.item.id)}
 						{@render gridRow(r)}
 					{/each}
 					{/if}
