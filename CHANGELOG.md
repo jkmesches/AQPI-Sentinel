@@ -136,6 +136,36 @@ rail collapses a radar's several readings onto one expandable row.
 
 ### Fixed
 
+- **The fleet correlation checks reported `pass` from stale verdicts**, during
+  exactly the incident they exist to characterise.
+
+  `_publish_verdict` has one call site, at the end of the per-radar `run()`.
+  The early return taken when radarca's `/api/radar-status/` is unavailable is
+  the only return above it and never reaches it — so while the origin is
+  unreachable, every per-radar check publishes **nothing**, every cycle. The
+  verdict cache keeps the pre-outage entries forever; after the 300 s TTL the
+  numerator (`_not_reporting_xband`, TTL-gated) empties while the denominator
+  (`known`, raw membership) still counts five, so the skip floor does not
+  trigger and the check reports `0/5 not reporting — pass`.
+
+  About five minutes into a radarca outage the operator therefore saw **five
+  red radar rows above a green fleet row** asserting nothing was systemic.
+  Both fleet checks now gate the denominator by the same TTL as the numerator
+  and report `skip` — no usable evidence, so assert nothing.
+
+  !!! note "Fleet uptime has a step change at this commit, and it is the fix"
+      Rows that read `pass` during a radarca outage now read `skip`. Any
+      comparison of fleet uptime across this point is apples to oranges in
+      that specific direction.
+
+  Suppression is unaffected: the per-radar checks list the fleet in
+  `alarm_only_depends_on` and `compute_suppression` keys on `fail`/`error`, so
+  a fleet reporting `skip` where it reported `pass` suppresses nothing it did
+  not suppress before. The fix cannot accidentally mute five radar alarms.
+  Historical rows are also untouched — `_reverdict_l2` requires
+  `payload["observed"]`, which fleet rows do not carry, so a reprocess pass
+  preserves them rather than retroactively rewriting them.
+
 - **The mobile status map coloured radar markers from `L2` alone.** Two
   consequences: on a profile with no radarca origin — `xqpi`, where FLOW is
   monitored entirely off the filesystem — every marker rendered in the `skip`

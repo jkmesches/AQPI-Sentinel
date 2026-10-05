@@ -227,6 +227,41 @@ def _not_reporting_xband(now: datetime) -> set[str]:
     return out
 
 
+def _fresh_verdicts(now: datetime) -> dict[str, str]:
+    """Fleet radars whose most recent verdict is still inside the TTL.
+
+    Membership in _last_verdict is NOT the same question, and the gap between
+    the two was a defect that made this check lie during the one incident it
+    exists to characterise.
+
+    _publish_verdict has exactly one call site, at the END of the per-radar
+    run(). The early return taken when radarca's /api/radar-status/ is
+    unavailable never reaches it, and that is the only return before it. So
+    while the origin is unreachable every per-radar check publishes NOTHING,
+    every cycle.
+
+    _last_verdict then keeps the five pre-outage verdicts forever. After
+    _VERDICT_TTL_S they fall outside the window, so _not_reporting_xband
+    returns empty and n=0 -- but a raw membership count still sees five, the
+    skip floor below does not trigger, and the check reports `pass`. Within
+    about five minutes of radarca becoming unreachable the operator saw five
+    red radar rows above a GREEN fleet row asserting nothing was systemic.
+
+    Gating here rather than at the early return is deliberate: it fixes the
+    symptom wherever it comes from, including any future early return someone
+    adds above the publish.
+    """
+    out: dict[str, str] = {}
+    for rid in XBAND_FLEET:
+        rec = _last_verdict.get(rid)
+        if rec is None:
+            continue
+        when, verdict = rec
+        if (now - when).total_seconds() <= _VERDICT_TTL_S:
+            out[rid] = verdict
+    return out
+
+
 def _reset_fleet_state() -> None:
     """Test hook."""
     global _fleet_systemic, _fleet_since
@@ -566,7 +601,11 @@ class Layer2XbandFleet(Check):
         t0 = utcnow()
         now = utcnow()
         not_reporting = _not_reporting_xband(now)
-        known = [r for r in XBAND_FLEET if r in _last_verdict]
+        # Freshness-gated by the same TTL the numerator uses. Raw membership
+        # in _last_verdict let this report `pass` from pre-outage verdicts; see
+        # _fresh_verdicts.
+        fresh = _fresh_verdicts(now)
+        known = sorted(fresh)
 
         # No verdicts yet (fresh boot, or this check ran before its peers).
         # Skip rather than assert health from absence of evidence.
@@ -596,7 +635,7 @@ class Layer2XbandFleet(Check):
         # Distinguish "still bad" from "held open by the dwell/hysteresis", so
         # the row says which it is rather than looking like a stuck check.
         latched = systemic and n < FLEET_SYSTEMIC_ENTER
-        verdicts = {r: _last_verdict[r][1] for r in sorted(known)}
+        verdicts = dict(sorted(fresh.items()))
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,
             status=("fail" if systemic else "pass"),
