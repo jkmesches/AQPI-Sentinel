@@ -553,8 +553,40 @@ class Layer3CompositeParticipationCheck(Check):
                           f"NAMED BUT NOT READ — {self.receipt_dir} appears in the "
                           f"run but the composite logged no dimensions for it")
 
-        # The run log carries the composite's own age; the receipt forces us to
-        # derive one from the volume filename.
+        # === The receipt fallback is PRESENCE-ONLY, by measurement ===
+        #
+        # The two sources have different ZERO POINTS. The run log's reference
+        # is endDateTimeScan, which equals the run's TARGET time (verified
+        # 120/120 runs). The receipt's only available reference is its own
+        # mtime, and it is written when the loops run -- at processing START,
+        # not at the target. The composite's own filenames show the gap:
+        # target 17:12:00 against startproc 17:14:01, 121 s later.
+        #
+        # Measured across 13 receipt versions, receipt-derived ages run
+        # +102..+148 s above log-derived ages for the same radars, clustering
+        # near one composite cycle: [M]
+        #
+        #     XSCV +148s   XSWR +102s   XSCR +115s   XEBY +118s   SSCB +114s
+        #
+        # So banding both bases at one 600/900 makes the FALLBACK PATH
+        # systematically ~115 s stricter for identical underlying staleness. A
+        # row would drift toward warn purely because the check fell back, with
+        # nothing having changed about the composite -- the same class of error
+        # as judging XEBY by XSCR's cadence, one layer up.
+        #
+        # Rather than fit a correction off 13 cycles, or maintain two bands
+        # against two bases, B_fresh is simply NOT ASSESSED on the receipt.
+        # A_included still works perfectly there, because membership does not
+        # depend on a reference time at all. The check degrades to the weaker
+        # QUESTION rather than to a differently-calibrated answer to the
+        # stronger one -- the same principle as the "offered to" versus "in
+        # composite" wording above.
+        if src != "run_log":
+            payload["age_basis"] = "not_assessed_on_receipt"
+            return _final(self, t0, sub, payload, metrics,
+                          f"{verb} (contribution age not assessed — the receipt's "
+                          f"reference time is ~1 cycle later than the run log's)")
+
         if contrib.get("age_s") is not None:
             age_s = float(contrib["age_s"])
             payload["age_basis"] = "composite_reported"
@@ -565,9 +597,6 @@ class Layer3CompositeParticipationCheck(Check):
             # with the independently derived figure is surfaced, not resolved.
             if contrib.get("age_disagrees"):
                 payload["age_disagrees"] = True
-        elif contrib.get("declared_ts") is not None:
-            age_s = t0.timestamp() - float(contrib["declared_ts"])
-            payload["age_basis"] = "derived_from_filename"
         else:
             # Present, readable, but carrying no usable timestamp. A_included
             # stands on its own; B_fresh is simply not assessable.

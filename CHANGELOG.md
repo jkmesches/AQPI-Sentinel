@@ -28,6 +28,45 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The LB3 receipt fallback was banded against the wrong zero point**, so it
+  judged staleness ~115 s more harshly than the primary source for identical
+  underlying conditions. Shipped in v0.7.0; found by measurement after the
+  tag, and not reachable on a deployment without backend mounts.
+
+  The run log references `endDateTimeScan`, which equals the composite run's
+  **target** time. The receipt's only available reference is its own mtime,
+  and it is written when the loops run — at processing **start**, about one
+  cycle later (target `17:12:00` against `startproc 17:14:01`). Across 13
+  receipt versions, receipt-derived ages ran **+102 to +148 s** above
+  log-derived ages for the same radars. Against a shared 600/900 band a row
+  would drift toward `warn` purely because the check fell back, with nothing
+  having changed about the composite.
+
+  `B_fresh` is now **not assessed** on the receipt. `A_included` still works
+  there, because membership does not depend on a reference time. The check
+  degrades to the weaker *question* rather than to a differently-calibrated
+  answer to the stronger one — the same principle as the "offered to" versus
+  "in composite" wording.
+
+### Changed
+
+- **`secondsStarttoEnd` is confirmed an age, not a scan duration**, settled
+  four ways rather than by the single-radar span argument v0.7.0 shipped with:
+  `endDateTimeScan` is identical across every radar within a run (120/120), it
+  equals the run's target time from the filename (120/120), the field equals
+  `start - end` exactly (687/687 blocks), and — decisively — one radar across
+  three consecutive runs shows an identical scan start with a value growing by
+  exactly the run interval. A duration cannot grow while the scan is
+  unchanged. The dual derivation and disagreement flag are kept anyway, now as
+  a guard against the log format changing rather than as an open question.
+- **The ~8% expected participation fire rate is 8% of (run × radar) pairs**,
+  not of distinct staleness events. The same stuck file is re-blended every
+  cycle until something replaces it, so one stuck file inflates the rate by
+  however many cycles it survives. Corrected in the docstring, the config
+  comment and the docs, and it is a further argument for the hold-down.
+
 ## [0.7.0] — 2026-10-05
 
 `LB2` stops measuring a downstream generator and starts measuring radar

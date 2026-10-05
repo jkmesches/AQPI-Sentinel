@@ -755,6 +755,16 @@ COMPOSITE_EXPECTED_RADARS: dict[str, str] = {
 #     blended into a composite that reports itself current. Add the guard and
 #     the tail disappears and these alarms stop. The rate is the detector
 #     reading the defect it was built to detect — not a threshold to tune away.
+#
+#     And read it as 8% of (run x radar) PAIRS, not of distinct staleness
+#     events. The same stuck file is re-blended every cycle until something
+#     replaces it: XSWR's 22:10:40 volume was still being picked up three runs
+#     later with an identical start time and an age growing by exactly the run
+#     interval. One stuck file therefore inflates the rate by however many
+#     cycles it survives, so 8% is NOT 8% of composites being independently
+#     wrong. It is also a direct argument for the hold-down — without a
+#     persistence requirement a single stuck file would page every cycle for
+#     as long as it stayed stuck.
 COMPOSITE_CONTRIB_WARN_S: int = 600
 COMPOSITE_CONTRIB_FAIL_S: int = 900
 
