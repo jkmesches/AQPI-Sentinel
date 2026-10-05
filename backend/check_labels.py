@@ -84,7 +84,24 @@ def pretty_check_label(check_id: str | None, target: str = "") -> str:
     if cid.startswith("layer1.stream."):        return "Stream Reach canary"
     if cid.startswith("layer1.vector."):        return _VECTORS.get(t) or _title(t)
     if cid.startswith("layer2.radar."):         return t or cid
+    # Both fleet correlation checks, BEFORE the layer2.backend. branch. The
+    # backend one fell into it and read "radar-fleet — backend arrival": a
+    # correlation verdict labelled as an arrival reading, which is precisely
+    # what it is not. These strings go into emails and push payloads where no
+    # stage name sits next to them, so the label is all the reader gets.
+    if cid == "layer2.backend.fleet":           return "Radar fleet — correlation"
+    if cid == "layer2.xband.fleet":             return "X-band fleet — correlation"
     if cid.startswith("layer2.backend."):       return f"{t or cid} — backend arrival"
+    # LB3, BEFORE the generic layer3. branch, which was written for the
+    # overlay-parity check and caught these: layer3.composite.* and
+    # layer3.backend.drops both rendered as "Overlay reconcile — …", which
+    # describes nothing either of them does.
+    #
+    # The label does not change with the source. "in composite" versus
+    # "offered to composite" is carried by the summary; a label that flipped
+    # when the receipt fallback engaged would read as a different check.
+    if cid.startswith("layer3.composite."):     return f"{t or cid} — in composite"
+    if cid == "layer3.backend.drops":            return "DROPS producer"
     if cid.startswith("layer3."):               return f"Overlay reconcile — {_product(t)}" if t else "Overlay reconcile"
     if cid.startswith("layer4.xband."):         return t or cid
     if cid.startswith("layer4."):               return _product(t)
