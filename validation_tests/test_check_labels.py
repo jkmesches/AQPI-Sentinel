@@ -223,10 +223,33 @@ def main() -> int:
                       and allowed(cid))
         check(f"no misuse of {word!r} — {why}", not hits, "; ".join(hits[:3]))
 
+    # ---- a label names an ASPECT, never a verdict ---------------------
+    #
+    # None of the rules above would catch this, and "XSWR — in composite"
+    # passed all of them: it is in the right branch, in both files, with no
+    # borrowed vocabulary. It was still wrong, because it STATES A CONCLUSION.
+    # On a failing row the label then contradicts the verdict beside it — a
+    # red dot next to the words "in composite" asserts the opposite of what
+    # the check found. A person read that row and asked what it meant.
+    print("\nno label reads as a claim about the verdict:")
+    VERDICT_PHRASES = ("in composite", "is up", "is down", "reachable —",
+                       "ok", "healthy", "arriving normally")
+    claims: list[str] = []
+    for cid in sorted(ids):
+        lab = (L(cid, ids[cid]) or "").lower()
+        for ph in VERDICT_PHRASES:
+            # "Origin reachable" names an aspect; "reachable —" would be a
+            # claim. Substring checks are deliberately narrow for that reason.
+            if ph in lab:
+                claims.append(f"{cid} -> {L(cid, ids[cid])!r} ({ph!r})")
+                break
+    check("no label asserts a verdict it cannot guarantee",
+          not claims, "; ".join(claims[:3]))
+
     # ---- the specific labels the incident was about -------------------
     print("\nthe labels a person actually read and could not interpret:")
-    for cid, want in (("layer3.composite.XSWR", "XSWR — in composite"),
-                      ("layer3.backend.drops", "DROPS producer"),
+    for cid, want in (("layer3.composite.XSWR", "XSWR — composite input"),
+                      ("layer3.backend.drops", "QPE producer"),
                       ("layer2.backend.fleet", "Radar fleet — correlation")):
         if cid in ids:
             got = L(cid, ids[cid])
