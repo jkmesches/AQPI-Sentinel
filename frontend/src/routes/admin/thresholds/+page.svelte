@@ -30,12 +30,19 @@
 		frozen_min_cov_pct?: number | null;
 		skip_range_ring?:    boolean | null;
 	};
-	type Globals = {
-		hysteresis?:          number | null;
-		cadence_tol?:         number | null;
-		step_count_tol?:      number | null;
-		silent_fail_default?: number | null;
-	};
+	// Deliberately NOT an enumeration of the four keys that existed when this
+	// page was written. Every threshold the backend seeds is a tunable, and a
+	// hand-written type here is one more place to forget — which is exactly
+	// what happened: v0.7.0/v0.7.1 added composite_contrib_warn_s,
+	// composite_contrib_fail_s and drops_silent_info_s to the seed, the checks
+	// honoured them and the API accepted edits to them, and this page rendered
+	// none of the three. Same failure the comment above RADAR_KEYS describes
+	// for LB1/LB2 in v0.5.0, reintroduced one section over.
+	//
+	// The backend validates the values (admin.py rejects a non-number or a
+	// non-positive radar limit), so the page does not need to know the key set
+	// in order to be safe — only in order to render it.
+	type Globals = Record<string, number | null>;
 	type Blob = {
 		products: Record<string, ProductOverride>;
 		radars:   Record<string, RadarOverride>;
@@ -56,6 +63,17 @@
 	// Edit buffer — what the user is currently typing. Initialized from
 	// `current` after fetch; saved back to the server on Apply.
 	let draft = $state<Blob | null>(null);
+	// Union of what the backend SEEDS and what this instance has STORED, so a
+	// new global appears here the moment the backend knows about it and a
+	// stored-but-unseeded key is still editable rather than stranded. Sorted
+	// for a stable order; these are a flat list of tolerances with no
+	// meaningful grouping.
+	const globalKeys = $derived(
+		Array.from(new Set([
+			...Object.keys(defaults?.globals ?? {}),
+			...Object.keys(draft?.globals ?? {})
+		])).sort()
+	);
 
 	async function load() {
 		loading = true;
@@ -283,9 +301,9 @@
 
 			<!-- Globals -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Global tolerances</h2>
+				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Global tolerances · LB3 composite-contribution bands · QPE producer limit</h2>
 				<div class="grid grid-cols-2 gap-x-6 gap-y-2 max-w-2xl">
-					{#each ['hysteresis','cadence_tol','step_count_tol','silent_fail_default'] as k}
+					{#each globalKeys as k}
 						<label class="flex items-center justify-between gap-3">
 							<span class="num text-[var(--color-default)]">{k}</span>
 							<input

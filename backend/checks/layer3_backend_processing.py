@@ -701,7 +701,17 @@ class Layer3DropsProducerCheck(Check):
                 payload=payload, metrics={"fs_timeout": 1.0})
 
         metrics["fs_timeout"] = 0.0
-        limit = float(DROPS_SILENT_INFO_S)
+        # Through the store, with the config constant as the default. Read
+        # fresh every run so an admin edit applies without a restart, the same
+        # way _contrib_bands does.
+        #
+        # This read DROPS_SILENT_INFO_S directly until 2026-10-05, while
+        # _reverdict_lb3 read get_global("drops_silent_info_s"). So editing the
+        # limit in /admin/thresholds changed RETROACTIVE verdicts and left live
+        # ones alone -- a split brain between the check and its own reprocess
+        # handler, with nothing anywhere reporting the disagreement.
+        limit = float(_thresholds.get_global(
+            "drops_silent_info_s", DROPS_SILENT_INFO_S))
         payload["silent_s"] = limit
         ages: dict[str, float] = {}
         for rid, mt in sorted(mtimes.items()):
