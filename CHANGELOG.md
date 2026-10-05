@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-05
+
 `LB2` stops measuring a downstream generator and starts measuring radar
 arrival; a new `LB3` stage watches the processing in between; and the radar
 rail collapses a radar's several readings onto one expandable row.
@@ -2677,7 +2679,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.13...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.6.2...v0.7.0
 [0.4.13]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.11...v0.4.12
 [0.3.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.3.0...v0.3.1
