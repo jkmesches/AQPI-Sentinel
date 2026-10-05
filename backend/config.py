@@ -608,6 +608,117 @@ RAW_VOLUME_TS_RE: dict[str, str] = {
     "CBAND": r"^AQPI\.SSCB_(\d{8})_(\d{6})",
 }
 
+# ==========================================================================
+# LB3 — Backend processing: composite participation and the DROPS producer
+# ==========================================================================
+
+# The composite's input receipt, relative to backend_root. Written by the
+# composite driver immediately before it reads the file back.
+COMPOSITE_RECEIPT: str = "PRODUCTS/Composite_QPE/radarfiles_for_comp.txt"
+
+# A SECOND receipt exists on xqpi — radarfiles_for_comp2.txt, same format,
+# different FLOW volume, different cadence, 2 min behind the first. There is a
+# composite2/ directory beside composite_SRI/ and composite_MAX/, which is the
+# obvious explanation and is NOT evidence for it. [U]
+#
+# Named rather than globbed deliberately: a glob would silently pick whichever
+# the filesystem returned first, and the two disagree about which FLOW volume
+# is current. If comp2 ever needs monitoring it gets its own check with its own
+# name, not a wildcard that makes the answer depend on directory order.
+COMPOSITE_RECEIPT_ALT: str | None = None
+
+# Our radar id → the directory component that identifies it in the receipt.
+#
+# NOT derivable in either direction, which is why it is a table:
+#   the X-bands appear under their radar id   (.../recentfiles//XSCR/...)
+#   CBAND appears as SSCB                     (.../recentfiles//SSCB/...)
+# while RADAR_FOLDER calls those scrz and sscb. Three different spellings of
+# the same radar across three files; see RADAR_DATED_TREE for the same lesson.
+#
+# === Why NEXRAD is absent, and why that is not an oversight ===
+#
+# The composite driver's own arrays intend NINE inputs:
+#     radarX=("XEBY" "XSCR" "XSCV" "XSCW" "XSWR")
+#     radarS=("KBBX" "KDAX" "KMUX")
+#     radarC=("SSCB")
+# The three NEXRAD directories under web-files/NEXRAD_L2 do not exist at all,
+# and their recentfiles trees hold zero files. That predates the 13 days the
+# rotated log covers, so it is a standing condition and not an incident.
+#
+# Deriving `expected` from those arrays would therefore make this check fire
+# immediately and permanently on something nobody is going to fix tonight,
+# which is how a check becomes one people learn to scroll past — the exact
+# failure mode we are repairing in LB2. So expected is an explicit list of the
+# radars this profile MONITORS FOR ARRIVAL and that the composite is
+# configured to include. Whether S-band input is still intended is a real
+# question for the AQPI team, raised separately rather than answered by a
+# monitoring threshold. [U]
+COMPOSITE_EXPECTED_RADARS: dict[str, str] = {
+    "XEBY":  "XEBY",
+    "XSCR":  "XSCR",
+    "XSCV":  "XSCV",
+    "XSCW":  "XSCW",
+    "XSWR":  "XSWR",
+    "CBAND": "SSCB",
+}
+
+# How long after a radar's own arrival its contribution may still be absent
+# from the receipt before that is a fault, on top of that radar's own silence
+# limit. Covers the DROPS processing lag plus the receipt's rewrite cadence.
+#
+# Measured: DROPS processing lag is +17 s, constant across 8 samples. The
+# receipt is rewritten every 120 s. So the mechanical floor is ~140 s and this
+# is a little over 2x that. [Q] — not characterised against a distribution;
+# the only observed contribution ages are 4-8 min healthy and one XEBY sample
+# at 50 min immediately before it dropped out of the receipt entirely, and a
+# band fitted between those two points would be a guess wearing a number.
+COMPOSITE_PIPELINE_LAG_S: int = 300
+
+# Per-radar overrides for the band above, when measurement says a radar needs
+# its own number. Empty by default: the derived band is per-radar already,
+# because it is built on RADAR_SILENT_FAIL_S, so CBAND's 18-minute cadence is
+# not judged by XEBY's 5-minute one.
+COMPOSITE_CONTRIB_WARN_S: dict[str, int] = {}
+COMPOSITE_CONTRIB_FAIL_S: dict[str, int] = {}
+
+# The receipt is truncate-then-append with no temp file and no rename:
+#
+#     echo "Radar files for composite:" > $filelist     # truncates
+#     ... ls -1rt .../$radar/*_drops.nc | tail -1 >> $filelist   # appends
+#
+# A read landing inside that window sees a SHORT file, and the bias is
+# directional rather than random: the appends run X-band, then NEXRAD, then
+# SSCB, so a torn read systematically under-reports CBAND and over-reports the
+# X-bands. A check that trusted a torn read would manufacture "CBAND absent
+# from the composite" alarms at some steady rate forever.
+#
+# Completeness cannot be judged from the content, because a complete file and
+# a nearly-complete one differ by exactly the line we would be looking for.
+# So the check brackets its read with stat() and requires the mtime to be
+# unchanged, and additionally waits out this settle window when it arrives
+# mid-rewrite. 5 s against a write that is a handful of filesystem ops.
+COMPOSITE_RECEIPT_SETTLE_S: float = 5.0
+
+# The DROPS producer's own staleness limit, for the INFORMATIONAL check.
+#
+# DROPS holds the output of Gen_X-band_QPE.py. Nothing in the live product
+# chain reads it, which is why LB2 no longer gates radar health on it — but a
+# processing step that dies silently for 12 hours still deserves a signal, and
+# on 2026-10-05 it got none because the only thing watching it was watching it
+# for the wrong reason.
+#
+# 1 h: generous on purpose. This check exists to notice death, not lateness,
+# and it is deliberately non-paging (see alerts.yaml). [Q]
+DROPS_SILENT_INFO_S: int = 3_600
+
+# DROPS entries are CREATED, never overwritten in place — every entry carries
+# its own scan timestamp and there is no fixed-name entry, verified against a
+# 629-entry day directory with no dotfiles. So directory mtime is a true
+# "something last landed here" time and one stat suffices, which is what makes
+# the producer check cheap enough to run on every radar's folder.
+DROPS_TREE: str = "PRODUCTS/DROPS"
+
+
 if SETTINGS.profile == "xqpi":
     from .profiles import xqpi as _xqpi       # noqa: E402
 
@@ -620,6 +731,9 @@ if SETTINGS.profile == "xqpi":
     LB1_FRESHNESS = _xqpi.LB1_FRESHNESS
     LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
+    COMPOSITE_EXPECTED_RADARS = _xqpi.COMPOSITE_EXPECTED_RADARS
+    COMPOSITE_RECEIPT_ALT = _xqpi.COMPOSITE_RECEIPT_ALT
+    DROPS_TREE = _xqpi.DROPS_TREE
     SITE_NAME = _xqpi.SITE_NAME
     DATA_SOURCE = _xqpi.DATA_SOURCE
     RADAR_META_OVERRIDE = _xqpi.RADAR_META
@@ -647,3 +761,47 @@ if LB2_FRESHNESS == "filename":
             f"LB2_FRESHNESS='filename' but RAW_VOLUME_TS_RE has no pattern "
             f"for {_missing} — every radar in RADAR_FOLDER needs one"
         )
+    # Compile here too, for a reason beyond catching typos early: a malformed
+    # pattern fails at RUN time inside every radar check at once, since they
+    # all read the same config. The fleet correlation check downstream counts
+    # simultaneous unreadable radars as evidence of a systemic infrastructure
+    # event — so a single bad character here would be diagnosed as an outage
+    # across the whole fleet. It must not be possible to reach that state from
+    # a running process.
+    import re as _re
+    for _rid, _pat in sorted(RAW_VOLUME_TS_RE.items()):
+        try:
+            _c = _re.compile(_pat)
+        except _re.error as _e:
+            raise ValueError(
+                f"RAW_VOLUME_TS_RE[{_rid!r}] is not a valid pattern: {_e}"
+            ) from None
+        if _c.groups != 2:
+            raise ValueError(
+                f"RAW_VOLUME_TS_RE[{_rid!r}] captures {_c.groups} group(s); "
+                f"needs exactly 2 (YYYYMMDD, HHMMSS)"
+            )
+    del _re, _rid, _pat, _c
+
+
+# A radar in the expected set that Sentinel does not otherwise monitor has no
+# RADAR_SILENT_FAIL_S entry, so the derived contribution band would silently
+# fall back to a default that was characterised for something else. Catch it
+# here: the expected set is a claim about radars we can already judge.
+_unmonitored = sorted(set(COMPOSITE_EXPECTED_RADARS) - set(RADAR_FOLDER))
+if _unmonitored:
+    raise ValueError(
+        f"COMPOSITE_EXPECTED_RADARS names {_unmonitored}, which are not in "
+        f"RADAR_FOLDER — participation can only be judged for a radar whose "
+        f"arrival this profile also monitors"
+    )
+# Two radars mapping to one receipt directory would make both read the same
+# contribution and agree forever, which looks like health.
+_dupes = sorted({d for d in COMPOSITE_EXPECTED_RADARS.values()
+                 if list(COMPOSITE_EXPECTED_RADARS.values()).count(d) > 1})
+if _dupes:
+    raise ValueError(
+        f"COMPOSITE_EXPECTED_RADARS maps more than one radar to {_dupes} — "
+        f"the receipt directory must identify exactly one radar"
+    )
+del _unmonitored, _dupes
