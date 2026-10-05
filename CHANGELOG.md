@@ -28,6 +28,17 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-05
+
+Follow-up to v0.7.0: one regression we caused on the cira-aqpi deploy, two
+latent defects found while chasing it, and the home page's left column scrolls
+as one.
+
+Every figure below was measured by independent derivation from the filesystem
+rather than by reading Sentinel's own output back — the deploy verification
+that found the regression was run that way deliberately, because a check that
+agrees with itself has told you nothing about whether it is right.
+
 ### Fixed
 
 - **CBAND regressed to `fail` on the v0.7.0 deploy, and the cause was ours.**
@@ -77,17 +88,6 @@ unknown`.
   values. Existing deployments keep their stored blob, so the placeholder
   corrects itself only on a fresh bootstrap.
 
-### Changed
-
-- **The whole left column on the home page scrolls, not just the radar list.**
-  It previously pinned the Site rows and both headers and scrolled the radars
-  in a nested pane. That stopped working once a radar row could **expand**:
-  the inner pane is flex-sized, so opening two or three radars left the detail
-  scrolling inside a few hundred pixels while a third of the column sat fixed
-  above it. One scroll region per column.
-
-### Fixed
-
 - **The LB3 receipt fallback was banded against the wrong zero point**, so it
   judged staleness ~115 s more harshly than the primary source for identical
   underlying conditions. Shipped in v0.7.0; found by measurement after the
@@ -110,6 +110,13 @@ unknown`.
 
 ### Changed
 
+- **The whole left column on the home page scrolls, not just the radar list.**
+  It previously pinned the Site rows and both headers and scrolled the radars
+  in a nested pane. That stopped working once a radar row could **expand**:
+  the inner pane is flex-sized, so opening two or three radars left the detail
+  scrolling inside a few hundred pixels while a third of the column sat fixed
+  above it. One scroll region per column.
+
 - **`secondsStarttoEnd` is confirmed an age, not a scan duration**, settled
   four ways rather than by the single-radar span argument v0.7.0 shipped with:
   `endDateTimeScan` is identical across every radar within a run (120/120), it
@@ -119,11 +126,28 @@ unknown`.
   exactly the run interval. A duration cannot grow while the scan is
   unchanged. The dual derivation and disagreement flag are kept anyway, now as
   a guard against the log format changing rather than as an open question.
+
 - **The ~8% expected participation fire rate is 8% of (run × radar) pairs**,
   not of distinct staleness events. The same stuck file is re-blended every
   cycle until something replaces it, so one stuck file inflates the rate by
   however many cycles it survives. Corrected in the docstring, the config
   comment and the docs, and it is a further argument for the hold-down.
+
+- **The fleet `ENTER`/`EXIT`/`DWELL` constants are measured on the arrival
+  basis**, closing the last `[Q]` on them. Reconstructed from the dated
+  arrival trees rather than accumulated from check history — 78,063 declared
+  timestamps, five radars, 6.81 days, simulated at 60 s ticks over 9,800
+  ticks. `n >= 4` never occurs, reaching the same conclusion as the
+  27,917-run L2 history by different data on a different basis. `EXIT=1` is
+  justified by episode structure rather than by the share. The sharper
+  argument against `ENTER=2` is structural: the two-radar episodes are
+  dominated by XEBY and XSCW specifically, so two-radar coincidence is two
+  individually unreliable radars rather than a weak systemic signal. Sample
+  size is stated rather than glossed — both `n >= 3` episodes are the same
+  trio three hours apart, so this reproduces the L2 reasoning and sets a
+  floor rather than fitting a distribution. `DWELL` is also worked through
+  against those episodes, because 10 min exceeds the shorter one and that
+  looks wrong until the timeline is written out.
 
 ## [0.7.0] — 2026-10-05
 
@@ -2776,7 +2800,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.6.2...v0.7.0
 [0.4.13]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.11...v0.4.12
