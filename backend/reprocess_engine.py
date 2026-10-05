@@ -451,12 +451,88 @@ def _reverdict_l2(row: dict) -> tuple[str, dict] | None:
 # L4 needs the running phash/source trail, so handlers take (row, ctx) and
 # pull what they need out of ctx rather than every handler carrying L4's
 # parameters.
+def _reverdict_lb3(row: dict) -> tuple[str, dict] | None:
+    """Re-evaluate an LB3 backend-processing verdict.
+
+    One stage, two check shapes, and only part of each is threshold-driven:
+
+    ``layer3.composite.<radar>``
+        ``B_fresh`` is recomputed from the recorded contribution age against
+        that radar's bands. ``A_included`` is PRESERVED — whether the radar
+        appeared in the receipt is a fact about a file we read at the time, not
+        a threshold comparison, so no change to a threshold can change it.
+        Recomputing it from anything available here would be inventing an
+        observation.
+    ``layer3.backend.drops``
+        Every folder is recomputed against the producer's informational limit.
+        The ceiling stays `warn` exactly as the live check does; see
+        Layer3DropsProducerCheck for why that cap is deliberate.
+    """
+    payload = row["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    sub = dict(payload.get("sub_status") or {})
+    if not sub:
+        return None
+
+    if row["check_id"] == "layer3.backend.drops":
+        limit = _thresholds.get_global("drops_silent_info_s")
+        if limit is None:
+            limit = payload.get("silent_s")
+        if limit is None:
+            return None
+        ages = payload.get("folder_age_min") or {}
+        if not ages:
+            return None
+        limit = float(limit)
+        for rid in list(sub):
+            mins = ages.get(rid)
+            # A folder with no recorded age was unreadable at the time. Leave
+            # its sub-verdict alone rather than guessing it was healthy.
+            if mins is None:
+                continue
+            sub[rid] = "pass" if float(mins) * 60 <= limit else "warn"
+        return _worst_of(*sub.values()), {**payload, "sub_status": sub,
+                                          "silent_s": limit}
+
+    # Composite participation.
+    if "A_included" not in sub:
+        return None
+    # Absent from the receipt: there is no contribution age to re-band, and
+    # A_included is not threshold-driven. Nothing to recompute.
+    if "B_fresh" not in sub:
+        return None
+    age = payload.get("age_s")
+    if age is None:
+        return None
+
+    fail_s = _thresholds.get_radar(row["target"], "composite_contrib_fail_s")
+    if fail_s is None:
+        fail_s = payload.get("contrib_fail_s")
+    if fail_s is None:
+        return None
+    fail_s = float(fail_s)
+    warn_s = _thresholds.get_radar(row["target"], "composite_contrib_warn_s")
+    if warn_s is None:
+        warn_s = payload.get("contrib_warn_s")
+    # Same 0.8x shape the live check derives when no override exists.
+    warn_s = float(warn_s) if warn_s is not None else fail_s * 0.8
+
+    age = float(age)
+    sub["B_fresh"] = ("pass" if age <= warn_s
+                      else "warn" if age <= fail_s else "fail")
+    new_payload = {**payload, "sub_status": sub,
+                   "contrib_warn_s": warn_s, "contrib_fail_s": fail_s}
+    return _worst_of(*sub.values()), new_payload
+
+
 _REVERDICT: dict[str, Any] = {
     "L1":      lambda row, ctx: _reverdict_l1(row),
     "L2":      lambda row, ctx: _reverdict_l2(row),
     "L4-T1T2": lambda row, ctx: _reverdict_l4(row, ctx["l4_phash"], ctx["l4_source"]),
     "LB1":     lambda row, ctx: _reverdict_lb1(row),
     "LB2":     lambda row, ctx: _reverdict_lb2(row),
+    "LB3":     lambda row, ctx: _reverdict_lb3(row),
 }
 
 # Stages that legitimately have nothing threshold-driven to recompute. Listed

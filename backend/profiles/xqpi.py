@@ -389,6 +389,31 @@ LB2_FRESHNESS = "filename"      # [M] flow-<YYYYMMDD>-<HHMMSS>_...
 # cannot match even though its name embeds the same timestamp.
 RAW_VOLUME_TS_RE = {"FLOW": r"^flow-(\d{8})-(\d{6})_"}   # per radar
 
+# ---- LB3: composite participation ---------------------------------------
+# FLOW appears under its own name in the receipt, so no irregular spelling
+# here (contrast AQPI, where CBAND appears as SSCB).
+#
+# KSOX and KVTX are deliberately absent. They ARE in xqpi's receipt, but both
+# entries are the 2026-09-17 volumes — 18 days stale as of 2026-10-05 — and
+# they are being consumed right now by a composite that applies no staleness
+# guard to its radar inputs. Sentinel does not monitor either radar's arrival,
+# so it has no threshold to judge them by and no business opening an alarm it
+# cannot characterise. The 18-day volumes are a real finding; they belong in a
+# report to the composite's owner, not in a check that fires forever. [M]
+COMPOSITE_EXPECTED_RADARS = {"FLOW": "FLOW"}
+
+# xqpi writes TWO receipts: radarfiles_for_comp.txt and ..._comp2.txt, same
+# format and same three radars, but different FLOW volumes and cadences 2 min
+# apart. Left unmonitored rather than guessed at: what consumes comp2 is [U],
+# and a check pointed at a file whose purpose we cannot state would be
+# reporting on something we do not understand.
+COMPOSITE_RECEIPT_ALT = "PRODUCTS/Composite_QPE/radarfiles_for_comp2.txt"
+
+# No DROPS tree on this profile: Gen_X-band_QPE.py is AQPI's. The producer
+# check is gated on this being non-empty rather than on the profile name, so a
+# third profile states its own answer instead of inheriting one. [V]
+DROPS_TREE = ""
+
 # The dated tree is partitioned by UTC date, not local: the first file of each
 # day directory lands at 00:00:1x UTC (verified across 09/26, 09/30, 10/02).
 # _radar_path formats in UTC, which is therefore correct — getting this wrong

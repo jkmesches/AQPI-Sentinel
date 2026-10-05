@@ -21,6 +21,11 @@ _STAGE_LABELS = {
     # stay informational.
     "LB1":     "Backend Products",
     "LB2":     "Backend Radar Arrival",
+    # The processing between arrival (LB2) and a published product (LB1/L1):
+    # composite participation, and the DROPS producer. Nothing watched this
+    # band until 2026-10-05, when a dead producer read as five radar outages
+    # and a radar left the composite unremarked in the same twelve hours.
+    "LB3":     "Backend Processing",
 }
 _STAGE_TECH_CODES = {
     "L0":      "L0",
@@ -30,6 +35,7 @@ _STAGE_TECH_CODES = {
     "L4-T1T2": "L4",
     "LB1":     "LB1",
     "LB2":     "LB2",
+    "LB3":     "LB3",
 }
 
 
