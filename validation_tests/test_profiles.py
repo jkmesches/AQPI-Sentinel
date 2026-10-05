@@ -124,6 +124,8 @@ print("@@" + json.dumps({
     "comp_extent_provisional": config.COMP_EXTENT_PROVISIONAL,
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
+    "lb2_freshness": config.LB2_FRESHNESS,
+    "ts_patterns": dict(config.RAW_VOLUME_TS_RE),
     "declined": dict(__import__("backend.registry", fromlist=["x"]).DECLINED),
     "checks": [{"id": c.id, "stage": c.stage, "target": c.target,
                 "module": type(c).__module__.rsplit(".", 1)[-1],
@@ -267,8 +269,12 @@ def main() -> int:
     check("aqpi LB1 keeps the fcst_temp unit special case",
           aqpi["lb1_paths"]["fcst_temp"].endswith("/temperature/images/F/"),
           aqpi["lb1_paths"]["fcst_temp"])
-    check("aqpi LB2 still resolves under PRODUCTS/DROPS/",
-          aqpi["lb2_paths"]["XEBY"] == f"{ROOT_MOUNT}/PRODUCTS/DROPS/ebay",
+    # Was "aqpi LB2 still resolves under PRODUCTS/DROPS/", which pinned the
+    # defect: DROPS is the QPE generator's OUTPUT, so the check measured the
+    # generator rather than the radar. Inverted on 2026-10-05 — the assertion
+    # is kept rather than deleted so the old target cannot quietly return.
+    check("aqpi LB2 resolves to the raw arrival tree, not DROPS",
+          aqpi["lb2_paths"]["XEBY"] == f"{ROOT_MOUNT}/EBAY/2026/10/03",
           aqpi["lb2_paths"]["XEBY"])
     check("aqpi CBAND still resolves to its own dated mount",
           aqpi["lb2_paths"]["CBAND"] == f"{SSCB_MOUNT}/2026/10/03",
@@ -392,6 +398,56 @@ def main() -> int:
           aqpi["site_name"])
     check("xqpi is XQPI Sentinel", xqpi["site_name"] == "XQPI Sentinel",
           xqpi["site_name"])
+
+    # ---- LB2 reads arrival, and every radar has a pattern that matches ----
+    # LB2 watched PRODUCTS/DROPS/<folder> until 2026-10-05 — the OUTPUT of a
+    # QPE generator, one step downstream of the radar. When that generator
+    # stopped at 04:07 UTC all five X-band checks failed for 12 h while three
+    # of the radars were arriving within a minute throughout.
+    print("\nLB2 measures arrival, per radar:")
+    for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):
+        check(f"{name}: freshness comes from the declared observation time",
+              prof["lb2_freshness"] == "filename", prof["lb2_freshness"])
+        missing = sorted(set(prof["radars"]) - set(prof["ts_patterns"]))
+        check(f"{name}: every monitored radar has a timestamp pattern",
+              not missing, ", ".join(missing))
+        # A pattern that matches nothing makes _newest_declared raise, which
+        # LB2 renders as "no data directory for the current UTC day" — against
+        # a directory that may be full of current files.
+        import re as _re
+        bad = []
+        for r, pat in prof["ts_patterns"].items():
+            try:
+                c = _re.compile(pat)
+            except _re.error as e:
+                bad.append(f"{r}: {e}"); continue
+            if c.groups != 2:
+                bad.append(f"{r}: {c.groups} groups, need 2 (date, time)")
+        check(f"{name}: every pattern compiles and yields date+time groups",
+              not bad, "; ".join(bad))
+    check("no AQPI radar still points at the DROPS tree",
+          not any("/DROPS/" in v for v in aqpi["lb2_paths"].values()),
+          ", ".join(f"{k}={v}" for k, v in aqpi["lb2_paths"].items() if "/DROPS/" in v))
+    check("XEBY resolves to EBAY, which is not derivable from its id",
+          aqpi["lb2_paths"]["XEBY"].endswith("/EBAY/2026/10/03"),
+          aqpi["lb2_paths"]["XEBY"])
+    # The two producers name files differently and nothing reconciles them:
+    # aqpi.scvw-<d>-<t>_... against AQPI.SSCB_<d>_<t>.nc. One shared pattern
+    # matched 0 of 295 CBAND files.
+    check("CBAND's pattern differs from the X-bands'",
+          aqpi["ts_patterns"]["CBAND"] != aqpi["ts_patterns"]["XSCV"],
+          "a single pattern cannot match both producers")
+    import re as _re2
+    check("...and matches a real CBAND filename",
+          bool(_re2.compile(aqpi["ts_patterns"]["CBAND"])
+               .match("AQPI.SSCB_20261005_162356.nc")))
+    check("...while the X-band pattern does NOT match it",
+          not _re2.compile(aqpi["ts_patterns"]["XSCV"])
+                 .match("AQPI.SSCB_20261005_162356.nc"),
+          "if this passes the two patterns were merged and CBAND is at risk")
+    check("the X-band pattern matches a real X-band filename",
+          bool(_re2.compile(aqpi["ts_patterns"]["XSCV"])
+               .match("aqpi.scvw-20261005-162541_317_2_2_PPI.netcdf")))
 
     print("\nsource tags stay renderable in a two-character column:")
     for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):

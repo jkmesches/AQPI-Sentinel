@@ -28,8 +28,54 @@ unknown`.
 
 ## [Unreleased]
 
-Documentation and threshold characterisation. No behavior change on either
-profile; the only value that moves is a threshold nothing reads yet.
+Documentation, threshold characterisation, and one behavior change: `aqpi`'s
+`LB2` radar checks now measure radar arrival instead of a downstream
+generator's output.
+
+### Fixed
+
+- **`LB2` measured the wrong thing on `aqpi`.** The five X-band checks read
+  `PRODUCTS/DROPS/<folder>`, which is the **output** of `Gen_X-band_QPE.py` —
+  one processing step downstream of the radar. So each check answered "is the
+  QPE generator alive", not "is this radar delivering".
+
+  On 2026-10-05 that generator stopped at 04:07 UTC and all five X-band
+  checks failed for 12 hours. Three of the five radars — XSCR, XSCV and XSWR
+  — were arriving within **one minute** the entire time. Measured at 16:25Z:
+
+  | radar | raw arrival | `PRODUCTS/DROPS` |
+  |---|---|---|
+  | XEBY | 63.6 min | 746.1 min |
+  | XSCR | 0.7 min | 747.1 min |
+  | XSCV | 0.3 min | 747.1 min |
+  | XSCW | 440.1 min | 746.1 min |
+  | XSWR | 0.7 min | 746.1 min |
+
+  Three false alarms out of five, and the two that were right (XEBY, XSCW)
+  were right by coincidence — they read the same wrong directory as the other
+  three. `RADAR_DATED_TREE` now maps each X-band to its own arrival tree.
+  Directory names are not derivable from the radar id: XEBY's tree is `EBAY`.
+
+  The DROPS producer is now unmonitored. That is a gap, not a fix, and it
+  wants its own check at an informational severity rather than a return to
+  gating radar health on it.
+
+### Changed
+
+- **`LB2_FRESHNESS` on `aqpi` moves from `dir_mtime` to `filename`**, for a
+  different reason than `xqpi`'s. Not because mtime lies on these trees — it
+  tracked declared time within half a minute — but because each arrival
+  directory carries 126–149 **in-flight dotfiles**, and a newest-by-mtime read
+  lands on one of those instead of a completed volume. The declared-time
+  pattern is anchored at the start of the name, which a dotfile cannot match.
+- **`RAW_VOLUME_TS_RE` is now a dict keyed by radar id**, not a single
+  pattern. AQPI's two producers name files differently and nothing reconciles
+  them — `aqpi.scvw-20261005-162541_...` against `AQPI.SSCB_20261005_162356.nc`.
+  A single pattern fitted to the X-bands matched **0 of 295** CBAND files,
+  which LB2 would have rendered as "no data directory for the current UTC day"
+  against a directory holding 295 current files. `config.py` now raises at
+  import if any radar in `RADAR_FOLDER` lacks a pattern, so a gap surfaces as
+  the config error it is rather than once per cycle as a broken mount.
 
 ### Added
 

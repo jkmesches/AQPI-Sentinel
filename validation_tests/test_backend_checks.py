@@ -68,8 +68,15 @@ def main() -> int:
           lb2._radar_path("CBAND", now) == "/sscb/2026/10/03",
           lb2._radar_path("CBAND", now))
     xb = next(r for r in RADAR_FOLDER if r != "CBAND")
-    check(f"an X-band ({xb}) resolves under PRODUCTS/DROPS",
-          "/PRODUCTS/DROPS/" in lb2._radar_path(xb, now), lb2._radar_path(xb, now))
+    # Was "resolves under PRODUCTS/DROPS". DROPS holds the QPE generator's
+    # OUTPUT, so the check measured the generator rather than the radar — on
+    # 2026-10-05 that generator stopped and all five X-bands failed for 12 h
+    # while three were arriving within a minute. Inverted rather than deleted,
+    # so the old target cannot quietly return.
+    check(f"an X-band ({xb}) resolves to the raw arrival tree, not DROPS",
+          "/PRODUCTS/DROPS/" not in lb2._radar_path(xb, now)
+          and lb2._radar_path(xb, now).endswith("/2026/10/03"),
+          lb2._radar_path(xb, now))
     check("...and the two trees are genuinely different",
           lb2._radar_path("CBAND", now) != lb2._radar_path(xb, now))
 
@@ -104,13 +111,19 @@ def main() -> int:
     RID = "XEBY"
     LIMIT = RADAR_SILENT_FAIL_S.get(RID, 900)
 
+    # Stub BOTH readers. The check picks one from config.LB2_FRESHNESS, and
+    # stubbing only the other silently exercises nothing — which is what
+    # happened when AQPI moved from dir_mtime to filename: these assertions
+    # kept running against a real (absent) path and failed as a missing mount
+    # rather than testing the bands at all.
     def verdict(age_s: float) -> str:
-        orig = lb2._dir_mtime
-        lb2._dir_mtime = lambda path: __import__("time").time() - age_s
+        orig_dir, orig_decl = lb2._dir_mtime, lb2._newest_declared
+        fake = lambda *a, **k: __import__("time").time() - age_s
+        lb2._dir_mtime, lb2._newest_declared = fake, fake
         try:
             r = asyncio.run(lb2.Layer2BackendRadarCheck(radar_id=RID).run(None))
         finally:
-            lb2._dir_mtime = orig
+            lb2._dir_mtime, lb2._newest_declared = orig_dir, orig_decl
         return r.payload["sub_status"]["A_arriving"]
 
     check(f"fresh arrival passes ({RID}, limit {LIMIT}s)", verdict(10) == "pass",
@@ -123,12 +136,13 @@ def main() -> int:
     check("past the limit fails", verdict(LIMIT + 30) == "fail", verdict(LIMIT + 30))
 
     # And the summary has to say which it is, in words an operator reads.
-    orig = lb2._dir_mtime
-    lb2._dir_mtime = lambda path: __import__("time").time() - (LIMIT + 30)
+    orig_dir, orig_decl = lb2._dir_mtime, lb2._newest_declared
+    _late = lambda *a, **k: __import__("time").time() - (LIMIT + 30)
+    lb2._dir_mtime, lb2._newest_declared = _late, _late
     try:
         r = asyncio.run(lb2.Layer2BackendRadarCheck(radar_id=RID).run(None))
     finally:
-        lb2._dir_mtime = orig
+        lb2._dir_mtime, lb2._newest_declared = orig_dir, orig_decl
     check("a breach is labelled BACKEND SILENT, not just a number",
           "BACKEND SILENT" in r.summary, r.summary)
     check("...and the overall status is fail", r.status == "fail", r.status)
