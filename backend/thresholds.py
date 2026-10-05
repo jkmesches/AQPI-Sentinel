@@ -94,7 +94,13 @@ def _seed_from_config() -> dict[str, Any]:
 
     radars: dict[str, dict[str, Any]] = {}
     for rid, sec in _config.RADAR_SILENT_FAIL_S.items():
-        radars[rid] = {"silent_fail_s": sec}
+        # Both keys, resolved. `backend_silent_s` is seeded for the same
+        # reason the l4 block persists its merged profile: the admin UI builds
+        # every placeholder from this blob, and a key absent here renders as
+        # "—" even though the CHECK supplies a real default. On 2026-10-05
+        # that gap meant clearing CBAND's override showed no indication that
+        # the effective limit would become 1080 s.
+        radars[rid] = {"silent_fail_s": sec, "backend_silent_s": sec}
 
     l4: dict[str, dict[str, Any]] = {}
     default_l4 = _config.DEFAULT_L4_PROFILE

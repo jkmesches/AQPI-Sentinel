@@ -541,22 +541,46 @@ class Layer2BackendFleetCheck(Check):
         latched = systemic and n < LB_FLEET_SYSTEMIC_ENTER
 
         witness = _lb_witness(now)
-        # Three states, and the third is not a variant of the second: an absent
-        # or stale witness means the independent tree could not be consulted,
-        # so the fault cannot be localised this cycle. Saying "the X-band path"
-        # on that evidence would be a claim we did not earn.
-        if witness is None:
+        # === What the witness actually licenses us to claim ===
+        #
+        # The first version branched on `witness in LB_SYSTEMIC_VERDICTS`,
+        # which conflated two different facts and got both edge cases wrong:
+        #
+        #   * CONFIG_ERROR fell to the `else`, so a malformed pattern would
+        #     have produced "host, NFS and clock are fine" on the strength of
+        #     a verdict that tells us nothing about any of them.
+        #   * SILENT produced "wider than the X-band path", so CBAND failing
+        #     for a THRESHOLD reason read as an infrastructure fault. That is
+        #     not hypothetical: on 2026-10-05 the LB2 basis change pushed
+        #     CBAND past a stored 300 s limit while its tree was being read
+        #     perfectly well every cycle.
+        #
+        # The distinction that matters for localisation is whether the
+        # independent tree could be READ, not whether the data on it was
+        # fresh. A successful read is what proves the host is up, NFS is
+        # serving, the clock is sane and our own reads work. Freshness is a
+        # separate question and a weaker signal.
+        if witness is None or witness == "CONFIG_ERROR":
             scope, scope_note = "unlocalised", (
                 f"{LB_FLEET_WITNESS} verdict unavailable — cannot tell the "
                 f"X-band path from a wider fault this cycle")
-        elif witness in LB_SYSTEMIC_VERDICTS:
+        elif witness == "UNREADABLE":
             scope, scope_note = "wider-than-xband", (
-                f"{LB_FLEET_WITNESS} is {witness} too, on a separate mount — "
-                f"wider than the X-band path")
-        else:
+                f"{LB_FLEET_WITNESS}'s own mount could not be read either — "
+                f"this is wider than the X-band path")
+        elif witness == "ARRIVING":
             scope, scope_note = "xband-path", (
                 f"{LB_FLEET_WITNESS} arriving normally on its own mount — "
                 f"host, NFS and clock are fine; fault is in the X-band path")
+        else:
+            # SILENT: the read SUCCEEDED, so the mount and host are fine; what
+            # is shared is an absence of data rather than an absence of
+            # service. Said precisely, because "wider than the X-band path"
+            # alone would be read as an infrastructure fault.
+            scope, scope_note = "wider-than-xband", (
+                f"{LB_FLEET_WITNESS} is {witness} too, but its mount read "
+                f"fine — host and NFS are healthy, so the fault spans both "
+                f"data paths rather than being mount-level")
 
         verdicts = dict(sorted(fresh.items()))
         # When some radars did not report this cycle, "3/5 not arriving" reads
@@ -586,6 +610,10 @@ class Layer2BackendFleetCheck(Check):
                      "enter_at": LB_FLEET_SYSTEMIC_ENTER,
                      "exit_at": LB_FLEET_SYSTEMIC_EXIT,
                      "witness": LB_FLEET_WITNESS, "witness_verdict": witness,
+                     # The fact the mount claim rests on, recorded separately
+                     # from the freshness verdict that must not imply it.
+                     "witness_mount_readable": (
+                         witness in ("ARRIVING", "SILENT") if witness else None),
                      # Only meaningful when there is an event to localise.
                      # Reporting a scope on a passing fleet would imply we
                      # tried to attribute a fault that does not exist.

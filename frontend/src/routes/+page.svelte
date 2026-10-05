@@ -346,11 +346,21 @@
 {/snippet}
 
 <div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
-	<!-- LEFT RAIL: SITE + RADARS + IMAGE QC ------------------------------------------- -->
+	<!-- LEFT RAIL: SITE + RADARS -------------------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
 	     of most cascading failures, so keeping it at eye level makes
-	     "what's actually broken" the first thing the operator sees. -->
-	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-hidden">
+	     "what's actually broken" the first thing the operator sees.
+	     (Image QC is no longer a section of its own — it is the small dot in
+	     each radar row's trailing cell.)
+
+	     THE WHOLE COLUMN SCROLLS, not just the radar list. It used to pin the
+	     Site rows and both headers and scroll only the radars in a nested
+	     pane, which went wrong once a radar row could EXPAND: the inner pane
+	     is sized by flex, so opening two or three radars left the detail
+	     scrolling inside a few hundred pixels while a third of the column sat
+	     fixed above it. One scroll region for one column — the expanders are
+	     the reason the old arrangement stopped working. -->
+	<aside class="panel col-span-3 row-span-1 flex flex-col overflow-y-auto">
 		<SectionHeader title="Site" right={stageLabel('L0')} />
 		<ul class="shrink-0 divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
@@ -414,7 +424,10 @@
 				</div>
 			</div>
 		{/if}
-		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
+		<!-- No flex-1/min-h-0/overflow here: the <aside> above owns the single
+		     scroll region. A nested one would reintroduce the cramped inner
+		     pane that expanding a radar made unusable. -->
+		<ul class="divide-y divide-[var(--color-border)]">
 			{#each radarGroups as g (g.target)}
 				{@const imgQc = l4XbandByRadar[g.target]}
 				{@const open = radarIsOpen(g.target, g.alerting)}
