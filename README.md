@@ -12,9 +12,11 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 ## Status
 
-**v0.4.13** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
+**v0.7.0** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
 
-- **45 checks** across 5 stages (L0/L1/L2/L3/L4-T1T2), self-registered via `@register`.
+- **72 checks** across 8 stages, self-registered via `@register`. Count from the real import graph, not one module — `backend.checks` alone under-reports.
+- **Two independent views of the same system.** The `L*` stages ask the upstream display tier what it believes; the `LB*` stages read the published files straight off the mounted shares and owe it nothing. Where the two disagree, the `LB` answer describes reality and *the disagreement itself is the signal* — the data exists and something in the display tier is not showing it.
+- **Deployment profiles** (`SENTINEL_PROFILE`) — one codebase, two radar networks. `aqpi` monitors six radars and thirteen products via radarca; `xqpi` monitors JPL's FLOW entirely off the filesystem, with no HTTP origin to probe at all. A profile owns its products, trees, thresholds, map and labels; the registry *refuses* a check that a profile cannot observe rather than letting it fail forever.
 - **21-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).
 - **Alarm engine** with routes, groups (schedule-gated bundles of users), escalation policies, acks, silences, dependency-graph suppression, and per-step recipient dedup.
 - **Three-tier severity model** (v0.1.2): `info` = attention-required, `warn` = broken (action required), `critical` = sustained outage. Auto-promotes `warn → critical` after 30 minutes.
@@ -28,13 +30,16 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 ```mermaid
 flowchart TB
     upstream["radarca.engr.colostate.edu"]
-    layers["<b>Five-layer probe stack</b><br/>L0 · Connectivity — site / TLS / origin / public dashboard<br/>L1 · Product Freshness — image · parity · step contiguity<br/>L2 · Radar Scans — per-radar reconciliation · GHOST_UP<br/>L3 · Map Overlays — JS overlay timestamp parity (Playwright)<br/>L4 · Image Quality — image stats · tier-2 heuristics"]
+    shares["mounted shares (K2 · Trinity)"]
+    layers["<b>Display-tier probe stack</b><br/>L0 · Connectivity — site / TLS / origin / public dashboard<br/>L1 · Product Freshness — image · parity · step contiguity<br/>L2 · Radar Scans — per-radar reconciliation · GHOST_UP<br/>L3 · Map Overlays — JS overlay timestamp parity (Playwright)<br/>L4 · Image Quality — image stats · tier-2 heuristics"]
+    backend["<b>Backend tier — reads the files, not the API</b><br/>LB1 · Backend Products — is it actually being produced?<br/>LB2 · Backend Radar Arrival — is data landing on disk now?<br/>LB3 · Backend Processing — in the composite? producer alive?"]
     engine["<b>Alarm engine</b><br/>routes · groups · escalation steps<br/>suppression DAG · acks · silences · per-step dedup"]
     ws["WebSocket fan-out"]
     dash["<b>SvelteKit dashboard</b><br/>Live · Timeline · History · Admin · /m/*"]
     sinks["<b>email · Web Push · webhook · console</b><br/>per-device severity floor, patterns,<br/>quiet hours, on-duty schedules"]
 
     upstream --> layers --> engine --> ws --> dash
+    shares --> backend --> engine
     engine --> sinks
 ```
 
@@ -108,6 +113,8 @@ Need to build from source (air-gapped, or a branch)?
 
 One file under `backend/checks/`, a `@register` line at the bottom, optionally an import in `backend/checks/__init__.py`. The scheduler, store, alarm engine, API, and frontend all consume the generic `CheckResult` envelope — no central list to update. New stages are just labels: `INFRA` for storage-cluster heartbeats works the same way as `L5`.
 
+A new *stage* costs more than a new check, because stage knowledge is enumerated in several places by design — `ALL_STAGES`, the label/code/colour maps, the timeline tabs, the mobile grids, the reprocess handler table. That table is the point: `test_reprocess_stage_coverage` fails on a stage with no reverdict handler rather than letting a reprocess job silently skip it.
+
 [Walkthrough →](docs/13-extending-checks.md)
 
 ## Documentation
@@ -126,6 +133,7 @@ One file under `backend/checks/`, a `@register` line at the bottom, optionally a
 | [`docs/16-alarm-engine.md`](docs/16-alarm-engine.md) | Custom alarm sinks / routing internals |
 | [`docs/93-severity-audit.md`](docs/93-severity-audit.md) | Per-check classification under the v0.1.2 severity model |
 | [`docs/92-glossary.md`](docs/92-glossary.md) | "What does *X* mean?" |
+| [`docs/07-deployment-profiles.md`](docs/07-deployment-profiles.md) | Running a second radar network from the same codebase; why a freshness basis is a property of the tree, not a preference |
 | [`docs/06-porting-to-other-upstreams.md`](docs/06-porting-to-other-upstreams.md) | Pointing Sentinel at a non-radarca system |
 | [`docs/radarca-public-characterization.md`](docs/radarca-public-characterization.md) | Reverse-engineering reference for radarca's API |
 
