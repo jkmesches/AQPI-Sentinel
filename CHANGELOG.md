@@ -28,6 +28,45 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-10-05
+
+Finishes the job v0.7.3 started. That release removed the clipped prose from the
+collapsed radar row and claimed the expander carried the full text; it did not.
+
+### Fixed
+
+- **The expander truncated too, which was the entire point of it.** The detail
+  row was a four-column grid — stage label, dot + source tag, summary in `1fr`,
+  sparkline — with `truncate` on the summary, inside the same 330&nbsp;px rail.
+  After 6.2rem of stage label, the dot, the tag and a 62&nbsp;px trace there was
+  barely more room than the collapsed row had, so it clipped in the same place
+  for the same reason. v0.7.3 moved the problem one click deeper rather than
+  solving it: an expander exists to show what does not fit, and one that
+  truncates is a quieter version of the original complaint.
+
+  The detail row is now two lines. The first carries the stage, status dot,
+  source tag and trace; the second gives the summary **the whole rail width**
+  with `break-words`, so it wraps instead of clipping.
+
+  `break-words` rather than a wider column, because these summaries put the
+  threshold in parentheses at the **end** — `newest volume 23.4 min ago
+  (silent limit 5 min)` — and the limit is the half a clipped line always
+  loses, which is the half that says whether 23.4 is bad. The
+  composite-participation line cannot be fixed by width at all: it names which
+  radars *were* present, so it is long by design and only useful whole.
+
+  The cost, stated because it is real: an expanded radar is now about twice as
+  tall, so six radars with **Expand all** is a longer scroll. The
+  whole-column scroll added in v0.7.1 absorbs it.
+
+- **The two Site-rail summaries are reachable.** They still clip — these are
+  one-line L0 rows, and eleven of them each wrapping to two would push the
+  radars below the fold, which is what that column is for — but the full text
+  is now on the row's hover title instead of nowhere. That includes the QPE
+  producer row, whose summary (`DROPS PRODUCER STALLED — 5/5 folders quiet,
+  oldest 15.1 h (…)`) was added in v0.7.0 with a `truncate` and has never been
+  visible on a deployment without backend mounts.
+
 ## [0.7.3] — 2026-10-05
 
 Labels, a rail that truncated, and three thresholds that were honoured but
@@ -2965,7 +3004,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...v0.7.1
