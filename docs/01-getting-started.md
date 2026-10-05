@@ -186,7 +186,7 @@ process or absent from it:
 
 | Setting | When set | When unset |
 |---|---|---|
-| `SENTINEL_BACKEND_ROOT` | 13 `LB1` product checks + 6 `LB2` radar checks register | none of them exist |
+| `SENTINEL_BACKEND_ROOT` | 13 `LB1` product checks, 6 `LB2` radar checks + the `LB2` fleet correlation, and 6 `LB3` participation checks + the `LB3` QPE-producer check register | none of them exist |
 | `SENTINEL_SSCB_ROOT` | CBAND's `LB2` check registers (it reads Trinity; the X-bands read their own arrival trees under `SENTINEL_BACKEND_ROOT`) | every other radar still registers; CBAND does not |
 
 The home page reads this off `/api/checks` and lays itself out to

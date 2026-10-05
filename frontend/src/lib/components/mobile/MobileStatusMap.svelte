@@ -14,6 +14,8 @@
 	import { url as apiUrl } from '$lib/origin';
 	import { resolveHomeView, type HomeView } from '$lib/site';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
+	import { isFleetCheck } from '$lib/format';
+	import { worstOf } from '$lib/grouping';
 
 	// Stadia styles — same as desktop MapView. Theme-locked at mount.
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
@@ -174,9 +176,27 @@
 	let playing = $state(false);
 	let playTimer: ReturnType<typeof setInterval> | undefined;
 
+	// Worst reading per radar, across every stage that observes one.
+	//
+	// This read L2 alone, which has two consequences. On a profile with no
+	// radarca origin — XQPI, where FLOW is monitored entirely off the
+	// filesystem — every marker rendered in the `skip` colour on a working
+	// deployment. And on AQPI a radar could be silent on disk (LB2 fail) while
+	// radarca still claimed it was fine, and the map would draw it green.
+	//
+	// LB3 is included: a radar that has dropped out of the composite is not
+	// fully healthy, and the map is the surface where "which radars are
+	// contributing right now" is the actual question being asked.
 	const statusByRadar = $derived.by(() => {
 		const out: Record<string, string> = {};
-		for (const r of sentinel.rollup?.stages?.L2 ?? []) out[r.target] = r.status;
+		const st = sentinel.rollup?.stages ?? {};
+		for (const stage of ['L2', 'LB2', 'LB3']) {
+			for (const r of st[stage] ?? []) {
+				if (isFleetCheck(r.check_id)) continue;          // not a radar
+				if (r.check_id === 'layer3.backend.drops') continue;
+				out[r.target] = worstOf([out[r.target], r.status].filter(Boolean) as string[]);
+			}
+		}
 		return out;
 	});
 

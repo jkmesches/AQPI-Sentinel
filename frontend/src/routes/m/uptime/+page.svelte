@@ -47,7 +47,7 @@
 	const SUBTABS: { key: SubTab; label: string; stages: string[] }[] = [
 		{ key: 'connectivity', label: 'Connectivity', stages: ['L0'] },
 		{ key: 'products',     label: 'Products',     stages: ['L1', 'LB1'] },
-		{ key: 'radar',        label: 'Radar',        stages: ['L2', 'LB2', 'L3', 'L4-T1T2'] }
+		{ key: 'radar',        label: 'Radar',        stages: ['L2', 'LB2', 'LB3', 'L3', 'L4-T1T2'] }
 	];
 
 
@@ -179,7 +179,14 @@
 		const out: Subgroup[] = [];
 		// 'LB2' stays listed, last, for a profile that registers it with no L2
 		// to fold into -- XQPI, where it is the only radar group there is.
-		for (const s of ['L2', 'L3', 'L4-T1T2', 'LB2']) {
+		//
+		// 'LB3' is listed on its own rather than folded: isBackendStage() is
+		// driven by BACKEND_STAGE_OF, which pairs LB1<-L1 and LB2<-L2, and LB3
+		// has no radarca counterpart to mirror. It measures the processing
+		// BETWEEN arrival and publication, which radarca does not observe at
+		// all, so there is nothing to fold it into and it must not inherit a
+		// mirror it does not have.
+		for (const s of ['L2', 'L3', 'L4-T1T2', 'LB2', 'LB3']) {
 			const cols = byStage.get(s);
 			if (cols?.length) out.push({ label: stageLabel(s), cols });
 		}

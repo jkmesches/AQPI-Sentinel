@@ -58,7 +58,7 @@ export const FAQ: FaqItem[] = [
 	},
 	{
 		id: 'stages',
-		q: 'What do the five stages mean?',
+		q: 'What do the stages mean?',
 		blocks: [
 			{
 				kind: 'table',
@@ -69,12 +69,14 @@ export const FAQ: FaqItem[] = [
 					['LB1', 'Backend Products', 'Is each product actually being produced — read from K2 directly, not via radarca?'],
 					['L2', 'Radar Scans', 'Is each radar actually emitting scans, according to radarca?'],
 					['LB2', 'Backend Radar Arrival', 'Is each radar\u2019s data landing on disk right now — read from the backend trees directly?'],
+					['LB3', 'Backend Processing', 'Is each radar reaching the composite, and is the QPE producer still running?'],
 					['L3', 'Map Overlays', 'Do overlays render in a real browser?'],
 					['L4', 'Image Quality', 'Does the imagery itself look plausible?']
 				]
 			},
 			{ kind: 'p', text: 'The stages are also a dependency chain. If L0 says the origin is unreachable, downstream failures are collateral and Sentinel marks them as such, rather than painting forty red cells for one root cause.' },
-			{ kind: 'p', text: 'The two LB stages sit deliberately outside that chain. They read the published files straight off the backend shares, so radarca being down tells you nothing about whether a product exists — and that independence is the point. Where an LB stage and its radarca counterpart disagree, the LB answer is the one describing reality, and the disagreement itself is the useful signal: the data is being produced but something in the display tier is not showing it. The home page puts that comparison on one row: each radar and product carries two readings, tagged K2 (the backend tree \u2014 Trinity for CBAND) and RC (radarca), plotted on the same fixed scale against the same threshold. When one trace falls and the other does not, that is the disagreement, visible without reading anything. Rails on a deployment with no backend mount show a single column and no tags.' }
+			{ kind: 'p', text: 'LB3 watches the gap between the other two: a radar can be arriving on disk (LB2 green) and a product can be publishing on time (LB1 green) while the product is quietly computed from fewer radars than it claims. On 2026-10-05 a radar aged out of the AQPI composite and nothing anywhere said so, because no check was looking between arrival and publication. Its second check watches the QPE producer, which is deliberately non-paging \u2014 nothing in the live product chain reads that tree, so a stall there is worth seeing and not worth waking anyone for.' },
+			{ kind: 'p', text: 'The LB stages sit deliberately outside that chain. They read the published files straight off the backend shares, so radarca being down tells you nothing about whether a product exists — and that independence is the point. Where an LB stage and its radarca counterpart disagree, the LB answer is the one describing reality, and the disagreement itself is the useful signal: the data is being produced but something in the display tier is not showing it. The home page puts that comparison on one row: each radar and product carries two readings, tagged K2 (the backend tree \u2014 Trinity for CBAND) and RC (radarca), plotted on the same fixed scale against the same threshold. When one trace falls and the other does not, that is the disagreement, visible without reading anything. Rails on a deployment with no backend mount show a single column and no tags.' }
 		]
 	},
 	{

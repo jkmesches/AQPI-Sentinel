@@ -9,30 +9,86 @@
 		fmtAge, severityChip, statusText, statusBorder,
 		stageLabel, prettyCheckLabel, productLabel,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
-		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck } from '$lib/format';
+		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck,
+		arrivalRowOf, BACKEND_FLEET_CHECK_ID } from '$lib/format';
+	import { groupByTarget, worstOf, isAlerting } from '$lib/grouping';
+	import GroupRow from '$lib/components/GroupRow.svelte';
 	import { api, type CheckMeta } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
 
-	// L2 + LB2 together: the same radar seen through radarca and read off the
-	// backend. Kept flat for the header's pass count; the rails render
-	// `radarPairs` instead, which puts the two sources on ONE row.
+	// Every reading of every radar, flat, for the header's pass count. The rail
+	// itself renders `radarGroups`, which collapses a radar's several readings
+	// onto one expandable row — see $lib/grouping.
 	const radarRows = $derived(
-		[...(sentinel.rollup?.stages?.L2 ?? []), ...(sentinel.rollup?.stages?.LB2 ?? [])]
+		[...(sentinel.rollup?.stages?.L2 ?? []), ...(sentinel.rollup?.stages?.LB2 ?? []),
+		 ...(sentinel.rollup?.stages?.LB3 ?? [])]
 			.filter((r) => !isFleetCheck(r.check_id))
+			// The DROPS producer is in LB3 but is not about a radar, so it must
+			// not land in the radar rail or its count. It gets its own row in
+			// the Site rail, where a backend processing step belongs.
+			.filter((r) => r.check_id !== 'layer3.backend.drops')
 			.slice().sort((a, b) => a.target.localeCompare(b.target))
+	);
+
+	// One expandable row per radar, carrying every reading of it.
+	//
+	// Stage order inside a group is CAUSAL, not alphabetical: arrival (LB2)
+	// explains a missing composite contribution (LB3), which in turn explains
+	// what radarca reports (L2). Reading the consequence before the cause is
+	// how an operator ends up investigating the wrong thing.
+	const RADAR_STAGE_ORDER = ['LB2', 'LB3', 'L2'];
+	const radarGroups = $derived(
+		groupByTarget(
+			radarRows.slice().sort(
+				(a, b) => RADAR_STAGE_ORDER.indexOf(a.stage) - RADAR_STAGE_ORDER.indexOf(b.stage)
+			)
+		)
+	);
+
+	// Open state. Default is "open if alerting", with explicit operator choices
+	// recorded separately so a radar that starts alerting can open itself
+	// WITHOUT overwriting a collapse someone chose on purpose.
+	let radarOverride = $state<Record<string, boolean>>({});
+	const radarIsOpen = (target: string, alerting: boolean) =>
+		radarOverride[target] ?? alerting;
+	const toggleRadar = (target: string, alerting: boolean) => {
+		radarOverride[target] = !radarIsOpen(target, alerting);
+	};
+	const allRadarsOpen = $derived(
+		radarGroups.length > 0 && radarGroups.every((g) => radarIsOpen(g.target, g.alerting))
+	);
+	const setAllRadars = (open: boolean) => {
+		for (const g of radarGroups) radarOverride[g.target] = open;
+	};
+
+	// The DROPS producer row, for the Site rail. Informational by design — see
+	// backend Layer3DropsProducerCheck — so it is shown always rather than only
+	// while alerting: an operator needs to be able to see that it IS running,
+	// which was the whole gap on 2026-10-05.
+	const dropsRow = $derived(
+		(sentinel.rollup?.stages?.LB3 ?? []).find((r) => r.check_id === 'layer3.backend.drops')
+			?? null
 	);
 
 	// The fleet correlation verdict is about the rail, not a row in it. Pulled
 	// out so the count reads 6 radars rather than 7, and rendered as a banner
 	// only when it has something to say — it is `pass` 99% of the time and a
 	// permanently-green row that cannot be acted on is just furniture.
+	//
+	// The BACKEND fleet verdict wins when both exist. Both answer "one event or
+	// N", but the backend one reads the filesystem and CBAND arrives on a
+	// separate mount — so it can say whether the host, NFS and clock are fine
+	// and localise the fault to the X-band path. The radarca-derived one cannot
+	// distinguish "the radars stopped" from "the API we ask about them
+	// stopped". Showing both would be two banners making the same claim with
+	// different confidence.
 	const fleetRow = $derived(
-		(sentinel.rollup?.stages?.L2 ?? []).find((r) => isFleetCheck(r.check_id)) ?? null
+		(sentinel.rollup?.stages?.LB2 ?? []).find((r) => r.check_id === BACKEND_FLEET_CHECK_ID)
+			?? (sentinel.rollup?.stages?.L2 ?? []).find((r) => isFleetCheck(r.check_id))
+			?? null
 	);
-	const fleetAlerting = $derived(
-		!!fleetRow && fleetRow.status !== 'pass' && fleetRow.status !== 'skip'
-	);
+	const fleetAlerting = $derived(!!fleetRow && isAlerting(fleetRow.status));
 
 	// Which sources exist on THIS deployment, per family.
 	//
@@ -85,7 +141,6 @@
 		};
 		return { products: pairable('L1', 'LB1'), radars: pairable('L2', 'LB2') };
 	});
-	const pairedRadars   = $derived(sources.radars.paired);
 	const pairedProducts = $derived(sources.products.paired);
 	// In an unpaired rail the single reading may come from EITHER side, so
 	// nothing downstream may assume it is `primary`.
@@ -131,10 +186,6 @@
 		return { pass: all.filter((r: any) => r.status === 'pass').length, total: all.length };
 	};
 
-	const radarPairs = $derived(pairByTarget(
-		(sentinel.rollup?.stages?.L2 ?? []).filter((r) => !isFleetCheck(r.check_id)),
-		sentinel.rollup?.stages?.LB2 ?? []
-	));
 	const productPairs = $derived(pairByTarget(
 		sentinel.rollup?.stages?.L1 ?? [],
 		sentinel.rollup?.stages?.LB1 ?? []
@@ -309,9 +360,38 @@
 					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{r.summary}</span>
 				</li>
 			{/each}
+			{#if dropsRow}
+				<!-- Informational by design: nothing in the live product chain
+				     reads the DROPS tree, so this never pages (see alerts.yaml
+				     and Layer3DropsProducerCheck). Shown even when healthy,
+				     because being unable to see that it IS running is exactly
+				     the gap that let it die unnoticed for twelve hours. -->
+				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
+					title={`${dropsRow.check_id} — informational, non-paging`}>
+					<StatusDot status={dropsRow.status} size={7} pulseKey={sentinel.pulseTick[dropsRow.check_id] ?? 0} />
+					<span class="text-[var(--color-default)] num">QPE producer</span>
+					<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">INFO</span>
+					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{dropsRow.summary}</span>
+				</li>
+			{/if}
 		</ul>
 
-		<SectionHeader title="Radars" count="{radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}" right={sourceLabelFor(sources.radars, 'L2', 'LB2')} />
+		<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5">
+			<span class="label">Radars</span>
+			<span class="num text-[10.5px] text-[var(--color-faint)]">·  {radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}</span>
+			<!-- One control, two states. Two buttons would leave one of them
+			     always a no-op, and the label says what the click will DO
+			     rather than what the rail currently is. -->
+			<button
+				type="button"
+				class="ml-auto num text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				onclick={() => setAllRadars(!allRadarsOpen)}
+				title={allRadarsOpen ? 'collapse every radar' : 'expand every radar'}
+			>
+				{allRadarsOpen ? 'Collapse all' : 'Expand all'}
+			</button>
+			<span class="num text-[10.5px] text-[var(--color-muted)]">{sourceLabelFor(sources.radars, 'L2', 'LB2')}</span>
+		</div>
 		{#if fleetAlerting && fleetRow}
 			<!-- The fleet verdict, where it belongs: above the radars it is a
 			     statement about, and only while it is making one. Everything
@@ -326,7 +406,7 @@
 				<span class="mt-[3px] shrink-0"><StatusDot status={fleetRow.status} size={8} /></span>
 				<div class="min-w-0">
 					<div class="label text-[10px] tracking-[0.14em] {statusText(fleetRow.status)}">
-						X-band fleet
+						{fleetRow.check_id === BACKEND_FLEET_CHECK_ID ? 'Radar fleet · backend' : 'X-band fleet'}
 					</div>
 					<div class="num text-[11px] leading-snug text-[var(--color-default)]">
 						{fleetRow.summary}
@@ -334,50 +414,89 @@
 				</div>
 			</div>
 		{/if}
-		{#if pairedRadars}
-			<!-- Column headers only exist in the paired layout. They name the
-			     sources in full: "K2/TRIN" was not parseable cold, and these
-			     labels are the first thing a new operator reads. -->
-			<div class="grid grid-cols-[3.6rem_1fr_1fr_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
-				<span></span><span>K2 / Trinity</span><span>RadarCA</span><span></span>
-			</div>
-		{/if}
 		<ul class="min-h-0 flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
-			{#each radarPairs as p (p.target)}
-				{@const imgQc = l4XbandByRadar[p.target]}
-				<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {pairedRadars ? 'grid-cols-[3.6rem_1fr_1fr_auto]' : 'grid-cols-[3.6rem_3rem_1fr_auto]'} items-center gap-2 px-3 py-2 text-[12px]">
-					<!-- The bare target, once. The old rail rendered prettyCheckLabel
-					     per row, which read "XEBY" then "XEBY · backend" down the
-					     list; with the two sources on one row the radar is named
-					     once and each source is named by its own column + tag. -->
-					<span class="num truncate text-[13px] text-[var(--color-bright)] tracking-wide"
-						  title={p.target}>{p.target}</span>
-					{#if pairedRadars}
-						{@render sourceCell(p.backend, 'K2', true, 76)}
-						{@render sourceCell(p.primary, 'RC', true, 76)}
-					{:else}
-						<!-- Unpaired, so there is room for the word. Dropping it would
-						     change today's rail on a deployment this change otherwise
-						     leaves alone. With two sources there is no room for two of
-						     these, and the dot plus the trace colour carry it.
-						     `loneOf`, not `primary`: on an XQPI-shaped deployment the
-						     one reading is the BACKEND one. -->
-						{@const lone = loneOf(p)}
-						<span class="label text-left {statusText(lone?.status ?? 'skip')}">
-							{lone?.status === 'pass' ? 'UP'
-								: lone?.status === 'fail' ? 'DOWN'
-								: (lone?.status ?? 'skip').toUpperCase()}
+			{#each radarGroups as g (g.target)}
+				{@const imgQc = l4XbandByRadar[g.target]}
+				{@const open = radarIsOpen(g.target, g.alerting)}
+				{@const worstRow = g.rows.find((r) => r.status === g.worst) ?? g.rows[0]}
+				{@const arrival = arrivalRowOf(g.rows)}
+				<GroupRow
+					label={g.target}
+					worst={g.worst}
+					{open}
+					ontoggle={() => toggleRadar(g.target, g.alerting)}
+					count={g.rows.length}
+					pulseKey={sentinel.pulseTick[arrival?.check_id ?? ''] ?? 0}
+					title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`}
+				>
+					{#snippet collapsed()}
+						<!-- The WORST reading's own words, not a synthesised line, so
+						     expanding never contradicts what the collapsed row said. -->
+						{worstRow?.summary ?? ''}
+					{/snippet}
+					{#snippet trailing()}
+						<span class="flex items-center gap-2">
+							{#if arrival && diag.spark}
+								<!-- Data arrival, specifically: LB2 where it exists. LB3
+								     measures a composite receipt written two steps later
+								     and L2 measures what radarca says, so plotting
+								     whichever came first would make the trace mean a
+								     different thing on different rows. -->
+								{@const metric = sparklineMetric(arrival.check_id)}
+								<Sparkline
+									data={sentinel.metrics[`${arrival.check_id}|${metric ?? 'age_s'}`] ?? []}
+									cadenceS={checksById[arrival.check_id]?.cadence_s ?? 120}
+									width={62}
+									height={14}
+									domain={sparklineDomain(metric)}
+									warnAt={sparklineWarnAt(metric)}
+									showLabel={false}
+								/>
+							{/if}
+							{#if imgQc}
+								<span class="inline-block align-middle" title="image QC">
+									<StatusDot status={imgQc} size={6} />
+								</span>
+							{/if}
 						</span>
-						{@render sourceCell(lone, 'RC', false, 86)}
-					{/if}
-					<span class="num text-[10.5px] text-[var(--color-muted)]">
-						{#if imgQc}
-							<span class="inline-block align-middle" title="image QC">
-								<StatusDot status={imgQc} size={6} />
-							</span>
-						{/if}
-					</span>
-				</li>
+					{/snippet}
+					{#snippet detail()}
+						<ul class="flex flex-col gap-1">
+							{#each g.rows as r (r.check_id)}
+								{@const meta = checksById[r.check_id]}
+								{@const metric = sparklineMetric(r.check_id)}
+								<li
+									class="grid grid-cols-[6.2rem_auto_1fr_auto] items-center gap-2 text-[11px]"
+									title={`${r.check_id}${meta?.source_label ? ` · read from ${meta.source_label}` : ''}`}
+								>
+									<span class="num text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
+										{stageLabel(r.stage)}
+									</span>
+									<span class="flex items-center gap-1.5">
+										<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
+										{#if meta?.source_tag}
+											<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{meta.source_tag}</span>
+										{/if}
+									</span>
+									<span class="min-w-0 truncate num text-[10.5px] {statusText(r.status)}">
+										{r.summary}
+									</span>
+									{#if diag.spark}
+										<Sparkline
+											data={sentinel.metrics[`${r.check_id}|${metric ?? 'age_s'}`] ?? []}
+											cadenceS={meta?.cadence_s ?? 120}
+											width={62}
+											height={12}
+											domain={sparklineDomain(metric)}
+											warnAt={sparklineWarnAt(metric)}
+											showLabel={false}
+										/>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/snippet}
+				</GroupRow>
 			{/each}
 		</ul>
 	</aside>

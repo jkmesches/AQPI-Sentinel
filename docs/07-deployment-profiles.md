@@ -25,7 +25,7 @@ therefore decides which checks exist at all, not merely what they point at.
 | | `aqpi` | `xqpi` |
 |---|---|---|
 | checks registered | 64 | 9 |
-| stages | L0, L1, L2, L3, L4, LB1, LB2 | L0, LB1, LB2 |
+| stages | L0, L1, L2, L3, L4, LB1, LB2, LB3 | L0, LB1, LB2, LB3 |
 | display tier | radarca + radar-display | none |
 | products | 13 | 4 |
 | radars | 6 monitored (9 drawn) | FLOW |
@@ -50,6 +50,9 @@ not import `config`** — `config` imports it, so the dependency runs one way.
 | `HAS_RADARCA` | whether a display tier exists — gates whole check families |
 | `PRODUCT_IMAGES_PREFIX`, `RADAR_DATED_TREE` | where published files live |
 | `LB1_FRESHNESS`, `LB2_FRESHNESS` | how freshness is derived (see below) |
+| `COMPOSITE_EXPECTED_RADARS` | which radars LB3 expects in the composite receipt, and the directory each appears under |
+| `COMPOSITE_RECEIPT_ALT` | a second receipt this profile writes but does not monitor |
+| `DROPS_TREE` | the QPE producer's output tree, or `""` for a profile with no such step |
 | `HOME_VIEW`, `MAP_OVERLAYS`, `COMP_EXTENT` | the map |
 | `PRODUCT_LABELS` | picker labels, when the product ids are not AQPI's |
 
@@ -168,6 +171,119 @@ Lowercase against uppercase, hyphen against underscore. A single pattern
 fitted to the X-bands matched **0 of 295** CBAND files, and an unmatched
 directory makes LB2 report "no data directory for the current UTC day"
 against a directory full of current data.
+
+---
+
+## LB3: the gap between arrival and publication
+
+LB2 says a radar's data is landing. LB1 says a product is publishing on time.
+Both can be green while the product is quietly computed from fewer radars than
+it claims, and until 2026-10-05 nothing in Sentinel looked in between.
+
+Two checks live there, and they are deliberately routed differently.
+
+### Composite participation (one per radar, paging)
+
+Reads the composite driver's input receipt at
+`$backend_root/PRODUCTS/Composite_QPE/radarfiles_for_comp.txt` and asks two
+things: is this radar named in it, and how old is the contribution it names.
+
+The receipt records **intent, not outcome**. The driver writes it and then
+reads it back, so it says which file `ls -1rt | tail -1` selected — not which
+files the composite successfully ingested. A radar present with a fresh
+contribution is evidence it was *offered* to the composite, which is strictly
+weaker than evidence it is *in* one. The check's wording stays inside that.
+
+Three things about the file shape, each of which would break a plausible
+parser:
+
+```
+Radar files for composite:
+/trinity/.../recentfiles//XSCR/XSCR_volume_20261005-163823_drops.nc
+/trinity/.../recentfiles//SSCB/AQPI.SSCB_20261005_163719_drops.nc
+/trinity/.../recentfiles//KSOX/cfrad_KSOX_20260917_155622_drops.nc
+```
+
+* The radar is spelled three ways **inside the filename** across the three
+  naming conventions, while the **directory** is uniform. Identity comes from
+  the directory.
+* `recentfiles//XSCR` carries a real double slash: the writer concatenates a
+  path that already ends in `/`.
+* The timestamp separator differs by convention — `-` for X-band, `_` for
+  C-band and NEXRAD.
+
+!!! danger "The receipt is truncate-then-append, and a torn read is biased"
+    ```sh
+    echo "Radar files for composite:" > $filelist          # truncates
+    ls -1rt .../$radar/*_drops.nc | tail -1 >> $filelist   # appends, per radar
+    ```
+    No temp file, no rename. A read landing inside that window sees a short
+    file, and the bias is **not random**: the appends run X-band, then NEXRAD,
+    then SSCB, so a torn read systematically under-reports CBAND. A check that
+    trusted one would manufacture "CBAND absent from the composite" alarms at
+    some steady rate forever.
+
+    Completeness cannot be judged from the content — a complete file and a
+    nearly-complete one differ by exactly the line you would look for. So two
+    mechanisms cover two different tears, and **neither alone is enough**: a
+    settle window catches *we arrived mid-write* (where the mtime is
+    momentarily stable between appends, so a bracket is blind), and a stat
+    bracket catches *the write started during our read*. The 5-minute alarm
+    hold-down is the third layer, and is what makes the residual risk
+    acceptable.
+
+Bands are derived **per radar**, from that radar's own silence limit plus
+`COMPOSITE_PIPELINE_LAG_S`. CBAND's cadence is roughly three times an
+X-band's, so one global band would call a healthy C-band contribution late on
+every cycle.
+
+### Why NEXRAD is not in the expected set
+
+The driver's own arrays intend nine inputs:
+
+```sh
+radarX=("XEBY" "XSCR" "XSCV" "XSCW" "XSWR")
+radarS=("KBBX" "KDAX" "KMUX")
+radarC=("SSCB")
+```
+
+The three NEXRAD directories under `web-files/NEXRAD_L2` **do not exist at
+all**, and their `recentfiles` trees hold zero files. That predates the 13 days
+the rotated log covers, so it is a standing condition rather than an incident.
+
+Deriving `expected` from those arrays would make the check fire immediately and
+permanently from its first cycle — which is how a check becomes one people
+learn to scroll past, the exact failure we were repairing in LB2. So
+`COMPOSITE_EXPECTED_RADARS` is an explicit list of the radars a profile
+monitors for arrival **and** the composite is configured to include. Whether
+S-band input is still intended is a real question for the AQPI team, raised
+separately rather than answered by a monitoring threshold.
+
+`xqpi` excludes `KSOX` and `KVTX` for a different reason: they *are* in its
+receipt, as 2026-09-17 volumes being consumed 18 days later by a composite that
+applies no staleness guard to its radar inputs. Sentinel does not monitor
+either radar's arrival, so it has no band to judge them by and no business
+opening an alarm it cannot characterise. The stale volumes are a real finding;
+they belong in a report to the composite's owner, not in a check that fires
+forever.
+
+### The QPE producer (one check, informational, non-paging)
+
+`DROPS` holds `Gen_X-band_QPE.py`'s output, and nothing in the live product
+chain reads it. LB2 used to point there by mistake, which is how one dead
+script read as five radar outages for twelve hours. The lesson is not "stop
+watching DROPS" — it is **watch it at the right severity**.
+
+So the check caps its own status at `warn` (which maps to `info` and is never
+auto-promoted, where a `fail` is promoted to critical after 30 min), *and*
+`alerts.yaml` routes its check id to a non-escalating policy. Two independent
+statements of one intent, deliberately: whichever a future editor removes, the
+other still holds. The summary states the real duration in words, so the row is
+never gentler than the fact.
+
+One check for the whole producer rather than one per folder — the folders
+freeze together because it is one process, so per-folder rows would be five
+restatements of one fault.
 
 ---
 

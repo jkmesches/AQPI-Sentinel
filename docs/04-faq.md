@@ -51,7 +51,7 @@ We actively work to keep that low. All six radar checks used to fetch
 now share one memoized fetch per cycle. If our traffic is ever a problem for
 you, tell us; the cadences are configuration, not architecture.
 
-## 4. What do the five stages mean?
+## 4. What do the stages mean?
 
 Each check belongs to a stage, ordered from "is anything reachable" to "does
 the imagery look sane":
@@ -59,14 +59,29 @@ the imagery look sane":
 | Stage | Name | Question it answers |
 |---|---|---|
 | L0 | Connectivity | Is the internet up, DNS resolving, radarca reachable? |
-| L1 | Product Freshness | Is each product publishing recent, correctly-sized data? |
-| L2 | Radar Scans | Is each radar actually emitting scans? |
+| L1 | Product Freshness | Is each product publishing recent, correctly-sized data, according to radarca? |
+| LB1 | Backend Products | Is each product actually being produced — read from K2 directly, not via radarca? |
+| L2 | Radar Scans | Is each radar actually emitting scans, according to radarca? |
+| LB2 | Backend Radar Arrival | Is each radar's data landing on disk right now — read from the backend trees directly? |
+| LB3 | Backend Processing | Is each radar reaching the composite, and is the QPE producer still running? |
 | L3 | Map Overlays | Do overlays render in a real browser? |
 | L4 | Image Quality | Does the imagery itself look plausible? |
 
 The stages are also a dependency chain. If L0 says the origin is unreachable,
 downstream failures are collateral, and Sentinel marks them as such instead of
 painting forty red cells for one root cause.
+
+The `LB` stages sit deliberately outside that chain. They read the published
+files straight off the backend shares, so radarca being down tells you nothing
+about whether a product exists — and that independence is the point. Where an
+`LB` stage and its radarca counterpart disagree, the `LB` answer is the one
+describing reality.
+
+`LB3` watches the gap between the other two. A radar can be arriving on disk
+(`LB2` green) and a product can be publishing on time (`LB1` green) while that
+product is quietly computed from fewer radars than it claims. On 2026-10-05 a
+radar aged out of the AQPI composite and nothing anywhere said so, because
+nothing was looking between arrival and publication.
 
 ## 5. What is the difference between fail, error, warn and skip?
 
