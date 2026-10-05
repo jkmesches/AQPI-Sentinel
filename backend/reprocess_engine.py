@@ -506,17 +506,20 @@ def _reverdict_lb3(row: dict) -> tuple[str, dict] | None:
     if age is None:
         return None
 
-    fail_s = _thresholds.get_radar(row["target"], "composite_contrib_fail_s")
+    # Global, not per radar: the band is uniform by measurement, because a
+    # per-radar band is blind on the radar that is never late. See
+    # config.COMPOSITE_CONTRIB_FAIL_S.
+    fail_s = _thresholds.get_global("composite_contrib_fail_s")
     if fail_s is None:
         fail_s = payload.get("contrib_fail_s")
     if fail_s is None:
         return None
-    fail_s = float(fail_s)
-    warn_s = _thresholds.get_radar(row["target"], "composite_contrib_warn_s")
+    warn_s = _thresholds.get_global("composite_contrib_warn_s")
     if warn_s is None:
         warn_s = payload.get("contrib_warn_s")
-    # Same 0.8x shape the live check derives when no override exists.
-    warn_s = float(warn_s) if warn_s is not None else fail_s * 0.8
+    if warn_s is None:
+        return None
+    fail_s, warn_s = float(fail_s), float(warn_s)
 
     age = float(age)
     sub["B_fresh"] = ("pass" if age <= warn_s

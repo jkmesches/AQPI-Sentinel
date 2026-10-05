@@ -409,6 +409,14 @@ COMPOSITE_EXPECTED_RADARS = {"FLOW": "FLOW"}
 # reporting on something we do not understand.
 COMPOSITE_RECEIPT_ALT = "PRODUCTS/Composite_QPE/radarfiles_for_comp2.txt"
 
+# Whether xqpi's composite writes the same per-run logs AQPI's does is [U] —
+# AQPI has log_SRI beside composite_SRI, and this profile has its own
+# composite2/ that nothing has looked inside. Left pointing at the same
+# relative path: if it exists the check uses it and says so in the payload, and
+# if it does not the check falls back to the receipt and says that instead.
+# Stating the path costs nothing and guessing its absence would be the error.
+COMPOSITE_RUN_LOG_DIR = "PRODUCTS/Composite_QPE/log_SRI"
+
 # No DROPS tree on this profile: Gen_X-band_QPE.py is AQPI's. The producer
 # check is gated on this being non-empty rather than on the profile name, so a
 # third profile states its own answer instead of inheriting one. [V]

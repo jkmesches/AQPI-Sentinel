@@ -40,24 +40,32 @@ rail collapses a radar's several readings onto one expandable row.
   green. On 2026-10-05 XEBY aged out of the AQPI composite between 16:16Z and
   16:44Z and nothing anywhere reported it.
 
-  - **`layer3.composite.<radar>`** — one per radar, paging. Reads the composite
-    driver's input receipt and reports whether the radar is named in it
-    (`A_included`) and how old the contribution it names is (`B_fresh`).
-    Contribution bands are derived per radar from that radar's own silence
-    limit plus `COMPOSITE_PIPELINE_LAG_S`: CBAND's cadence is ~3x an
-    X-band's, so one global band would call a healthy C-band contribution late
-    every cycle.
+  - **`layer3.composite.<radar>`** — one per radar, paging. Reads the
+    composite's **own per-run log** and reports whether the radar has a block
+    in the latest run (`A_included`) and how old its contribution was
+    (`B_fresh`).
 
-    The receipt records **intent, not outcome** — the driver writes it, then
-    reads it back, so it says what `ls -1rt | tail -1` selected, not what was
-    successfully ingested. The check's wording stays inside what the file
-    supports.
+    `GetNetCDFdim` with real dimensions means the composite opened the file and
+    read its header, so a block is evidence of **ingestion** — the check says
+    "in composite", not "offered to" it. That also exposes a third state:
+    a block with *no* dimensions means the composite tried this file and
+    failed on it, which is worse than absence and reported as `NAMED BUT NOT
+    READ`. These files are written once per run, 120 s apart, so reading the
+    **second-newest** is always a complete file — the torn-read problem is
+    retired rather than defended against, at the cost of ~240 s of reporting
+    lag against a 900 s band.
 
-    Three parsing hazards, all real and all in one file: the radar is spelled
-    three ways inside the filename across naming conventions while the
-    directory is uniform (so identity comes from the directory);
-    `recentfiles//XSCR` carries a genuine double slash; and the timestamp
-    separator is `-` for X-band but `_` for C-band and NEXRAD.
+    `secondsStarttoEnd` is used as the contribution age, but its label says
+    start-minus-*end-of-scan* — a duration. The evidence that it is an age is
+    that one radar reaches 64,828 s, impossible for a 4-sweep volume. Sound,
+    but an inference, so the check derives an age independently and **flags a
+    disagreement** rather than silently banding the wrong quantity.
+
+    The input receipt is retained as a **fallback**, tagged in the payload
+    rather than substituted silently, because it supports only the weaker
+    claim. It records intent, not outcome, and carries three parsing hazards
+    plus a biased torn-read window — all documented in
+    `docs/07-deployment-profiles.md`.
 
   - **`layer3.backend.drops`** — one check, **informational and non-paging**.
     Watches the QPE producer that LB2 was pointed at by mistake. Capped at
@@ -99,6 +107,32 @@ rail collapses a radar's several readings onto one expandable row.
 - **Collapsible stage blocks on the timeline**, with `collapse all` /
   `expand all`. The Radars tab now carries five stages; scanning one of them
   meant scrolling past the others.
+
+### Changed
+
+- **Contribution-age bands are one uniform pair (warn 600 s / fail 900 s), not
+  per radar.** The first design derived them from each radar's own silence
+  limit, which is principled and does not work. Measured over 1,440 composite
+  runs and 8,298 contributions, that rule is **blind on XSCR** — observed max
+  403 s against a 1,080 s band, on the one radar that is never late — while
+  firing on 25% of XSCW's runs. The derivation inherited a mismatch:
+  `RADAR_SILENT_FAIL_S` was fitted to radarca *reporting* cadence, so building
+  a composite-ingestion band on it is a borrowed figure one level removed.
+
+  A percentile band is worse — 2x p90 hands XSCW a 36-hour limit, because its
+  p90 *is* the pathology.
+
+  The decisive argument is that **the per-radar variation is the signal**: a
+  band tuned to each radar's own history silences precisely the radars that
+  misbehave, encoding XSCW's 18-hour staleness as normal for XSCW. Under one
+  uniform band XSCR and SSCB stay quiet because they are never stale, and
+  XSWR/XSCW/XSCV are loud because they are.
+
+  The ~8% expected fire rate measures the **missing staleness guard on
+  granite**, not this threshold: the composite applies none to its radar
+  inputs, so an 18-hour-old volume gets blended into a composite reporting
+  itself current. Add the guard and the tail disappears. Stated in the check's
+  docstring so nobody tunes the detector instead of fixing the defect.
 
 ### Fixed
 

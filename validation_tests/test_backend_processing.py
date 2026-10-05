@@ -93,6 +93,60 @@ def receipt_now(ages_min: dict[str, float]) -> list[str]:
     return out
 
 
+RUN_LOG_DIR = "PRODUCTS/Composite_QPE/log_SRI"
+
+
+def radar_block(rdir: str, age_s: float, *, dims: bool = True,
+                run_dt: datetime | None = None, derived_skew_s: float = 0.0,
+                reported_age_s: float | None = None) -> str:
+    """One RADAR block, in the exact shape the composite writes.
+
+    `reported_age_s` lets a test make secondsStarttoEnd disagree with what the
+    scan start implies, which is the condition the cross-check exists for.
+    """
+    run_dt = run_dt or datetime.now(timezone.utc)
+    start = datetime.fromtimestamp(run_dt.timestamp() - age_s + derived_skew_s,
+                                   timezone.utc)
+    end = run_dt
+    secs = int(round(reported_age_s if reported_age_s is not None else age_s))
+    name = (f"AQPI.SSCB_{start.strftime('%Y%m%d_%H%M%S')}_drops.nc"
+            if rdir == "SSCB"
+            else f"{rdir}_volume_{start.strftime('%Y%m%d-%H%M%S')}_drops.nc")
+    out = [f"************************** RADAR: {rdir} **************************",
+           f"filename: {PREFIX}/{rdir}/{name}"]
+    if dims:
+        out.append("GetNetCDFdim: #radials = 2719  #gates (rangebins) = 675  #sweeps = 4")
+    out += ["radar height = 608.7m",
+            "radar lon, lat = -122.062,37.8156",
+            f"startDateTimeScan  = {start.strftime('%Y-%m-%dT%H:%M:%S')}Z",
+            f"endDateTimeScan    = {end.strftime('%Y-%m-%dT%H:%M:%S')}Z",
+            f"secondsStarttoEnd = -{secs}"]
+    return "\n".join(out) + "\n"
+
+
+def write_run_logs(runs: list[tuple[datetime, str]]) -> str:
+    """Write one per-run file per (run time, body). Returns the directory."""
+    d = os.path.join(_TMP, RUN_LOG_DIR)
+    os.makedirs(d, exist_ok=True)
+    for f in os.listdir(d):
+        os.remove(os.path.join(d, f))
+    for run_dt, body in runs:
+        fn = f"composite_SRI_startproc_{run_dt.strftime('%Y%m%d-%H%M%S')}.txt"
+        with open(os.path.join(d, fn), "w") as fh:
+            fh.write("composite run\n" + body)
+    lb3._reset_receipt_cache()
+    return d
+
+
+def drop_run_logs() -> None:
+    d = os.path.join(_TMP, RUN_LOG_DIR)
+    if os.path.isdir(d):
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
+        os.rmdir(d)
+    lb3._reset_receipt_cache()
+
+
 def run(rid: str):
     return asyncio.run(
         lb3.Layer3CompositeParticipationCheck(radar_id=rid).run(None))
@@ -149,8 +203,15 @@ def main() -> int:
     r = run("XEBY")
     check("XEBY reports fail", r.status == "fail", r.status)
     check("...with A_included = fail", r.payload["sub_status"]["A_included"] == "fail")
-    check("...and says NOT IN COMPOSITE in words", "NOT IN COMPOSITE" in r.summary,
-          r.summary)
+    # Wording follows the SOURCE. On the receipt fallback the strongest claim
+    # available is "offered to", because that file records only what
+    # `ls | tail -1` selected. Claiming "not in the composite" on it would be
+    # overstating the evidence in the other direction.
+    check("...and says so in words, scoped to what the receipt can support",
+          r.summary.startswith("NOT OFFERED TO COMPOSITE"), r.summary)
+    check("...and records which source answered",
+          r.payload["participation_source"] == "receipt",
+          str(r.payload.get("participation_source")))
     check("...and names who IS present, so the row is actionable",
           "XSCR" in r.summary and "SSCB" in r.summary, r.summary)
     check("...and records included=0 as a metric",
@@ -168,19 +229,28 @@ def main() -> int:
           0.0 <= r.metrics.get("headroom", -1) <= 1.0,
           str(r.metrics.get("headroom")))
 
-    print("\nbands are derived PER RADAR from that radar's own silence limit:")
-    # CBAND's cadence is ~3x an X-band's. One global band would call a healthy
-    # C-band contribution late on every single cycle.
+    print("\nONE uniform band, because a per-radar band is blind where it matters:")
+    # This block asserted the opposite until 2026-10-05: bands derived from
+    # each radar's own silence limit. Measured over 1,440 composite runs that
+    # rule can NEVER fire on XSCR (max contribution age 403 s against a
+    # 1,080 s band) while firing on 25% of XSCW's runs. Inverted rather than
+    # deleted, so the derivation cannot quietly come back.
     w_x, f_x = lb3._contrib_bands("XEBY")
     w_c, f_c = lb3._contrib_bands("CBAND")
-    check("CBAND's fail band is looser than XEBY's", f_c > f_x,
-          f"XEBY {f_x:.0f}s vs CBAND {f_c:.0f}s")
-    check("...by exactly the difference in their silence limits",
-          abs((f_c - f_x) - (RADAR_SILENT_FAIL_S["CBAND"]
-                             - RADAR_SILENT_FAIL_S["XEBY"])) < 1,
-          f"{f_c - f_x:.0f}s")
-    check("warn sits at 0.8x fail, the same shape LB1/LB2 use",
-          abs(w_x - f_x * 0.8) < 1, f"{w_x:.0f} vs {f_x * 0.8:.0f}")
+    check("every radar gets the same band", (w_x, f_x) == (w_c, f_c),
+          f"XEBY {w_x:.0f}/{f_x:.0f} vs CBAND {w_c:.0f}/{f_c:.0f}")
+    check("...which is NOT derived from the radar's silence limit",
+          abs(f_c - f_x) < 1 and RADAR_SILENT_FAIL_S["CBAND"] != RADAR_SILENT_FAIL_S["XEBY"],
+          "silence limits differ by 780s; the bands do not differ at all")
+    check("warn 600s / fail 900s, the thinnest gap in the pooled distribution",
+          (w_x, f_x) == (600.0, 900.0), f"{w_x:.0f}/{f_x:.0f}")
+    # The band has to be able to fire on the radar that is never late, or it is
+    # not measuring that radar at all. XSCR's observed max is 403s.
+    check("...and 900s is reachable by XSCR, whose observed max is 403s",
+          f_x > 403, f"{f_x:.0f}s > 403s")
+    # ...and clear of the healthy mode: p50 111-320s, well-behaved p90 204-408s.
+    check("...while sitting clear of the healthy mode (p90 up to 408s)",
+          w_x > 408, f"warn {w_x:.0f}s > 408s")
 
     print("\na stale contribution warns, then fails:")
     _, fail_s = lb3._contrib_bands("XSCR")
@@ -279,6 +349,109 @@ def main() -> int:
           len(set(seen)) == 1, str(seen))
     check("...and the cache key is the receipt's own (mtime, size)",
           lb3._receipt_cache is not None, "parsed once, read by all")
+
+    print("\nthe PRIMARY source: the composite's own per-run log")
+    # Written once per run, 120 s apart, so the second-newest is always
+    # complete. That retires the torn-read problem rather than defending
+    # against it.
+    now = datetime.now(timezone.utc)
+    older = datetime.fromtimestamp(now.timestamp() - 120, timezone.utc)
+    complete = "".join(radar_block(r, a, run_dt=older) for r, a in
+                       [("XEBY", 200), ("XSCR", 180), ("XSCV", 150),
+                        ("XSCW", 210), ("XSWR", 190), ("SSCB", 300)])
+    # The NEWEST file is deliberately short, as a file still being written
+    # would be. Nothing may read it.
+    partial = radar_block("XEBY", 60, run_dt=now)
+    write_run_logs([(older, complete), (now, partial)])
+
+    r = run("XSCV")
+    check("the run log is preferred over the receipt",
+          r.payload["participation_source"] == "run_log",
+          str(r.payload.get("participation_source")))
+    check("...and the SECOND-newest run is the one read",
+          r.payload["run_log"].endswith(
+              f"composite_SRI_startproc_{older.strftime('%Y%m%d-%H%M%S')}.txt"),
+          os.path.basename(r.payload["run_log"]))
+    check("...so a half-written newest file cannot be read",
+          sorted(r.payload["receipt_radars"]) ==
+          ["SSCB", "XEBY", "XSCR", "XSCV", "XSCW", "XSWR"],
+          "6 radars from the complete file, not 1 from the partial one")
+    check("XSCV passes", r.status == "pass", f"{r.status}: {r.summary}")
+    check("...and now claims IN the composite, not merely offered to it",
+          r.summary.startswith("in composite"), r.summary)
+    check("...on the strength of logged netCDF dimensions",
+          r.payload["age_basis"] == "composite_reported", str(r.payload))
+
+    print("\nthe age comes from the composite, and is cross-checked:")
+    check("age is the composite's own secondsStarttoEnd",
+          abs(r.payload["age_s"] - 150) < 2, str(r.payload["age_s"]))
+    check("...and an independently derived age is carried alongside",
+          abs(r.payload["derived_age_s"] - 150) < 2,
+          str(r.payload.get("derived_age_s")))
+    check("...which agrees, so no disagreement is flagged",
+          not r.payload.get("age_disagrees"), str(r.payload.get("age_disagrees")))
+    # The field is LABELLED start-minus-end-of-scan, which read literally is a
+    # scan duration. If it ever stops behaving as an age the check must say so
+    # rather than silently band the wrong quantity.
+    write_run_logs([(older, radar_block("XSCV", 150, run_dt=older,
+                                        reported_age_s=9000))])
+    r = run("XSCV")
+    check("a secondsStarttoEnd that disagrees with the scan start is flagged",
+          r.payload.get("age_disagrees") is True, str(r.payload.get("age_disagrees")))
+    check("...and the disagreement is visible in the summary",
+          "age fields disagree" in r.summary, r.summary)
+
+    print("\nnamed but not read is a THIRD state, which the receipt could not see:")
+    write_run_logs([(older, radar_block("XSCV", 150, run_dt=older, dims=False)
+                     + radar_block("XSCR", 150, run_dt=older))])
+    r = run("XSCV")
+    check("a block with no dimensions fails", r.status == "fail", r.status)
+    check("...and says NAMED BUT NOT READ", "NAMED BUT NOT READ" in r.summary,
+          r.summary)
+    check("...distinctly from being absent", r.payload.get("named_not_read") is True,
+          "the composite tried this file and failed on it")
+    r = run("XSCR")
+    check("...while its neighbour in the same run still passes",
+          r.status == "pass", f"{r.status}: {r.summary}")
+
+    print("\nabsence from a run is inferred from a missing block:")
+    write_run_logs([(older, "".join(radar_block(x, 150, run_dt=older)
+                                    for x in ("XSCR", "XSCV", "SSCB")))])
+    r = run("XEBY")
+    check("XEBY fails", r.status == "fail", r.status)
+    check("...and says NOT IN COMPOSITE, which the run log does support",
+          r.summary.startswith("NOT IN COMPOSITE"), r.summary)
+
+    print("\nthe uniform band applies to run-log ages too:")
+    write_run_logs([(older, radar_block("XSCR", 1200, run_dt=older))])
+    r = run("XSCR")
+    check("a 20-minute contribution fails against the 900s band",
+          r.payload["sub_status"]["B_fresh"] == "fail", str(r.payload["sub_status"]))
+    check("...and A_included still passes — in-but-stale is not absent",
+          r.payload["sub_status"]["A_included"] == "pass")
+    write_run_logs([(older, radar_block("XSCR", 700, run_dt=older))])
+    r = run("XSCR")
+    check("a 700s contribution warns", r.payload["sub_status"]["B_fresh"] == "warn",
+          str(r.payload["sub_status"]))
+
+    print("\nevery radar in a cycle sees ONE composite run:")
+    write_run_logs([(older, complete)])
+    seen = [tuple(run(x).payload["receipt_radars"]) for x in ("XSCR", "CBAND", "XSCV")]
+    check("all three radars report the same run contents", len(set(seen)) == 1,
+          str(len(set(seen))))
+
+    print("\nand it falls back to the receipt, saying so, when the run log is gone:")
+    drop_run_logs()
+    write_receipt(receipt_now({"XSCR": 3, "SSCB": 5}))
+    r = run("XSCR")
+    check("the receipt answers when there is no run log",
+          r.payload["participation_source"] == "receipt",
+          str(r.payload.get("participation_source")))
+    check("...and the claim weakens to 'offered to', not 'in'",
+          r.summary.startswith("offered to composite"), r.summary)
+    check("...with the age derived from the filename instead",
+          r.payload["age_basis"] == "derived_from_filename",
+          str(r.payload.get("age_basis")))
 
     print("\nthe DROPS producer check is informational by construction:")
     root = os.path.join(_TMP, "PRODUCTS", "DROPS")

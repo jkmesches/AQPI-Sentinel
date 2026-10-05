@@ -184,58 +184,111 @@ Two checks live there, and they are deliberately routed differently.
 
 ### Composite participation (one per radar, paging)
 
-Reads the composite driver's input receipt at
-`$backend_root/PRODUCTS/Composite_QPE/radarfiles_for_comp.txt` and asks two
-things: is this radar named in it, and how old is the contribution it names.
+Two sources, and the better one answers a stronger question.
 
-The receipt records **intent, not outcome**. The driver writes it and then
-reads it back, so it says which file `ls -1rt | tail -1` selected — not which
-files the composite successfully ingested. A radar present with a fresh
-contribution is evidence it was *offered* to the composite, which is strictly
-weaker than evidence it is *in* one. The check's wording stays inside that.
-
-Three things about the file shape, each of which would break a plausible
-parser:
+**Primary — the composite's own per-run log** (`COMPOSITE_RUN_LOG_DIR`, in
+practice `PRODUCTS/Composite_QPE/log_SRI`). One file per run, ~720/day,
+retained about 7 days, with a block per radar the composite actually processed:
 
 ```
-Radar files for composite:
-/trinity/.../recentfiles//XSCR/XSCR_volume_20261005-163823_drops.nc
-/trinity/.../recentfiles//SSCB/AQPI.SSCB_20261005_163719_drops.nc
-/trinity/.../recentfiles//KSOX/cfrad_KSOX_20260917_155622_drops.nc
+************************** RADAR: XEBY **************************
+filename: .../recentfiles//XEBY/XEBY_volume_20261005-170754_drops.nc
+GetNetCDFdim: #radials = 2719  #gates (rangebins) = 675  #sweeps = 4
+radar height = 608.7m
+radar lon, lat = -122.062,37.8156
+startDateTimeScan  = 2026-10-05T17:07:54Z
+endDateTimeScan    = 2026-10-05T17:12:00Z
+secondsStarttoEnd = -246
 ```
 
-* The radar is spelled three ways **inside the filename** across the three
-  naming conventions, while the **directory** is uniform. Identity comes from
-  the directory.
-* `recentfiles//XSCR` carries a real double slash: the writer concatenates a
-  path that already ends in `/`.
-* The timestamp separator differs by convention — `-` for X-band, `_` for
-  C-band and NEXRAD.
+`GetNetCDFdim` with real dimensions means the composite **opened the file and
+read its header**, so a block is evidence of *ingestion*. That lets the check
+say "in composite" rather than "offered to" it, and it exposes a third state
+the receipt could never see: a block present with **no** dimensions means the
+composite tried this file and failed on it — worse than absence, and reported
+separately as `NAMED BUT NOT READ`.
 
-!!! danger "The receipt is truncate-then-append, and a torn read is biased"
-    ```sh
-    echo "Radar files for composite:" > $filelist          # truncates
-    ls -1rt .../$radar/*_drops.nc | tail -1 >> $filelist   # appends, per radar
-    ```
-    No temp file, no rename. A read landing inside that window sees a short
-    file, and the bias is **not random**: the appends run X-band, then NEXRAD,
-    then SSCB, so a torn read systematically under-reports CBAND. A check that
-    trusted one would manufacture "CBAND absent from the composite" alarms at
-    some steady rate forever.
+These files are written once per run, 120 s apart, so **reading the
+second-newest is always a complete file.** That retires the torn-read problem
+rather than defending against it. The cost is up to ~240 s of reporting lag
+against a 900 s band, accepted deliberately: a late correct answer beats a
+prompt one computed from half a file.
 
-    Completeness cannot be judged from the content — a complete file and a
-    nearly-complete one differ by exactly the line you would look for. So two
-    mechanisms cover two different tears, and **neither alone is enough**: a
-    settle window catches *we arrived mid-write* (where the mtime is
-    momentarily stable between appends, so a bracket is blind), and a stat
-    bracket catches *the write started during our read*. The 5-minute alarm
-    hold-down is the third layer, and is what makes the residual risk
-    acceptable.
+!!! warning "`secondsStarttoEnd` is used as an age, and the label says otherwise"
+    Read literally the field is start-minus-**end-of-scan**, i.e. a scan
+    duration. The evidence that it is an age is that one radar's distribution
+    reaches 64,828 s — an 18-hour span is impossible for a 4-sweep X-band
+    volume, so `endDateTimeScan` must be the composite's own reference time
+    rather than anything read out of the file. That inference is sound but it
+    *is* an inference, so the check derives an age independently from the run
+    time minus the recorded scan start, carries both in the payload, and
+    **flags a disagreement** instead of silently banding whichever it
+    computed first.
 
-Bands are derived **per radar**, from that radar's own silence limit plus
-`COMPOSITE_PIPELINE_LAG_S`. CBAND's cadence is roughly three times an
-X-band's, so one global band would call a healthy C-band contribution late on
-every cycle.
+**Fallback — the input receipt** (`COMPOSITE_RECEIPT`). Used only when the
+run-log directory is absent or unreadable, and tagged in
+`payload.participation_source` rather than substituted silently, because the
+two sources support different claims. It records **intent, not outcome**: the
+driver writes it and reads it back, so it says what `ls -1rt | tail -1`
+selected. Its file shape has three hazards, each of which would break a
+plausible parser — the radar is spelled three ways inside the filename while
+the directory is uniform (so identity comes from the directory),
+`recentfiles//XSCR` carries a real double slash, and the timestamp separator
+differs by convention. And it is truncate-then-append with no rename:
+
+```sh
+echo "Radar files for composite:" > $filelist          # truncates
+ls -1rt .../$radar/*_drops.nc | tail -1 >> $filelist   # appends, per radar
+```
+
+A read landing in that window sees a short file, and the bias is **not
+random**: the appends run X-band, then NEXRAD, then SSCB, so a torn read
+systematically under-reports CBAND. Completeness cannot be judged from the
+content — a complete file and a nearly-complete one differ by exactly the line
+you would look for — so a settle window covers *arrived mid-write* (where the
+mtime is momentarily stable between appends, and a bracket is blind) and a
+stat bracket covers *the write started during our read*. The 5-minute alarm
+hold-down is the third layer.
+
+### One uniform band, and why per-radar was wrong
+
+`COMPOSITE_CONTRIB_WARN_S = 600`, `COMPOSITE_CONTRIB_FAIL_S = 900`. Not per
+radar — that was the first design and measurement killed it. Over 2 complete
+days, 1,440 runs, 8,298 contributions:
+
+| radar | present | p50 | p90 | p99 | max | fires at the derived band |
+|---|---|---|---|---|---|---|
+| XSCR | 100.0% | 202s | 260s | 263s | 403s | **0.00% — can never fire** |
+| SSCB | 100.0% | 320s | 408s | 464s | 1424s | 0.07% |
+| XSWR | 97.8% | 171s | 4880s | 76376s | 83696s | 16.62% |
+| XSCV | 97.0% | 111s | 204s | 71153s | 71153s | 4.94% |
+| XEBY | 96.2% | 249s | 321s | 2829s | 3983s | 4.11% |
+| XSCW | 85.2% | 206s | 64779s | 64828s | 64828s | 25.26% |
+
+A band of *that radar's silence limit + a pipeline budget* is **blind on
+XSCR** — max 403 s against a 1,080 s limit, on the one radar that is never
+late — while firing on a quarter of XSCW's runs. The derivation was
+principled; its input was not. `RADAR_SILENT_FAIL_S` was fitted to radarca
+*reporting* cadence, so building a composite-ingestion band on it is a
+borrowed figure one level removed from what it describes.
+
+A percentile band is worse: 2× p90 hands XSCW a **36-hour** limit, because its
+p90 *is* the pathology. A percentile band fails exactly when the tail is the
+fault.
+
+**The per-radar variation is the signal.** A band tuned to each radar's own
+history would silence precisely the radars that misbehave — it would encode
+XSCW's 18-hour staleness as normal for XSCW. Under one uniform band XSCR and
+SSCB stay quiet because they are never stale, and XSWR/XSCW/XSCV are loud
+because they are. 900 s sits in the thinnest part of the pooled distribution
+(`[600,900)` holds 0.39%) and clear of the healthy mode.
+
+!!! note "The ~8% fire rate measures granite, not this threshold"
+    The composite applies **no staleness guard** to its radar inputs
+    (`ls -1rt | tail -1`, any age), which is how an 18-hour-old volume gets
+    blended into a composite reporting itself current. Add the guard and the
+    tail disappears and these alarms stop. The rate is the detector reading
+    the defect it was built to detect — not a number to tune away.
 
 ### Why NEXRAD is not in the expected set
 

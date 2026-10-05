@@ -95,22 +95,6 @@ def _seed_from_config() -> dict[str, Any]:
     radars: dict[str, dict[str, Any]] = {}
     for rid, sec in _config.RADAR_SILENT_FAIL_S.items():
         radars[rid] = {"silent_fail_s": sec}
-        # LB3 composite-participation bands. Seeded with the RESOLVED values
-        # rather than left absent, for the same reason the l4 block below
-        # persists its merged profile: the admin UI shows every cell from this
-        # blob, and a key that is missing cannot be edited even though the
-        # check honours it.
-        #
-        # These are DERIVED from that radar's own silence limit plus the
-        # pipeline budget, which is why they are per radar at all — CBAND's
-        # cadence is roughly three times an X-band's, so a single global band
-        # would call a healthy C-band contribution late on every cycle.
-        if rid in _config.COMPOSITE_EXPECTED_RADARS:
-            fail_s = float(_config.COMPOSITE_CONTRIB_FAIL_S.get(
-                rid, sec + _config.COMPOSITE_PIPELINE_LAG_S))
-            radars[rid]["composite_contrib_fail_s"] = fail_s
-            radars[rid]["composite_contrib_warn_s"] = float(
-                _config.COMPOSITE_CONTRIB_WARN_S.get(rid, fail_s * 0.8))
 
     l4: dict[str, dict[str, Any]] = {}
     default_l4 = _config.DEFAULT_L4_PROFILE
@@ -129,6 +113,15 @@ def _seed_from_config() -> dict[str, Any]:
     # The DROPS producer's informational limit. Global rather than per radar:
     # the folders freeze together because one process writes all of them.
     globals_["drops_silent_info_s"] = int(_config.DROPS_SILENT_INFO_S)
+    # LB3 contribution bands. Global, and deliberately NOT per radar: measured
+    # over 1,440 composite runs, a band derived from each radar's own history
+    # is blind on the radar that is never late and fires on a quarter of the
+    # runs of the radar that is always late. See
+    # config.COMPOSITE_CONTRIB_FAIL_S — the per-radar variation IS the signal,
+    # so normalising it away would encode one radar's 18-hour staleness as
+    # normal for that radar.
+    globals_["composite_contrib_warn_s"] = int(_config.COMPOSITE_CONTRIB_WARN_S)
+    globals_["composite_contrib_fail_s"] = int(_config.COMPOSITE_CONTRIB_FAIL_S)
 
     return {
         "products": products,

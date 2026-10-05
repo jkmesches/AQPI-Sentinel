@@ -612,8 +612,53 @@ RAW_VOLUME_TS_RE: dict[str, str] = {
 # LB3 — Backend processing: composite participation and the DROPS producer
 # ==========================================================================
 
+# === The PRIMARY source: the composite's own per-run log ===
+#
+# One file per run, ~720/day, named <target>_startproc_<when>.txt, retained
+# about 7 days. Each carries a block per radar it actually processed: [M]
+#
+#     ************************** RADAR: XEBY **************************
+#     filename: .../recentfiles//XEBY/XEBY_volume_20261005-170754_drops.nc
+#     GetNetCDFdim: #radials = 2719  #gates (rangebins) = 675  #sweeps = 4
+#     radar height = 608.7m
+#     radar lon, lat = -122.062,37.8156
+#     startDateTimeScan  = 2026-10-05T17:07:54Z
+#     endDateTimeScan    = 2026-10-05T17:12:00Z
+#     secondsStarttoEnd = -246
+#
+# Strictly better than the receipt, in three ways:
+#
+#   * `GetNetCDFdim` with real dimensions proves the file was OPENED AND READ.
+#     A radar block is therefore evidence of INGESTION. The receipt only ever
+#     showed what `ls | tail -1` selected, which is what the composite was
+#     OFFERED — a weaker claim, and the check's wording had to say so.
+#   * `secondsStarttoEnd` is the contribution age as the composite itself
+#     computed it, so nothing has to be re-derived from filenames.
+#   * These files are written ONCE PER RUN and the next run is 120 s later, so
+#     the second-newest is always complete. That retires the whole
+#     settle-window + stat-bracket + hold-down scheme for the primary path:
+#     there is no torn read to defend against if you never read the file that
+#     is being written.
+#
+# What it does NOT carry is absence. The `ls: cannot access` lines go to stderr
+# and land in a rolling log that is TRUNCATED every run, so it is no use as
+# history. Absence has to be inferred from a MISSING radar block — still
+# positive evidence, since the block appears for every radar that was ingested.
+COMPOSITE_RUN_LOG_DIR: str = "PRODUCTS/Composite_QPE/log_SRI"
+
+# Bound on the per-run log listing. ~720/day x 7 days retained is ~5,000, so
+# this is headroom rather than a limit in normal operation. Names are parsed,
+# never stat()ed: at this count a stat per entry over NFS is exactly the kind
+# of read that hangs, and the filename already carries the run time.
+MAX_RUN_LOG_ENTRIES: int = 20_000
+
 # The composite's input receipt, relative to backend_root. Written by the
 # composite driver immediately before it reads the file back.
+#
+# Retained as a FALLBACK only, for when the per-run log directory is absent or
+# unreadable. It answers a weaker question and carries the torn-read hazard
+# documented at COMPOSITE_RECEIPT_SETTLE_S, so a verdict sourced from it is
+# tagged in the payload rather than silently substituted.
 COMPOSITE_RECEIPT: str = "PRODUCTS/Composite_QPE/radarfiles_for_comp.txt"
 
 # A SECOND receipt exists on xqpi — radarfiles_for_comp2.txt, same format,
@@ -662,24 +707,60 @@ COMPOSITE_EXPECTED_RADARS: dict[str, str] = {
     "CBAND": "SSCB",
 }
 
-# How long after a radar's own arrival its contribution may still be absent
-# from the receipt before that is a fault, on top of that radar's own silence
-# limit. Covers the DROPS processing lag plus the receipt's rewrite cadence.
+# Contribution-age bands. ONE UNIFORM PAIR, not per radar.
 #
-# Measured: DROPS processing lag is +17 s, constant across 8 samples. The
-# receipt is rewritten every 120 s. So the mechanical floor is ~140 s and this
-# is a little over 2x that. [Q] — not characterised against a distribution;
-# the only observed contribution ages are 4-8 min healthy and one XEBY sample
-# at 50 min immediately before it dropped out of the receipt entirely, and a
-# band fitted between those two points would be a guess wearing a number.
-COMPOSITE_PIPELINE_LAG_S: int = 300
+# === Why the per-radar derivation was wrong ===
+#
+# This was `that radar's own silence limit + a pipeline budget`, which is
+# principled and does not work. Measured over 2 complete days, 1,440 composite
+# runs, 8,298 contributions: [M]
+#
+#   radar   present     p50     p90      p99      max   fires at derived band
+#   XSCR     100.0%    202s    260s     263s     403s   0.00%  <- NEVER fires
+#   SSCB     100.0%    320s    408s     464s    1424s   0.07%
+#   XSWR      97.8%    171s   4880s   76376s   83696s   16.62%
+#   XSCV      97.0%    111s    204s   71153s   71153s   4.94%
+#   XEBY      96.2%    249s    321s    2829s    3983s   4.11%
+#   XSCW      85.2%    206s  64779s   64828s   64828s   25.26%
+#
+# One rule, and it is blind on XSCR (max 403 s against a 1,080 s band — it can
+# never fire, on the one radar that is never late) while firing on a quarter of
+# XSCW's runs. The derivation inherited a mismatch: RADAR_SILENT_FAIL_S was
+# fitted to radarca REPORTING cadence, so building a composite-ingestion band
+# on it is a borrowed figure one level removed from what it describes.
+#
+# A percentile band was considered and is worse. 2x p90 hands XSCW a 36-hour
+# limit, because its p90 of 64,779 s IS the pathology — it spent that time
+# blending stale data. A percentile band fails exactly when the tail is the
+# fault.
+#
+# === Why NOT to normalise per radar, which is the load-bearing part ===
+#
+# The per-radar variation IS the signal. A band tuned to each radar's own
+# history would silence precisely the radars that misbehave — it would encode
+# XSCW's 18-hour staleness as normal for XSCW. Under one uniform band XSCR and
+# SSCB stay quiet because they are never stale, and XSWR/XSCW/XSCV are loud
+# because they are. That difference is a finding, not a tuning artefact.
+#
+# 900 s sits in the thinnest part of the pooled distribution and clear of the
+# healthy mode (p50 111-320 s; the four well-behaved radars p90 204-408 s):
+#
+#   [0,300) 77.05%  [300,420) 12.89%  [420,600) 1.53%
+#   [600,900) 0.39%   <- the gap
+#   [900,1800) 1.02%  [1800,inf) 7.11%
+#
+# !!! The ~8% expected fire rate measures granite, not this threshold.
+#     The composite applies NO staleness guard to its radar inputs
+#     (`ls -1rt | tail -1`, any age), which is how an 18-hour-old volume gets
+#     blended into a composite that reports itself current. Add the guard and
+#     the tail disappears and these alarms stop. The rate is the detector
+#     reading the defect it was built to detect — not a threshold to tune away.
+COMPOSITE_CONTRIB_WARN_S: int = 600
+COMPOSITE_CONTRIB_FAIL_S: int = 900
 
-# Per-radar overrides for the band above, when measurement says a radar needs
-# its own number. Empty by default: the derived band is per-radar already,
-# because it is built on RADAR_SILENT_FAIL_S, so CBAND's 18-minute cadence is
-# not judged by XEBY's 5-minute one.
-COMPOSITE_CONTRIB_WARN_S: dict[str, int] = {}
-COMPOSITE_CONTRIB_FAIL_S: dict[str, int] = {}
+# Per-radar overrides, for when a radar genuinely earns its own number.
+# Deliberately empty: see above for why per-radar tuning would hide the fault.
+COMPOSITE_CONTRIB_OVERRIDE_S: dict[str, tuple[int, int]] = {}
 
 # The receipt is truncate-then-append with no temp file and no rename:
 #
@@ -733,6 +814,7 @@ if SETTINGS.profile == "xqpi":
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
     COMPOSITE_EXPECTED_RADARS = _xqpi.COMPOSITE_EXPECTED_RADARS
     COMPOSITE_RECEIPT_ALT = _xqpi.COMPOSITE_RECEIPT_ALT
+    COMPOSITE_RUN_LOG_DIR = _xqpi.COMPOSITE_RUN_LOG_DIR
     DROPS_TREE = _xqpi.DROPS_TREE
     SITE_NAME = _xqpi.SITE_NAME
     DATA_SOURCE = _xqpi.DATA_SOURCE
