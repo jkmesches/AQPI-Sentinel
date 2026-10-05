@@ -364,9 +364,15 @@
 		<SectionHeader title="Site" right={stageLabel('L0')} />
 		<ul class="shrink-0 divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
-				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+				<!-- The summary is clipped here too, but these are one-line L0
+				     rows in a quarter-width rail and the full text is on the row's
+				     hover title rather than nowhere. Left single-line on purpose:
+				     eleven site rows that each wrap to two would push the radars
+				     below the fold, and the radars are what the column is for. -->
+				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
+					title={`${prettyCheckLabel(r.check_id, r.target)} · ${r.check_id}${r.summary ? `\n${r.summary}` : ''}`}>
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="text-[var(--color-default)] num" title={r.check_id}>{prettyCheckLabel(r.check_id, r.target)}</span>
+					<span class="text-[var(--color-default)] num">{prettyCheckLabel(r.check_id, r.target)}</span>
 					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{r.summary}</span>
 				</li>
 			{/each}
@@ -377,7 +383,7 @@
 				     because being unable to see that it IS running is exactly
 				     the gap that let it die unnoticed for twelve hours. -->
 				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
-					title={`${dropsRow.check_id} — informational, non-paging`}>
+					title={`${prettyCheckLabel(dropsRow.check_id, dropsRow.target)} · ${dropsRow.check_id} — informational, non-paging${dropsRow.summary ? `\n${dropsRow.summary}` : ''}`}>
 					<StatusDot status={dropsRow.status} size={7} pulseKey={sentinel.pulseTick[dropsRow.check_id] ?? 0} />
 					<!-- Via prettyCheckLabel, not hardcoded. Hardcoding it is how
 					     this check ended up with two names in one app: the label
@@ -496,33 +502,48 @@
 							{#each g.rows as r (r.check_id)}
 								{@const meta = checksById[r.check_id]}
 								{@const metric = sparklineMetric(r.check_id)}
+								<!-- Two lines, not four columns. The first carries the
+								     stage, dot, source tag and trace; the second gives
+								     the summary THE WHOLE RAIL WIDTH and lets it wrap.
+								     This was a single row with the summary in a `1fr`
+								     column beside a 62px sparkline, with `truncate` on
+								     it — so the expander clipped the text just like the
+								     collapsed row did, which defeated the entire point
+								     of moving the prose down here. An expander exists
+								     to show what does not fit; one that truncates is
+								     only a quieter version of the problem. -->
 								<li
-									class="grid grid-cols-[6.2rem_auto_1fr_auto] items-center gap-2 text-[11px]"
+									class="flex flex-col gap-0.5 text-[11px]"
 									title={`${r.check_id}${meta?.source_label ? ` · read from ${meta.source_label}` : ''}`}
 								>
-									<span class="num text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
-										{stageLabel(r.stage)}
-									</span>
-									<span class="flex items-center gap-1.5">
+									<div class="flex items-center gap-2">
+										<span class="num shrink-0 text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
+											{stageLabel(r.stage)}
+										</span>
 										<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 										{#if meta?.source_tag}
 											<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{meta.source_tag}</span>
 										{/if}
-									</span>
-									<span class="min-w-0 truncate num text-[10.5px] {statusText(r.status)}">
+										{#if diag.spark}
+											<span class="ml-auto shrink-0">
+												<Sparkline
+													data={sentinel.metrics[`${r.check_id}|${metric ?? 'age_s'}`] ?? []}
+													cadenceS={meta?.cadence_s ?? 120}
+													width={62}
+													height={12}
+													domain={sparklineDomain(metric)}
+													warnAt={sparklineWarnAt(metric)}
+													showLabel={false}
+												/>
+											</span>
+										{/if}
+									</div>
+									<!-- break-words, not truncate: these summaries carry
+									     the threshold in parentheses at the END, which is
+									     the half a clipped line always loses. -->
+									<span class="num break-words text-[10.5px] leading-snug {statusText(r.status)}">
 										{r.summary}
 									</span>
-									{#if diag.spark}
-										<Sparkline
-											data={sentinel.metrics[`${r.check_id}|${metric ?? 'age_s'}`] ?? []}
-											cadenceS={meta?.cadence_s ?? 120}
-											width={62}
-											height={12}
-											domain={sparklineDomain(metric)}
-											warnAt={sparklineWarnAt(metric)}
-											showLabel={false}
-										/>
-									{/if}
 								</li>
 							{/each}
 						</ul>
