@@ -647,9 +647,35 @@ RAW_VOLUME_TS_RE: dict[str, str] = {
 COMPOSITE_RUN_LOG_DIR: str = "PRODUCTS/Composite_QPE/log_SRI"
 
 # Bound on the per-run log listing. ~720/day x 7 days retained is ~5,000, so
-# this is headroom rather than a limit in normal operation. Names are parsed,
-# never stat()ed: at this count a stat per entry over NFS is exactly the kind
-# of read that hangs, and the filename already carries the run time.
+# this is headroom rather than a limit in normal operation.
+#
+# Names are parsed, never stat()ed, and that choice now has a figure on it
+# rather than an instinct. Timed on cira-aqpi over the mount the container
+# sees, 4,321 entries, idle server: [M]
+#
+#     scandir, names only              24 ms cold, 1.7-2.2 ms warm
+#     scandir + stat() per entry      823 ms          <- 34x
+#     the full LB3 read (list+filter+select)  5.2 ms
+#
+# 26 ms against a 120 s cadence is a 0.02% duty cycle. The stat variant is
+# already 16% of FS_TIMEOUT_S on an IDLE server, and a per-entry stat over NFS
+# is the shape of operation that degrades non-linearly under load, so 823 ms
+# idle can be seconds when the server is busy.
+#
+# === The margin is in the scaling, not in today's numbers ===
+#
+# Cold cost is roughly linear in entry count. At this cap the names-only read
+# would be ~120 ms; the stat variant would be ~3.8 s, inside a hair of the 5 s
+# timeout. The two approaches only diverge dangerously once the directory
+# grows -- so this cap guards against unbounded growth rather than buying
+# performance, and growth is a live failure mode on this system rather than a
+# hypothetical: /web-files/LOGS sits at 27 GB unrotated, and the NEXRAD_L2
+# trees disappeared entirely without anyone noticing. "The reaping quietly
+# stops" is a thing that happens here.
+#
+# Of 4,321 entries, 4,320 matched the name pattern; the one that did not is
+# online_composite_SRI.log, the rolling file that would have been wrong to
+# parse, so the filter excludes exactly the right thing. [V]
 MAX_RUN_LOG_ENTRIES: int = 20_000
 
 # The composite's input receipt, relative to backend_root. Written by the
