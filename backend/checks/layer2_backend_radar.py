@@ -6,15 +6,30 @@ the only question that is unambiguous: **is this radar's data landing on disk ri
 
 Two trees, because the radars do not all arrive the same way:
 
-* Five X-bands  — DROPS2 writes a dated tree per radar under
-  ``{backend_root}/PRODUCTS/DROPS/<folder>``. Entries are *created*, so the directory
-  mtime is a true arrival time and one stat suffices.
+* Five X-bands  — each writes a dated tree per radar under ``{backend_root}``,
+  mapped by ``config.RADAR_DATED_TREE``. The directory names are not derivable
+  from the radar id (XEBY's tree is ``EBAY``), so the table is the mapping.
+
+  These pointed at ``{backend_root}/PRODUCTS/DROPS/<folder>`` until
+  2026-10-05. That is the **output** of ``Gen_X-band_QPE.py``, one processing
+  step downstream, so the check answered "is the QPE generator alive" rather
+  than "is this radar delivering". When the generator stopped at 04:07 UTC all
+  five checks failed for 12 hours while three of the radars were arriving
+  within a minute throughout. See ``config.RADAR_DATED_TREE``.
 * CBAND (SSCB)  — lands on trinity at ``/trinity/projects/aqpi/sscb/YYYY/MM/DD``, not in
-  the DROPS tree. It has no ACCEPT entry in iris's ldmd.conf and no file_process_sscb.sh
-  on granite, so it neither arrives by the X-band push path nor joins their composite.
+  the X-band trees. It has no ACCEPT entry in iris's ldmd.conf and no
+  file_process_sscb.sh on granite, so it does not arrive by the X-band push path.
   Monitored here because a C-band outage was previously undetectable.
 
-FLOW (XQPI/JPL) is deliberately NOT included in this revision.
+  .. warning:: **Unresolved:** this docstring has said since v0.5.0 that CBAND
+     also does not join the X-band composite. The composite's own input loops
+     are reported to expect a ``radarC`` entry, which contradicts that. It
+     decides whether CBAND belongs in the composite-participation check's
+     expected set, and CBAND is the discriminator the fleet correlation below
+     rests on, so it is flagged rather than assumed either way.
+
+FLOW (XQPI/JPL) is covered by the ``xqpi`` profile, which registers one
+instance of this check with its own tree and threshold.
 
 Thresholds reuse ``config.RADAR_SILENT_FAIL_S``, which was characterised against real
 per-radar cadence (XEBY 300 s ... CBAND 1080 s) and is already the number operators
@@ -127,6 +142,180 @@ def _dir_mtime(path: str) -> float:
     return os.stat(path).st_mtime
 
 
+# ==========================================================================
+# Fleet correlation — is this one event or five?
+# ==========================================================================
+#
+# Ported from Layer2XbandFleet in layer2_radar.py. The mechanism is identical
+# and the reasoning for the thresholds carries over; what differs is the
+# evidence this side can bring, and it is strictly better.
+#
+# === Why the backend side is the stronger discriminator ===
+#
+# L2's fleet check reads verdicts derived from ONE radarca endpoint, so when
+# it says "systemic" it cannot separate "the radars stopped" from "the API we
+# ask about them stopped". This side reads the filesystem, and CBAND reads a
+# DIFFERENT TREE ON A DIFFERENT MOUNT (trinity, via SENTINEL_SSCB_ROOT) from
+# the five X-bands (K2, via SENTINEL_BACKEND_ROOT).
+#
+# That makes a passing CBAND positive evidence, not merely an absence of bad
+# news: the host is up, NFS is serving, the clock is sane, and Sentinel's own
+# reads are working. So "five X-bands silent while CBAND arrives normally"
+# localises the fault to the X-band path specifically, which no amount of
+# X-band-only evidence can do. CBAND silent AT THE SAME TIME means something
+# wider, and the summary says which.
+#
+# CBAND is therefore excluded from the COUNT but reported as corroboration.
+# Counting it would destroy exactly the independence that gives it its value.
+LB_FLEET_CHECK_ID = "layer2.backend.fleet"
+LB_FLEET = frozenset(r for r in RADAR_FOLDER if r != "CBAND")
+LB_FLEET_WITNESS = "CBAND"
+
+# Enter at 3, leave at 1, hold 10 min. Inherited from the L2 check, and the
+# inherited part is the REASONING, not the measurement:
+#
+#   What transfers: radars at different physical sites do not fail
+#   independently within the same minute. That is a property of the radars and
+#   the sites, so 3 simultaneous is already systemic however you observed it.
+#   The L2 history also showed 4-of-5 is too rare a bar to catch the real
+#   episodes — it suppressed 0 alarms in 27,917 runs and missed the 2026-09-17
+#   three-radar event entirely.
+#
+#   What does NOT transfer: the count distribution those numbers were fitted
+#   to (0/5 93.9% ... 4/5 0.8%) was measured on L2 verdicts over
+#   2026-08-25..10-03. No equivalent distribution has been computed from LB2
+#   history, so these are a reasoned starting point and not a characterised
+#   threshold. [Q]
+#
+# One LB-side data point exists and it supports the bar: on 2026-10-05 all
+# five X-bands read silent simultaneously from a single upstream cause. At
+# ENTER=3 that is one alarm instead of five.
+LB_FLEET_SYSTEMIC_ENTER = 3
+LB_FLEET_SYSTEMIC_EXIT = 1
+
+# Must outlast the alarm hold-down, same as the L2 constant: suppression is
+# only consulted when a radar alarm OPENS, which is one hold-down (5 m, see
+# alerts.yaml) after that radar started failing. A verdict that trips and
+# clears inside that window suppresses nothing. 10 min covers the hold-down
+# plus this check's cadence with room to spare.
+LB_FLEET_MIN_DWELL_S = 600.0
+
+# The verdict vocabulary this side publishes. Deliberately smaller than L2's.
+#
+#   ARRIVING      data is landing within the silence threshold
+#   SILENT        the threshold is breached, or the day's directory is absent
+#   UNREADABLE    we could not look — read timeout, or an OS error
+#   CONFIG_ERROR  the profile's own pattern is malformed
+#
+# L2 needs GHOST_UP/CONFIRMED_DOWN/STUCK_DOWN_FLAG because radarca *declares*
+# a state that can disagree with the data. A filesystem declares nothing, so
+# there is no "says down and is down" case to exclude here: SILENT is the
+# analog of GHOST_UP and carries the same meaning.
+LB_SYSTEMIC_VERDICTS = frozenset({"SILENT", "UNREADABLE"})
+
+# CONFIG_ERROR is excluded from the systemic set on purpose. A malformed
+# pattern is shared config, so it fails every radar in the same tick by
+# construction — a guaranteed instant 5/5. Counting it would make the check
+# report a fleet-wide infrastructure event for a typo, which is the most
+# misleading thing it could possibly say. config.py now compiles the patterns
+# at import so this verdict should be unreachable in a running process; it
+# exists because "should be unreachable" is not the same as "is".
+
+# How long a published verdict stays usable. The radar checks run at 60 s and
+# this one at 120 s, so a verdict can legitimately be up to two radar cycles
+# old when read. 180 s accepts that without accepting a stale one.
+_LB_VERDICT_TTL_S = 180.0
+_lb_last_verdict: dict[str, tuple[datetime, str]] = {}
+
+_lb_fleet_systemic: bool = False
+_lb_fleet_since: datetime | None = None
+
+# Whether correlation is possible on this profile at all.
+#
+# Below LB_FLEET_SYSTEMIC_ENTER members the question the check asks has no
+# meaning: xqpi monitors one radar, and "is 3 of 1 radars silent" is not a
+# threshold that can be reached. Registering it there would put a permanent
+# skip row on the dashboard, and the row would be telling the truth, which is
+# worse than its absence — it reads as a broken check rather than an
+# inapplicable one.
+#
+# Recorded as a reason rather than a silent `if`, because "why is this check
+# missing" is otherwise unanswerable. registry.DECLINED is not reused: its
+# values are module names and its contract is specifically the no-HTTP-origin
+# case, so widening it here would make that dict mean two things.
+_FLEET_ACTIVE = len(LB_FLEET) >= LB_FLEET_SYSTEMIC_ENTER
+FLEET_NOT_REGISTERED: str | None = (
+    None if _FLEET_ACTIVE else
+    f"{len(LB_FLEET)} correlatable radar(s) in this profile, "
+    f"LB_FLEET_SYSTEMIC_ENTER is {LB_FLEET_SYSTEMIC_ENTER} — "
+    f"a fleet of this size cannot reach the systemic threshold"
+)
+
+
+def _lb_publish_verdict(radar_id: str, verdict: str, when: datetime) -> None:
+    _lb_last_verdict[radar_id] = (when, verdict)
+
+
+def _lb_not_arriving(now: datetime) -> set[str]:
+    """Fleet radars whose most recent non-stale verdict is in
+    LB_SYSTEMIC_VERDICTS. CBAND is not a fleet member; see LB_FLEET."""
+    out: set[str] = set()
+    for rid in LB_FLEET:
+        rec = _lb_last_verdict.get(rid)
+        if rec is None:
+            continue
+        when, verdict = rec
+        if ((now - when).total_seconds() <= _LB_VERDICT_TTL_S
+                and verdict in LB_SYSTEMIC_VERDICTS):
+            out.add(rid)
+    return out
+
+
+def _lb_fresh(now: datetime) -> dict[str, str]:
+    """Fleet radars whose most recent verdict is still inside the TTL.
+
+    Membership in _lb_last_verdict is NOT the same question. A verdict stays in
+    that dict forever once published, so counting raw membership as "reported"
+    lets the check assert `0/5 not arriving — pass` from verdicts that stopped
+    updating hours ago. That is health claimed from stale evidence, and it is
+    the precise failure the `skip` path below exists to avoid; it has to be the
+    same freshness test or the floor does not hold.
+    """
+    out: dict[str, str] = {}
+    for rid in LB_FLEET:
+        rec = _lb_last_verdict.get(rid)
+        if rec is None:
+            continue
+        when, verdict = rec
+        if (now - when).total_seconds() <= _LB_VERDICT_TTL_S:
+            out[rid] = verdict
+    return out
+
+
+def _lb_witness(now: datetime) -> str | None:
+    """CBAND's current verdict, or None when it is absent or stale.
+
+    None is a real answer and distinct from a bad one: it means the
+    independent tree could not be consulted, so the fault cannot be localised
+    this cycle. The summary must not imply otherwise.
+    """
+    rec = _lb_last_verdict.get(LB_FLEET_WITNESS)
+    if rec is None:
+        return None
+    when, verdict = rec
+    if (now - when).total_seconds() > _LB_VERDICT_TTL_S:
+        return None
+    return verdict
+
+
+def _reset_lb_fleet_state() -> None:
+    """Test hook."""
+    global _lb_fleet_systemic, _lb_fleet_since
+    _lb_last_verdict.clear()
+    _lb_fleet_systemic = False
+    _lb_fleet_since = None
+
+
 class Layer2BackendRadarCheck(Check):
     """One per radar in config.RADAR_FOLDER. Reads the backend tree directly."""
 
@@ -149,6 +338,18 @@ class Layer2BackendRadarCheck(Check):
         self.id = f"layer2.backend.{radar_id}"
         self.target = radar_id
         self.cadence_s = 60
+        # Alarm suppression only — NOT depends_on. The fleet check is an
+        # AGGREGATE OF THIS CHECK, so letting it demote us to `skip` would have
+        # an aggregate marking its own inputs "not measured" when we measured
+        # them precisely. See Check.alarm_only_depends_on.
+        #
+        # Set only when the fleet check actually registered. A dangling id is
+        # tolerated by compute_suppression (an unknown id is never fail/error,
+        # so it suppresses nothing) but it would be a lie in the check's own
+        # declared dependencies, and `why is this not suppressed` is a question
+        # someone will eventually ask of this attribute.
+        if _FLEET_ACTIVE and radar_id in LB_FLEET:
+            self.alarm_only_depends_on = [LB_FLEET_CHECK_ID]
 
     async def run(self, ctx) -> CheckResult:
         t0 = utcnow()
@@ -177,6 +378,7 @@ class Layer2BackendRadarCheck(Check):
             mtime = await asyncio.wait_for(
                 asyncio.to_thread(reader, path), FS_TIMEOUT_S)
         except asyncio.TimeoutError:
+            _lb_publish_verdict(self.radar_id, "UNREADABLE", t0)
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage, status="error",
                 started_at=t0, finished_at=utcnow(),
@@ -190,9 +392,14 @@ class Layer2BackendRadarCheck(Check):
             metrics["fs_timeout"] = 0.0
             sub["A_arriving"] = "fail"
             payload["absent"] = True
+            _lb_publish_verdict(self.radar_id, "SILENT", t0)
             return _final(self, t0, sub, payload, metrics,
                           "no data directory for the current UTC day")
         except re.error as e:
+            # NOT "UNREADABLE". Shared config fails every radar in the same
+            # tick, so counting this toward the fleet tally would diagnose a
+            # typo as a fleet-wide outage. See LB_SYSTEMIC_VERDICTS.
+            _lb_publish_verdict(self.radar_id, "CONFIG_ERROR", t0)
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage, status="error",
                 started_at=t0, finished_at=utcnow(),
@@ -200,6 +407,7 @@ class Layer2BackendRadarCheck(Check):
                 payload=payload, metrics={"fs_timeout": 0.0},
             )
         except OSError as e:
+            _lb_publish_verdict(self.radar_id, "UNREADABLE", t0)
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage, status="error",
                 started_at=t0, finished_at=utcnow(),
@@ -232,6 +440,10 @@ class Layer2BackendRadarCheck(Check):
         else:
             sub["A_arriving"] = "fail"
 
+        _lb_publish_verdict(
+            self.radar_id,
+            "SILENT" if sub["A_arriving"] == "fail" else "ARRIVING", t0)
+
         what = "newest volume" if LB2_FRESHNESS == "filename" else "last arrival"
         summary = (f"{what} {age_s / 60:.1f} min ago"
                    f"  (silent limit {silent_s / 60:.0f} min)")
@@ -251,14 +463,150 @@ def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,
     )
 
 
+class Layer2BackendFleetCheck(Check):
+    """Backend-side fleet correlation — one event, or N radar outages?
+
+    Fails when LB_FLEET_SYSTEMIC_ENTER or more fleet radars are simultaneously
+    not arriving, which means an upstream or shared-infrastructure cause rather
+    than coincident independent failures. The per-radar checks list this one in
+    ``alarm_only_depends_on``, so their alarms are still recorded and still
+    drawn, but the operator gets ONE page describing the real scope instead of
+    five saying the same thing.
+
+    Reads the verdicts the radar checks published this cycle rather than
+    re-reading the filesystem. It must agree with them by construction, and
+    re-walking five directories to compute an aggregate of five walks we just
+    did would add NFS load for no new information.
+
+    Verdict latches: once systemic it stays systemic until the count drops to
+    LB_FLEET_SYSTEMIC_EXIT, and for at least LB_FLEET_MIN_DWELL_S regardless.
+    See the constants for why both exist.
+
+    What this check can say that the L2 one cannot: CBAND reads a different
+    tree on a different mount, so its verdict localises the fault. See the
+    block comment above LB_FLEET_CHECK_ID.
+    """
+
+    id         = LB_FLEET_CHECK_ID
+    target     = "radar-fleet"
+    # No new stage. This belongs with the checks it aggregates, and a stage of
+    # its own would add an enumeration surface across the frontend for one row.
+    stage      = "LB2"
+    cadence_s  = 120
+    # Independent of radarca, like every check in this module.
+    depends_on: list[str] = []
+
+    def __init__(self):
+        self.source_tag, self.source_label = BACKEND_SOURCE
+
+    async def run(self, ctx) -> CheckResult:
+        t0 = utcnow()
+        now = t0
+        not_arriving = _lb_not_arriving(now)
+        # Fresh verdicts only — see _lb_fresh. Raw dict membership would let a
+        # fleet whose radar checks all stopped reporting read as healthy.
+        fresh = _lb_fresh(now)
+        known = sorted(fresh)
+
+        # No verdicts yet (fresh boot, or this check ran before its peers).
+        # Skip rather than assert health from an absence of evidence.
+        if len(known) < LB_FLEET_SYSTEMIC_ENTER:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="skip", started_at=t0, finished_at=utcnow(),
+                summary=(f"awaiting radar verdicts "
+                         f"({len(known)}/{len(LB_FLEET)} reported)"),
+                payload={"reason": "insufficient_data",
+                         "reported": sorted(known)},
+            )
+
+        n, total = len(not_arriving), len(LB_FLEET)
+
+        global _lb_fleet_systemic, _lb_fleet_since
+        held_for = ((now - _lb_fleet_since).total_seconds()
+                    if _lb_fleet_since else 0.0)
+        if not _lb_fleet_systemic:
+            if n >= LB_FLEET_SYSTEMIC_ENTER:
+                _lb_fleet_systemic, _lb_fleet_since = True, now
+        else:
+            if n >= LB_FLEET_SYSTEMIC_ENTER:
+                # Still bad: re-arm the dwell so it measures from the most
+                # recent systemic reading, not the first one.
+                _lb_fleet_since = now
+            elif n <= LB_FLEET_SYSTEMIC_EXIT and held_for >= LB_FLEET_MIN_DWELL_S:
+                _lb_fleet_systemic, _lb_fleet_since = False, None
+        systemic = _lb_fleet_systemic
+        # Distinguish "still bad" from "held open by the dwell", so the row
+        # says which rather than looking like a stuck check.
+        latched = systemic and n < LB_FLEET_SYSTEMIC_ENTER
+
+        witness = _lb_witness(now)
+        # Three states, and the third is not a variant of the second: an absent
+        # or stale witness means the independent tree could not be consulted,
+        # so the fault cannot be localised this cycle. Saying "the X-band path"
+        # on that evidence would be a claim we did not earn.
+        if witness is None:
+            scope, scope_note = "unlocalised", (
+                f"{LB_FLEET_WITNESS} verdict unavailable — cannot tell the "
+                f"X-band path from a wider fault this cycle")
+        elif witness in LB_SYSTEMIC_VERDICTS:
+            scope, scope_note = "wider-than-xband", (
+                f"{LB_FLEET_WITNESS} is {witness} too, on a separate mount — "
+                f"wider than the X-band path")
+        else:
+            scope, scope_note = "xband-path", (
+                f"{LB_FLEET_WITNESS} arriving normally on its own mount — "
+                f"host, NFS and clock are fine; fault is in the X-band path")
+
+        verdicts = dict(sorted(fresh.items()))
+        # When some radars did not report this cycle, "3/5 not arriving" reads
+        # as "and the other 2 are fine" — which is not what was observed. Say
+        # how many were actually seen, but only when it differs, so the
+        # ordinary line stays short.
+        seen = (f" [{len(known)}/{total} reported]"
+                if len(known) != total else "")
+        if systemic and not latched:
+            summary = (f"SYSTEMIC: {n}/{total} radars not arriving{seen} "
+                       f"({', '.join(sorted(not_arriving))}) — one event, "
+                       f"not {n} radar outages. {scope_note}")
+        elif latched:
+            summary = (f"SYSTEMIC (holding): {n}/{total} not arriving{seen} — "
+                       f"recent episode, still inside the "
+                       f"{LB_FLEET_MIN_DWELL_S / 60:.0f} min window")
+        else:
+            summary = f"{n}/{total} radars not arriving{seen}"
+
+        return CheckResult(
+            check_id=self.id, target=self.target, stage=self.stage,
+            status=("fail" if systemic else "pass"),
+            started_at=t0, finished_at=utcnow(),
+            summary=summary,
+            payload={"not_arriving": sorted(not_arriving), "n": n, "of": total,
+                     "systemic": systemic, "latched": latched,
+                     "enter_at": LB_FLEET_SYSTEMIC_ENTER,
+                     "exit_at": LB_FLEET_SYSTEMIC_EXIT,
+                     "witness": LB_FLEET_WITNESS, "witness_verdict": witness,
+                     # Only meaningful when there is an event to localise.
+                     # Reporting a scope on a passing fleet would imply we
+                     # tried to attribute a fault that does not exist.
+                     "scope": scope if systemic else None,
+                     "verdicts": verdicts,
+                     "source": "backend-filesystem"},
+            metrics={"not_arriving_radars": float(n)},
+        )
+
+
 # --------------------------------------------------------------------------
-# Register one instance per radar in the profile's table (FLOW on xqpi).
+# Register one instance per radar in the profile's table (FLOW on xqpi),
+# plus the fleet correlation check where a fleet exists to correlate.
 # --------------------------------------------------------------------------
 
 # Gated identically to layer1_backend_product. CBAND additionally requires
-# SENTINEL_SSCB_ROOT, since it does not live under the DROPS tree.
+# SENTINEL_SSCB_ROOT, since it does not live under the X-band trees.
 if SETTINGS.backend_root:
     for _rid in RADAR_FOLDER:
         if _rid == "CBAND" and not SETTINGS.sscb_root:
             continue
         register(Layer2BackendRadarCheck(radar_id=_rid))
+    if _FLEET_ACTIVE:
+        register(Layer2BackendFleetCheck())
