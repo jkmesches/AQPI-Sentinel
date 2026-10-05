@@ -519,7 +519,26 @@ PRODUCT_IMAGES_PREFIX: tuple[str, ...] = ("realtime", "product_images")
 # strftime template evaluated in UTC. AQPI's are flat under PRODUCTS/DROPS and
 # so declare nothing here; CBAND is dated but lives on a separate mount and is
 # handled by SENTINEL_SSCB_ROOT instead. See layer2_backend_radar._radar_path.
-RADAR_DATED_TREE: dict[str, str] = {}
+# AQPI's five X-bands, repointed from PRODUCTS/DROPS/<folder> to the raw
+# arrival trees. DROPS holds the OUTPUT of Gen_X-band_QPE.py, one step
+# downstream, so the check answered "is the DROPS producer alive" rather than
+# "is this radar delivering". On 2026-10-05 that producer stopped at 04:07 UTC
+# and all five checks failed for 12 h while XSCR, XSCV and XSWR were arriving
+# within a minute throughout — three false alarms out of five, and the two
+# that were right (XEBY 56 min, XSCW 433 min) were right by coincidence.
+#
+# Directory names are NOT derivable from the radar id: XEBY's tree is `EBAY`,
+# with no leading X. The table is the mapping.
+#
+# CBAND is absent deliberately — it is caught earlier by _special_trees() via
+# SENTINEL_SSCB_ROOT, which already points at its own dated tree on trinity.
+RADAR_DATED_TREE: dict[str, str] = {
+    "XEBY": "EBAY/%Y/%m/%d",
+    "XSCR": "XSCR/%Y/%m/%d",
+    "XSCV": "XSCV/%Y/%m/%d",
+    "XSCW": "XSCW/%Y/%m/%d",
+    "XSWR": "XSWR/%Y/%m/%d",
+}
 
 # How a backend check decides HOW FRESH the data is. This is a property of the
 # published tree, not a preference, so it is declared per profile.
@@ -565,8 +584,29 @@ RADAR_DATED_TREE: dict[str, str] = {}
 # the daily gzip sweep is confined to the raw volume tree, but the newest-frame
 # re-touch above affects the published products too. See profiles/xqpi.py.
 LB1_FRESHNESS: str = "newest_mtime"   # newest file's mtime in the images dir
-LB2_FRESHNESS: str = "dir_mtime"      # the data directory's own mtime
-RAW_VOLUME_TS_RE: str | None = None   # only used by LB2_FRESHNESS="filename"
+LB2_FRESHNESS: str = "filename"
+
+# Per RADAR, not per profile. The two producers on AQPI name their files
+# differently and nothing reconciles them:
+#
+#     aqpi.scvw-20261005-162541_317_2_2_PPI.netcdf   the five X-bands
+#     AQPI.SSCB_20261005_162356.nc                   CBAND
+#
+# Lowercase against uppercase, hyphen against underscore. A single pattern
+# fitted to the X-bands matched 0 of 295 CBAND files, and _newest_declared
+# raises when nothing matches — which LB2 renders as "no data directory for
+# the current UTC day" against a directory holding 295 current files. One
+# shared pattern would have traded three false failures for a fourth, on the
+# one radar that reads a different tree and is therefore the discriminator any
+# fleet correlation would rest on.
+RAW_VOLUME_TS_RE: dict[str, str] = {
+    "XEBY":  r"^aqpi\.[a-z]+-(\d{8})-(\d{6})_",
+    "XSCR":  r"^aqpi\.[a-z]+-(\d{8})-(\d{6})_",
+    "XSCV":  r"^aqpi\.[a-z]+-(\d{8})-(\d{6})_",
+    "XSCW":  r"^aqpi\.[a-z]+-(\d{8})-(\d{6})_",
+    "XSWR":  r"^aqpi\.[a-z]+-(\d{8})-(\d{6})_",
+    "CBAND": r"^AQPI\.SSCB_(\d{8})_(\d{6})",
+}
 
 if SETTINGS.profile == "xqpi":
     from .profiles import xqpi as _xqpi       # noqa: E402
@@ -589,9 +629,21 @@ if SETTINGS.profile == "xqpi":
     COMP_EXTENT_PROVISIONAL = _xqpi.COMP_EXTENT_PROVISIONAL
     PRODUCT_LABELS = _xqpi.PRODUCT_LABELS
     HAS_RADARCA = False
-elif SETTINGS.profile != "aqpi":
+if SETTINGS.profile not in ("aqpi", "xqpi"):
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
     # monitors the wrong radar network, which is worse than not starting.
     raise ValueError(
         f"unknown SENTINEL_PROFILE {SETTINGS.profile!r} — expected 'aqpi' or 'xqpi'"
     )
+
+
+if LB2_FRESHNESS == "filename":
+    # A radar with no pattern would raise inside every check run, once per
+    # cycle, reported as a broken mount. Catch it at import instead: this is a
+    # config error and it cannot be anything else.
+    _missing = sorted(set(RADAR_FOLDER) - set(RAW_VOLUME_TS_RE))
+    if _missing:
+        raise ValueError(
+            f"LB2_FRESHNESS='filename' but RAW_VOLUME_TS_RE has no pattern "
+            f"for {_missing} — every radar in RADAR_FOLDER needs one"
+        )

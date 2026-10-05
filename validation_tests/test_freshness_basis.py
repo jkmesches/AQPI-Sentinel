@@ -292,8 +292,17 @@ def main() -> int:
         env=dict(os.environ, SENTINEL_DB_URL="postgresql://unused/unused",
                  **{k: v for k, v in os.environ.items() if k != "SENTINEL_PROFILE"}))
     basis = out.stdout.strip().splitlines()[-1] if out.returncode == 0 else out.stderr
-    check("the default profile still reads mtime", basis == "newest_mtime dir_mtime",
-          basis)
+    # LB1 stays on mtime: K2's product tree writes each frame once, 2.25-2.48
+    # min after its own declared time, with 0.04-0.18 min of spread.
+    #
+    # LB2 moved to the declared basis on 2026-10-05, for a DIFFERENT reason
+    # than XQPI's. Not because mtime lies on the raw arrival tree — it tracks
+    # within half a minute there — but because those directories carry 126-149
+    # in-flight dotfiles apiece, and a newest-mtime read would land on one.
+    check("the default profile reads mtime for products",
+          basis.split()[0] == "newest_mtime", basis)
+    check("...and the declared observation time for radar arrival",
+          basis.split()[1] == "filename", basis)
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall freshness-basis assertions passed")

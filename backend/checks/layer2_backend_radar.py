@@ -73,7 +73,7 @@ def _radar_path(radar_id: str, now) -> str:
 MAX_SCAN_ENTRIES = 20_000
 
 
-def _newest_declared(path: str) -> float:
+def _newest_declared(path: str, pattern: str) -> float:
     """Blocking. Newest observation time the FILENAMES declare, as an epoch.
 
     For trees where mtime is not a sound freshness basis -- see
@@ -90,7 +90,7 @@ def _newest_declared(path: str) -> float:
     No stat(2) per entry, unlike the mtime path -- the name carries everything
     needed, so this is cheaper than what it replaces despite the larger walk.
     """
-    pat = re.compile(RAW_VOLUME_TS_RE)
+    pat = re.compile(pattern)
     newest = 0.0
     n = 0
     with os.scandir(path) as it:
@@ -157,7 +157,20 @@ class Layer2BackendRadarCheck(Check):
         path = _radar_path(self.radar_id, t0)
         payload: dict[str, Any] = {"path": path, "source": "backend-filesystem"}
 
-        reader = _newest_declared if LB2_FRESHNESS == "filename" else _dir_mtime
+        if LB2_FRESHNESS == "filename":
+            # Per radar, not per profile. AQPI's five X-bands are written by
+            # one producer as `aqpi.<site>-<date>-<time>_...` while CBAND
+            # comes off a different tree entirely as
+            # `AQPI.SSCB_<date>_<time>.nc` — different case, different
+            # separator, no hyphen. A single pattern matched 0 of 295 CBAND
+            # files, and _newest_declared raises when nothing matches, so one
+            # shared pattern would have reported "no data directory for the
+            # current UTC day" against a directory holding 295 current files.
+            pat = RAW_VOLUME_TS_RE[self.radar_id]
+            def reader(p: str, _pat: str = pat) -> float:
+                return _newest_declared(p, _pat)
+        else:
+            reader = _dir_mtime
         payload["freshness_basis"] = LB2_FRESHNESS
 
         try:

@@ -29,7 +29,8 @@ therefore decides which checks exist at all, not merely what they point at.
 | display tier | radarca + radar-display | none |
 | products | 13 | 4 |
 | radars | 6 monitored (9 drawn) | FLOW |
-| freshness basis | file mtime | the observation time the data declares |
+| freshness basis (products, LB1) | file mtime | the observation time the data declares |
+| freshness basis (radar arrival, LB2) | the observation time the data declares | the observation time the data declares |
 
 ---
 
@@ -102,7 +103,7 @@ Declined checks are recorded in `registry.DECLINED` rather than vanishing, so
 
 ---
 
-## Freshness: why `xqpi` does not use mtime
+## Freshness: where mtime is a sound basis, and where it is not
 
 On K2, mtime means what it says. Measured across all 31 frames of three
 products: every frame is written 2.25–2.48 min after its own declared time,
@@ -133,6 +134,40 @@ frames the rolling window never reclaims (26 files against a manifest of 14–15
 so **the manifest is the product and the directory is a cache with litter in
 it.** The same applies when measuring these trees: iterate the manifest, do not
 glob the directory.
+
+### `aqpi` LB2 also reads the declared time — for a different reason
+
+As of 2026-10-05 `aqpi` sets `LB2_FRESHNESS = "filename"` too, so the table
+above splits. The reason is **not** the one above. On AQPI's raw arrival trees
+mtime is sound: declared and mtime ages agreed within about half a minute when
+measured. The problem is what else is in those directories. Each carries
+126–149 **in-flight dotfiles** at any moment, and a newest-by-mtime read lands
+on one of those rather than on a completed volume — so the basis changed to
+one that cannot see a partial write, because the pattern is anchored at the
+start of the name and a dotfile cannot match it.
+
+The two profiles therefore arrive at the same basis from opposite directions:
+`xqpi` because mtime lies, `aqpi` because mtime is honest about the wrong file.
+
+### The pattern is per radar, not per profile
+
+`RAW_VOLUME_TS_RE` is a dict keyed by radar id, and every radar in
+`RADAR_FOLDER` must have an entry — `config.py` raises at import if one is
+missing, because a gap would otherwise surface once per cycle as a broken
+mount rather than as the config error it is.
+
+It has to be per radar because AQPI's two producers name their files
+differently and nothing reconciles them:
+
+```
+aqpi.scvw-20261005-162541_317_2_2_PPI.netcdf   the five X-bands
+AQPI.SSCB_20261005_162356.nc                   CBAND
+```
+
+Lowercase against uppercase, hyphen against underscore. A single pattern
+fitted to the X-bands matched **0 of 295** CBAND files, and an unmatched
+directory makes LB2 report "no data directory for the current UTC day"
+against a directory full of current data.
 
 ---
 

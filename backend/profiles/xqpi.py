@@ -387,7 +387,7 @@ LB2_FRESHNESS = "filename"      # [M] flow-<YYYYMMDD>-<HHMMSS>_...
 
 # Anchored at the start and excluding dotfiles upstream, so a gzip temp file
 # cannot match even though its name embeds the same timestamp.
-RAW_VOLUME_TS_RE = r"^flow-(\d{8})-(\d{6})_"
+RAW_VOLUME_TS_RE = {"FLOW": r"^flow-(\d{8})-(\d{6})_"}   # per radar
 
 # The dated tree is partitioned by UTC date, not local: the first file of each
 # day directory lands at 00:00:1x UTC (verified across 09/26, 09/30, 10/02).
