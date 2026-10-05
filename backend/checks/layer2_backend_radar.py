@@ -181,15 +181,41 @@ LB_FLEET_WITNESS = "CBAND"
 #   episodes — it suppressed 0 alarms in 27,917 runs and missed the 2026-09-17
 #   three-radar event entirely.
 #
-#   What does NOT transfer: the count distribution those numbers were fitted
-#   to (0/5 93.9% ... 4/5 0.8%) was measured on L2 verdicts over
-#   2026-08-25..10-03. No equivalent distribution has been computed from LB2
-#   history, so these are a reasoned starting point and not a characterised
-#   threshold. [Q]
+# ENTER=3 is now CONFIRMED on the arrival basis, independently of the L2
+# figure. Reconstructed from the dated arrival trees rather than accumulated
+# from check history -- 78,063 declared timestamps across five radars and 6.81
+# days, simulated at 60 s ticks, 9,800 ticks: [M]
 #
-# One LB-side data point exists and it supports the bar: on 2026-10-05 all
-# five X-bands read silent simultaneously from a single upstream cause. At
-# ENTER=3 that is one alarm instead of five.
+#     n not arriving    0      1      2      3      4      5
+#     share         56.89% 30.26% 12.43%  0.43%  0.00%  0.00%
+#
+# n >= 4 NEVER occurs, 0 of 9,800. Same conclusion as the L2 history reached
+# by different data on a different basis: 4-of-5 is a bar the real episodes do
+# not reach.
+#
+# Episode structure matters more than the shares:
+#     n >= 2:  12 episodes, min 4 min, median 44 min, max 468 min
+#     n >= 3:   2 episodes, 34 min and 8 min
+#
+# EXIT=1 is supported by the episodes rather than by the share: exiting at <=2
+# would release the latch during a state occupying 12.4% of the window across
+# 12 episodes with a 44-minute median, so it would flap through most of them.
+#
+# === The real argument against ENTER=2, which the shares do not show ===
+#
+# The n>=2 episodes are dominated by the same two radars -- XEBY in five of
+# the top eight, XSCW in six. So the two-radar state is not a weak systemic
+# signal, it is two individually unreliable radars coinciding, which is the
+# OPPOSITE of systemic. An enter at 2 would not merely be noisy: it would fire
+# most often on exactly the pair whose failures are known to be independent,
+# and so be systematically wrong about the thing it claims to detect.
+#
+# !!! Sample size, stated rather than glossed. Both n>=3 episodes are the same
+#     trio on the same day three hours apart, so they are arguably one
+#     underlying event sampled twice. The honest count is one to two systemic
+#     events in 6.81 days, against 27,917 runs on the L2 side. This REPRODUCES
+#     the L2 reasoning on the correct basis and sets a floor; it does not fit a
+#     distribution, and it is not equivalent evidence to the L2 figure.
 LB_FLEET_SYSTEMIC_ENTER = 3
 LB_FLEET_SYSTEMIC_EXIT = 1
 
@@ -198,6 +224,26 @@ LB_FLEET_SYSTEMIC_EXIT = 1
 # alerts.yaml) after that radar started failing. A verdict that trips and
 # clears inside that window suppresses nothing. 10 min covers the hold-down
 # plus this check's cadence with room to spare.
+#
+# Checked against the measured episodes, because 10 min EXCEEDS the shorter of
+# the two n>=3 episodes (8 min) and that looks alarming until it is worked
+# through. It is correct, and the arithmetic is the reason:
+#
+#   t=0      n reaches 3, latch sets, `since` re-arms on every systemic tick
+#   t=5 min  the radar alarms OPEN, one hold-down in -- latch is active, so
+#            they are suppressed, which is the entire purpose
+#   t=8 min  episode ends, n drops to <=1, dwell starts counting from the last
+#            systemic tick
+#   t=18 min latch releases
+#
+# So the latch outliving an 8-minute episode by 10 minutes is the design
+# working, not failing: a dwell SHORTER than the episode would clear the latch
+# mid-incident and unsuppress the duplicates. The cost is a row reading
+# "SYSTEMIC (holding)" on a recovered fleet for 10 minutes -- labelled as such,
+# with the window named in the summary -- plus the narrow case of a genuinely
+# independent single-radar failure opening inside that window and being
+# suppressed as systemic when it is not. That is the trade any latch buys, and
+# it is why `latched` is reported separately in the payload.
 LB_FLEET_MIN_DWELL_S = 600.0
 
 # The verdict vocabulary this side publishes. Deliberately smaller than L2's.
