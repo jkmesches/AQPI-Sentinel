@@ -27,17 +27,32 @@ Two checks, one stage:
     Is ``Gen_X-band_QPE.py`` still producing? One instance covering every
     folder, deliberately INFORMATIONAL — see ``Layer3DropsProducerCheck``.
 
-=== What the receipt can and cannot tell us ===
+=== Two sources, and the better one answers a stronger question ===
 
-The receipt records INTENT, not outcome. The driver writes it (lines 79-91)
-and then reads it back (line 121), so it says which file ``ls | tail -1``
-selected — not which files the composite successfully ingested. If the
-composite then fails on one of them, nothing on disk says so: there is no
-second file recording what was actually blended, and the only ``.txt`` at that
-depth is the receipt itself. A radar present here with a fresh contribution is
-therefore evidence that it was OFFERED to the composite, which is strictly
-weaker than evidence that it is IN the composite. The check's wording stays
-inside what the file supports.
+PRIMARY — the composite's own per-run log (``config.COMPOSITE_RUN_LOG_DIR``).
+One file per run, with a block per radar the composite actually processed,
+including the netCDF dimensions it read and the contribution age it computed
+itself. A block is evidence of INGESTION. These files are written once per run
+and the next run is 120 s later, so reading the second-newest is always a
+complete file — there is no torn read to defend against if you never read the
+file that is being written.
+
+FALLBACK — the input receipt (``config.COMPOSITE_RECEIPT``). This records
+INTENT, not outcome: the driver writes it and then reads it back, so it says
+which file ``ls -1rt | tail -1`` selected, not what was successfully ingested.
+A radar present there is evidence it was OFFERED to the composite, which is
+strictly weaker. It is also truncate-then-append with no rename, so it carries
+a torn-read hazard the run log does not — see ``COMPOSITE_RECEIPT_SETTLE_S``.
+
+The check's wording follows whichever source answered, and the source is
+recorded in ``payload.participation_source``. A row must not claim "in the
+composite" on evidence that only supports "offered to" it.
+
+What NEITHER source carries is a statement of absence. The composite's
+``ls: cannot access`` lines go to stderr and land in a rolling log that is
+truncated every run, so it is useless as history. Absence is inferred from a
+missing radar block, which is still positive evidence because the block
+appears for every radar that was ingested.
 """
 from __future__ import annotations
 import asyncio
@@ -47,10 +62,11 @@ from datetime import timezone
 from typing import Any
 
 from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
-                      COMPOSITE_CONTRIB_WARN_S, COMPOSITE_EXPECTED_RADARS,
-                      COMPOSITE_PIPELINE_LAG_S, COMPOSITE_RECEIPT,
-                      COMPOSITE_RECEIPT_SETTLE_S, DROPS_SILENT_INFO_S,
-                      DROPS_TREE, RADAR_FOLDER, RADAR_SILENT_FAIL_S, SETTINGS)
+                      COMPOSITE_CONTRIB_OVERRIDE_S, COMPOSITE_CONTRIB_WARN_S,
+                      COMPOSITE_EXPECTED_RADARS, COMPOSITE_RECEIPT,
+                      COMPOSITE_RECEIPT_SETTLE_S, COMPOSITE_RUN_LOG_DIR,
+                      DROPS_SILENT_INFO_S, DROPS_TREE, MAX_RUN_LOG_ENTRIES,
+                      RADAR_FOLDER, SETTINGS)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -177,69 +193,260 @@ def _read_receipt_blocking(path: str) -> dict[str, Any]:
         }
     return {
         "contributions": contributions,
+        "source": "receipt",
         "unparsed": unparsed,
         "receipt_mtime": st1.st_mtime,
         "line_count": len(lines),
     }
 
 
-async def _receipt(path: str) -> dict[str, Any]:
-    """Parsed receipt for this cycle, reusing the cached parse of this version.
+async def _participation() -> dict[str, Any]:
+    """This cycle's participation facts, from the best source available.
 
-    One retry on a torn read: the write window is milliseconds and the cadence
-    is 120 s, so a second tear in a row means something other than the normal
-    rewrite is happening and the caller should hear about it.
+    Prefers the composite's per-run log, which answers the stronger question
+    (ingested, not merely offered), carries the composite's own age
+    computation, and cannot be read mid-write. Falls back to the receipt when
+    the run-log directory is absent, empty, or in an unrecognised format.
+
+    The fallback is TAGGED in `source` rather than substituted silently: the
+    two sources support different claims, and a row that says "in the
+    composite" on receipt evidence alone would be overstating what was read.
+
+    Cached per source version so every radar in a cycle sees ONE composite
+    run. Otherwise XEBY could be judged against one run and CBAND the next,
+    and the reported set would be stitched from two runs and could be a set
+    that never existed.
     """
     global _receipt_cache
+    if COMPOSITE_RUN_LOG_DIR:
+        d = os.path.join(SETTINGS.backend_root, COMPOSITE_RUN_LOG_DIR)
+        try:
+            path, run_ts = await asyncio.to_thread(_pick_run_log, d)
+            if _receipt_cache is not None and _receipt_cache[0] == ("run_log", path):
+                return _receipt_cache[1]
+            parsed = await asyncio.to_thread(_read_run_log_blocking, d)
+            _receipt_cache = (("run_log", parsed["run_log"]), parsed)
+            return parsed
+        except (FileNotFoundError, NotADirectoryError, ValueError, OSError):
+            # Fall through to the receipt. Deliberately broad: every one of
+            # these means "this source could not answer", and the fallback can.
+            pass
+
+    path = _receipt_path()
     st = await asyncio.to_thread(os.stat, path)
-    key = (st.st_mtime, st.st_size)
+    key = ("receipt", f"{st.st_mtime}:{st.st_size}")
     if _receipt_cache is not None and _receipt_cache[0] == key:
         return _receipt_cache[1]
     try:
         parsed = await asyncio.to_thread(_read_receipt_blocking, path)
     except TornReceipt:
+        # One retry: the write window is milliseconds against a 120 s cadence,
+        # so a second tear means something other than the normal rewrite.
         parsed = await asyncio.to_thread(_read_receipt_blocking, path)
-    _receipt_cache = ((parsed["receipt_mtime"], st.st_size), parsed)
+    _receipt_cache = (key, parsed)
     return parsed
 
 
-def _contrib_bands(radar_id: str) -> tuple[float, float]:
-    """(warn_s, fail_s) for this radar's contribution age.
+# ==========================================================================
+# PRIMARY source: the composite's own per-run log
+# ==========================================================================
+#
+# One file per run under COMPOSITE_RUN_LOG_DIR, written once, with a block per
+# radar the composite actually processed. See config.COMPOSITE_RUN_LOG_DIR for
+# a verbatim block and for why this beats the receipt.
 
-    Derived per radar rather than one global number, because the inputs differ
-    by a factor of three: a contribution cannot be fresher than the radar's own
-    arrival, and those cadences run from XEBY's 5 min to CBAND's 18 min.
-    Judging CBAND by an X-band band would call a healthy C-band contribution
-    late on every cycle.
+_RADAR_BLOCK_RE = re.compile(r"^\*+\s*RADAR:\s*(\S+?)\s*\*+\s*$", re.M)
+# `GetNetCDFdim` with real dimensions is the ingestion evidence: it means the
+# file was opened and its header read, not merely named.
+_DIM_RE = re.compile(r"#radials\s*=\s*(\d+).*?#gates[^=]*=\s*(\d+)"
+                     r"(?:.*?#sweeps\s*=\s*(\d+))?", re.S)
+# Logged as start-minus-end, so negative. The sign is not load-bearing; the
+# magnitude is the contribution age.
+_SECONDS_RE = re.compile(r"secondsStarttoEnd\s*=\s*(-?\d+)")
+_SCAN_START_RE = re.compile(r"startDateTimeScan\s*=\s*(\S+)")
+_FILENAME_RE = re.compile(r"^\s*filename:\s*(\S+)\s*$", re.M)
 
-        fail = that radar's silence limit + the pipeline budget
-        warn = 0.8x fail, the same band shape LB1/LB2 already use
 
-    COMPOSITE_CONTRIB_{WARN,FAIL}_S override per radar when measurement says
-    one needs its own number; both are empty by default.
+def _parse_run_log(text: str, run_ts: float | None) -> dict[str, dict[str, Any]]:
+    """Per-radar ingestion facts from one composite run log.
+
+    A radar appears here only if the composite processed it, so the KEYS are
+    the ingestion evidence and the absence of a key is the absence of a
+    contribution.
+
+    `age_s` comes from the composite's own `secondsStarttoEnd`. `derived_age_s`
+    is computed independently as (run time from the filename) minus (the scan
+    start the log records), and the two are compared.
+
+    === Why both, rather than trusting the one number ===
+
+    The field is labelled start-minus-END-of-scan, which read literally is a
+    SCAN DURATION, not an age — and a band fitted to an age would be measuring
+    the wrong quantity entirely. The evidence that it is an age is that one
+    radar's distribution reaches 64,828 s: an 18-hour span is impossible for a
+    4-sweep X-band volume, so `endDateTimeScan` must be the composite's own
+    reference time rather than anything read out of the file. That inference is
+    sound but it IS an inference, and the label contradicts it. So the derived
+    figure is carried alongside and a disagreement is recorded instead of being
+    silently resolved in favour of whichever was computed first.
     """
-    silent_s = _thresholds.get_radar(
-        radar_id, "backend_silent_s", RADAR_SILENT_FAIL_S.get(radar_id, 900))
-    fail_s = float(COMPOSITE_CONTRIB_FAIL_S.get(
-        radar_id, silent_s + COMPOSITE_PIPELINE_LAG_S))
-    warn_s = float(COMPOSITE_CONTRIB_WARN_S.get(radar_id, fail_s * 0.8))
-    return warn_s, fail_s
+    out: dict[str, dict[str, Any]] = {}
+    marks = list(_RADAR_BLOCK_RE.finditer(text))
+    for i, m in enumerate(marks):
+        rdir = m.group(1)
+        body = text[m.end(): marks[i + 1].start() if i + 1 < len(marks) else len(text)]
+        dims = _DIM_RE.search(body)
+        rec: dict[str, Any] = {
+            # No dimensions means the block exists but the read did not land.
+            # Recorded rather than dropped: "named but not read" is a distinct
+            # and more alarming state than "not named".
+            "ingested": bool(dims),
+            "age_s": None,
+            "derived_age_s": None,
+            "volume_path": None,
+        }
+        if dims:
+            rec["radials"] = int(dims.group(1))
+            rec["gates"] = int(dims.group(2))
+            if dims.group(3):
+                rec["sweeps"] = int(dims.group(3))
+        sec = _SECONDS_RE.search(body)
+        if sec:
+            rec["age_s"] = abs(float(sec.group(1)))
+        fn = _FILENAME_RE.search(body)
+        if fn:
+            rec["volume_path"] = fn.group(1)
+        st = _SCAN_START_RE.search(body)
+        if st and run_ts is not None:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(st.group(1).rstrip("Z"), "%Y-%m-%dT%H:%M:%S")
+                rec["derived_age_s"] = round(
+                    run_ts - dt.replace(tzinfo=timezone.utc).timestamp(), 1)
+            except ValueError:
+                pass
+        if rec["age_s"] is not None and rec["derived_age_s"] is not None:
+            # One composite cycle of slack. Beyond that the two fields are not
+            # measuring the same thing and someone needs to know.
+            rec["age_disagrees"] = abs(rec["age_s"] - rec["derived_age_s"]) > 120
+        out[rdir] = rec
+    return out
+
+
+def _pick_run_log(dirpath: str) -> tuple[str, float | None]:
+    """Blocking. The SECOND-NEWEST run log, which is always complete.
+
+    The newest file may still be open: the name says `startproc`, so it is
+    created when the run begins and written as the run proceeds. The next run
+    starts 120 s later, so the previous file is finished — reading it avoids
+    the torn-read problem entirely rather than defending against it.
+
+    The cost is up to ~240 s of reporting lag against a 900 s fail band. That
+    is accepted deliberately: a late-but-correct answer beats a prompt one
+    computed from half a file, and the alternative (newest, with a settle
+    window) would need to know whether these files are written incrementally
+    or on completion, which is not established.
+
+    Ordering is by the timestamp IN THE NAME, never by mtime. At ~5,000
+    retained files a stat per entry over NFS is the read that hangs, and the
+    name already carries the run time.
+    """
+    stamped: list[tuple[float, str]] = []
+    n = 0
+    with os.scandir(dirpath) as it:
+        for e in it:
+            n += 1
+            if n > MAX_RUN_LOG_ENTRIES:
+                break
+            if e.name.startswith(".") or not e.name.endswith(".txt"):
+                continue
+            m = _TS_RE.search(e.name)
+            if not m:
+                continue
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            stamped.append((dt.replace(tzinfo=timezone.utc).timestamp(), e.path))
+    if not stamped:
+        raise FileNotFoundError(f"no timestamped run logs in {dirpath}")
+    stamped.sort()
+    # One file only: it may be mid-write, but refusing to look at a directory
+    # holding exactly one run is worse than reading it. Flagged by the caller.
+    ts, path = stamped[-2] if len(stamped) >= 2 else stamped[-1]
+    return path, ts
+
+
+def _read_run_log_blocking(dirpath: str) -> dict[str, Any]:
+    """Blocking. Parse the second-newest run log."""
+    path, run_ts = _pick_run_log(dirpath)
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    radars = _parse_run_log(text, run_ts)
+    if not radars:
+        # The file exists and holds no radar blocks. That is a real statement —
+        # a run that ingested nothing — but it is indistinguishable from a
+        # format change, so it is surfaced rather than reported as six absences.
+        raise ValueError(f"no RADAR blocks in {path}")
+    return {
+        "contributions": radars,
+        "source": "run_log",
+        "run_log": path,
+        "run_ts": run_ts,
+        "receipt_mtime": run_ts,
+        "line_count": text.count("\n"),
+        "unparsed": [],
+    }
+
+
+def _contrib_bands(radar_id: str) -> tuple[float, float]:
+    """(warn_s, fail_s) for a contribution age. ONE UNIFORM PAIR.
+
+    This was derived per radar from that radar's own silence limit. Measured
+    over 1,440 composite runs that band is blind on XSCR — max 403 s against a
+    1,080 s limit, so it can never fire on the one radar that is never late —
+    while firing on 25% of XSCW's runs. See config.COMPOSITE_CONTRIB_FAIL_S for
+    the distribution and for why per-radar normalisation is the wrong answer:
+    a band tuned to each radar's own history silences exactly the radars that
+    misbehave.
+
+    Thresholds are read through the admin store first so a retroactive change
+    applies, then fall back to the config constants.
+    """
+    ov = COMPOSITE_CONTRIB_OVERRIDE_S.get(radar_id)
+    warn_s = _thresholds.get_global(
+        "composite_contrib_warn_s",
+        ov[0] if ov else COMPOSITE_CONTRIB_WARN_S)
+    fail_s = _thresholds.get_global(
+        "composite_contrib_fail_s",
+        ov[1] if ov else COMPOSITE_CONTRIB_FAIL_S)
+    return float(warn_s), float(fail_s)
 
 
 class Layer3CompositeParticipationCheck(Check):
-    """Is this radar being offered to the composite, and how fresh is what it offers?
+    """Is this radar in the composite, and how fresh is what it contributed?
 
     Two sub-checks:
 
-    ``A_included``  the radar's directory appears in the latest receipt.
-                    Absent is a fail: the composite is running without it, which
-                    is how XEBY left the AQPI composite on 2026-10-05 without a
-                    single alarm anywhere in the system.
-    ``B_fresh``     how old the contribution it named is, against bands derived
-                    from that radar's own silence limit.
+    ``A_included``  the radar has a block in the latest composite run, with
+                    dimensions logged — so the composite opened its file and
+                    read it. Absent is a fail: the composite is running without
+                    it, which is how XEBY left the AQPI composite on 2026-10-05
+                    without a single alarm anywhere in the system.
+    ``B_fresh``     how old that contribution was, against one uniform band.
+
+    Three states, not two, and the third only exists because the run log
+    reports outcomes: **absent** (no block), **named but not read** (a block
+    with no dimensions — the composite tried this file and failed on it), and
+    **in**. The receipt could never distinguish the middle one.
 
     ``A_included`` is reported even when ``B_fresh`` cannot be: a radar present
-    with an unparseable filename is a different fault from a radar missing.
+    with no usable timestamp is a different fault from a radar missing.
+
+    On the receipt fallback the claim weakens to "offered to composite", since
+    that file records only what ``ls | tail -1`` selected. The wording follows
+    the evidence; see ``_participation``.
     """
 
     stage = "LB3"
@@ -264,14 +471,15 @@ class Layer3CompositeParticipationCheck(Check):
         t0 = utcnow()
         sub: dict[str, str] = {}
         metrics: dict[str, float] = {}
-        path = _receipt_path()
+        # The receipt path, as the fallback location. The actual source used
+        # is recorded in payload.participation_source once a read succeeds.
         payload: dict[str, Any] = {
-            "path": path, "receipt_dir": self.receipt_dir,
+            "receipt_path": _receipt_path(), "receipt_dir": self.receipt_dir,
             "source": "backend-filesystem",
         }
 
         try:
-            parsed = await asyncio.wait_for(_receipt(path), FS_TIMEOUT_S)
+            parsed = await asyncio.wait_for(_participation(), FS_TIMEOUT_S)
         except asyncio.TimeoutError:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage,
@@ -287,14 +495,14 @@ class Layer3CompositeParticipationCheck(Check):
                 summary=f"receipt rewritten under us twice — {e}",
                 payload=payload, metrics={"fs_timeout": 0.0})
         except FileNotFoundError:
-            # The composite is not running at all, or not where we think. That
-            # is a real fault but it is not THIS radar's fault, and six radars
-            # reporting it would be six rows saying one thing.
+            # Neither source answered: no run logs and no receipt. The
+            # composite is not running at all, or not where we think.
             metrics["fs_timeout"] = 0.0
             payload["receipt_absent"] = True
             sub["A_included"] = "fail"
             return _final(self, t0, sub, payload, metrics,
-                          f"composite receipt absent — {path}")
+                          f"no composite run log or receipt found under "
+                          f"{SETTINGS.backend_root}")
         except OSError as e:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage,
@@ -303,28 +511,74 @@ class Layer3CompositeParticipationCheck(Check):
                 payload=payload, metrics={"fs_timeout": 0.0})
 
         metrics["fs_timeout"] = 0.0
+        src = parsed.get("source", "receipt")
         contrib = parsed["contributions"].get(self.receipt_dir)
+        payload["participation_source"] = src
         payload["receipt_radars"] = sorted(parsed["contributions"])
+        if parsed.get("run_log"):
+            payload["run_log"] = parsed["run_log"]
         payload["receipt_age_s"] = round(t0.timestamp() - parsed["receipt_mtime"], 1)
 
         warn_s, fail_s = _contrib_bands(self.radar_id)
         payload["contrib_warn_s"], payload["contrib_fail_s"] = warn_s, fail_s
+
+        # The run log proves INGESTION (the composite opened the file and read
+        # its dimensions); the receipt only shows what `ls | tail -1` selected,
+        # which is what the composite was OFFERED. The wording follows the
+        # evidence rather than claiming the stronger thing on the weaker
+        # source.
+        verb = "in composite" if src == "run_log" else "offered to composite"
+        absent_verb = ("NOT IN COMPOSITE" if src == "run_log"
+                       else "NOT OFFERED TO COMPOSITE")
 
         if contrib is None:
             sub["A_included"] = "fail"
             metrics["included"] = 0.0
             others = ", ".join(payload["receipt_radars"]) or "none"
             return _final(self, t0, sub, payload, metrics,
-                          f"NOT IN COMPOSITE — {self.receipt_dir} absent from the "
-                          f"latest receipt (present: {others})")
+                          f"{absent_verb} — {self.receipt_dir} has no block in the "
+                          f"latest composite run (present: {others})")
 
         sub["A_included"] = "pass"
         metrics["included"] = 1.0
-        age_s = t0.timestamp() - contrib["declared_ts"]
+
+        # Named but not read is a distinct, worse state than not named: the
+        # composite tried and failed on this file. Only the run log can tell
+        # the difference, since the receipt never reports an outcome.
+        if src == "run_log" and not contrib.get("ingested", True):
+            sub["A_included"] = "fail"
+            metrics["included"] = 0.0
+            payload["named_not_read"] = True
+            return _final(self, t0, sub, payload, metrics,
+                          f"NAMED BUT NOT READ — {self.receipt_dir} appears in the "
+                          f"run but the composite logged no dimensions for it")
+
+        # The run log carries the composite's own age; the receipt forces us to
+        # derive one from the volume filename.
+        if contrib.get("age_s") is not None:
+            age_s = float(contrib["age_s"])
+            payload["age_basis"] = "composite_reported"
+            if contrib.get("derived_age_s") is not None:
+                payload["derived_age_s"] = contrib["derived_age_s"]
+            # See _parse_run_log: the field's own label says scan duration, and
+            # the evidence that it is an age is an inference. A disagreement
+            # with the independently derived figure is surfaced, not resolved.
+            if contrib.get("age_disagrees"):
+                payload["age_disagrees"] = True
+        elif contrib.get("declared_ts") is not None:
+            age_s = t0.timestamp() - float(contrib["declared_ts"])
+            payload["age_basis"] = "derived_from_filename"
+        else:
+            # Present, readable, but carrying no usable timestamp. A_included
+            # stands on its own; B_fresh is simply not assessable.
+            payload["age_basis"] = "unavailable"
+            return _final(self, t0, sub, payload, metrics,
+                          f"{verb}, contribution age not reported")
+
         metrics["contrib_age_s"] = float(age_s)
         # Same normalized 0..1 sparkline axis as LB1/LB2. See helpers.headroom.
         metrics["headroom"] = headroom(age_s, fail_s)
-        payload["contrib_path"] = contrib["path"]
+        payload["contrib_path"] = contrib.get("volume_path") or contrib.get("path")
         payload["age_s"] = round(age_s, 1)
 
         if age_s <= warn_s:
@@ -334,10 +588,12 @@ class Layer3CompositeParticipationCheck(Check):
         else:
             sub["B_fresh"] = "fail"
 
-        summary = (f"in composite, contribution {age_s / 60:.1f} min old"
+        summary = (f"{verb}, contribution {age_s / 60:.1f} min old"
                    f"  (limit {fail_s / 60:.0f} min)")
         if sub["B_fresh"] == "fail":
             summary = "STALE CONTRIBUTION — " + summary
+        if payload.get("age_disagrees"):
+            summary += "  [age fields disagree]"
         return _final(self, t0, sub, payload, metrics, summary)
 
 
