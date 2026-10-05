@@ -41,8 +41,8 @@
 		  desc: 'Site liveness, TLS, public page.' },
 		{ key: 'products', label: 'Products', stages: ['L1', 'LB1'],
 		  desc: 'Per-product freshness on the backend and as radarca serves it.' },
-		{ key: 'radars',   label: 'Radars',   stages: ['L2', 'LB2', 'L3', 'L4-T1T2'],
-		  desc: 'Per-radar arrival on the backend, radarca rollup, cross-checks, image QC.' }
+		{ key: 'radars',   label: 'Radars',   stages: ['L2', 'LB2', 'LB3', 'L3', 'L4-T1T2'],
+		  desc: 'Per-radar arrival on the backend, composite participation, radarca rollup, cross-checks, image QC.' }
 	];
 
 	// Static cell+row geometry. Rows = checks (horizontal labels on the left,
@@ -54,6 +54,19 @@
 	const STAGE_ROW_H   = 22;   // px, height of a "[Stage]" separator row
 
 	let tab           = $state<Tab>('radars');
+
+	// Collapsed stage blocks, by stage id.
+	//
+	// Default is expanded: the grid's whole purpose is showing state over time,
+	// and a view that opens closed makes the operator click before it answers
+	// anything. The control exists because the Radars tab now carries five
+	// stages — LB3 added composite participation — and scanning one of them
+	// means scrolling past the others.
+	let collapsedStages = $state<Record<string, boolean>>({});
+	const stageCollapsed = (stage: string) => collapsedStages[stage] === true;
+	const toggleStage = (stage: string) => {
+		collapsedStages[stage] = !stageCollapsed(stage);
+	};
 	let bucket        = $state<Bucket>('5m');
 	let columns       = $state<CheckMeta[]>([]);
 	let buckets       = $state<TimelineBucket[]>([]);
@@ -198,6 +211,15 @@
 		}
 		return out;
 	});
+	// "Are they all collapsed" rather than "did someone click collapse-all", so
+	// the label stays truthful after the stages are toggled one at a time.
+	const allStagesCollapsed = $derived(
+		groupedColumns.length > 0 && groupedColumns.every((g: any) => stageCollapsed(g.stage))
+	);
+	const setAllStages = (collapsed: boolean) => {
+		for (const g of groupedColumns) collapsedStages[(g as any).stage] = collapsed;
+	};
+
 	const flatColumns = $derived(groupedColumns.flatMap((g) => g.rows.map((r) => r.item)));
 	const totalCols   = $derived(flatColumns.length);
 
@@ -824,6 +846,17 @@
 		</div>
 
 		<div class="flex items-center gap-1">
+			<span class="text-[var(--color-muted)] uppercase tracking-wider">rows</span>
+			<div class="flex border border-[var(--color-border-strong)]">
+				<button
+					class="px-2 py-0.5 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-default)]"
+					title={allStagesCollapsed ? 'Expand every stage block' : 'Collapse every stage block'}
+					onclick={() => setAllStages(!allStagesCollapsed)}
+				>{allStagesCollapsed ? 'expand all' : 'collapse all'}</button>
+			</div>
+		</div>
+
+		<div class="flex items-center gap-1">
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">order</span>
 			<div class="flex border border-[var(--color-border-strong)]">
 				<button
@@ -962,13 +995,22 @@
 				<!-- ONE BLOCK PER STAGE -->
 				{#each groupedColumns as g}
 					<!-- Stage separator (sticky-left label + full-width strip) -->
-					<div
-						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center gap-1 overflow-hidden whitespace-nowrap px-3 text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
+					<button
+						type="button"
+						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center gap-1 overflow-hidden whitespace-nowrap px-3 text-left text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
 						style="height:{STAGE_ROW_H}px;"
+						aria-expanded={!stageCollapsed(g.stage)}
+						title={stageCollapsed(g.stage) ? `expand ${g.label}` : `collapse ${g.label}`}
+						onclick={() => toggleStage(g.stage)}
 					>
+						<span
+							class="inline-block w-[0.55rem] shrink-0 text-[8px] text-[var(--color-muted)] transition-transform duration-150"
+							style:transform={stageCollapsed(g.stage) ? 'rotate(0deg)' : 'rotate(90deg)'}
+							aria-hidden="true">▶</span
+						>
 						<span class="truncate">{g.label}</span>
 						<span class="ml-2 text-[var(--color-faint)] num">({g.rows.length})</span>
-					</div>
+					</button>
 					<div
 						class="tl-cell border-b border-t border-[var(--color-border)] bg-[var(--color-canvas)]"
 						style="height:{STAGE_ROW_H}px; grid-column: span {orderedBuckets.length};"
@@ -978,7 +1020,12 @@
 					     page's Radar Data / Atmospheric Forecast / CoSMoS / NWM
 					     grouping. Each subgroup gets a slim header row before
 					     its checks. -->
-					{#if g.subgroups}
+					{#if stageCollapsed(g.stage)}
+						<!-- Collapsed: the separator row above is the whole block.
+						     Rows are not rendered rather than hidden with CSS — a
+						     tab can carry several hundred cells per row and the
+						     grid's column spans are computed per row. -->
+					{:else if g.subgroups}
 						{#each g.subgroups as sg}
 							<div
 								class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-muted)]"

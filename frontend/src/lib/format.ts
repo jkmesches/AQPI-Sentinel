@@ -99,7 +99,7 @@ export function statusText(s: string): string {
 //
 // Backend stages sit immediately after the radarca stage they correspond to, so the
 // two views of the same thing are adjacent wherever stages are listed in order.
-export const ALL_STAGES = ['L0', 'L1', 'LB1', 'L2', 'LB2', 'L3', 'L4-T1T2'] as const;
+export const ALL_STAGES = ['L0', 'L1', 'LB1', 'L2', 'LB2', 'LB3', 'L3', 'L4-T1T2'] as const;
 export type Stage = (typeof ALL_STAGES)[number];
 
 /** Dropdown/filter options. `hint` carries the short technical code where the UI shows it. */
@@ -177,8 +177,27 @@ export function isBackendStage(stage: string): boolean {
  */
 export const FLEET_CHECK_ID = 'layer2.xband.fleet';
 
+/**
+ * The backend-side fleet correlation, added 2026-10-05.
+ *
+ * Same shape and same reason as the L2 one — a verdict ABOUT the rail rather
+ * than a row in it — but it reads the filesystem, so it can say something the
+ * radarca-derived check cannot: CBAND arrives on a separate mount, so a
+ * passing CBAND localises the fault to the X-band path. See
+ * backend/checks/layer2_backend_radar.Layer2BackendFleetCheck.
+ */
+export const BACKEND_FLEET_CHECK_ID = 'layer2.backend.fleet';
+
+/**
+ * True for a correlation verdict that must NOT be rendered as a radar row.
+ *
+ * Both ids, because both share a stage with the radars they describe. Missing
+ * the second would put `radar-fleet` in the rail as a seventh radar with an
+ * empty sparkline — exactly the bug the L2 one was pulled out to fix, and the
+ * rail's "5/7" count would come back with it.
+ */
 export function isFleetCheck(checkId: string): boolean {
-	return checkId === FLEET_CHECK_ID;
+	return checkId === FLEET_CHECK_ID || checkId === BACKEND_FLEET_CHECK_ID;
 }
 
 export function sparklineMetric(checkId: string): string | null {
@@ -186,7 +205,36 @@ export function sparklineMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer2.backend.')) return 'headroom';
 	if (checkId.startsWith('layer1.product.')) return 'headroom';
 	if (checkId.startsWith('layer1.backend.')) return 'headroom';
+	// LB3. Participation plots headroom against its own contribution-age band
+	// so it shares the fixed 0..1 axis with everything else; the DROPS producer
+	// does too, against its informational limit.
+	if (checkId.startsWith('layer3.composite.')) return 'headroom';
+	if (checkId === 'layer3.backend.drops')      return 'headroom';
 	return null;
+}
+
+/**
+ * Which of a target's several checks owns the row's ARRIVAL trace.
+ *
+ * A radar now reports through up to three checks and they do not all measure
+ * arrival: LB2 reads the raw volumes landing on disk, LB3 reads a composite
+ * receipt written two steps later, and L2 reads what radarca says about it.
+ * Only the first is data arrival. The collapsed row plots that one, so the
+ * trace means the same thing on every row and is never quietly a measure of
+ * the composite driver's health instead.
+ *
+ * Falls back to whatever the target does have — on a profile with no backend
+ * mount there is no LB2 reading, and a row with no trace at all is worse than
+ * one whose trace is the only reading available.
+ */
+export const ARRIVAL_STAGE_PRIORITY = ['LB2', 'L2', 'LB3'] as const;
+
+export function arrivalRowOf<T extends { stage: string }>(rows: readonly T[]): T | null {
+	for (const stage of ARRIVAL_STAGE_PRIORITY) {
+		const hit = rows.find((r) => r.stage === stage);
+		if (hit) return hit;
+	}
+	return rows[0] ?? null;
 }
 
 /**
@@ -236,7 +284,8 @@ export function stageColor(s: string): string {
 			L3:        'text-[var(--color-warn)]',
 			'L4-T1T2': 'text-[var(--color-critical)]',
 			LB1:       'text-[var(--color-bright)]',
-			LB2:       'text-[var(--color-bright)]'
+			LB2:       'text-[var(--color-bright)]',
+			LB3:       'text-[var(--color-bright)]'
 		}[s] ?? 'text-[var(--color-muted)]'
 	);
 }
@@ -249,7 +298,8 @@ export function stageLabel(s: string): string {
 			L3:        'Map Overlays',
 			'L4-T1T2': 'Image Quality',
 			LB1:       'Backend Products',
-			LB2:       'Backend Radar Arrival'
+			LB2:       'Backend Radar Arrival',
+			LB3:       'Backend Processing'
 		}[s] ?? s
 	);
 }
@@ -262,7 +312,8 @@ export function stageTechCode(s: string): string {
 			L3:        'L3',
 			'L4-T1T2': 'L4',
 			LB1:       'LB1',
-			LB2:       'LB2'
+			LB2:       'LB2',
+			LB3:       'LB3'
 		}[s] ?? s
 	);
 }

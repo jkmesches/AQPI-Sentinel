@@ -28,11 +28,93 @@ unknown`.
 
 ## [Unreleased]
 
-Documentation, threshold characterisation, and one behavior change: `aqpi`'s
-`LB2` radar checks now measure radar arrival instead of a downstream
-generator's output.
+`LB2` stops measuring a downstream generator and starts measuring radar
+arrival; a new `LB3` stage watches the processing in between; and the radar
+rail collapses a radar's several readings onto one expandable row.
+
+### Added
+
+- **`LB3` — Backend Processing.** LB2 says a radar's data is landing, LB1 says
+  a product is publishing, and until now nothing looked in between — so a
+  product could be computed from fewer radars than it claimed with both stages
+  green. On 2026-10-05 XEBY aged out of the AQPI composite between 16:16Z and
+  16:44Z and nothing anywhere reported it.
+
+  - **`layer3.composite.<radar>`** — one per radar, paging. Reads the composite
+    driver's input receipt and reports whether the radar is named in it
+    (`A_included`) and how old the contribution it names is (`B_fresh`).
+    Contribution bands are derived per radar from that radar's own silence
+    limit plus `COMPOSITE_PIPELINE_LAG_S`: CBAND's cadence is ~3x an
+    X-band's, so one global band would call a healthy C-band contribution late
+    every cycle.
+
+    The receipt records **intent, not outcome** — the driver writes it, then
+    reads it back, so it says what `ls -1rt | tail -1` selected, not what was
+    successfully ingested. The check's wording stays inside what the file
+    supports.
+
+    Three parsing hazards, all real and all in one file: the radar is spelled
+    three ways inside the filename across naming conventions while the
+    directory is uniform (so identity comes from the directory);
+    `recentfiles//XSCR` carries a genuine double slash; and the timestamp
+    separator is `-` for X-band but `_` for C-band and NEXRAD.
+
+  - **`layer3.backend.drops`** — one check, **informational and non-paging**.
+    Watches the QPE producer that LB2 was pointed at by mistake. Capped at
+    `warn` so it cannot auto-promote, *and* routed to a non-escalating policy
+    by check id — two independent statements of one intent, because one of them
+    will eventually be edited by someone unaware of the other. One check for
+    the whole producer, not one per folder: the folders freeze together because
+    it is one process.
+
+- **Backend fleet correlation** (`layer2.backend.fleet`). The L2 design ported
+  to the filesystem side, where it is a **stronger discriminator**: CBAND
+  arrives on a different tree on a different mount, so a passing CBAND is
+  positive evidence — host up, NFS serving, clock sane, our own reads working —
+  and localises the fault to the X-band path. The radarca-derived check cannot
+  separate "the radars stopped" from "the API we ask about them stopped". The
+  home page shows the backend verdict in preference to the radarca one.
+
+  Three scopes, and the third is not a variant of the second: `xband-path`
+  (CBAND arriving), `wider-than-xband` (CBAND silent too), and `unlocalised`
+  (CBAND's verdict unavailable, so the fault *cannot* be localised this cycle —
+  saying otherwise would be a claim we did not earn).
+
+  Registers only where a fleet exists. On `xqpi`, with one radar, "is 3 of 1
+  silent" is unreachable, so it is declined with a stated reason rather than
+  rendering a permanent skip row that reads as a broken check.
+
+- **Grouped radar rows.** Each radar now reports through up to three checks, so
+  the rail collapses them onto one expandable row showing the **worst** reading
+  — and the worst reading's own summary text, so expanding never contradicts
+  what the collapsed row said. Expands automatically when alerting, with manual
+  collapses recorded separately so a newly-alerting radar cannot overwrite a
+  deliberate choice. `Expand all` / `Collapse all` on the rail header.
+
+  The collapsed row's sparkline plots **data arrival specifically** (LB2 where
+  it exists). LB3 measures a receipt written two steps later and L2 measures
+  what radarca says, so plotting whichever came first would make the trace mean
+  a different thing on different rows.
+
+- **Collapsible stage blocks on the timeline**, with `collapse all` /
+  `expand all`. The Radars tab now carries five stages; scanning one of them
+  meant scrolling past the others.
 
 ### Fixed
+
+- **The mobile status map coloured radar markers from `L2` alone.** Two
+  consequences: on a profile with no radarca origin — `xqpi`, where FLOW is
+  monitored entirely off the filesystem — every marker rendered in the `skip`
+  colour on a working deployment; and on `aqpi` a radar could be silent on disk
+  while radarca still claimed it was fine, and the map drew it green. Now the
+  worst reading across `L2`, `LB2` and `LB3`.
+- **`LB1`/`LB2` had no alert route** and fell through to the catch-all at 4h,
+  so the *authoritative* filesystem-read observation repeated four times less
+  often than the radarca-derived one it exists to outrank. An omission when
+  those stages were added in v0.5.0, not a decision.
+- **The docs FAQ stage table was missing `LB1` and `LB2` entirely**, and asked
+  about "the five stages" when there were seven. Both surfaces now list all
+  eight.
 
 - **`LB2` measured the wrong thing on `aqpi`.** The five X-band checks read
   `PRODUCTS/DROPS/<folder>`, which is the **output** of `Gen_X-band_QPE.py` —
