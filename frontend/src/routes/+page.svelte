@@ -379,7 +379,12 @@
 				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
 					title={`${dropsRow.check_id} — informational, non-paging`}>
 					<StatusDot status={dropsRow.status} size={7} pulseKey={sentinel.pulseTick[dropsRow.check_id] ?? 0} />
-					<span class="text-[var(--color-default)] num">QPE producer</span>
+					<!-- Via prettyCheckLabel, not hardcoded. Hardcoding it is how
+					     this check ended up with two names in one app: the label
+					     function said "DROPS producer" and this row said "QPE
+					     producer". One source for the label means they cannot
+					     disagree again. -->
+					<span class="text-[var(--color-default)] num">{prettyCheckLabel(dropsRow.check_id, dropsRow.target)}</span>
 					<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">INFO</span>
 					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{dropsRow.summary}</span>
 				</li>
@@ -440,13 +445,26 @@
 					ontoggle={() => toggleRadar(g.target, g.alerting)}
 					count={g.rows.length}
 					pulseKey={sentinel.pulseTick[arrival?.check_id ?? ''] ?? 0}
-					title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`}
+					title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`
+						+ (worstRow?.summary ? `\n${worstRow.summary}` : '')}
 				>
-					{#snippet collapsed()}
-						<!-- The WORST reading's own words, not a synthesised line, so
-						     expanding never contradicts what the collapsed row said. -->
-						{worstRow?.summary ?? ''}
-					{/snippet}
+					<!-- No collapsed prose. The summary is written to be read in
+					     full — in an email, the timeline, the detail modal — and
+					     this rail is a quarter of the viewport wide. After the
+					     radar name, the sparkline, the count and the QC dot there
+					     is room for about twenty characters, so it rendered as
+					     "BACKEND SILENT — newest volu…": an arbitrary truncation
+					     that says less than the status dot already did, and can be
+					     misread (that tail looks like the start of a filename).
+					     The information is not superfluous, the PROSE FORM is wrong
+					     for the width.
+					     Three non-redundant signals remain, none of which can
+					     truncate: the dot carries severity (worst-of across the
+					     radar's checks), the sparkline carries magnitude against
+					     the check's own limit on a fixed 0..1 axis, and the count
+					     says how many readings are behind it. The full summary is
+					     the row's hover title, and the expander has every check's
+					     own words untruncated. -->
 					{#snippet trailing()}
 						<span class="flex items-center gap-2">
 							{#if arrival && diag.spark}

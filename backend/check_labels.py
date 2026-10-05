@@ -100,8 +100,12 @@ def pretty_check_label(check_id: str | None, target: str = "") -> str:
     # The label does not change with the source. "in composite" versus
     # "offered to composite" is carried by the summary; a label that flipped
     # when the receipt fallback engaged would read as a different check.
-    if cid.startswith("layer3.composite."):     return f"{t or cid} — in composite"
-    if cid == "layer3.backend.drops":            return "DROPS producer"
+    # "composite input", NOT "in composite" — a label names the aspect being
+    # watched and never asserts a verdict, or it reads as a false statement on
+    # a failing row. See the matching comment in format.ts.
+    if cid.startswith("layer3.composite."):     return f"{t or cid} — composite input"
+    # QPE is what the script produces; DROPS is only where it lands.
+    if cid == "layer3.backend.drops":            return "QPE producer"
     if cid.startswith("layer3."):               return f"Overlay reconcile — {_product(t)}" if t else "Overlay reconcile"
     if cid.startswith("layer4.xband."):         return t or cid
     if cid.startswith("layer4."):               return _product(t)

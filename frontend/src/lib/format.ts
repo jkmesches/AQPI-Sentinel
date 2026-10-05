@@ -470,8 +470,19 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	// versus "offered to composite" is carried by the SUMMARY, where it
 	// belongs — a row whose label changed when the receipt fallback engaged
 	// would read as a different check rather than a weaker reading.
-	if (checkId.startsWith('layer3.composite.'))     return `${target} · in composite`;
-	if (checkId === 'layer3.backend.drops')          return 'DROPS producer';
+	// "composite input", NOT "in composite". A label must name the ASPECT
+	// being watched, never assert a verdict about it — every other label here
+	// names a subject ("TLS certificate", "Origin reachable", "XEBY ·
+	// backend"). An asserting label contradicts itself on a failing row: a red
+	// dot beside the words "in composite" states the opposite of the verdict,
+	// which is the same class of error as the "Overlay reconcile" label this
+	// replaced. The verdict belongs in the summary, where it changes with the
+	// result.
+	if (checkId.startsWith('layer3.composite.'))     return `${target} · composite input`;
+	// "QPE producer", not "DROPS producer": DROPS is the directory name and
+	// QPE is what the script produces. Also the string the Site rail already
+	// used, so the same check no longer has two names in one app.
+	if (checkId === 'layer3.backend.drops')          return 'QPE producer';
 	if (checkId.startsWith('layer3.'))               return `Reconcile · ${productLabel(target)}`;
 	if (checkId.startsWith('layer4.xband.'))         return target;            // radar IDs
 	if (checkId.startsWith('layer4.'))               return productLabel(target);
