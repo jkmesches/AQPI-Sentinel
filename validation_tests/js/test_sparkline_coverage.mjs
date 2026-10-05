@@ -121,9 +121,21 @@ check('...and not by counting an empty rollup stage',
 check('...keyed on TARGETS, so a stray check cannot flip the layout',
       !!srcBlock && /\.add\(c\.target\)/.test(srcBlock[0]) &&
       /some\(\(t\) => rc\.has\(t\)\)/.test(srcBlock[0]));
-check('the rails branch on "two readings exist", not "the backend exists"',
-      /pairedRadars/.test(home) && /pairedProducts/.test(home) &&
-      !/hasBackend/.test(home));
+// The PRODUCTS rail still branches this way, and still must: a two-column
+// layout only makes sense when two readings of one target exist to compare.
+check('the products rail branches on "two readings exist", not "the backend exists"',
+      /pairedProducts/.test(home) && !/hasBackend/.test(home));
+// The RADARS rail no longer branches at all. It used to assert `pairedRadars`
+// here, which went away on 2026-10-05: a radar now reports through up to three
+// checks (LB2 arrival, LB3 composite participation, L2 radarca) and a
+// two-column layout cannot grow a third column. Rows group by target and
+// collapse to their worst reading instead, which is shape-independent — so the
+// question this assertion was asking cannot be asked of that rail any more.
+check('...while the radars rail groups by target instead of pairing',
+      /groupByTarget/.test(home) && !/pairedRadars/.test(home));
+// What must NOT come back is deciding the layout from stage presence.
+check('...and still never asks whether a stage merely exists',
+      !/stages\?\.LB\d\s*\?\?\s*\[\]\)\.length/.test(home));
 
 console.log(failures.length
   ? `\n${failures.length} FAILED: ${failures.join(', ')}`
