@@ -145,8 +145,31 @@
 		if (!s || typeof s !== 'object') return null;
 		return Object.entries(s).map(([k, v]) => [k, String(v)] as [string, string]);
 	}
+	// L2's reasoning trail. Reads `observed` plus the top-level `verdict`.
+	//
+	// This read `payload.reconcile` — a key layer2_radar has NEVER emitted.
+	// reprocess_engine documents the same mistake and the same numbers: 0 of
+	// 231,356 L2 rows carry `reconcile`, 212,572 carry `observed`. So the
+	// `{#if reco}` guard below was always false and this modal has never
+	// shown an L2 trail at all. Not an empty section — an absent one, which
+	// is why it went unnoticed: there was nothing on screen to look wrong.
+	//
+	// The legacy key is still honoured first in case any ancient row has it.
 	function l2Reconcile(run: any): Record<string, any> | null {
-		return run?.payload?.reconcile ?? null;
+		const p = run?.payload;
+		if (!p) return null;
+		if (p.reconcile && typeof p.reconcile === 'object') return p.reconcile;
+		const obs = p.observed;
+		if (!obs || typeof obs !== 'object') return null;
+		// Scalars only — the renderer below skips objects, so flattening here
+		// keeps the verdict and the systemic context from being dropped
+		// silently alongside them.
+		const out: Record<string, any> = { verdict: p.verdict ?? null, ...obs };
+		if (p.systemic != null) out.systemic = p.systemic;
+		if (p.reason != null) out.reason = p.reason;
+		if (Array.isArray(p.dead_moments) && p.dead_moments.length)
+			out.dead_moments = p.dead_moments.join(', ');
+		return out;
 	}
 	function l4Verdicts(run: any): Array<[string, string, string]> | null {
 		const t1 = run?.payload?.tier1;

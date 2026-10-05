@@ -452,7 +452,26 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	if (checkId.startsWith('layer1.stream.'))        return STREAM_TARGET_LABELS[target] ?? `Stream · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer1.vector.'))        return VECTOR_TARGET_LABELS[target] ?? `Overlay · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer2.radar.'))         return target;            // XSCV / CBAND — keep radar IDs as-is
+	// Both fleet correlation checks, BEFORE the layer2.backend. branch they
+	// would otherwise fall into. The backend one did, and rendered as
+	// "radar-fleet · backend" — a correlation verdict labelled as an arrival
+	// reading, which is the one thing it is not.
+	if (checkId === BACKEND_FLEET_CHECK_ID)          return 'Radar fleet · correlation';
+	if (checkId === FLEET_CHECK_ID)                  return 'X-band fleet · correlation';
 	if (checkId.startsWith('layer2.backend.'))       return `${target} · backend`;
+	// LB3, BEFORE the generic layer3. branch. First match wins, and that
+	// branch was written for the overlay-parity check: it caught
+	// layer3.composite.* and layer3.backend.drops and labelled them
+	// "Reconcile · …", which describes nothing either of them does. A
+	// participation check reports whether a radar is IN the composite and how
+	// stale its contribution was.
+	//
+	// The label stays the same whichever source answered. "in composite"
+	// versus "offered to composite" is carried by the SUMMARY, where it
+	// belongs — a row whose label changed when the receipt fallback engaged
+	// would read as a different check rather than a weaker reading.
+	if (checkId.startsWith('layer3.composite.'))     return `${target} · in composite`;
+	if (checkId === 'layer3.backend.drops')          return 'DROPS producer';
 	if (checkId.startsWith('layer3.'))               return `Reconcile · ${productLabel(target)}`;
 	if (checkId.startsWith('layer4.xband.'))         return target;            // radar IDs
 	if (checkId.startsWith('layer4.'))               return productLabel(target);

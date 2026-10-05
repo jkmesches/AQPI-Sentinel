@@ -186,6 +186,39 @@ keep in sync):
 if cid.startswith("layer0.observatory."): return "Observatory status"
 ```
 
+!!! danger "Both chains are first-match-wins, so a generic branch will eat your new family"
+    Skipping this step does not produce a missing label. It produces a
+    **confidently wrong** one, from whichever older, broader branch your ids
+    happen to fall under.
+
+    LB3 shipped in v0.7.0 without it. `layer3.composite.<radar>` and
+    `layer3.backend.drops` both fell into the `layer3.` branch written for the
+    overlay-parity check and rendered as *"Overlay reconcile — Cband"*.
+    Nothing errored. It was found by a person reading the dashboard and asking
+    what the row meant. The same release labelled the fleet correlation check
+    *"radar-fleet — backend arrival"*, because its id sits under
+    `layer2.backend.` — a correlation verdict described as an arrival reading.
+
+    Put the specific branch **above** the generic one, in both files, and let
+    `validation_tests/test_check_labels.py` confirm it.
+
+### Two shapes of enumeration site, and two greps
+
+Stage-aware code is audited by searching for stage-keyed references. That
+search cannot find the second family, which matches on **check id prefix** —
+and that is where LB3's label bug lived, which is why a stage-shaped audit
+missed it entirely:
+
+```bash
+grep -rnE "ALL_STAGES|stage ==|'L0'"                      # stage-keyed
+grep -rnE "startsWith\('layer|\.startswith\(\"layer"      # id-prefix-keyed
+```
+
+The id-prefix family is larger than the label functions: `sparklineMetric`
+and `readoutMetric` in `format.ts`, `scheduler.py`'s `layer0.net.` handling,
+`push.py`'s L0 routing, and the home page's `layer4.xband.` lookup all key off
+id prefixes. Run **both** greps when adding a check family.
+
 ### 5. Restart the backend
 
 ```bash
