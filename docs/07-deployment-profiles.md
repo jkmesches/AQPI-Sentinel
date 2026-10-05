@@ -214,21 +214,33 @@ rather than defending against it. The cost is up to ~240 s of reporting lag
 against a 900 s band, accepted deliberately: a late correct answer beats a
 prompt one computed from half a file.
 
-!!! warning "`secondsStarttoEnd` is used as an age, and the label says otherwise"
+!!! warning "`secondsStarttoEnd` is an age, despite its label — settled by measurement"
     Read literally the field is start-minus-**end-of-scan**, i.e. a scan
-    duration. The evidence that it is an age is that one radar's distribution
-    reaches 64,828 s — an 18-hour span is impossible for a 4-sweep X-band
-    volume, so `endDateTimeScan` must be the composite's own reference time
-    rather than anything read out of the file. That inference is sound but it
-    *is* an inference, so the check derives an age independently from the run
-    time minus the recorded scan start, carries both in the payload, and
-    **flags a disagreement** instead of silently banding whichever it
-    computed first.
+    duration, and a band fitted to an age would be measuring the wrong
+    quantity. It was settled four ways:
 
-**Fallback — the input receipt** (`COMPOSITE_RECEIPT`). Used only when the
-run-log directory is absent or unreadable, and tagged in
-`payload.participation_source` rather than substituted silently, because the
-two sources support different claims. It records **intent, not outcome**: the
+    1. `endDateTimeScan` is **identical across every radar within a run**
+       (120/120 runs), so it is not read out of any file.
+    2. It equals the run's target time taken from the filename (120/120).
+    3. `secondsStarttoEnd` equals `start - end` exactly (687/687 blocks).
+    4. The clincher — XSWR across three consecutive runs has an **identical
+       scan start**, an end that advances with the run, and a value growing by
+       exactly the sample interval. A scan *duration* cannot grow while the
+       scan is unchanged. The start is frozen because it is the same stale
+       file being re-blended, and the age increases by precisely the run
+       interval.
+
+    So the label is wrong and the quantity is right. The check still derives
+    an age independently and **flags a disagreement** — kept not because the
+    question is open but because it costs nothing and guards against the log
+    format changing under us, which is a different risk from the one it was
+    built for.
+
+**Fallback — the input receipt** (`COMPOSITE_RECEIPT`), and it answers
+**presence only**. Used when the run-log directory is absent or unreadable,
+and tagged in `payload.participation_source` rather than substituted silently,
+because the two sources support different claims. It records **intent, not
+outcome**: the
 driver writes it and reads it back, so it says what `ls -1rt | tail -1`
 selected. Its file shape has three hazards, each of which would break a
 plausible parser — the radar is spelled three ways inside the filename while
@@ -249,6 +261,27 @@ you would look for — so a settle window covers *arrived mid-write* (where the
 mtime is momentarily stable between appends, and a bracket is blind) and a
 stat bracket covers *the write started during our read*. The 5-minute alarm
 hold-down is the third layer.
+
+!!! danger "The two sources have different zero points, so the fallback does not band"
+    The run log references `endDateTimeScan`, which equals the run's **target**
+    time (verified 120/120 runs). The receipt's only available reference is its
+    own mtime, and it is written when the loops run — at processing **start**,
+    about one cycle later. The composite's own filenames show the gap: target
+    `17:12:00` against `startproc 17:14:01`, 121 s later.
+
+    Measured across 13 receipt versions, receipt-derived ages run **+102 to
+    +148 s** above log-derived ages for the same radars (XSCV +148, XSWR +102,
+    XSCR +115, XEBY +118, SSCB +114). Banding both bases at one 600/900 would
+    make the fallback path silently ~115 s **stricter** for identical
+    underlying staleness — a row would drift toward `warn` purely because the
+    check fell back, with nothing having changed about the composite. That is
+    the same class of error as judging XEBY by XSCR's cadence, one layer up.
+
+    So `B_fresh` is **not assessed** on the receipt. `A_included` still works
+    perfectly, because membership does not depend on a reference time at all.
+    The check degrades to the weaker *question* rather than to a
+    differently-calibrated answer to the stronger one — the same principle as
+    the "offered to" versus "in composite" wording.
 
 ### One uniform band, and why per-radar was wrong
 
@@ -289,6 +322,16 @@ because they are. 900 s sits in the thinnest part of the pooled distribution
     blended into a composite reporting itself current. Add the guard and the
     tail disappears and these alarms stop. The rate is the detector reading
     the defect it was built to detect — not a number to tune away.
+
+    Read it as 8% of **(run × radar) pairs**, not of distinct staleness
+    events. The same stuck file is re-blended every cycle until something
+    replaces it — XSWR's `22:10:40` volume was still being picked up three
+    runs later with an identical start time and an age growing by exactly the
+    run interval. One stuck file therefore inflates the rate by however many
+    cycles it survives, so 8% is *not* 8% of composites being independently
+    wrong. It is also a direct argument for the hold-down: without a
+    persistence requirement a single stuck file would page every cycle for as
+    long as it stayed stuck.
 
 ### Why NEXRAD is not in the expected set
 

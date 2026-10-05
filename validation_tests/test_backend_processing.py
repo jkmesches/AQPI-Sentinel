@@ -217,17 +217,27 @@ def main() -> int:
     check("...and records included=0 as a metric",
           r.metrics.get("included") == 0.0)
 
-    print("\na radar present and fresh passes:")
+    print("\na radar present in the receipt passes, on presence alone:")
     r = run("XSCR")
     check("XSCR passes", r.status == "pass", f"{r.status}: {r.summary}")
-    check("...A_included and B_fresh both pass",
-          r.payload["sub_status"] == {"A_included": "pass", "B_fresh": "pass"},
+    # B_fresh is deliberately NOT assessed from the receipt. The two sources
+    # have different zero points -- the run log references the run's TARGET
+    # time, the receipt only its own mtime, which is written at processing
+    # START about one cycle later. Measured, receipt-derived ages run
+    # +102..+148 s above log-derived ages for the same radars. Banding both
+    # against one 600/900 would make the fallback silently ~115 s stricter, so
+    # a row would drift toward warn purely because the check fell back.
+    check("...with A_included only — no B_fresh on this basis",
+          r.payload["sub_status"] == {"A_included": "pass"},
           str(r.payload["sub_status"]))
-    check("...and carries age_s in payload for the reprocess engine",
-          isinstance(r.payload.get("age_s"), float), str(r.payload.get("age_s")))
-    check("...and headroom for the sparkline",
-          0.0 <= r.metrics.get("headroom", -1) <= 1.0,
-          str(r.metrics.get("headroom")))
+    check("...recorded as a basis, not as a missing value",
+          r.payload["age_basis"] == "not_assessed_on_receipt",
+          str(r.payload.get("age_basis")))
+    check("...and the summary says WHY, so the row is not just quieter",
+          "reference time" in r.summary, r.summary)
+    check("...and no age or headroom is published from a basis we cannot band",
+          r.payload.get("age_s") is None and r.metrics.get("headroom") is None,
+          f"age_s={r.payload.get('age_s')} headroom={r.metrics.get('headroom')}")
 
     print("\nONE uniform band, because a per-radar band is blind where it matters:")
     # This block asserted the opposite until 2026-10-05: bands derived from
@@ -252,21 +262,22 @@ def main() -> int:
     check("...while sitting clear of the healthy mode (p90 up to 408s)",
           w_x > 408, f"warn {w_x:.0f}s > 408s")
 
-    print("\na stale contribution warns, then fails:")
+    print("\na stale contribution is NOT banded from the receipt:")
+    # This section used to assert warn/fail bands against receipt-derived
+    # ages. That is exactly the comparison the measurement above rules out, so
+    # it now asserts the opposite: the receipt answers presence and declines
+    # the freshness question. The warn/fail bands are exercised against the
+    # run log instead, further down, which is the basis they were fitted to.
     _, fail_s = lb3._contrib_bands("XSCR")
-    write_receipt(receipt_now({"XSCR": (fail_s * 0.9) / 60}))
+    write_receipt(receipt_now({"XSCR": (fail_s + 600) / 60}))
     r = run("XSCR")
-    check("inside the fail band but past warn -> warn",
-          r.payload["sub_status"]["B_fresh"] == "warn", str(r.payload["sub_status"]))
-    check("...and the overall status is warn, not fail", r.status == "warn", r.status)
-    write_receipt(receipt_now({"XSCR": (fail_s + 120) / 60}))
-    r = run("XSCR")
-    check("past the fail band -> fail", r.payload["sub_status"]["B_fresh"] == "fail")
-    check("...and says STALE CONTRIBUTION, not just a number",
-          "STALE CONTRIBUTION" in r.summary, r.summary)
-    check("...while A_included still passes — present-but-stale is not absent",
+    check("a wildly stale contribution still reports pass from the receipt",
+          r.status == "pass", f"{r.status}: {r.summary}")
+    check("...because presence is all this source can answer",
+          "B_fresh" not in r.payload["sub_status"], str(r.payload["sub_status"]))
+    check("...which is a weaker question, not a wrong answer",
           r.payload["sub_status"]["A_included"] == "pass",
-          "two distinct faults must not collapse into one")
+          "degrade the question, never the calibration")
 
     print("\nan absent receipt is a fail, and says so plainly:")
     pth = os.path.join(_TMP, COMPOSITE_RECEIPT)
@@ -449,8 +460,9 @@ def main() -> int:
           str(r.payload.get("participation_source")))
     check("...and the claim weakens to 'offered to', not 'in'",
           r.summary.startswith("offered to composite"), r.summary)
-    check("...with the age derived from the filename instead",
-          r.payload["age_basis"] == "derived_from_filename",
+    check("...and declines the freshness question rather than re-basing it",
+          r.payload["age_basis"] == "not_assessed_on_receipt"
+          and "B_fresh" not in r.payload["sub_status"],
           str(r.payload.get("age_basis")))
 
     print("\nthe DROPS producer check is informational by construction:")
