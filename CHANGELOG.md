@@ -28,6 +28,77 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-10-05
+
+Four check labels described their checks as things they are not, and an L2
+reasoning trail that had never rendered. Both were found by people reading the
+dashboard rather than by anything failing.
+
+### Fixed
+
+- **LB3 and the fleet checks were labelled as other checks entirely.** Both
+  label chains — `frontend/src/lib/format.ts:prettyCheckLabel` and its mirror
+  `backend/check_labels.py` — are ordered prefix-match chains, first match
+  wins. A new check family whose ids sit under an existing prefix therefore
+  gets labelled by the *older, broader* branch, and the result is
+  **confidently wrong rather than missing**:
+
+  | check | was | now |
+  |---|---|---|
+  | `layer3.composite.<radar>` | "Overlay reconcile — Cband" | `CBAND — in composite` |
+  | `layer3.backend.drops` | "Overlay reconcile — Drops-Qpe" | `DROPS producer` |
+  | `layer2.backend.fleet` | "radar-fleet — backend arrival" | `Radar fleet — correlation` |
+  | `layer2.xband.fleet` | "Xband-Fleet" (fallthrough) | `X-band fleet — correlation` |
+
+  The first two fell into the `layer3.` branch written for the overlay-parity
+  check; "reconcile" describes nothing a participation check does. The third
+  is a *correlation* verdict labelled as an arrival reading, which is the one
+  thing it is not — and these strings go into emails and push payloads where
+  no stage name sits beside them. Three of the four shipped in v0.7.0.
+
+  The label deliberately does **not** change with the participation source:
+  "in composite" versus "offered to composite" is carried by the summary, so
+  a row does not read as a different check when the receipt fallback engages.
+
+- **The history modal's L2 reasoning trail had never rendered.** It read
+  `payload.reconcile`, a key `layer2_radar` has never emitted —
+  `reprocess_engine` documents the identical mistake with identical numbers
+  (0 of 231,356 L2 rows carry `reconcile`; 212,572 carry `observed`). The
+  `{#if}` guard was therefore always false, so the section was *absent* rather
+  than empty, which is precisely why it went unnoticed: there was nothing on
+  screen to look wrong. Now reads `observed` plus the top-level `verdict`.
+
+### Added
+
+- **`validation_tests/test_check_labels.py`**, built around the invariant
+  rather than a proxy for it. The rule is not "every family needs its own
+  branch" — some are deliberately served by a generic branch with a lookup
+  table behind it — but that **relying on a generic branch must be a declared
+  choice**, so a new family cannot start relying on one silently. A companion
+  assertion fails on a stale allowlist entry so the allowlist cannot quietly
+  stop meaning anything. Negative-tested: reverting the LB3 branches trips it
+  four independent ways, including the one-file-drift case, which is the
+  likelier future mistake than missing both.
+
+### Changed
+
+- **The enumeration-site audit needs two greps, not one.** This label bug was
+  the eleventh such site and the first keyed on **check-id prefix** rather
+  than on stage — so the stage-shaped search that found the other ten could
+  never have found it:
+
+  ```bash
+  grep -rnE "ALL_STAGES|stage ==|'L0'"                      # stage-keyed
+  grep -rnE "startsWith\('layer|\.startswith\(\"layer"      # id-prefix-keyed
+  ```
+
+  The id-prefix family is larger than the two label functions:
+  `sparklineMetric`, `readoutMetric`, `scheduler.py`'s `layer0.net.` handling,
+  `push.py`'s L0 routing and the home page's `layer4.xband.` lookup all key
+  off id prefixes. Documented in `docs/13-extending-checks.md`, which already
+  said to update both label files — that step was simply skipped, and nothing
+  failed.
+
 ## [0.7.1] — 2026-10-05
 
 Follow-up to v0.7.0: one regression we caused on the cira-aqpi deploy, two
@@ -2800,7 +2871,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.6.2...v0.7.0
 [0.4.13]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.4.12...v0.4.13
