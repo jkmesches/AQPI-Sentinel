@@ -228,6 +228,30 @@ STATUS_TO_RADAR = {"EBAY": "XEBY", "CBand": "CBAND"}
 
 # Per-radar GHOST_UP detection threshold: max wall-clock seconds since the
 # newest image filename's timestamp before we treat the radar as silent.
+#
+# !!! A THRESHOLD IS ONLY VALID FOR THE BASIS IT WAS FITTED TO !!!
+#
+# These are fitted to the FILENAME (declared) basis — see "newest image
+# filename's timestamp" above. LB2 reads them through
+# thresholds.get_radar(rid, "backend_silent_s", <value from here>), so a
+# STORED override replaces them entirely and carries no record of which basis
+# it was fitted under. Nothing in the system connects the two.
+#
+# That cost us an outage on 2026-10-05. LB2_FRESHNESS is a single GLOBAL flag,
+# so moving the five X-bands from dir_mtime to the declared basis moved CBAND
+# too — and CBAND is the one radar with a multi-minute publish lag (mtime minus
+# declared: p50 240 s, p90 316 s), invisible under dir_mtime and fully counted
+# under declared time. Its stored backend_silent_s of 300 s had been tightened
+# to be meaningful against directory mtimes, where the age read 97-155 s. Under
+# the new basis the same 300 s is breached 71.9% of the day, and CBAND went
+# from 2.6% non-pass to 91% non-pass across the deploy with the limit
+# unchanged. The stored value was already marginal beforehand (10 warns in 389
+# runs), so it was a tight value pushed over rather than a good one broken.
+#
+# Before changing LB1_FRESHNESS or LB2_FRESHNESS, re-derive every affected
+# radar's limit against the NEW basis, including the ones the change was not
+# "about" — the flag is global even when the intent is not. Measure the
+# publish lag, not just the cadence: lag p90 + inter-arrival p90 is the floor.
 # Values are ~1.5× each radar's observed worst-case gap, with a 4-min floor
 # (no point firing on a single missed scan when the cadence is tight).
 #

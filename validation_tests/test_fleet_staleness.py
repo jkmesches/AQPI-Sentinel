@@ -121,6 +121,66 @@ def main() -> int:
     r = asyncio.run(lb2.Layer2BackendFleetCheck().run(None))
     check("all stale -> skip", r.status == "skip", f"{r.status}: {r.summary}")
 
+    print("\nthe witness licenses a MOUNT claim, not a freshness claim:")
+    # The first version branched on "is the witness verdict systemic", which
+    # conflated two facts and got both edges wrong. What proves the host is up,
+    # NFS is serving and our reads work is that the independent tree COULD BE
+    # READ -- not that the data on it was fresh.
+    def scope_with(witness: str | None, n_out: int = 3) -> tuple[str, str]:
+        lb2._reset_lb_fleet_state()
+        t = utcnow()
+        out = sorted(lb2.LB_FLEET)
+        for i, rid in enumerate(out):
+            lb2._lb_publish_verdict(rid, "SILENT" if i < n_out else "ARRIVING", t)
+        if witness is not None:
+            lb2._lb_publish_verdict(lb2.LB_FLEET_WITNESS, witness, t)
+        r = asyncio.run(lb2.Layer2BackendFleetCheck().run(None))
+        return r.payload["scope"], r.summary
+
+    sc, summ = scope_with("ARRIVING")
+    check("an ARRIVING witness localises to the X-band path", sc == "xband-path", sc)
+    check("...and that is the only case claiming host/NFS/clock are fine",
+          "host, NFS and clock are fine" in summ, summ)
+
+    sc, summ = scope_with("UNREADABLE")
+    check("an UNREADABLE witness means the fault is wider",
+          sc == "wider-than-xband", sc)
+    check("...stated as a MOUNT failure, which is what was observed",
+          "could not be read" in summ, summ)
+
+    # CBAND failing a freshness threshold while its tree reads perfectly is not
+    # an infrastructure fault. It happened for real on 2026-10-05: the LB2
+    # basis change pushed CBAND past a stored 300 s limit while every cycle
+    # read its mount without trouble.
+    sc, summ = scope_with("SILENT")
+    check("a SILENT witness still confirms the mount is healthy",
+          "mount read" in summ and "healthy" in summ, summ)
+    check("...so it is not reported as a mount-level fault",
+          "could not be read" not in summ, summ)
+
+    # CONFIG_ERROR tells us nothing about the host at all. It used to fall
+    # through to the ARRIVING branch and assert the infrastructure was fine.
+    sc, summ = scope_with("CONFIG_ERROR")
+    check("a CONFIG_ERROR witness localises NOTHING", sc == "unlocalised", sc)
+    check("...and must never claim the infrastructure is fine",
+          "host, NFS and clock are fine" not in summ, summ)
+
+    sc, _ = scope_with(None)
+    check("an absent witness localises nothing either", sc == "unlocalised", sc)
+
+    # The fact the mount claim rests on, separable from the freshness verdict.
+    lb2._reset_lb_fleet_state()
+    t = utcnow()
+    for rid in sorted(lb2.LB_FLEET):
+        lb2._lb_publish_verdict(rid, "SILENT", t)
+    for w, expect in (("ARRIVING", True), ("SILENT", True),
+                      ("UNREADABLE", False), ("CONFIG_ERROR", False)):
+        lb2._lb_publish_verdict(lb2.LB_FLEET_WITNESS, w, utcnow())
+        r = asyncio.run(lb2.Layer2BackendFleetCheck().run(None))
+        check(f"witness {w} -> mount_readable={expect}",
+              r.payload["witness_mount_readable"] is expect,
+              str(r.payload["witness_mount_readable"]))
+
     print("\nthe mechanism that makes staleness reachable, pinned in the source:")
     src = Path(l2.__file__).read_text()
     pub_sites = [m.start() for m in re.finditer(r"^\s+_publish_verdict\(", src, re.M)]

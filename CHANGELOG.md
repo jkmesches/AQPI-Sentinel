@@ -30,6 +30,64 @@ unknown`.
 
 ### Fixed
 
+- **CBAND regressed to `fail` on the v0.7.0 deploy, and the cause was ours.**
+  `LB2_FRESHNESS` is a single **global** flag, so repointing the five X-bands
+  to the declared-time basis moved CBAND too — and CBAND is the one radar with
+  a multi-minute publish lag (mtime − declared: p50 240 s, p90 316 s),
+  invisible under `dir_mtime` and fully counted under declared time. Its
+  stored `backend_silent_s` of 300 s had been tightened to mean something
+  against directory mtimes, where the age read 97–155 s. Under the new basis
+  the same limit is breached **71.9% of the day**: CBAND went from 2.6%
+  non-pass to 91% non-pass across the deploy with the threshold unchanged.
+
+  Resolved operationally by clearing the stored override, restoring config's
+  1080 s. The stored 300 s was already marginal beforehand (10 warns in 389
+  runs), so it was a tight value pushed over rather than a good one broken.
+
+  The hazard is now documented at `RADAR_SILENT_FAIL_S`, which is where it
+  would have been caught: **a threshold is only valid for the basis it was
+  fitted to**, a stored override carries no record of its basis, and nothing
+  in the system connects the two. Before changing a freshness basis,
+  re-derive every affected radar's limit — *including the ones the change was
+  not "about"*, because the flag is global even when the intent is not.
+  Measure publish lag, not just cadence; lag p90 + inter-arrival p90 is the
+  floor.
+
+- **The fleet witness claimed things its verdict did not support.** The scope
+  branch tested "is the witness verdict systemic", which conflated two facts
+  and got both edges wrong: `CONFIG_ERROR` fell through to the healthy branch
+  and would have reported *"host, NFS and clock are fine"* on a verdict that
+  says nothing about any of them; and `SILENT` reported *"wider than the
+  X-band path"*, so CBAND failing for a **threshold** reason read as an
+  infrastructure fault — exactly what happened on 2026-10-05 while its mount
+  was being read without trouble every cycle.
+
+  The distinction that matters for localisation is whether the independent
+  tree could be **read**, not whether its data was fresh: a successful read is
+  what proves the host, NFS, clock and our own reads are working. Freshness is
+  a separate and weaker signal. `witness_mount_readable` now carries that fact
+  in the payload, separately from the freshness verdict that must not imply
+  it.
+
+- **The admin panel could not show what clearing `backend_silent_s` would
+  do.** The seeder wrote only `silent_fail_s`, so the `backend_silent_s`
+  column rendered its placeholder as `—` while the *check* supplied a real
+  default. Clearing CBAND's override therefore gave no indication the
+  effective limit would become 1080 s. Both keys are now seeded with resolved
+  values. Existing deployments keep their stored blob, so the placeholder
+  corrects itself only on a fresh bootstrap.
+
+### Changed
+
+- **The whole left column on the home page scrolls, not just the radar list.**
+  It previously pinned the Site rows and both headers and scrolled the radars
+  in a nested pane. That stopped working once a radar row could **expand**:
+  the inner pane is flex-sized, so opening two or three radars left the detail
+  scrolling inside a few hundred pixels while a third of the column sat fixed
+  above it. One scroll region per column.
+
+### Fixed
+
 - **The LB3 receipt fallback was banded against the wrong zero point**, so it
   judged staleness ~115 s more harshly than the primary source for identical
   underlying conditions. Shipped in v0.7.0; found by measurement after the
