@@ -20,7 +20,8 @@ _ALWAYS = (
     "layer0_network",          # 2 control-ping checks (+1 radarca-gated)
     "layer0_selfhost",         # 2 self-monitoring checks (host disk, backup)
     "layer1_backend_product",  # LB1 (gated on SENTINEL_BACKEND_ROOT)
-    "layer2_backend_radar",    # LB2 (gated)
+    "layer2_backend_radar",    # LB2 (gated) + the fleet correlation check
+    "layer3_backend_processing",  # LB3 (gated)
     "layer0_episode",          # attach_episode_suppression (+1 radarca-gated)
 )
 

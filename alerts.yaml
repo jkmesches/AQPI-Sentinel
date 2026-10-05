@@ -71,6 +71,49 @@ routes:
     hold_down: 2m
     repeat_interval: 10m
 
+  # --- The DROPS producer: deliberately NON-PAGING -----------------------
+  #
+  # FIRST among the LB routes, because first-match wins and the LB3 stage
+  # route below would otherwise swallow it.
+  #
+  # Matched on `check_id`, not on stage. It shares stage LB3 with composite
+  # participation, which IS paging — the two are both "backend processing" but
+  # they differ in consequence: a radar silently leaving the composite changes
+  # what the published products MEAN, while the DROPS tree is read by nothing
+  # in the live chain. Giving the producer its own stage to express that would
+  # add an enumeration surface across the frontend for one row.
+  #
+  # The check also caps its own status at `warn` so it cannot auto-promote.
+  # Two independent statements of one intent, deliberately: whichever of them
+  # a future editor removes, the other still holds. See
+  # Layer3DropsProducerCheck.
+  - match: {check_id: layer3.backend.drops}
+    policy: standard
+    repeat_interval: 12h
+
+  # --- Backend (filesystem-read) stages: authoritative -------------------
+  #
+  # These read K2/trinity directly rather than through radarca, which is why
+  # they are separate stages at all — see backend/stages.py. Until now they
+  # had no route and fell through to the catch-all at 4h, so the AUTHORITATIVE
+  # observation repeated four times less often than the radarca-derived one it
+  # was meant to outrank. That was an omission when LB1/LB2 were added in
+  # v0.5.0, not a decision.
+  - match: {stage: LB2}
+    policy: standard
+    repeat_interval: 1h
+
+  - match: {stage: LB1}
+    policy: standard
+    repeat_interval: 1h
+
+  # LB3 — composite participation. A radar absent from the composite's input
+  # receipt is not a degraded product, it is a product computed from fewer
+  # radars than it claims, and nothing else in the system reports it.
+  - match: {stage: LB3}
+    policy: standard
+    repeat_interval: 1h
+
   # L2 radar: anything not pass goes to standard.
   - match: {stage: L2}
     policy: standard

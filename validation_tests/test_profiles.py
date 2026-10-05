@@ -125,6 +125,14 @@ print("@@" + json.dumps({
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
     "lb2_freshness": config.LB2_FRESHNESS,
+    "composite_expected": dict(config.COMPOSITE_EXPECTED_RADARS),
+    "drops_tree": config.DROPS_TREE,
+    "fleet_active": __import__(
+        "backend.checks.layer3_backend_processing", fromlist=["x"]) is not None
+    and getattr(__import__("backend.checks.layer2_backend_radar",
+                           fromlist=["x"]), "_FLEET_ACTIVE"),
+    "fleet_declined": getattr(__import__("backend.checks.layer2_backend_radar",
+                                         fromlist=["x"]), "FLEET_NOT_REGISTERED"),
     "ts_patterns": dict(config.RAW_VOLUME_TS_RE),
     "declined": dict(__import__("backend.registry", fromlist=["x"]).DECLINED),
     "checks": [{"id": c.id, "stage": c.stage, "target": c.target,
@@ -197,6 +205,11 @@ def main() -> int:
         UNIVERSAL_L0
         | {f"layer1.backend.{p}" for p in xqpi["products"]}
         | {f"layer2.backend.{r}" for r in xqpi["radars"]}
+        # LB3 composite participation. xqpi DOES write a receipt — verified on
+        # trinity, with FLOW, KSOX and KVTX in it — so FLOW's participation is
+        # observable here. The DROPS producer check is NOT expected: that tree
+        # is Gen_X-band_QPE.py's output and the profile sets DROPS_TREE = "".
+        | {f"layer3.composite.{r}" for r in xqpi["radars"]}
     )
     print("\nthe xqpi registry is exactly what the profile can observe:")
     extra = sorted(x_ids - expected)
@@ -448,6 +461,63 @@ def main() -> int:
     check("the X-band pattern matches a real X-band filename",
           bool(_re2.compile(aqpi["ts_patterns"]["XSCV"])
                .match("aqpi.scvw-20261005-162541_317_2_2_PPI.netcdf")))
+
+    # ---- LB3 and fleet correlation --------------------------------------
+    print("\nLB3 watches the gap between arrival and publication:")
+    check("aqpi expects all six radars in the composite",
+          sorted(aqpi["composite_expected"]) == sorted(aqpi["radars"]),
+          str(sorted(aqpi["composite_expected"])))
+    check("...and CBAND's receipt directory is SSCB, not derivable from its id",
+          aqpi["composite_expected"].get("CBAND") == "SSCB",
+          str(aqpi["composite_expected"].get("CBAND")))
+    # The composite driver's own arrays intend nine inputs; the three NEXRAD
+    # trees do not exist at all and that predates everything we have logs for.
+    # Deriving `expected` from those arrays would fire forever on day one.
+    check("...and no NEXRAD radar is in the expected set",
+          not any(r.startswith("K") for r in aqpi["composite_expected"]),
+          str(sorted(aqpi["composite_expected"])))
+    check("xqpi expects only FLOW",
+          sorted(xqpi["composite_expected"]) == ["FLOW"],
+          str(sorted(xqpi["composite_expected"])))
+    # KSOX and KVTX ARE in xqpi's receipt, as 18-day-old volumes being consumed
+    # right now. Sentinel does not monitor their arrival, so it has no band to
+    # judge them by; that finding belongs in a report, not in a check that
+    # fires forever.
+    check("...and not the two stale NEXRAD volumes in its receipt",
+          "KSOX" not in xqpi["composite_expected"]
+          and "KVTX" not in xqpi["composite_expected"])
+
+    a_ids = {c["id"] for c in aqpi["checks"]}
+    check("aqpi registers one participation check per radar",
+          all(f"layer3.composite.{r}" in a_ids for r in aqpi["radars"]))
+    check("...and exactly one DROPS producer check, not one per folder",
+          len([i for i in a_ids if i.startswith("layer3.backend.")]) == 1,
+          str(sorted(i for i in a_ids if i.startswith("layer3.backend."))))
+    check("xqpi registers NO DROPS producer check",
+          "layer3.backend.drops" not in x_ids,
+          "gated on DROPS_TREE, which the profile states for itself")
+    check("...because its profile declares no DROPS tree",
+          xqpi["drops_tree"] == "", repr(xqpi["drops_tree"]))
+
+    print("\nfleet correlation registers only where a fleet exists:")
+    check("aqpi has a correlatable fleet", aqpi["fleet_active"] is True)
+    check("...and registers the backend fleet check",
+          "layer2.backend.fleet" in a_ids)
+    # 3 of 1 is not a threshold that can be reached. A permanent skip row is
+    # worse than an absent one: it reads as a broken check, not an N/A.
+    check("xqpi does NOT register it", "layer2.backend.fleet" not in x_ids,
+          "one radar cannot be correlated against itself")
+    check("...and says why, rather than vanishing silently",
+          isinstance(xqpi["fleet_declined"], str)
+          and "cannot reach the systemic threshold" in xqpi["fleet_declined"],
+          str(xqpi["fleet_declined"]))
+
+    print("\nevery LB3 check targets a bare radar id, for the grouped rows:")
+    for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):
+        bad = sorted(f"{c['id']}->{c['target']}" for c in prof["checks"]
+                     if c["id"].startswith("layer3.composite.")
+                     and c["target"] != c["id"].rsplit(".", 1)[-1])
+        check(f"{name}: participation target == radar id", not bad, "; ".join(bad))
 
     print("\nsource tags stay renderable in a two-character column:")
     for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):
