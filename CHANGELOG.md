@@ -28,6 +28,100 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-10-05
+
+Labels, a rail that truncated, and three thresholds that were honoured but
+unreachable. All four came from questions asked while reading the deployed
+dashboard, which is the only way any of them would have surfaced — every one
+passed the full suite.
+
+### Fixed
+
+- **Three LB3 thresholds were seeded and honoured but not editable.**
+  `composite_contrib_warn_s`, `composite_contrib_fail_s` and
+  `drops_silent_info_s` were in the threshold blob, read by the checks and
+  accepted by the API — and absent from `/admin/thresholds`, so the only way
+  to change one was to PATCH the endpoint by hand.
+
+  Nothing failed, which is the whole problem: the check reads its threshold,
+  the API would accept an edit, the reprocess engine would honour one, and
+  there is no way to make the edit through the UI and no error to say so.
+  This is the **second** occurrence — the comment above `RADAR_KEYS` records
+  LB1/LB2 landing in the same state in v0.5.0 because "the column set was
+  written out by hand in four spots". The globals section turned out to be a
+  **fifth** hand-written list, inline in the markup one section below that
+  comment.
+
+  The globals grid now **derives** its keys from the seed, unioned with
+  whatever the instance has stored, so a new backend tunable appears the
+  moment the backend knows about it and a stored-but-unseeded key is still
+  editable rather than stranded.
+
+- **A split brain between the QPE producer check and its own reprocess
+  handler.** The live check read `DROPS_SILENT_INFO_S` from config while
+  `_reverdict_lb3` read `get_global("drops_silent_info_s")`. Editing that
+  limit therefore changed **retroactive** verdicts and left live ones alone —
+  two sources of truth for one threshold, disagreeing silently. The live check
+  now reads the store with the config constant as its default, re-read every
+  run so an edit applies without a restart.
+
+### Changed
+
+- **`layer3.composite.<radar>` is labelled `<radar> · composite input`**, not
+  "in composite". A label must name the **aspect** being watched and never
+  assert a verdict: every other label in the system names a subject ("TLS
+  certificate", "Origin reachable", "XEBY · backend"), and an asserting label
+  **contradicts itself on a failing row** — a red dot beside the words "in
+  composite" states the opposite of the verdict. Same class of error as the
+  "Overlay reconcile" label it replaced, one level further in, and it passed
+  every structural rule in `test_check_labels.py`. It was found by a person
+  reading the row and asking what it meant.
+
+- **One name for the QPE producer check.** The Site rail said "QPE producer"
+  while both label functions said "DROPS producer" — one check under two names
+  in one app. Unified on "QPE producer" (QPE is what the script produces;
+  DROPS is only where it lands), and fixed at the cause: that row now calls
+  `prettyCheckLabel` instead of hardcoding a string.
+
+- **The collapsed radar row no longer carries prose.** It rendered
+  `BACKEND SILENT — newest volu…`. The information is not superfluous but the
+  prose form is wrong for the width: a summary is written to be read in full —
+  in an email, on the timeline, in the detail modal — and that rail is a
+  quarter of the viewport, leaving room for about twenty characters. The
+  result said *less* than the status dot already did and could be misread as
+  the start of a filename.
+
+  Three non-redundant signals remain, none of which can truncate: the dot
+  carries severity (worst-of across the radar's checks), the sparkline carries
+  magnitude against each check's own limit on a fixed 0–1 axis, and the count
+  says how many readings sit behind the row. The full summary is the row's
+  hover title and the expander shows every check's own words untruncated.
+
+### Added
+
+- **`validation_tests/test_threshold_panel_coverage.py`** — asserts the
+  derivation rather than re-listing keys: no hand-written `{#each}` may drive
+  a tunable section, every seeded per-radar and per-product key is in its
+  declared list, every `get_global`/`get_radar` key the new checks read is
+  seeded, and every threshold the LB3 reverdict reads is **also read live** —
+  the assertion that would have caught the split brain above on the day it was
+  introduced. It also asserts the fleet `ENTER`/`EXIT`/`DWELL` constants stay
+  *deliberately* untunable, since changing them alters what "systemic" means.
+
+- **`validation_tests/test_reprocess_lb3.py`** — exercises the handler against
+  the payload shapes the checks actually emit. Being listed in
+  `reverdict_stages()` only means the UI will offer the stage; a handler
+  returning `None` for every row is indistinguishable from a missing one
+  except that it does not report as unhandled, which is exactly how
+  `_reverdict_l2` sat broken until 2026-08-26 reading a key that has never
+  existed. Covers `B_fresh` moving in **both** directions, `A_included`
+  surviving a `B_fresh` driven to fail, the producer's warn ceiling holding at
+  absurd staleness so it cannot page retroactively, and a folder with no
+  recorded age keeping its stored verdict rather than being guessed healthy.
+
+- A **verdict-phrase guard** in `test_check_labels.py`, since none of its
+  structural rules could catch a label that reads as a claim.
+
 ## [0.7.2] — 2026-10-05
 
 Four check labels described their checks as things they are not, and an L2
@@ -2871,7 +2965,8 @@ radarca.engr.colostate.edu monitoring scope.
   `payload.original_summary`; idempotent via
   `payload.cascade_retro_v=1`.
 
-[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jkmesches/AQPI-Sentinel/compare/v0.6.2...v0.7.0

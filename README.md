@@ -12,7 +12,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 ## Status
 
-**v0.7.2** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
+**v0.7.3** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
 
 - **72 checks** across 8 stages, self-registered via `@register`. Count from the real import graph, not one module — `backend.checks` alone under-reports.
 - **Two independent views of the same system.** The `L*` stages ask the upstream display tier what it believes; the `LB*` stages read the published files straight off the mounted shares and owe it nothing. Where the two disagree, the `LB` answer describes reality and *the disagreement itself is the signal* — the data exists and something in the display tier is not showing it.
