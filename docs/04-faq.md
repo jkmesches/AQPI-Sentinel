@@ -77,6 +77,14 @@ about whether a product exists — and that independence is the point. Where an
 `LB` stage and its radarca counterpart disagree, the `LB` answer is the one
 describing reality.
 
+<!-- The answers below are duplicated in prose in frontend/src/lib/faq.ts,
+     rendered at /faq in a running Sentinel. The WORDING is deliberately
+     allowed to differ (see validation_tests/test_faq_parity.py), but a
+     factual correction has to be applied to BOTH copies -- that test
+     compares only the questions and cannot catch a half-applied one.
+     On 2026-10-12 a retracted claim about XSCW had to be removed from
+     both, and the second copy was nearly missed. -->
+
 `LB3` watches the gap between the other two. A radar can be arriving on disk
 (`LB2` green) and a product can be publishing on time (`LB1` green) while that
 product is quietly computed from fewer radars than it claims. On 2026-10-05 a
