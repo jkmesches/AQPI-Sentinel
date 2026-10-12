@@ -868,10 +868,15 @@ class Layer3InputStagingCheck(Check):
         composite output    <- layer3.composite.<radar>  (LB3)
 
     On 2026-10-12 XSCW had zero files staged here while ``layer2.backend.XSCW``
-    read pass with "newest volume 0.5 min ago", because LB2 reads the DROPS
-    tree and these are different paths. Two checks reporting health on either
-    side of a real break, and the composite silently building a third of its
-    output without that radar. The same shape hid the NEXRAD feeds for
+    read pass with "newest volume 0.5 min ago". Two checks reporting health on
+    either side of a real break, and the composite silently building a third of
+    its output without that radar.
+
+    The two trees hold different OBJECTS, not just different paths: the dated
+    tree holds per-elevation PPI SWEEPS and this one holds assembled VOLUMES.
+    So this check's age and LB2's age are not two views of one quantity, and a
+    discrepancy between them is structural rather than a fault — do not
+    sanity-check one against the other. See config.COMPOSITE_INPUT_TREE. The same shape hid the NEXRAD feeds for
     eighteen days: their staging directories held zero files from 2026-09-17
     to ~2026-10-06 and nothing in Sentinel could say so, because nothing was
     looking at the one directory where it was visible.
