@@ -28,6 +28,7 @@ Run:  python3 validation_tests/test_backend_processing.py
 from __future__ import annotations
 import asyncio
 import os
+import time as _time
 import sys
 import tempfile
 import time
@@ -467,9 +468,34 @@ def main() -> int:
 
     print("\nthe DROPS producer check is informational by construction:")
     root = os.path.join(_TMP, "PRODUCTS", "DROPS")
-    for rid, folder in RADAR_FOLDER.items():
-        if rid != "CBAND":
-            os.makedirs(os.path.join(root, folder), exist_ok=True)
+
+    def write_drops(age_s: float) -> None:
+        """A DATED tree with real files, which is the layout on cira-aqpi.
+
+        This fixture used to create EMPTY folders and assert that a "fresh
+        DROPS tree passes" — and it did, because the check stat'd the folder
+        and a just-created directory looks new. So the test was passing on the
+        bug: a directory with no output in it read as output arriving. Writing
+        files is what makes the assertion mean anything, and it is the same
+        directory-exists-but-declares-nothing conflation as the LB2 rollover.
+        """
+        when = time.time() - age_s
+        day = time.strftime("%Y/%m/%d", time.gmtime(when))
+        for rid, folder in RADAR_FOLDER.items():
+            if rid == "CBAND":
+                continue
+            d = os.path.join(root, folder, day)
+            os.makedirs(d, exist_ok=True)
+            f = os.path.join(d, f"aqpi.{folder}-x_PPI.netcdf.drops")
+            with open(f, "w") as fh:
+                fh.write("x")
+            os.utime(f, (when, when))
+            # Frozen a week back on purpose: the folder's own mtime must not
+            # be what the check reports, or it cannot see recovery.
+            old = time.time() - 182 * 3600
+            os.utime(os.path.join(root, folder), (old, old))
+
+    write_drops(60)
     d = lb3.Layer3DropsProducerCheck()
     r = asyncio.run(d.run(None))
     check("a fresh DROPS tree passes", r.status == "pass", f"{r.status}: {r.summary}")
@@ -480,11 +506,10 @@ def main() -> int:
           len(r.payload["sub_status"]) == 5 and r.target == "drops-qpe",
           f"{len(r.payload['sub_status'])} folders in one row")
 
-    # Age every folder past the limit — 12 h, the real 2026-10-05 duration.
-    stale = time.time() - 12 * 3600
-    for rid, folder in RADAR_FOLDER.items():
-        if rid != "CBAND":
-            os.utime(os.path.join(root, folder), (stale, stale))
+    # Age the OUTPUT past the limit — 12 h, the real 2026-10-05 duration. The
+    # folder mtimes stay frozen at 182 h throughout, so a check reading them
+    # would report 182 h here and would have reported 182 h above too.
+    write_drops(12 * 3600)
     r = asyncio.run(d.run(None))
     check("a producer dead 12 h reports WARN, never fail",
           r.status == "warn", r.status)
@@ -496,12 +521,110 @@ def main() -> int:
           "no live product" in r.summary, r.summary)
     check("...while payload.age_s carries the true age for reprocess",
           r.payload.get("age_s", 0) > 11 * 3600, str(r.payload.get("age_s")))
+    check("...and it is the OUTPUT age, not the frozen folder mtime",
+          r.payload.get("age_s", 0) < 24 * 3600,
+          f"folders read 182 h; check reads "
+          f"{r.payload.get('age_s', 0) / 3600:.1f} h")
     check("...and payload is flagged informational",
           r.payload.get("informational") is True)
+
+    print("\nDROPS freshness basis:")
+
+    test_drops_newest()
+
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall LB3 assertions passed")
     return 1 if failures else 0
+
+
+
+# ---------------------------------------------------------------------------
+# DROPS freshness must come from the FILES, not from the radar folder
+# ---------------------------------------------------------------------------
+def test_drops_newest() -> None:
+    """The producer check has to be able to see RECOVERY.
+
+    From v0.7.0 until 2026-10-12 it did one stat on `DROPS/<radar>`. Measured
+    on cira-aqpi: every radar folder holds ZERO direct files and exactly one
+    year directory, so output lands in `<radar>/2026/10/05/` and never touches
+    `<radar>` itself.
+
+    The number therefore meant "when something was last added to this folder" —
+    all five read an identical 182 h, owned by a different user from their
+    contents, which is a sweep rather than output arrival. And if the producer
+    resumed, new files would land in a new day directory while the folder mtime
+    stayed frozen, so the check would report the same stall forever.
+
+    That is why its agreement with reality during the actual stall proved
+    nothing: a frozen clock and a stopped producer look identical in exactly
+    that state. The assertion that discriminates is RECOVERY, not staleness —
+    the old implementation passes a staleness test and fails this one.
+    """
+    import tempfile
+    from backend.checks.layer3_backend_processing import _drops_newest
+
+    now = _time.time()
+    root = Path(tempfile.mkdtemp(prefix="drops-"))
+
+    def touch(p: Path, age_s: float) -> None:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+        os.utime(p, (now - age_s, now - age_s))
+
+    # Recovery: the radar folder is frozen a week back, a file landed a minute
+    # ago in a NEW day directory. The old one-stat basis reports the week.
+    ebay = root / "ebay"
+    touch(ebay / "2026" / "10" / "05" / "aqpi.ebay-20261005-040613_PPI.netcdf.drops",
+          182 * 3600)
+    touch(ebay / "2026" / "10" / "13" / "aqpi.ebay-20261013-101500_PPI.netcdf.drops", 60)
+    os.utime(ebay, (now - 182 * 3600, now - 182 * 3600))
+    got = _drops_newest(str(ebay))
+    check("recovery in a new day directory is visible",
+          got is not None and now - got < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
+    check("...and the frozen folder mtime is NOT what is reported",
+          got is not None and now - got < 3600,
+          f"folder reads {182} h, check reads {(now - got) / 3600:.1f} h" if got else "None")
+
+    # A genuine stall still reads as stale.
+    scrz = root / "scrz"
+    touch(scrz / "2026" / "10" / "05" / "aqpi.scrz-20261005-040000_PPI.netcdf.drops",
+          182 * 3600)
+    got = _drops_newest(str(scrz))
+    check("a real stall still reports the true age",
+          got is not None and abs((now - got) - 182 * 3600) < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
+
+    # The flat layout the original basis assumed must still work.
+    flat = root / "flat"
+    touch(flat / "aqpi.flat-20261013-101500_PPI.netcdf.drops", 300)
+    got = _drops_newest(str(flat))
+    check("a folder holding files directly is read directly",
+          got is not None and abs((now - got) - 300) < 60,
+          f"{(now - got):.0f} s" if got else "None")
+
+    # An empty newest day directory falls back a day rather than reading as
+    # fresh — the LB2 rollover lesson, inverted: a directory created before its
+    # first file must not count as output having arrived.
+    scvw = root / "scvw"
+    touch(scvw / "2026" / "10" / "12" / "aqpi.scvw-20261012-090000_PPI.netcdf.drops",
+          4 * 3600)
+    (scvw / "2026" / "10" / "13").mkdir(parents=True, exist_ok=True)
+    got = _drops_newest(str(scvw))
+    check("an empty new day directory does not read as fresh output",
+          got is not None and abs((now - got) - 4 * 3600) < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
+
+    # A non-numeric stray must not be mistaken for the newest period.
+    swyr = root / "swyr"
+    touch(swyr / "2026" / "10" / "05" / "aqpi.swyr-20261005-040000_PPI.netcdf.drops",
+          182 * 3600)
+    (swyr / "tmp").mkdir(parents=True, exist_ok=True)
+    got = _drops_newest(str(swyr))
+    check("a non-numeric stray directory is not taken for the newest year",
+          got is not None and abs((now - got) - 182 * 3600) < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
 
 
 if __name__ == "__main__":
