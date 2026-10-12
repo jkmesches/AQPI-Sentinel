@@ -6,8 +6,10 @@ carry enough state — last_ts / image_bytes / tier2 stats / moment_newest —
 to recompute the verdict without re-fetching anything from upstream.
 
 Five stages are supported:
-  * L1: C_freshness, E_step_count, G_image_size sub-checks. D_cadence is
-    out of scope (its inputs live in metrics, not payload). Everything
+  * L1: C_freshness, D_cadence, E_step_count, G_image_size sub-checks.
+    D_cadence became reprocessable on 2026-10-12, when median_dt_s was added
+    to the payload; rows written before that have no median_dt_s and keep
+    their recorded D_cadence rather than a guessed one. Everything
     else folded by worst_of from the existing sub_status dict.
   * L2: ghost-up freshness verdict, using primary_newest_ts + current
     silent_fail_s + hysteresis. Other verdict modes (CONFIRMED_DOWN,
@@ -36,6 +38,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import thresholds as _thresholds
+# Imported, not restated: a second copy of this default is how the live
+# path and the reprocess path come to disagree about the same row.
+from .checks.layer1_product import DEFAULT_CADENCE_TOL as _DEFAULT_CADENCE_TOL
 
 log = logging.getLogger(__name__)
 
@@ -210,9 +215,15 @@ def _reverdict_l1_image_timeout(row: dict, payload: dict) -> tuple[str, dict] | 
 
 
 def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
-    """Re-evaluate freshness + step_count + image_size sub-checks under
-    current thresholds. D_cadence is left at the recorded value (its
-    median_dt_s input is in metrics, not payload).
+    """Re-evaluate freshness, cadence, step_count and image_size sub-checks
+    under current thresholds.
+
+    D_cadence was excluded until 2026-10-12 because its only input lived in
+    metrics, which check_runs does not store. It is now in the payload, so a
+    cadence_s change clears retroactively like the others. A row older than
+    that change carries no median_dt_s and keeps its recorded D_cadence --
+    "we cannot re-derive this" is left as the recorded verdict rather than
+    recomputed from an assumed spacing.
     """
     payload = row["payload"] or {}
     if isinstance(payload, str):
@@ -252,6 +263,22 @@ def _reverdict_l1(row: dict) -> tuple[str, dict] | None:
         else:
             tol = int(_thresholds.get_global("step_count_tol", 4))
             sub["E_step_count"] = "pass" if abs(n_steps - expected) <= tol else "warn"
+
+    # D_cadence — recompute from median_dt_s + cadence_s. Mirrors the live
+    # branch in layer1_product exactly, including that a cadence_s of None
+    # means "pass, nothing to compare against". A row with no median_dt_s
+    # predates that key reaching the payload and is left alone.
+    med = payload.get("median_dt_s")
+    if "D_cadence" in sub and med is not None:
+        scan_cad = _thresholds.get_product(product_id, "cadence_s")
+        if scan_cad is None:
+            sub["D_cadence"] = "pass"
+        else:
+            cad_tol = float(_thresholds.get_global("cadence_tol",
+                                                   _DEFAULT_CADENCE_TOL))
+            sub["D_cadence"] = (
+                "pass" if abs(med - scan_cad) <= scan_cad * cad_tol else "warn"
+            )
 
     # G_image_size — recompute from image_bytes + min_png_bytes.
     img_bytes = payload.get("image_bytes")

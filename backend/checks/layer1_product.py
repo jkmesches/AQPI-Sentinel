@@ -180,7 +180,18 @@ class Layer1ProductCheck(Check):
         else:
             diffs = [(ts_list[i + 1] - ts_list[i]).total_seconds() for i in range(n - 1)]
             med = statistics.median(diffs)
-            metrics["median_dt_s"] = float(med)
+            # Both, from one expression, deliberately. check_runs stores the
+            # payload but NOT metrics (those go to metric_samples), and the
+            # reprocess engine reads only check_runs -- so a metrics-only
+            # input makes its sub-check the one thing a retroactive threshold
+            # change cannot touch. That was true of D_cadence until 2026-10-12:
+            # an operator edited cadence_s, this went to warn, and the tool
+            # built to resolve exactly that could not clear it. Same reason
+            # LB1 writes age_s to both; see layer1_backend_product.
+            #
+            # Assigned together rather than in two statements so the two copies
+            # cannot drift -- there is one float and one source for it.
+            payload["median_dt_s"] = metrics["median_dt_s"] = float(med)
             cad_tol = float(_thresholds.get_global("cadence_tol", DEFAULT_CADENCE_TOL))
             sub["D_cadence"] = (
                 "pass" if abs(med - scan_cad) <= scan_cad * cad_tol else "warn"
