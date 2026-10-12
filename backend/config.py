@@ -893,6 +893,16 @@ DROPS_SILENT_INFO_S: int = 3_600
 # 629-entry day directory with no dotfiles. So directory mtime is a true
 # "something last landed here" time and one stat suffices, which is what makes
 # the producer check cheap enough to run on every radar's folder.
+# Read ONLY by Layer3DropsProducerCheck, which watches whether
+# Gen_X-band_QPE.py is still producing. Measured 2026-10-12 the tree under
+# backend_root is 7.6 days stale, so that check should currently be reporting a
+# stalled producer — which is what it is for, and why it is warn-capped and
+# non-paging. Whether the producer genuinely stopped or this copy was abandoned
+# like `recentfiles` was is [U] and worth establishing before anyone acts on it.
+#
+# NOT a radar volume source. LB2 used to fall back to this layout for a radar
+# in neither tree table; see layer2_backend_radar._radar_path for why that is
+# now a startup error.
 DROPS_TREE: str = "PRODUCTS/DROPS"
 
 # ---------------------------------------------------------------------------
