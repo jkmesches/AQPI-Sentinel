@@ -991,12 +991,11 @@ class Layer3InputStagingCheck(Check):
 
         sub["A_staged"] = "pass"
         age_s = t0.timestamp() - float(got["newest"])
-        warn_s = float(_thresholds.get_global("composite_input_stale_warn_s",
-                                              COMPOSITE_INPUT_STALE_WARN_S))
+        warn_s = _thresholds.get_global("composite_input_stale_warn_s",
+                                        COMPOSITE_INPUT_STALE_WARN_S)
         metrics["age_s"] = float(age_s)
-        metrics["headroom"] = headroom(age_s, warn_s)
         payload["age_s"] = round(age_s, 1)
-        payload["stale_warn_s"] = warn_s
+        payload["stale_warn_s"] = float(warn_s) if warn_s is not None else None
         payload["newest_name"] = got["newest_name"]
         payload["newest_declared"] = datetime.fromtimestamp(
             float(got["newest"]), timezone.utc).isoformat()
@@ -1013,6 +1012,21 @@ class Layer3InputStagingCheck(Check):
             payload["staged_skew_s"] = round(skew, 1)
             metrics["staged_skew_s"] = skew
 
+        if warn_s is None:
+            # No band — see config.COMPOSITE_INPUT_STALE_WARN_S. B_fresh is
+            # not added to `sub` at all rather than being set to a passing
+            # value: "we did not judge this" and "we judged it healthy" are
+            # different claims, and recording the second would make the
+            # staged-age series look assessed for the whole period it was not.
+            # The age is still in the payload and the metric, which is what the
+            # band will eventually be fitted from.
+            return _final(self, t0, sub, payload, metrics,
+                          f"{got['parsed']} staged, newest "
+                          f"{age_s / 60:.1f} min old")
+        warn_s = float(warn_s)
+        # Same normalized 0..1 sparkline axis as the other backend checks, and
+        # only meaningful once there is a budget to measure against.
+        metrics["headroom"] = headroom(age_s, warn_s)
         if age_s > warn_s:
             sub["B_fresh"] = "warn"
             summary = (f"STAGING STALE — newest staged volume "
