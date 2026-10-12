@@ -495,6 +495,32 @@ def _reverdict_lb3(row: dict) -> tuple[str, dict] | None:
         return _worst_of(*sub.values()), {**payload, "sub_status": sub,
                                           "silent_s": limit}
 
+    # Composite input staging. Before the participation branch, which would
+    # otherwise see no A_included and decline — correct but silent, and a
+    # threshold that is editable in the admin panel while its history can never
+    # be re-verdicted is the split-brain this engine exists to prevent.
+    if row["check_id"].startswith("layer3.input."):
+        if "B_fresh" not in sub:
+            # Nothing staged, or nothing parseable. A_staged is not
+            # threshold-driven, so there is no verdict to recompute.
+            return None
+        age = payload.get("age_s")
+        if age is None:
+            return None
+        warn_s = _thresholds.get_global("composite_input_stale_warn_s")
+        if warn_s is None:
+            warn_s = payload.get("stale_warn_s")
+        if warn_s is None:
+            return None
+        warn_s = float(warn_s)
+        # WARN-capped, exactly as the live check is. A retroactive pass must
+        # not be able to produce a verdict the live check cannot: this band has
+        # no fail arm, and inventing one here would make history disagree with
+        # every row written since.
+        sub["B_fresh"] = "pass" if float(age) <= warn_s else "warn"
+        return _worst_of(*sub.values()), {**payload, "sub_status": sub,
+                                          "stale_warn_s": warn_s}
+
     # Composite participation.
     if "A_included" not in sub:
         return None
