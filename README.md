@@ -14,7 +14,7 @@ Sentinel watches the upstream stack from five angles, turns anomalies into route
 
 **v0.7.4** — running 24×7 against radarca, and deployable by another team: self-contained compose stack with a bundled reverse proxy, verified backups, and a data export/import path. Apache-2.0, with tagged container images published publicly to GHCR (`ghcr.io/jkmesches/sentinel-{backend,frontend}`) so a deploy needs no login.
 
-- **72 checks** across 8 stages, self-registered via `@register`. Count from the real import graph, not one module — `backend.checks` alone under-reports.
+- **84 checks** across 8 stages, self-registered via `@register` — or **45** on a deployment with no backend mounts, where the `LB*` stages do not register at all. Count from the real import graph, not one module, and state which configuration the number is for: the two differ by the 39 backend checks (LB1 13, LB2 7, LB3 19).
 - **Two independent views of the same system.** The `L*` stages ask the upstream display tier what it believes; the `LB*` stages read the published files straight off the mounted shares and owe it nothing. Where the two disagree, the `LB` answer describes reality and *the disagreement itself is the signal* — the data exists and something in the display tier is not showing it.
 - **Deployment profiles** (`SENTINEL_PROFILE`) — one codebase, two radar networks. `aqpi` monitors six radars and thirteen products via radarca; `xqpi` monitors JPL's FLOW entirely off the filesystem, with no HTTP origin to probe at all. A profile owns its products, trees, thresholds, map and labels; the registry *refuses* a check that a profile cannot observe rather than letting it fail forever.
 - **21-table Postgres 16 schema**, auto-applied on backend start (no migrations to run).

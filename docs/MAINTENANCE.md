@@ -114,8 +114,11 @@ whether the backend is wedged or whether the issue is browser-side.
 
 ### Performance tuning
 
-Sentinel runs comfortably on a 2-vCPU / 4 GB host for the radarca
-scale (43 checks, ~30 outbound req/min). Symptoms of under-resourcing
+Sentinel runs comfortably on a 2-vCPU / 4 GB host at either scale: **45
+checks** and ~30 outbound req/min for the display tier alone, or **84 checks**
+with the backend mounts present. The backend checks make no upstream requests
+— they read mounted files — so the req/min figure is the same either way, and
+`httpx.in_flight` is unaffected by enabling them. Symptoms of under-resourcing
 that show up in `/api/_debug/stats`:
 
 | Symptom | Likely cause | Fix |
