@@ -32,8 +32,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from ..config import (BACKEND_SOURCE, LB1_FRESHNESS, PRODUCT_IMAGES_PREFIX, PRODUCTS,
-                      SETTINGS, image_path)
+from ..config import (BACKEND_PRODUCT_CADENCE_S, BACKEND_SOURCE, LB1_FRESHNESS,
+                      PRODUCT_IMAGES_PREFIX, PRODUCTS, SETTINGS, image_path)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -47,6 +47,19 @@ FS_TIMEOUT_S = 5.0
 
 # Fallback when a product has no explicit backend threshold. Deliberately generous:
 # the point of v1 is to stop contradicting K2, not to introduce a new noise source.
+#
+# Per-product values are set from /admin/thresholds under `backend_max_age_s` and
+# live in the settings blob, not here, so this constant is NOT where a deployment
+# records its choice. The convention a deployment is choosing between, when it
+# sets one against an hourly publish, is roughly:
+#
+#     ~1.5x the publish interval   a single missed publish FAILS
+#     ~2.25x                       a single miss passes; two or more fail
+#
+# Either is defensible and the choice is the deployment's, but it is a choice --
+# a value between one and two publish intervals will fire on every ordinary late
+# publish, and the next person reads it firing and widens it back. B_freshness is
+# also binary (pass/fail, no warn arm), so there is no "late" state to land in.
 DEFAULT_BACKEND_MAX_AGE_S = 1_800
 
 
@@ -157,9 +170,13 @@ class Layer1BackendProductCheck(Check):
         self.cfg = cfg
         self.id = f"layer1.backend.{product_id}"
         self.target = product_id
-        # Filesystem reads are far cheaper than the radarca fetch, but there is no
-        # value in running faster than the product is published.
-        self.cadence_s = max(60, int(cfg.get("cadence_s") or 120))
+        # NOT cfg["cadence_s"]. That is the upstream PUBLISH interval, and using it
+        # here sampled every product at its own period -- aliased by construction,
+        # so a missed publish went unnoticed for up to a full interval and a panel
+        # edit took as long to apply. Filesystem reads are cheap; the publish rate
+        # is not a reason to sample slowly. See config.BACKEND_PRODUCT_CADENCE_S.
+        self.cadence_s = max(60, int(cfg.get("backend_cadence_s")
+                                     or BACKEND_PRODUCT_CADENCE_S))
 
     async def run(self, ctx) -> CheckResult:
         t0 = utcnow()

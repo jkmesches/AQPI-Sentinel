@@ -659,6 +659,42 @@ RADAR_DATED_TREE: dict[str, str] = {
 LB1_FRESHNESS: str = "newest_mtime"   # newest file's mtime in the images dir
 LB2_FRESHNESS: str = "filename"
 
+# How often the LB1 checks STAT the filesystem. Not the publish cadence, and
+# deliberately unrelated to it.
+#
+# LB1 used to take its sampling interval from PRODUCTS[pid]["cadence_s"], the
+# UPSTREAM PUBLISH interval, on the reasoning that there is "no value in
+# running faster than the product is published". That reasoning is wrong, and
+# it aliased 11 of 13 products 1:1 against their own publish rate:
+#
+#     water_depth, water_level, fcst_temp,
+#     fcst_total_precip, fcst_total_precip_cum   3600 s sampled at 3600 s
+#     fcst_precip_rate                            900 s sampled at  900 s
+#     qpe_15min, qpe_1hr, precip_rate_radar,
+#     comp_ref, comp_now                          120 s sampled at  120 s
+#
+# Sampling a signal at its own period fixes nothing and costs three things:
+# detection latency equal to a full publish interval at arbitrary phase; a
+# derived "observed cadence" that is an artifact of the sampler rather than a
+# property of the product (measured 2026-10-12 on water_*: intervals read as
+# 31-170 min, entirely the instrument, because two consecutive hourly
+# publishes land in one sampling gap); and an admin threshold edit that does
+# not take effect for up to an hour. The last one was observed directly --
+# max_water_* picked up a panel edit within 2 minutes while water_* had last
+# run 40 minutes earlier, and the only difference between them was this key.
+#
+# 120 s is not a fitted number and nothing is judged against it. It is the
+# rate max_water_depth/max_water_level have already run at in production
+# (their cadence_s is None, so they fell through to the old `or 120`), it is
+# the fastest publish any product has, and it leaves >=7x oversampling on the
+# slowest. A product that genuinely needs slower filesystem polling sets
+# `backend_cadence_s` in PRODUCTS; nothing does today.
+#
+# L1 is NOT affected and must not be: it fetches over HTTP from radarca, takes
+# its interval through derive_check_cadence() at half the publish rate, and
+# raising its rate would add load to someone else's public service.
+BACKEND_PRODUCT_CADENCE_S: int = 120
+
 # Per RADAR, not per profile. The two producers on AQPI name their files
 # differently and nothing reconciles them:
 #
