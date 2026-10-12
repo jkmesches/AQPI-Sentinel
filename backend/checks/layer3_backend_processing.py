@@ -71,7 +71,7 @@ import asyncio
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
@@ -83,11 +83,17 @@ from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
                       COMPOSITE_RECEIPT_SETTLE_S, COMPOSITE_RUN_LOG_DIR,
                       DROPS_SILENT_INFO_S, DROPS_TREE, MAX_RUN_LOG_ENTRIES,
                       RADAR_FOLDER, SETTINGS)
+from ..config import RAW_VOLUME_TS_RE
 from ..errors import humanize_error
+# One implementation of "newest observation these filenames declare", shared
+# rather than copied. LB2 owns it because that is where the basis was
+# established; checks/__init__ imports layer2_backend_radar first, so this is
+# resolved by the time this module loads.
+from .layer2_backend_radar import _newest_declared
 from .. import thresholds as _thresholds
 from ..registry import CHECKS, register
 from .base import Check, CheckResult, utcnow
-from .helpers import headroom, worst_of
+from .helpers import first_resolvable, headroom, worst_of
 
 FS_TIMEOUT_S = 8.0
 
@@ -687,8 +693,9 @@ class Layer3CompositeParticipationCheck(Check):
 _DROPS_LOOKBACK_DAYS = 2
 
 
-def _drops_newest(folder: str) -> float | None:
-    """Blocking. When output last landed under one DROPS radar folder.
+def _drops_newest(folder: str, pattern: str, now: datetime) -> float | None:
+    """Blocking. When output last landed under one DROPS radar folder, as the
+    FILENAMES declare it.
 
     === Why this is not one stat on the folder ===
 
@@ -710,61 +717,74 @@ def _drops_newest(folder: str) -> float | None:
          evidence that it worked: a frozen clock and a stopped producer are
          indistinguishable in exactly that one state.
 
-    So this walks to the files. The original justification — DROPS entries are
-    created and never overwritten, so a directory mtime is a true "something
-    last landed" — is sound at the level it was VERIFIED, which was a day
-    directory, and that is the level used here.
+    === Declared time, not mtime ===
 
-    Handles both layouts rather than assuming the dated one: a folder holding
-    files directly is read directly. Guessing a layout is what the rest of this
-    week was about.
+    `_newest_declared` reads the timestamp out of the filename. That is the
+    same choice LB2_FRESHNESS = "filename" exists to make, and for the same
+    reason — an mtime can be re-touched while the observation it describes
+    stays old. Today's finding sharpens it rather than softening it: something
+    swept these directories' mtimes without writing data, so mtime on this tree
+    is demonstrably not a record of arrival. The per-radar patterns match DROPS
+    names unchanged, so this needs no new table and no new import guard.
 
-    An empty newest day directory falls back one day, for the reason the LB2
-    rollover fix exists: just after 00Z the day's directory can exist before
-    its first file does, and reading that as "output arrived" would be the
-    same not-finished-yet-read-as-fine error inverted.
+    === Three reads, most specific first ===
+
+    Flat layout, then today and yesterday constructed from the clock, then a
+    bounded walk. The middle one is `first_resolvable` for the reason its own
+    docstring gives: without the yesterday fallback this reports all five
+    folders stalled in the first minutes of every UTC day, which is the LB2
+    nuisance alarm reintroduced in a different tree.
+
+    The walk exists only for the failure case. Constructing from the clock
+    means a producer dead eight days answers "nothing today or yesterday",
+    which loses the magnitude an operator wants — so when that happens, descend
+    by numeric name to recover the true age. Bounded at today so a stray
+    future-dated directory cannot blind the check, which is the hazard a pure
+    descent has and clock construction does not.
     """
-    with os.scandir(folder) as it:
-        entries = [e for e in it if not e.name.startswith(".")]
-    files = [e for e in entries if not e.is_dir(follow_symlinks=False)]
-    if files:
-        # Flat layout — the shape the original one-stat basis assumed.
-        return max(e.stat(follow_symlinks=False).st_mtime for e in files)
+    # Flat layout, if this tree ever is one. Cheap, and it means the check does
+    # not assume a layout — guessing one is what the rest of this week was
+    # about.
+    try:
+        return _newest_declared(folder, pattern)
+    except FileNotFoundError:
+        pass
 
-    # Dated layout. Descend by NUMERIC name, not lexical order over everything:
-    # a stray non-numeric entry would otherwise sort last and be mistaken for
-    # the newest period.
-    def newest_numeric(path: str) -> str | None:
-        with os.scandir(path) as it:
-            names = sorted((e.name for e in it
-                            if e.is_dir(follow_symlinks=False) and e.name.isdigit()),
-                           key=lambda n: (len(n), n))
+    candidates = [
+        os.path.join(folder, (now - timedelta(days=d)).strftime("%Y/%m/%d"))
+        for d in range(_DROPS_LOOKBACK_DAYS)
+    ]
+    try:
+        ts, _path, _back = first_resolvable(
+            candidates, lambda p: _newest_declared(p, pattern))
+        return ts
+    except FileNotFoundError:
+        pass
+
+    # Nothing recent. Walk to the newest day that exists, so the payload
+    # carries the real age rather than only "absent" — the same reasoning as
+    # the staging check reporting its siblings' age instead of their names.
+    def newest_numeric(path: str, ceiling: str) -> str | None:
+        try:
+            with os.scandir(path) as it:
+                names = sorted((e.name for e in it
+                                if e.is_dir(follow_symlinks=False)
+                                and e.name.isdigit() and e.name <= ceiling),
+                               key=lambda n: (len(n), n))
+        except OSError:
+            return None
         return names[-1] if names else None
 
-    days: list[str] = []
     cur = folder
-    for _ in range(3):                       # %Y / %m / %d
-        nxt = newest_numeric(cur)
+    for fmt in ("%Y", "%m", "%d"):
+        nxt = newest_numeric(cur, now.strftime(fmt))
         if nxt is None:
-            break
+            return None
         cur = os.path.join(cur, nxt)
-        days.append(cur)
-    if len(days) < 3:
+    try:
+        return _newest_declared(cur, pattern)
+    except (FileNotFoundError, OSError):
         return None
-
-    # The newest day, then the one before it if the newest is empty.
-    parent = os.path.dirname(days[-1])
-    with os.scandir(parent) as it:
-        dnames = sorted((e.name for e in it
-                         if e.is_dir(follow_symlinks=False) and e.name.isdigit()),
-                        key=lambda n: (len(n), n))
-    for dname in reversed(dnames[-_DROPS_LOOKBACK_DAYS:]):
-        with os.scandir(os.path.join(parent, dname)) as it:
-            mtimes = [e.stat(follow_symlinks=False).st_mtime for e in it
-                      if not e.name.startswith(".")]
-        if mtimes:
-            return max(mtimes)
-    return None
 
 
 class Layer3DropsProducerCheck(Check):
@@ -841,7 +861,8 @@ class Layer3DropsProducerCheck(Check):
             out: dict[str, float | None] = {}
             for rid, folder in folders.items():
                 try:
-                    out[rid] = _drops_newest(os.path.join(root, folder))
+                    out[rid] = _drops_newest(os.path.join(root, folder),
+                                             RAW_VOLUME_TS_RE[rid], t0)
                 except OSError:
                     out[rid] = None
             return out
