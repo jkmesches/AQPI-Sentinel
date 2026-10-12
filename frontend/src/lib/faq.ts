@@ -21,6 +21,12 @@ export interface FaqItem {
 }
 
 export const FAQ: FaqItem[] = [
+	// NOTE: every answer here is duplicated in prose in docs/04-faq.md.
+	// The wording may differ on purpose -- this page is read on a dashboard,
+	// the docs site suits longer prose -- but a FACTUAL correction must be
+	// applied to both copies. test_faq_parity.py compares only the questions,
+	// so a half-applied correction is silent. One slipped through on
+	// 2026-10-12 (the retracted XSCW staging claim) and was nearly missed.
 	{
 		id: 'what-we-watch',
 		q: 'What is Sentinel actually watching?',
