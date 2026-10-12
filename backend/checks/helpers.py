@@ -5,7 +5,9 @@ without circularity.
 """
 from __future__ import annotations
 import re
+from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import Any
 
 from .base import Status
 
@@ -144,3 +146,49 @@ def headroom(age_s: float, limit_s: float) -> float:
     if span == 0.0:
         return 0.0
     return max(0.0, min(1.0, (float(limit_s) - float(age_s)) / span))
+
+
+# --------------------------------------------------------------------------
+# Candidate paths
+# --------------------------------------------------------------------------
+
+def first_resolvable(paths: Sequence[str], reader) -> tuple[Any, str, int]:
+    """First of ``paths`` the reader can resolve. Returns (value, path, index).
+
+    Factored out of the two places that need it — a dated radar tree whose
+    directory for the new UTC day does not exist until the day's first file
+    lands, and a forecast tree whose newest published init hour is always
+    behind the one a clock would ask for. Both were reading ONE candidate and
+    treating its absence as a fault.
+
+    Deliberately NOT parameterised by a step unit and a count. The two callers
+    step by different things — one by day over a dated tree, the other by hour
+    over a known publish lag — and a helper that generated the candidates
+    would have to hide each caller's ZERO POINT behind a shared loop. The zero
+    point is precisely what goes wrong in both bugs, so each caller builds its
+    own list and states its own zero point where a reader will look for it.
+    What is shared is only the retry-and-raise semantics below.
+
+    Raises the LAST FileNotFoundError, not the first: the error then names the
+    OLDEST candidate tried, which is the one whose absence actually means
+    something. "no data for yesterday either" is a fault; "no directory for
+    today yet" is a sentence about the clock.
+
+    Callers that build a list with duplicates (a layout that ignores the date,
+    say) get one read per DISTINCT path — the point of the look-back is to
+    cost nothing in the steady state, and re-reading one directory twice per
+    tick would spend exactly what it was careful not to.
+    """
+    last: FileNotFoundError | None = None
+    seen: set[str] = set()
+    for i, p in enumerate(paths):
+        if p in seen:
+            continue
+        seen.add(p)
+        try:
+            return reader(p), p, i
+        except FileNotFoundError as e:
+            last = e
+    if last is None:
+        raise ValueError("first_resolvable called with no candidate paths")
+    raise last

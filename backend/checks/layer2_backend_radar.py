@@ -39,7 +39,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..config import (BACKEND_SOURCE, LB2_FRESHNESS,  # noqa: F401
@@ -49,7 +49,7 @@ from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
-from .helpers import headroom, worst_of
+from .helpers import first_resolvable, headroom, worst_of
 
 FS_TIMEOUT_S = 5.0
 
@@ -420,9 +420,43 @@ class Layer2BackendRadarCheck(Check):
             reader = _dir_mtime
         payload["freshness_basis"] = LB2_FRESHNESS
 
+        # Candidates, newest first. A dated tree has no directory for the new
+        # UTC day until that day's first file lands, and `_newest_declared`
+        # also raises when a directory EXISTS but declares nothing parseable
+        # yet — which just after 00Z is the more common shape of the same
+        # thing. Reading only today's path conflates "the day just started"
+        # with "nothing is arriving": measured over the 25 days to 2026-10-12,
+        # all three of layer2.backend.XSCR's non-pass runs and 15 of
+        # layer2.backend.fleet's 21 fell in the first ten minutes of the UTC
+        # day. The fleet was the loud one because several radars published
+        # SILENT in the same tick and it read that as fleet-wide silence.
+        #
+        # THIS IS NOT A GRACE WINDOW, and the difference is the whole design.
+        # A "don't alarm for the first N minutes" rule blinds the check: a
+        # radar that dies at 23:55 would be invisible until the window closed.
+        # The look-back can never report an age YOUNGER than reality, because
+        # today is tried FIRST and only yields when it declares nothing at
+        # all — so the fallback value is always a real observation time from
+        # yesterday, and the silence threshold governs at every instant. It
+        # also needs no new tuning constant; see the hazard note above
+        # RADAR_SILENT_FAIL_S for why that matters here.
+        #
+        # One more thing it buys, which is why the broader FileNotFoundError
+        # condition is load-bearing rather than incidental: if the producer's
+        # filenames drift out of RAW_VOLUME_TS_RE, today's directory is full
+        # but declares nothing, the age grows from yesterday's newest, and the
+        # threshold fails it correctly — instead of the check reporting a
+        # missing directory that is plainly there.
+        candidates = [_radar_path(self.radar_id, t0 - timedelta(days=back))
+                      for back in (0, 1)]
         try:
-            mtime = await asyncio.wait_for(
-                asyncio.to_thread(reader, path), FS_TIMEOUT_S)
+            mtime, path, days_back = await asyncio.wait_for(
+                asyncio.to_thread(first_resolvable, candidates, reader),
+                FS_TIMEOUT_S)
+            payload["path"] = path
+            # An integer, not a flag: the reprocess engine re-verdicts from
+            # payload, and "which day this came from" is part of the reading.
+            payload["days_back"] = days_back
         except asyncio.TimeoutError:
             _lb_publish_verdict(self.radar_id, "UNREADABLE", t0)
             return CheckResult(
@@ -432,15 +466,22 @@ class Layer2BackendRadarCheck(Check):
                 payload=payload, metrics={"fs_timeout": 1.0},
             )
         except FileNotFoundError:
-            # For a dated tree this is the normal shape of "nothing has arrived today
-            # yet", which just after 00Z is not yet a fault. The silence threshold is
-            # what decides; treat absence as maximally stale and let it be judged.
+            # NEITHER today nor yesterday. Not a rollover artifact: this radar
+            # has declared no parseable volume for more than 24 hours, so SILENT
+            # is simply true and the fleet check SHOULD correlate on it. (An
+            # earlier plan moved this publish out of the absence path to stop
+            # the fleet amplification; that would have made a genuinely
+            # day-dead radar invisible to the fleet — removing the signal
+            # rather than the artifact. The amplification is cured at source
+            # above, because this branch no longer fires at rollover.)
             metrics["fs_timeout"] = 0.0
             sub["A_arriving"] = "fail"
             payload["absent"] = True
+            payload["days_tried"] = len(set(candidates))
             _lb_publish_verdict(self.radar_id, "SILENT", t0)
             return _final(self, t0, sub, payload, metrics,
-                          "no data directory for the current UTC day")
+                          "BACKEND SILENT — no volume declared today or "
+                          "yesterday (over 24 h)")
         except re.error as e:
             # NOT "UNREADABLE". Shared config fails every radar in the same
             # tick, so counting this toward the fleet tally would diagnose a
