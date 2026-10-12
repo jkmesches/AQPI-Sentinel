@@ -39,6 +39,44 @@ _STAGE_TECH_CODES = {
 }
 
 
+# Which of the two OBSERVATION TIERS a stage belongs to.
+#
+# The `L*` stages ask the radarca display tier what it believes. The `LB*`
+# stages read the published files off K2/Trinity and owe the web tier nothing.
+# The distinction matters to an operator because the two can disagree, and
+# where they do, the disagreement itself is the signal — so anything that
+# switches on "which half of the stack is this" switches on this map rather
+# than on a prefix test or a list of check-id families.
+#
+# Stated per stage, not derived from the "LB" spelling, so a new stage has to
+# answer the question. The parity test asserts this covers _STAGE_LABELS
+# exactly: a stage added above without a tier here fails that assertion
+# instead of silently landing in whichever half the string test picks.
+TIERS = ("frontend", "backend")
+
+_STAGE_TIERS = {
+    "L0":      "frontend",
+    "L1":      "frontend",
+    "L2":      "frontend",
+    "L3":      "frontend",
+    "L4-T1T2": "frontend",
+    "LB1":     "backend",
+    "LB2":     "backend",
+    "LB3":     "backend",
+}
+
+
+def stage_tier(s: str) -> str:
+    """'LB2' -> 'backend', 'L2' -> 'frontend'.
+
+    An unknown stage reads as 'frontend'. That is the FAIL-OPEN direction for
+    every current caller: the tier is used to gate NOTIFICATION, and an
+    unrecognised stage should keep paging rather than go quiet because of a
+    taxonomy gap.
+    """
+    return _STAGE_TIERS.get(s, "frontend")
+
+
 def stage_descriptor(s: str) -> str:
     """e.g. 'L2' -> 'Radar Scans'. Unknown IDs fall through unchanged."""
     return _STAGE_LABELS.get(s, s)

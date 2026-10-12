@@ -17,8 +17,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..registry import CHECKS
+from ..stages import stage_tier
 from . import silences as silence_lib
 from . import suppression as sup_lib
+from . import tiers as tier_lib
 from .models import AlertsConfig
 from .router import Router, severity_for_status, _SEV_RANK
 from .sinks import build_sinks
@@ -262,6 +264,9 @@ class AlarmEngine:
         if not rows:
             return
         active_silences = await self.store.list_active_silences(now)
+        # One read per tick, shared by every alarm. load() never raises and
+        # fails open, so a tick cannot go quiet because this row is missing.
+        tier_cfg = await tier_lib.load(self.store.pool)
         # One snapshot of every check's latest status, shared by all open
         # alarms this tick. Both the suppression re-evaluation and the
         # current-status severity read need it, and neither is worth a
@@ -280,7 +285,8 @@ class AlarmEngine:
             latest = {}
         for alarm in rows:
             try:
-                await self._process(alarm, now, active_silences, latest)
+                await self._process(alarm, now, active_silences, latest,
+                                    tier_cfg)
             except Exception:
                 log.exception("processing alarm %s", alarm.get("id"))
 
@@ -338,7 +344,8 @@ class AlarmEngine:
             })
 
     async def _process(self, alarm: dict, now: datetime, silences: list[dict],
-                       latest: dict[str, str] | None = None):
+                       latest: dict[str, str] | None = None,
+                       tier_cfg: dict | None = None):
         latest = latest or {}
         status_now = latest.get(alarm["check_id"])
         if status_now:
@@ -413,6 +420,16 @@ class AlarmEngine:
                 "status": status_now,
             })
 
+        # === Per-tier notification gate ===
+        #
+        # Placed HERE, after severity and the ack re-evaluation and before the
+        # first dispatch, because it gates notification and nothing else. The
+        # silence check above returns earlier and freezes severity as a side
+        # effect; this must not, or a disabled tier's alarms would sit at
+        # whatever severity they held when they opened and the timeline would
+        # misdescribe them for the rest of their lives. See alarms/tiers.py.
+        tier_open = tier_lib.may_notify(tier_cfg, alarm.get("stage", ""))
+
         # Which steps are due AND not yet fired?
         policy = self.cfg.policy(route.policy)
         if policy is None:
@@ -431,6 +448,31 @@ class AlarmEngine:
                 last = await self.store.last_notification_at(alarm["id"], step_idx)
                 if last and (now - last).total_seconds() < route.repeat_interval_s:
                     continue
+            if not tier_open:
+                # Recorded where the message would have gone, rather than
+                # logged and forgotten: /api/alarms/<id> then answers "what
+                # did Sentinel decide not to tell me, and when".
+                #
+                # Writing it also consumes this step's bookkeeping, which is
+                # deliberate. Re-enabling the tier tomorrow must not replay
+                # the backlog of every step that came due while it was off —
+                # that turns a deliberate quiet period into a burst, which is
+                # precisely the crying-wolf failure the hold-down exists to
+                # prevent. Later steps still come due on their own delays,
+                # and a repeat_interval still re-evaluates, so a tier turned
+                # back on is audible from the next interval onward.
+                await self.store.write_notification(
+                    alarm_id=alarm["id"],
+                    receiver=f"(tier: {stage_tier(alarm.get('stage', ''))})",
+                    channel="none", step_idx=step_idx, template=None,
+                    body_excerpt=None, status="tier-disabled",
+                    error=(f"{stage_tier(alarm.get('stage', ''))} tier "
+                           f"notifications are disabled"),
+                )
+                log.info("alarm %s step %d not dispatched: %s tier disabled",
+                         alarm["id"], step_idx,
+                         stage_tier(alarm.get("stage", "")))
+                continue
             await self._dispatch(alarm, route, step, step_idx)
 
     # Status severity for the ack comparison. Deliberately separate from the
