@@ -995,9 +995,18 @@ DROPS_TREE: str = "PRODUCTS/DROPS"
 #     recentfiles/<DIR>  <- NOTHING
 #     composite output   <- layer3.composite.<radar> (LB3, participation)
 #
-# Measured 2026-10-12 17:20Z: XSCW had ZERO files staged here while
-# layer2.backend.XSCW read pass with "newest volume 0.5 min ago". Two checks
-# reporting health on either side of a real break. [M]
+# The conjunction this check exists to catch -- staging EMPTY while arrival
+# reads healthy -- has been observed once, on NEXRAD (below). It has NOT been
+# observed on XSCW, though this comment asserted it and marked it [M] until
+# 2026-10-12: the staging emptiness was measured on 10-12 and the LB2 pass
+# ("newest volume 0.5 min ago") on 10-08, four days earlier, and splicing two
+# readings that far apart manufactured a conjunction nobody ever saw.
+# Re-measured 19:32Z 10-12, XSCW is simply DOWN -- radarca declares DOWN with
+# obs=0, the newest sweep aqpi.scwa-20261012-090852 stopped at 09:08Z, LB2
+# fails at 623.7 min -- and an empty staging directory is the ordinary
+# downstream consequence, reported correctly at every stage. A stale PASS is
+# more dangerous than a stale FAIL: a stale fail makes you look at the thing,
+# a stale pass makes you look away from it and invent a cause elsewhere. [M]
 #
 # They are not merely different PATHS — they hold different OBJECTS, and that
 # is load-bearing for anyone reading both numbers:
@@ -1009,13 +1018,15 @@ DROPS_TREE: str = "PRODUCTS/DROPS"
 #
 # So LB2's freshness and this check's freshness are not two views of one
 # quantity, cannot be reconciled, and must not be used to sanity-check each
-# other -- a discrepancy between them is structural, not a fault. It also
-# narrows what XSCW's break IS: sweeps are arriving and no volume is being
-# assembled or staged from them, which points at the assembly step rather than
-# at transport. Site codes differ too (`swyr` dated, `XSWR` staged), so nothing
-# can join the two trees by name either. [M] 2026-10-12
+# other -- a discrepancy between them is structural, not a fault. What it does
+# NOT license is locating a break: reading "sweeps present, volumes absent" as
+# "the assembly step is broken" needs both readings to come from the same
+# moment, and the XSCW argument for exactly that did not. Site codes differ too
+# (`swyr` dated, `XSWR` staged), so nothing can join the two trees by name
+# either. [M] 2026-10-12
 #
-# It would also have caught the NEXRAD outage on its first tick: Renzo reports
+# The one measured case, and the reason this check ships: it would have caught
+# the NEXRAD outage on its first tick. Renzo reports
 # the KBBX/KDAX/KMUX feeds stopped when K2 was rebooted on 2026-09-17 and did
 # not restart until ~2026-10-06 00Z, and their recentfiles trees held zero
 # files throughout. Eighteen days, found by eye.

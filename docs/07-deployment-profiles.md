@@ -190,9 +190,15 @@ only place the composite reads its radar volumes from. Nine directories, one
 per input: the five X-bands, SSCB, and the three NEXRAD sites.
 
 It exists because the two checks either side of it can both be green across a
-real break. Measured 2026-10-12: XSCW had **zero** files staged here while
-`layer2.backend.XSCW` read pass with "newest volume 0.5 min ago". The composite
-was building a third of its output without that radar.
+real break. The measured case is NEXRAD: for eighteen days from 2026-09-17 the
+KBBX/KDAX/KMUX staging directories held **zero files** after a K2 reboot left
+`ldm` stopped, and the composite published from six radars instead of nine with
+nothing in Sentinel able to say so.
+
+An earlier version of this page offered XSCW instead, on a staging reading from
+2026-10-12 paired with a `layer2.backend.XSCW` pass from 10-08. Four days apart
+is not a conjunction; re-measured, XSCW was simply down and every stage
+reported it correctly.
 
 The two trees hold different **objects**, not just different paths:
 
@@ -203,12 +209,11 @@ The two trees hold different **objects**, not just different paths:
 
 So the two freshness numbers are not two views of one quantity, cannot be
 reconciled, and must not be used to sanity-check each other — a discrepancy
-between them is structural. It also narrows what XSCW's break is: sweeps are
-arriving and no volume is being assembled or staged from them, which points at
-the assembly step rather than at transport. The site codes differ as well
+between them is structural. What that does **not** license is locating a break:
+reading "sweeps present, volumes absent" as a broken assembly step requires
+both readings to come from the same moment. The site codes differ as well
 (`swyr` in the dated tree, `XSWR` in staging), so nothing can join the trees by
-name. The same shape hid the three NEXRAD
-feeds for eighteen days after a K2 reboot left `ldm` stopped.
+name.
 
 | Sub-check | Means |
 |---|---|

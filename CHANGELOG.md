@@ -28,12 +28,54 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Retracted: the XSCW finding was never a conjunction.** Three releases of
+  notes, two code comments, two doc pages and a test docstring said that on
+  2026-10-12 XSCW had zero files staged while `layer2.backend.XSCW` read pass
+  with "newest volume 0.5 min ago", and inferred from the pair that volumes
+  were not being assembled from arriving sweeps — a break located in the
+  assembly step. The two readings are four days apart: the staging emptiness
+  was measured 2026-10-12, the LB2 pass 2026-10-08, and the second was reused
+  without re-measurement. Re-measured 2026-10-12 19:32Z, XSCW is simply
+  **down** — radarca declares DOWN with `obs=0`, the newest sweep
+  (`aqpi.scwa-20261012-090852`) stopped at 09:08Z, LB2 fails at 623.7 min,
+  `layer3.composite` and `layer3.input` fail, `layer4.xband` skips. Every
+  stage reported it correctly, upstream agrees, and an empty staging directory
+  is the ordinary downstream consequence of a dead radar once retention prunes
+  the last volume (directory mtime 10:16Z). There is no hidden break and
+  nothing in the assembly step.
+
+  The generalisable part, and the reason this is worth a changelog entry rather
+  than a quiet edit: **a stale PASS is more dangerous than a stale FAIL.** A
+  stale fail makes you look at the thing; a stale pass makes you look away from
+  it and invent a cause elsewhere. Every other error this week was reading the
+  wrong object — this one read the right object at the wrong time, and the
+  wrong sentence was adopted precisely because it was the more actionable one.
+
+  No check logic changes: `layer3.input.<radar>` was correct throughout and its
+  `alarm_only_depends_on` gate on LB2 is exactly what keeps a down radar from
+  paging. What changes is the justification. **The case the check is genuinely
+  needed for is NEXRAD** — staging directories holding zero files for eighteen
+  days with nothing able to say so — and that is now the example everywhere the
+  XSCW one stood. Corrected in `backend/config.py`,
+  `backend/checks/layer3_backend_processing.py`, `docs/04-faq.md`,
+  `docs/07-deployment-profiles.md` and `validation_tests/test_input_staging.py`.
+
+- Unrelated and still open: the **33.2% composite exclusion on 2026-10-11** is
+  not explained by any of the above. 10-12 was a plain outage, so 10-11's
+  intermittency is a separate and smaller phenomenon that still needs a cause.
+
 ## [0.8.3] — 2026-10-12
 
 v0.8.2's staging check reached production and worked: nine rows live, and
 XSCW's break reported by a check for the first time rather than by someone
 listing a directory. Getting there took two failed deploys, and this release
 is mostly about the configuration that caused them.
+
+> **Retracted — see [Unreleased].** XSCW was not a break the staging check was
+> needed for; LB2 and `layer2.radar` already had it, loudly and correctly. The
+> radar was down. The check is sound and the case it is needed for is NEXRAD.
 
 ### ⚠ Breaking — change `.env.prod` and deploy in the SAME step
 
@@ -240,9 +282,11 @@ them.
   DROPS dated tree holds one PPI sweep per file at one elevation, `recentfiles`
   holds an assembled volume of four. Their freshness numbers are therefore not
   two views of one quantity and must not be reconciled or used to check each
-  other; a discrepancy between them is structural. It also narrows the XSCW
+  other; a discrepancy between them is structural. ~~It also narrows the XSCW
   finding: sweeps are arriving and no volume is being assembled or staged from
-  them, which points at the assembly step rather than at transport.
+  them, which points at the assembly step rather than at transport.~~
+  **Retracted — see [Unreleased]:** the two readings were four days apart, so
+  they locate nothing. The different-objects point itself stands.
 
 - **The staging check shipped with a threshold that would have paged three
   times an hour, indefinitely.** `composite_input_stale_warn_s` went out in
@@ -271,13 +315,16 @@ them.
 
 - **A check on the composite's input staging — `layer3.input.<radar>`, nine of
   them.** Three stages sit between a radar and a composite and only the ends
-  were watched. Measured 2026-10-12: XSCW had **zero** files staged in
-  `PRODUCTS/Radar_processed/recentfiles` while `layer2.backend.XSCW` read pass
-  with "newest volume 0.5 min ago" — LB2 reads the DROPS tree and these are
-  different paths. Two checks reporting health on either side of a real break,
-  with the composite building a third of its output without that radar. The
-  same shape hid the three NEXRAD feeds for eighteen days after a K2 reboot
-  left `ldm` stopped, and it would have been caught on the first tick.
+  were watched. The three NEXRAD feeds hid in the middle one for eighteen days
+  after a K2 reboot left `ldm` stopped — `PRODUCTS/Radar_processed/recentfiles`
+  held **zero files** for KBBX/KDAX/KMUX from 2026-09-17 to ~2026-10-06 while
+  the composite went on publishing from six radars instead of nine, and it
+  would have been caught on the first tick.
+
+  > **Retracted — see [Unreleased].** This entry originally led with XSCW:
+  > zero files staged while `layer2.backend.XSCW` read pass with "newest volume
+  > 0.5 min ago", two checks green either side of a real break. Those readings
+  > are four days apart and the conjunction was never observed. XSCW was down.
 
   `A_staged` (anything staged at all) fails from day one; `B_fresh` is
   **warn-capped with no fail arm** until the check's own series supports a

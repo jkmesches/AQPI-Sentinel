@@ -11,12 +11,18 @@ the ends were watched:
     recentfiles/<DIR>   <- nothing
     composite output    <- layer3.composite.<radar>  (LB3, participation)
 
-XSCW had ZERO files staged in the middle one while `layer2.backend.XSCW` read
-pass with "newest volume 0.5 min ago", because LB2 reads the DROPS tree and
-these are different paths. The composite was building a third of its output
-without that radar. The same shape hid the three NEXRAD feeds for eighteen
-days after a K2 reboot: their staging directories held zero files and nothing
-in Sentinel looked at the one directory where that was visible.
+The three NEXRAD feeds hid in the middle one for eighteen days after a K2
+reboot left `ldm` stopped: KBBX/KDAX/KMUX staging directories held zero files
+from 2026-09-17 to ~2026-10-06 while the composite went on publishing from six
+radars instead of nine, and nothing in Sentinel looked at the one directory
+where that was visible.
+
+The XSCW version of this story stood here until 2026-10-12 and was wrong. It
+paired a staging reading from 10-12 with a `layer2.backend.XSCW` pass from
+10-08 and called that a simultaneous conjunction; re-measured, XSCW was simply
+down and every stage said so. The tests below still use XSCW as a fixture
+name, which is harmless — they build their own directories and assert on
+behaviour, not on that radar's history.
 
 What this check must not do, each a mistake already made elsewhere in this
 codebase and each pinned below:

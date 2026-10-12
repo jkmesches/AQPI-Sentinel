@@ -1025,19 +1025,28 @@ class Layer3InputStagingCheck(Check):
         recentfiles/<DIR>   <- THIS CHECK
         composite output    <- layer3.composite.<radar>  (LB3)
 
-    On 2026-10-12 XSCW had zero files staged here while ``layer2.backend.XSCW``
-    read pass with "newest volume 0.5 min ago". Two checks reporting health on
-    either side of a real break, and the composite silently building a third of
-    its output without that radar.
+    The case this ships for is NEXRAD. KBBX/KDAX/KMUX staging directories held
+    zero files from 2026-09-17 to ~2026-10-06 after a K2 reboot left ``ldm``
+    stopped, so the composite ran for eighteen days on six radars instead of
+    nine. Nothing in Sentinel could say so, because nothing looked at the one
+    directory where it was visible, and it was found by eye.
+
+    It is NOT XSCW, which this docstring asserted until 2026-10-12. That
+    argument set a staging reading from 10-12 beside a ``layer2.backend.XSCW``
+    pass from 10-08 and treated the pair as one observation. Re-measured, XSCW
+    was simply down — declared DOWN with obs=0, newest sweep stopped 09:08Z,
+    LB2 failing at 623.7 min — and an empty staging directory is what a down
+    radar looks like from here. A stale PASS is more dangerous than a stale
+    FAIL: a stale fail makes you look at the thing, a stale pass makes you look
+    away from it and invent a cause elsewhere.
 
     The two trees hold different OBJECTS, not just different paths: the dated
     tree holds per-elevation PPI SWEEPS and this one holds assembled VOLUMES.
     So this check's age and LB2's age are not two views of one quantity, and a
     discrepancy between them is structural rather than a fault — do not
-    sanity-check one against the other. See config.COMPOSITE_INPUT_HOST_SUBPATH. The same shape hid the NEXRAD feeds for
-    eighteen days: their staging directories held zero files from 2026-09-17
-    to ~2026-10-06 and nothing in Sentinel could say so, because nothing was
-    looking at the one directory where it was visible.
+    sanity-check one against the other, and do not read "sweeps present,
+    volumes absent" as a located break unless both readings are from the same
+    moment. See config.COMPOSITE_INPUT_HOST_SUBPATH.
 
     ``A_staged``  the directory holds at least one volume. Empty is the
                   headline failure: the composite has nothing to read.

@@ -85,11 +85,12 @@ nothing was looking between arrival and publication.
 
 That gap turned out to have a gap of its own. The composite does not read the
 tree `LB2` watches; it reads a staging directory that something else copies
-into. On 2026-10-12 XSCW was arriving on disk, `LB2` said so, and **nothing was
-staged** — so a third of that day's composites were built without it, with a
-green row on either side of the break. `layer3.input.<radar>` watches that
-directory now, for all nine composite inputs including the three NEXRAD sites,
-which have no other coverage anywhere in Sentinel.
+into. For eighteen days after a K2 reboot in September 2026, the three NEXRAD
+staging directories held **zero files** while the composite went on publishing
+— it ran on six radars instead of nine, and the only place that was visible was
+a directory nothing in Sentinel looked at. `layer3.input.<radar>` watches it
+now, for all nine composite inputs including the three NEXRAD sites, which
+have no other coverage anywhere in Sentinel.
 
 ## 5. What is the difference between fail, error, warn and skip?
 
