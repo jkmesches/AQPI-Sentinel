@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 import httpx
 
 from ..config import HAS_RADARCA
+from ..stages import stage_tier
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 
@@ -59,6 +60,13 @@ EPISODE_MIN_CHECKS = 4
 
 # Checks that never talk to radarca, and so can never be part of an upstream
 # episode. Their failures are ours, and must never be excused by one.
+#
+# This list covers the L0 self-and-network probes. The OTHER population that
+# never talks to radarca is the whole backend tier, and it is excluded by
+# stages.stage_tier() in attach_episode_suppression rather than by being spelled
+# out here — one derivation from the stage each check already declares, instead
+# of a prefix list that has to be edited every time a backend check family is
+# added. The LB3 work added two such families in a week.
 EXEMPT_PREFIXES = ("layer0.net.", "layer0.self.", EPISODE_CHECK_ID)
 
 # check_id -> when it most recently hit an upstream read timeout. In-process
@@ -103,13 +111,35 @@ def attach_episode_suppression(checks) -> int:
     """Point every upstream-facing check's alarm suppression at this one.
 
     Done centrally rather than by editing twenty check classes: membership is
-    a property of "does it call radarca", which is true of everything except
-    the explicitly exempt prefixes. Returns the number wired, so a caller (and
-    the test suite) can assert it is not silently zero.
+    a property of "does it call radarca". Returns the number wired, so a caller
+    (and the test suite) can assert it is not silently zero.
+
+    === The backend tier is exempt, and was not always ===
+
+    This function's premise — "everything except the exempt prefixes calls
+    radarca" — was true when it was written and stopped being true when LB1
+    landed. Until 2026-10-12 every `LB*` check was quietly given
+    `alarm_only_depends_on = [layer0.origin.episode]`, so a radarca slow
+    episode silenced alarms from checks that read K2 and Trinity and owe the
+    web tier nothing.
+
+    That is precisely backwards. The backend tier exists to be the independent
+    witness when radarca is misbehaving, and where the two disagree the
+    disagreement IS the signal — so a radarca episode is the moment those
+    alarms matter most, and it was the moment they went quiet. It also slipped
+    past the test that was meant to catch it: test_backend_checks asserts
+    `depends_on == []`, which stayed true, while this function wired the
+    alarm-only form behind it.
+
+    Keyed on stages.stage_tier() rather than on a prefix list, so a new backend
+    check family is exempt by virtue of declaring an LB stage instead of by
+    somebody remembering to add it here.
     """
     n = 0
     for c in checks:
         if c.id.startswith(EXEMPT_PREFIXES):
+            continue
+        if stage_tier(getattr(c, "stage", "")) == "backend":
             continue
         deps = list(getattr(c, "alarm_only_depends_on", None) or [])
         if EPISODE_CHECK_ID not in deps:

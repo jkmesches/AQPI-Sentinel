@@ -183,6 +183,44 @@ def main() -> int:
           lb1.Layer1BackendProductCheck.stage == "LB1"
           and lb2.Layer2BackendRadarCheck.stage == "LB2")
 
+    # === The assertions above were true while the thing they protect was not ===
+    #
+    # `depends_on == []` held throughout, and until 2026-10-12 every backend
+    # check was nonetheless given `alarm_only_depends_on =
+    # [layer0.origin.episode]` by attach_episode_suppression, whose premise
+    # ("everything except the exempt prefixes calls radarca") was written
+    # before the backend tier existed. So a radarca slow episode silenced
+    # alarms from checks that read K2 and Trinity and owe the web tier nothing.
+    #
+    # That is backwards in the worst possible way: the backend tier exists to
+    # be the independent witness when radarca is misbehaving, and where the two
+    # disagree the disagreement IS the signal — so a radarca episode is exactly
+    # when those alarms matter, and it was exactly when they went quiet.
+    #
+    # Asserted over the REGISTRY rather than over the classes, because the
+    # wiring happens to instances at import time and reading the class
+    # attribute is what let this through for two releases.
+    from backend.registry import CHECKS as _REG                 # noqa: E402
+    from backend.stages import stage_tier as _tier              # noqa: E402
+    _silenced = sorted(
+        c.id for c in _REG.values()
+        if _tier(c.stage) == "backend"
+        and "layer0.origin.episode" in (c.alarm_only_depends_on or [])
+    )
+    check("no backend check can be silenced by a radarca episode",
+          not _silenced, ", ".join(_silenced))
+    _frontend_wired = [
+        c.id for c in _REG.values()
+        if "layer0.origin.episode" in (c.alarm_only_depends_on or [])
+    ]
+    # The other half of the same guarantee: an exemption that accidentally
+    # covered everything would also make this test pass, and would disable
+    # episode suppression wholesale.
+    check("...while the radarca checks are still wired to it",
+          len(_frontend_wired) > 10, f"{len(_frontend_wired)} wired")
+    check("...and every one of those is a frontend-tier check",
+          all(_tier(_REG[i].stage) == "frontend" for i in _frontend_wired))
+
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall backend-check assertions passed")
     return 1 if failures else 0
