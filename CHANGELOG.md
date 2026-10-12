@@ -81,6 +81,44 @@ unknown`.
 
 ### Fixed
 
+- **LB2 read "the UTC day just started" as "nothing is arriving".** A dated
+  radar tree (`XSCR/%Y/%m/%d`) has no directory for a new day until that day's
+  first volume lands, and the check read that one path and failed. Over the 25
+  days to 2026-10-12 on cira-aqpi that produced all three of
+  `layer2.backend.XSCR`'s non-pass runs and 15 of `layer2.backend.fleet`'s 21,
+  every one inside the first ten minutes of a UTC day. The fleet check was the
+  loud one because the absence path published `SILENT` for each affected radar
+  in the same tick, and several radars silent at once is precisely what it is
+  built to notice — one per-radar artifact became a fleet-wide alarm. Found by
+  measuring per-check RATES at 00Z against the rest of the day; the aggregate
+  hourly histogram does not show it, because a genuinely dead radar
+  contributes a flat baseline at every hour that swamps a few hundred
+  rollover events.
+
+  LB2 now resolves across the rollover by looking back one day. This is a
+  look-back and not a grace window, and the difference is the design: a
+  "don't alarm for the first N minutes" rule would blind the check to a radar
+  that dies at 23:55, whereas this can never report an age YOUNGER than
+  reality — today is tried first and only yields when it declares nothing at
+  all, so the fallback is always a real observation time and the silence
+  threshold governs at every instant. It adds no tuning constant and costs no
+  read in the steady state.
+
+  The fallback condition is "today declares nothing", which is broader than
+  "the directory is missing" and deliberately so: `_newest_declared` also
+  raises when a directory exists but holds no parseable filenames, which just
+  after 00Z is the more common shape, and which also covers a producer whose
+  filenames drift out of `RAW_VOLUME_TS_RE`. When NEITHER day resolves the
+  radar really has been absent for over 24 h, so that path still publishes
+  `SILENT` and the fleet still correlates on it — the amplification is cured
+  at its source, not by muting the branch.
+
+  The retry semantics are factored into `checks/helpers.first_resolvable`,
+  shared with the NWM forecast-hour lookup that has the same bug at hour
+  granularity. Deliberately not parameterised by a step unit: each caller
+  builds its own candidate list, because the zero point is what goes wrong in
+  both cases and a shared loop would hide it.
+
 - **`_buckets` counted an errored probe as a failed minute.** Only reachable
   through the new two-level grouping, where `bad` is computed per timestep
   before the reported-status filter applies. A subject whose radarca probe was

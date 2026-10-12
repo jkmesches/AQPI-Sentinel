@@ -556,6 +556,15 @@ PRODUCT_IMAGES_PREFIX: tuple[str, ...] = ("realtime", "product_images")
 #
 # CBAND is absent deliberately — it is caught earlier by _special_trees() via
 # SENTINEL_SSCB_ROOT, which already points at its own dated tree on trinity.
+# Dated directory trees, per radar. A consequence worth knowing before adding
+# one: there is no directory for a new UTC day until that day's first file
+# lands, so a check that reads only today's path conflates "the day just
+# started" with "nothing is arriving". Measured over the 25 days to
+# 2026-10-12, that produced all three of layer2.backend.XSCR's non-pass runs
+# and 15 of layer2.backend.fleet's 21, every one inside the first ten minutes
+# of a UTC day. LB2 resolves across the rollover by looking back one day --
+# see the comment in layer2_backend_radar.run() for why that is a look-back
+# and not a grace window.
 RADAR_DATED_TREE: dict[str, str] = {
     "XEBY": "EBAY/%Y/%m/%d",
     "XSCR": "XSCR/%Y/%m/%d",
