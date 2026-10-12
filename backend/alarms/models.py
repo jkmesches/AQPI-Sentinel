@@ -5,6 +5,7 @@ The YAML loader (:func:`load_config`) returns an :class:`AlertsConfig` with
 happens here so the rest of the system can trust the shapes.
 """
 from __future__ import annotations
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,8 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .parse import parse_duration
+
+log = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------
@@ -89,7 +92,19 @@ class Route(BaseModel):
     match: dict[str, str] = Field(default_factory=dict)
     when: Condition | None = None
     policy: str
-    severity_floor: str | None = None                 # "warn" | "critical"
+
+    # Raises an alarm's severity to AT LEAST this, via _max_sev. It does not
+    # filter and never suppresses a notification — see alarms/router.py, and
+    # note that push.py has its own `severity_floor` on per-device routing
+    # which DOES filter. That collision is why this one is not called
+    # `severity_floor` any more.
+    severity_at_least: str | None = None              # "warn" | "critical"
+    # Deprecated spelling of the field above. Still honoured, because an
+    # alerts.yaml that predates the rename lives on each deployment and this
+    # model ignores unknown keys — so a silent rename would have dropped L0's
+    # setting with nothing to show for it.
+    severity_floor: str | None = None
+
     repeat_interval: str | None = None
     group_by: list[str] = Field(default_factory=list)
 
@@ -119,6 +134,30 @@ class Route(BaseModel):
             self.repeat_interval_s = parse_duration(self.repeat_interval)
         if self.hold_down:
             self.hold_down_s = parse_duration(self.hold_down)
+        return self
+
+    @model_validator(mode="after")
+    def _migrate_severity_floor(self):
+        """Accept the old key, prefer the new one, and say so out loud.
+
+        Both set: the new name wins and the mismatch is reported, rather than
+        picking one silently. Only the old one set: it is honoured and logged
+        once per load, so an operator finds out from a startup line instead of
+        from a route that stopped behaving.
+        """
+        if self.severity_floor and not self.severity_at_least:
+            self.severity_at_least = self.severity_floor
+            log.warning(
+                "alerts.yaml: route %s uses deprecated `severity_floor`; "
+                "rename it to `severity_at_least` (same behaviour -- it "
+                "raises severity to at least this value and does not filter)",
+                self.match or self.policy)
+        elif self.severity_floor and self.severity_at_least:
+            log.warning(
+                "alerts.yaml: route %s sets both `severity_at_least` (%s) and "
+                "deprecated `severity_floor` (%s); using %s",
+                self.match or self.policy, self.severity_at_least,
+                self.severity_floor, self.severity_at_least)
         return self
 
 

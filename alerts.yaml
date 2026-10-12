@@ -66,7 +66,11 @@ routes:
   # averaging 44 seconds, and every one of those would have hard-paged. Two
   # minutes clears the flaps with the least delay that does.
   - match: {stage: L0}
-    severity_floor: critical
+    # Raises severity to critical at open; it does NOT mean "only page once
+    # critical". Nothing on the notification path filters on severity, so this
+    # route pages immediately because hard-page's first step has delay 0m and
+    # the hold-down below is 2m. See alarms/router.py.
+    severity_at_least: critical
     policy: hard-page
     hold_down: 2m
     repeat_interval: 10m
