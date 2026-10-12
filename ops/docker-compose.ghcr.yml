@@ -92,7 +92,7 @@ services:
       # SENTINEL_BACKEND_ROOT, and v0.8.0 assumed it was — see
       # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
       # do not register.
-      SENTINEL_RECENTFILES_ROOT: ${SENTINEL_RECENTFILES_ROOT:-}
+      SENTINEL_RECENTFILES_DIR: ${SENTINEL_RECENTFILES_DIR:-}
     volumes:
       # === Load-bearing: these accept a HOST PATH, not just a volume name ===
       #

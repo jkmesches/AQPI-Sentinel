@@ -1084,11 +1084,11 @@ class Layer3InputStagingCheck(Check):
         self.alarm_only_depends_on = [lb2] if lb2 in CHECKS else []
 
     def _path(self) -> str:
-        # recentfiles_root IS the recentfiles directory — only the per-radar
+        # recentfiles_dir IS the recentfiles directory — only the per-radar
         # name is appended. See config.COMPOSITE_INPUT_HOST_SUBPATH for why
         # this no longer joins a subpath, and config.COMPOSITE_INPUT_DIR for
         # why the name is a mapping (CBAND stages as SSCB).
-        return os.path.join(SETTINGS.recentfiles_root,
+        return os.path.join(SETTINGS.recentfiles_dir,
                             COMPOSITE_INPUT_DIR[self.radar_id])
 
     async def run(self, ctx) -> CheckResult:
@@ -1132,17 +1132,19 @@ class Layer3InputStagingCheck(Check):
             # assertion: a mount can come up after the process does, and
             # refusing to boot on a slow NFS mount would trade this for a
             # worse failure.
-            deep = os.path.join(SETTINGS.recentfiles_root or "",
+            deep = os.path.join(SETTINGS.recentfiles_dir or "",
                                 COMPOSITE_INPUT_HOST_SUBPATH,
                                 COMPOSITE_INPUT_DIR[self.radar_id])
             if await asyncio.to_thread(os.path.isdir, deep):
                 return CheckResult(
                     check_id=self.id, target=self.target, stage=self.stage,
                     status="error", started_at=t0, finished_at=utcnow(),
-                    summary=(f"SENTINEL_RECENTFILES_ROOT points one level too "
+                    summary=(f"SENTINEL_RECENTFILES_DIR points one level too "
                              f"shallow: {path} does not exist but {deep} does. "
                              f"It must name the recentfiles directory itself, "
-                             f"not the project root above it."),
+                             f"not the project root above it — which is also "
+                             f"what the old SENTINEL_RECENTFILES_ROOT meant, "
+                             f"so a v0.8.2 value lands here."),
                     payload={**payload, "absent": True, "misconfigured_root": deep},
                     metrics={"fs_timeout": 0.0},
                 )
@@ -1328,6 +1330,6 @@ if SETTINGS.backend_root:
     # Registered AFTER layer2_backend_radar (see checks/__init__._ALWAYS) so
     # each instance can read the registry to find out whether it has an LB2
     # check to gate its alarm on.
-    if SETTINGS.recentfiles_root:
+    if SETTINGS.recentfiles_dir:
         for _rid in sorted(COMPOSITE_INPUT_DIR):
             register(Layer3InputStagingCheck(radar_id=_rid))

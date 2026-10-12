@@ -37,7 +37,7 @@ os.environ.setdefault("SENTINEL_SSCB_ROOT", "/sscb")
 # Its own root — the layer3.input.* checks do not register without it, and
 # deliberately do not fall back to the backend root. See
 # config.COMPOSITE_INPUT_TREE for what that fallback cost.
-os.environ.setdefault("SENTINEL_RECENTFILES_ROOT", "/nonexistent-for-tests/the secondary archive")
+os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/the secondary archive")
 
 # checks first: backend.registry imports backend.checks.base, and every check
 # module imports backend.registry back. Importing registry first catches it

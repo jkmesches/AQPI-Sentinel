@@ -117,7 +117,7 @@ services:
       # SENTINEL_BACKEND_ROOT, and v0.8.0 assumed it was — see
       # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
       # do not register.
-      SENTINEL_RECENTFILES_ROOT: ${SENTINEL_RECENTFILES_ROOT:-}
+      SENTINEL_RECENTFILES_DIR: ${SENTINEL_RECENTFILES_DIR:-}
     volumes:
       # Both accept either a named volume (bare name, the dev default) or a
       # host path (leading slash → bind mount). Production points these at the
