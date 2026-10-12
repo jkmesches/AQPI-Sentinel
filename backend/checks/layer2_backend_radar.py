@@ -543,11 +543,16 @@ class Layer2BackendRadarCheck(Check):
         #
         # The obvious repair is "newest sweep", and it is wrong for the same
         # reason the shared filename pattern was: CBAND comes off a different
-        # tree from a different producer, its names carry no elevation and no
-        # sequence, and nobody has measured what one of its files contains.
-        # FLOW on xqpi is likewise unmeasured. Naming them all "sweep" would
-        # trade an inaccuracy about five radars for one about two, which is
-        # not a fix.
+        # tree from a different producer. Measured 2026-10-12 — 323 entries in
+        # a day directory, a single uniform shape `AQPI.SSCB_<date>_<time>.nc`,
+        # and ZERO names carrying a float field: no elevation, no sequence.
+        # Its cadence of one file per ~3.5 min is consistent with one file
+        # being a whole volume, but that is INFERRED FROM CADENCE and not read
+        # from the name, so it stays an inference. [M]
+        #
+        # FLOW on xqpi is unmeasured entirely. Naming them all "sweep" would
+        # trade an inaccuracy about five radars for one about two, on the one
+        # radar whose filenames describe no sweep at all.
         #
         # So: the quantity this check actually has is the newest observation
         # time any filename in the directory DECLARES — see _newest_declared,
