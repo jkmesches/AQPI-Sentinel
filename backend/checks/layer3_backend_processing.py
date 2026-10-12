@@ -10,10 +10,22 @@ watching, and on 2026-10-05 that gap cost twelve hours:
   target removed the false alarms and also removed the only thing watching the
   producer at all. This module puts that back, at a severity that matches what
   it means.
-* The composite driver selects its inputs with ``ls -1rt | tail -1`` and
-  applies no staleness guard to them, so a radar can age out of the composite
-  silently. XEBY did exactly that between 16:16Z and 16:44Z while we were
-  looking at it. Nothing in the system said so.
+* The composite driver selects its inputs with ``ls -1rt | tail -1``, so a
+  radar can age out of the composite silently. XEBY did exactly that between
+  16:16Z and 16:44Z while we were looking at it. Nothing in the system said so.
+
+  CORRECTION, 2026-10-09. An earlier version of this paragraph said the
+  composite "applies no staleness guard to its inputs". It does: Renzo Bechini,
+  who wrote it, reports a 15-minute delay check INSIDE the composite program —
+  downstream of the ``ls -1rt`` selection in the driver, which is why reading
+  the driver alone says otherwise. Files exceeding it are discarded and omitted
+  from the output's ``RadarNamesInComposite`` attribute. Confirmed by
+  measurement on 2026-10-12: XSWR was excluded from four consecutive composites
+  on 2026-10-08 and readmitted once producing again, so no published composite
+  was built from the 148-minute-old scan we had reported. The consequence for
+  THIS module is in ``Layer3CompositeParticipationCheck``: a run-log block
+  proves the file was READ, which is upstream of that discard, and is therefore
+  weaker evidence than it was written to be.
 
 Two checks, one stage:
 
@@ -58,18 +70,21 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
                       COMPOSITE_CONTRIB_OVERRIDE_S, COMPOSITE_CONTRIB_WARN_S,
-                      COMPOSITE_EXPECTED_RADARS, COMPOSITE_RECEIPT,
+                      COMPOSITE_EXPECTED_RADARS, COMPOSITE_INPUT_DIR,
+                      COMPOSITE_INPUT_RETENTION_S, COMPOSITE_INPUT_STALE_WARN_S,
+                      COMPOSITE_INPUT_TREE, COMPOSITE_INPUT_TS_RE,
+                      COMPOSITE_RECEIPT,
                       COMPOSITE_RECEIPT_SETTLE_S, COMPOSITE_RUN_LOG_DIR,
                       DROPS_SILENT_INFO_S, DROPS_TREE, MAX_RUN_LOG_ENTRIES,
                       RADAR_FOLDER, SETTINGS)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
-from ..registry import register
+from ..registry import CHECKS, register
 from .base import Check, CheckResult, utcnow
 from .helpers import headroom, worst_of
 
@@ -400,8 +415,32 @@ def _read_run_log_blocking(dirpath: str) -> dict[str, Any]:
     }
 
 
-def _contrib_bands(radar_id: str) -> tuple[float, float]:
-    """(warn_s, fail_s) for a contribution age. ONE UNIFORM PAIR.
+def _contrib_bands(radar_id: str) -> tuple[float, float] | None:
+    """(warn_s, fail_s) for a contribution age, or None when there is no band.
+
+    None for a radar this profile does not monitor for ARRIVAL — which, since
+    2026-10-12, means the three NEXRAD sites. They belong in the expected set
+    because they are in the composite at every timestep, but their contribution
+    ages are a different population: measured over 720 composites on
+    2026-10-11, X-band p50 ran 140-236 s while NEXRAD p50 ran 597-717 s, and
+    KMUX reached p95 = 952 s. Applying the uniform band to them would fire on
+    most of their healthy runs. [M]
+
+    That is not a number to be adjusted, it is a band of the wrong SHAPE: the
+    difference is longer volume scans delivered over LDM, i.e. the delivery
+    mechanism, not the radar's luck. A band per radar CLASS would be defensible
+    where the per-radar band in the docstring below is not — one describes the
+    transport, the other is fitted to each radar's own history and goes blind
+    exactly where that history is already bad. It is not being fitted yet
+    because the quantity itself is unsettled; see the note on `age_disagrees`
+    and config.COMPOSITE_CONTRIB_FAIL_S.
+
+    So those radars get A_included judged and their contribution age RECORDED,
+    with no verdict on it. That is the same presence-only treatment the receipt
+    fallback already gets for the same reason: a band is only valid for the
+    basis it was fitted to.
+
+    ONE UNIFORM PAIR for everything else.
 
     This was derived per radar from that radar's own silence limit. Measured
     over 1,440 composite runs that band is blind on XSCR — max 403 s against a
@@ -414,6 +453,8 @@ def _contrib_bands(radar_id: str) -> tuple[float, float]:
     Thresholds are read through the admin store first so a retroactive change
     applies, then fall back to the config constants.
     """
+    if radar_id not in RADAR_FOLDER:
+        return None
     ov = COMPOSITE_CONTRIB_OVERRIDE_S.get(radar_id)
     warn_s = _thresholds.get_global(
         "composite_contrib_warn_s",
@@ -519,8 +560,13 @@ class Layer3CompositeParticipationCheck(Check):
             payload["run_log"] = parsed["run_log"]
         payload["receipt_age_s"] = round(t0.timestamp() - parsed["receipt_mtime"], 1)
 
-        warn_s, fail_s = _contrib_bands(self.radar_id)
-        payload["contrib_warn_s"], payload["contrib_fail_s"] = warn_s, fail_s
+        bands = _contrib_bands(self.radar_id)
+        # None stays None in the payload rather than being filled with the
+        # uniform pair: the reprocess engine re-verdicts from these, and
+        # writing a band this radar was never judged against would let a
+        # retroactive pass invent a verdict the live check declined to give.
+        payload["contrib_warn_s"] = bands[0] if bands else None
+        payload["contrib_fail_s"] = bands[1] if bands else None
 
         # The run log proves INGESTION (the composite opened the file and read
         # its dimensions); the receipt only shows what `ls | tail -1` selected,
@@ -605,10 +651,21 @@ class Layer3CompositeParticipationCheck(Check):
                           f"{verb}, contribution age not reported")
 
         metrics["contrib_age_s"] = float(age_s)
-        # Same normalized 0..1 sparkline axis as LB1/LB2. See helpers.headroom.
-        metrics["headroom"] = headroom(age_s, fail_s)
         payload["contrib_path"] = contrib.get("volume_path") or contrib.get("path")
         payload["age_s"] = round(age_s, 1)
+
+        if bands is None:
+            # Recorded, not judged. See _contrib_bands. The age is in the
+            # payload and the metric so the series accumulates toward a
+            # per-class band; what is withheld is the verdict, because we have
+            # no band this radar's population was fitted to.
+            payload["age_basis_banded"] = False
+            return _final(self, t0, sub, payload, metrics,
+                          f"{verb}, contribution {age_s / 60:.1f} min old"
+                          f"  (no band for this radar class)")
+        warn_s, fail_s = bands
+        # Same normalized 0..1 sparkline axis as LB1/LB2. See helpers.headroom.
+        metrics["headroom"] = headroom(age_s, fail_s)
 
         if age_s <= warn_s:
             sub["B_fresh"] = "pass"
@@ -742,6 +799,230 @@ class Layer3DropsProducerCheck(Check):
         return _final(self, t0, sub, payload, metrics, summary)
 
 
+# --------------------------------------------------------------------------
+# Composite INPUT staging
+# --------------------------------------------------------------------------
+
+def _scan_staging_blocking(path: str) -> dict[str, Any]:
+    """Blocking. What is staged for one radar, in ONE directory read.
+
+    Returns entry counts and the newest DECLARED observation time, plus the
+    mtime of the file that declared it. Deliberately not a stat per file: the
+    standing constraint on these hosts is to add no load, and a thirty-file
+    stat storm per radar per tick would be the most expensive check in the
+    suite for information the filenames already carry. Exactly one stat is
+    taken, on the single newest-declared file, because the skew between what a
+    file DECLARES and when it was WRITTEN is the only way to see a producer
+    replaying or backfilling stale scans — and that is a distinct failure from
+    anything an age alone can show.
+
+    Dot-prefixed entries are skipped before matching, as in
+    layer2_backend_radar._newest_declared: a writer's temporary files embed a
+    real parseable timestamp and only the leading dot distinguishes them.
+    """
+    pat = re.compile(COMPOSITE_INPUT_TS_RE)
+    entries = 0
+    parsed = 0
+    newest = 0.0
+    newest_name = ""
+    with os.scandir(path) as it:
+        for e in it:
+            if e.name.startswith("."):
+                continue
+            entries += 1
+            m = pat.search(e.name)
+            if not m:
+                continue
+            try:
+                dt = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            parsed += 1
+            ts = dt.replace(tzinfo=timezone.utc).timestamp()
+            if ts > newest:
+                newest = ts
+                newest_name = e.name
+    out: dict[str, Any] = {
+        "entries": entries, "parsed": parsed,
+        "newest": newest or None, "newest_name": newest_name or None,
+        "newest_mtime": None,
+    }
+    if newest_name:
+        try:
+            out["newest_mtime"] = os.stat(os.path.join(path, newest_name)).st_mtime
+        except OSError:
+            # Pruned between the scan and the stat, which is normal in a tree
+            # with an hour of retention. The skew is an extra, never the
+            # verdict, so losing it costs nothing.
+            pass
+    return out
+
+
+class Layer3InputStagingCheck(Check):
+    """Is anything staged for this radar where the composite will look?
+
+    The gap this closes, and why neither neighbour could see it:
+
+        DROPS dated tree    <- layer2.backend.<radar>    (LB2)
+        recentfiles/<DIR>   <- THIS CHECK
+        composite output    <- layer3.composite.<radar>  (LB3)
+
+    On 2026-10-12 XSCW had zero files staged here while ``layer2.backend.XSCW``
+    read pass with "newest volume 0.5 min ago", because LB2 reads the DROPS
+    tree and these are different paths. Two checks reporting health on either
+    side of a real break, and the composite silently building a third of its
+    output without that radar. The same shape hid the NEXRAD feeds for
+    eighteen days: their staging directories held zero files from 2026-09-17
+    to ~2026-10-06 and nothing in Sentinel could say so, because nothing was
+    looking at the one directory where it was visible.
+
+    ``A_staged``  the directory holds at least one volume. Empty is the
+                  headline failure: the composite has nothing to read.
+    ``B_fresh``   how old the newest staged observation is. WARN-CAPPED, and
+                  will stay that way until this check has produced its own
+                  distribution — see config.COMPOSITE_INPUT_STALE_WARN_S for
+                  why a band is not being fitted to one afternoon's sample.
+
+    === Three refusals, each repeating a mistake already made in this file ===
+
+    1. A directory with entries that none of our patterns match is an ERROR
+       naming OUR pattern, never "nothing staged". Reporting our blindness as
+       the subject's outage is what rendered a CBAND directory holding 295
+       current files as "no data directory for the current UTC day".
+
+    2. Empty is a TERMINAL state, not an age. This tree retains about an hour,
+       so once staging stops the evidence ages out and the check cannot tell
+       "stopped 70 minutes ago" from "stopped three days ago". The summary says
+       nothing is staged; it must never imply it knows for how long.
+
+    3. The alarm is gated on LB2 via ``alarm_only_depends_on``, not
+       ``depends_on``. XSCV is down, so its staging directory is CORRECTLY
+       empty, and a check that pages for that is a restatement of
+       ``layer2.radar.XSCV`` that buries the one case we care about.
+       ``depends_on`` would be wrong in the other direction: it demotes the
+       result to skip, discarding an observation we actually made. The
+       conjunction that matters is LB2 PASS plus staging EMPTY, and keeping
+       the fail recorded while suppressing the page is exactly what the
+       alarm-only form is for.
+    """
+    stage = "LB3"
+    cadence_s = 120
+
+    def __init__(self, radar_id: str):
+        self.radar_id = radar_id
+        self.id = f"layer3.input.{radar_id}"
+        self.target = radar_id
+        self.source_tag, self.source_label = BACKEND_SOURCE
+        # Only when that check exists. The three NEXRAD sites have no DROPS
+        # tree and no LB2, and are watched here or nowhere — read from the
+        # registry rather than re-deriving LB2's own registration gate, which
+        # would be a second place to keep in step.
+        lb2 = f"layer2.backend.{radar_id}"
+        self.alarm_only_depends_on = [lb2] if lb2 in CHECKS else []
+
+    def _path(self) -> str:
+        return os.path.join(SETTINGS.backend_root, COMPOSITE_INPUT_TREE,
+                            COMPOSITE_INPUT_DIR[self.radar_id])
+
+    async def run(self, ctx) -> CheckResult:
+        t0 = utcnow()
+        sub: dict[str, str] = {}
+        metrics: dict[str, float] = {}
+        path = self._path()
+        payload: dict[str, Any] = {
+            "path": path, "source": "backend-filesystem",
+            "retention_s": COMPOSITE_INPUT_RETENTION_S,
+        }
+
+        try:
+            got = await asyncio.wait_for(
+                asyncio.to_thread(_scan_staging_blocking, path), FS_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="error", started_at=t0, finished_at=utcnow(),
+                summary=f"NFS read timed out after {FS_TIMEOUT_S:g}s — mount may be hung",
+                payload=payload, metrics={"fs_timeout": 1.0},
+            )
+        except FileNotFoundError:
+            # The staging directory itself, not its contents. All nine exist
+            # on AQPI; their absence is a statement about the mount or about
+            # Sounak's scripts, not about this radar.
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="error", started_at=t0, finished_at=utcnow(),
+                summary="staging directory does not exist — mount or upstream layout changed",
+                payload={**payload, "absent": True}, metrics={"fs_timeout": 0.0},
+            )
+        except OSError as e:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="error", started_at=t0, finished_at=utcnow(),
+                summary=f"staging read failed: {humanize_error(e)}",
+                payload=payload, metrics={"fs_timeout": 0.0},
+            )
+
+        metrics["fs_timeout"] = 0.0
+        metrics["staged_files"] = float(got["parsed"])
+        payload["staged_entries"] = got["entries"]
+        payload["staged_files"] = got["parsed"]
+
+        if got["entries"] and not got["parsed"]:
+            # See refusal 1. Our pattern, our problem — and saying so names the
+            # thing to go and look at instead of sending someone to a radar
+            # that is fine.
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="error", started_at=t0, finished_at=utcnow(),
+                summary=(f"{got['entries']} staged file(s), none matching "
+                         f"Sentinel's filename pattern — the pattern is stale, "
+                         f"not the radar"),
+                payload={**payload, "unparseable": True,
+                         "pattern": COMPOSITE_INPUT_TS_RE},
+                metrics=metrics,
+            )
+
+        if not got["parsed"]:
+            sub["A_staged"] = "fail"
+            # See refusal 2: no duration, because this tree cannot support one.
+            return _final(self, t0, sub, payload, metrics,
+                          "NOTHING STAGED — the composite has no input for "
+                          "this radar")
+
+        sub["A_staged"] = "pass"
+        age_s = t0.timestamp() - float(got["newest"])
+        warn_s = float(_thresholds.get_global("composite_input_stale_warn_s",
+                                              COMPOSITE_INPUT_STALE_WARN_S))
+        metrics["age_s"] = float(age_s)
+        metrics["headroom"] = headroom(age_s, warn_s)
+        payload["age_s"] = round(age_s, 1)
+        payload["stale_warn_s"] = warn_s
+        payload["newest_name"] = got["newest_name"]
+        payload["newest_declared"] = datetime.fromtimestamp(
+            float(got["newest"]), timezone.utc).isoformat()
+
+        # Declared-versus-written skew. RECORDED, never judged — this check has
+        # no characterised distribution for it yet. It is here because it is
+        # the only quantity that can distinguish a producer that has stalled
+        # from one that is replaying old scans into a fresh file, and because
+        # retention bounds a file's MTIME while this tree is read by its
+        # DECLARED time. Conflating those two is what made a 22.8 h
+        # contribution age look impossible when it was merely unexplained.
+        if got["newest_mtime"] is not None:
+            skew = float(got["newest_mtime"]) - float(got["newest"])
+            payload["staged_skew_s"] = round(skew, 1)
+            metrics["staged_skew_s"] = skew
+
+        if age_s > warn_s:
+            sub["B_fresh"] = "warn"
+            summary = (f"STAGING STALE — newest staged volume "
+                       f"{age_s / 60:.1f} min old (warn at {warn_s / 60:.0f} min)")
+        else:
+            sub["B_fresh"] = "pass"
+            summary = (f"{got['parsed']} staged, newest {age_s / 60:.1f} min old")
+        return _final(self, t0, sub, payload, metrics, summary)
+
+
 def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,
            summary: str) -> CheckResult:
     payload["sub_status"] = sub
@@ -767,3 +1048,9 @@ if SETTINGS.backend_root:
     # a profile-name comparison.
     if DROPS_TREE:
         register(Layer3DropsProducerCheck())
+    # Nine on AQPI, none on xqpi — the table says so rather than the profile
+    # name. Registered AFTER layer2_backend_radar (see checks/__init__._ALWAYS)
+    # so each instance can read the registry to find out whether it has an LB2
+    # check to gate its alarm on.
+    for _rid in sorted(COMPOSITE_INPUT_DIR):
+        register(Layer3InputStagingCheck(radar_id=_rid))

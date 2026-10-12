@@ -104,6 +104,12 @@ def pretty_check_label(check_id: str | None, target: str = "") -> str:
     # watched and never asserts a verdict, or it reads as a false statement on
     # a failing row. See the matching comment in format.ts.
     if cid.startswith("layer3.composite."):     return f"{t or cid} — composite input"
+    # "staged", not "staging" or "input" — the aspect is whether this radar's
+    # volumes are STAGED where the composite will look, and the word has to
+    # distinguish it from the composite-input row directly above it in the same
+    # radar group. Those two watch adjacent stages and a reader has to be able
+    # to tell them apart at a glance.
+    if cid.startswith("layer3.input."):         return f"{t or cid} — staged for composite"
     # QPE is what the script produces; DROPS is only where it lands.
     if cid == "layer3.backend.drops":            return "QPE producer"
     if cid.startswith("layer3."):               return f"Overlay reconcile — {_product(t)}" if t else "Overlay reconcile"

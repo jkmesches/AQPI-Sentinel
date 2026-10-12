@@ -10,7 +10,7 @@
 		stageLabel, prettyCheckLabel, productLabel,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
 		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck,
-		arrivalRowOf, BACKEND_FLEET_CHECK_ID } from '$lib/format';
+		arrivalRowOf, radarRowRank, BACKEND_FLEET_CHECK_ID } from '$lib/format';
 	import { groupByTarget, worstOf, isAlerting } from '$lib/grouping';
 	import GroupRow from '$lib/components/GroupRow.svelte';
 	import { api, type CheckMeta } from '$lib/api';
@@ -37,13 +37,10 @@
 	// explains a missing composite contribution (LB3), which in turn explains
 	// what radarca reports (L2). Reading the consequence before the cause is
 	// how an operator ends up investigating the wrong thing.
-	const RADAR_STAGE_ORDER = ['LB2', 'LB3', 'L2'];
+	// Ordering lives in $lib so it is testable and so the two LB3 families stay
+	// in pipeline order rather than alphabetical — see radarRowRank.
 	const radarGroups = $derived(
-		groupByTarget(
-			radarRows.slice().sort(
-				(a, b) => RADAR_STAGE_ORDER.indexOf(a.stage) - RADAR_STAGE_ORDER.indexOf(b.stage)
-			)
-		)
+		groupByTarget(radarRows.slice().sort((a, b) => radarRowRank(a) - radarRowRank(b)))
 	);
 
 	// Open state. Default is "open if alerting", with explicit operator choices

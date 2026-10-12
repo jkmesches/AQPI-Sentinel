@@ -63,7 +63,7 @@ the imagery look sane":
 | LB1 | Backend Products | Is each product actually being produced — read from K2 directly, not via radarca? |
 | L2 | Radar Scans | Is each radar actually emitting scans, according to radarca? |
 | LB2 | Backend Radar Arrival | Is each radar's data landing on disk right now — read from the backend trees directly? |
-| LB3 | Backend Processing | Is each radar reaching the composite, and is the QPE producer still running? |
+| LB3 | Backend Processing | Is each radar staged where the composite reads, is it reaching the composite, and is the QPE producer still running? |
 | L3 | Map Overlays | Do overlays render in a real browser? |
 | L4 | Image Quality | Does the imagery itself look plausible? |
 
@@ -82,6 +82,14 @@ describing reality.
 product is quietly computed from fewer radars than it claims. On 2026-10-05 a
 radar aged out of the AQPI composite and nothing anywhere said so, because
 nothing was looking between arrival and publication.
+
+That gap turned out to have a gap of its own. The composite does not read the
+tree `LB2` watches; it reads a staging directory that something else copies
+into. On 2026-10-12 XSCW was arriving on disk, `LB2` said so, and **nothing was
+staged** — so a third of that day's composites were built without it, with a
+green row on either side of the break. `layer3.input.<radar>` watches that
+directory now, for all nine composite inputs including the three NEXRAD sites,
+which have no other coverage anywhere in Sentinel.
 
 ## 5. What is the difference between fail, error, warn and skip?
 

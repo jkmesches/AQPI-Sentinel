@@ -422,6 +422,18 @@ COMPOSITE_RUN_LOG_DIR = "PRODUCTS/Composite_QPE/log_SRI"
 # third profile states its own answer instead of inheriting one. [V]
 DROPS_TREE = ""
 
+# Whether this profile stages composite input the way AQPI does is [U]. AQPI's
+# `recentfiles` is written by Sounak's scripts on K2 and is the composite's
+# only input; nothing has looked for an equivalent under trinity, and FLOW's
+# composite may well read its volumes directly.
+#
+# Empty, which registers NO staging checks here — stated rather than inherited,
+# same as DROPS_TREE above. The alternative is worse than a gap: a check
+# pointed at a directory that does not exist reports "nothing staged" forever,
+# which is a confident claim about a pipeline stage we have not confirmed
+# exists. If it turns out to exist, the only change needed is this table.
+COMPOSITE_INPUT_DIR: dict[str, str] = {}
+
 # The dated tree is partitioned by UTC date, not local: the first file of each
 # day directory lands at 00:00:1x UTC (verified across 09/26, 09/30, 10/02).
 # _radar_path formats in UTC, which is therefore correct — getting this wrong

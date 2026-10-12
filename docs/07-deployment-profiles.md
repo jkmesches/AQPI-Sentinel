@@ -180,7 +180,52 @@ LB2 says a radar's data is landing. LB1 says a product is publishing on time.
 Both can be green while the product is quietly computed from fewer radars than
 it claims, and until 2026-10-05 nothing in Sentinel looked in between.
 
-Two checks live there, and they are deliberately routed differently.
+Three checks live there, and they are deliberately routed differently.
+
+### Composite input staging (one per staging directory, paging)
+
+`layer3.input.<radar>` reads `COMPOSITE_INPUT_TREE`
+(`PRODUCTS/Radar_processed/recentfiles`), which Renzo Bechini confirms is the
+only place the composite reads its radar volumes from. Nine directories, one
+per input: the five X-bands, SSCB, and the three NEXRAD sites.
+
+It exists because the two checks either side of it can both be green across a
+real break. Measured 2026-10-12: XSCW had **zero** files staged here while
+`layer2.backend.XSCW` read pass with "newest volume 0.5 min ago" — LB2 reads
+the DROPS tree, and these are different paths. The composite was building a
+third of its output without that radar. The same shape hid the three NEXRAD
+feeds for eighteen days after a K2 reboot left `ldm` stopped.
+
+| Sub-check | Means |
+|---|---|
+| `A_staged` | at least one volume is staged. Empty is the headline failure — the composite has nothing to read |
+| `B_fresh` | how old the newest staged observation is. **Warn-capped**, with no fail arm, until this check's own series supports a band |
+
+Three properties worth knowing before changing it:
+
+- **An unreadable directory is OUR fault, not the radar's.** Entries that match
+  no pattern produce an `error` naming the pattern, never "nothing staged".
+  Reporting our blindness as the subject's outage is what once rendered a CBAND
+  directory holding 295 current files as "no data directory".
+- **The alarm is gated on LB2, the observation is not.** XSCV's staging
+  directory is correctly empty because the radar is down, so the check carries
+  `alarm_only_depends_on = [layer2.backend.<radar>]` — the fail stays recorded
+  and true, and only the page is suppressed. `depends_on` would demote the
+  result to `skip` and throw away a reading we took. The conjunction that
+  matters is LB2 **pass** plus staging **empty**. The three NEXRAD sites have
+  no LB2 check and so gate on nothing.
+- **This tree retains about an hour.** Once staging stops the evidence ages
+  out, so "empty" is a terminal state and not an age — the check cannot tell
+  "stopped 70 minutes ago" from "stopped three days ago", and says nothing that
+  implies it can. A look-back past the retention would find nothing and must
+  never be read as staleness.
+
+It also records `staged_skew_s`, the gap between what the newest file
+**declares** and when it was **written**. Not judged — recorded, because it is
+the only quantity that separates a producer that has stalled from one replaying
+old scans into a fresh file, and because conflating a file's mtime with its
+declared observation time has now cost three wrong conclusions in this project.
+
 
 ### Composite participation (one per radar, paging)
 

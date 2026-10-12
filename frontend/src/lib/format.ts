@@ -209,6 +209,7 @@ export function sparklineMetric(checkId: string): string | null {
 	// so it shares the fixed 0..1 axis with everything else; the DROPS producer
 	// does too, against its informational limit.
 	if (checkId.startsWith('layer3.composite.')) return 'headroom';
+	if (checkId.startsWith('layer3.input.'))     return 'headroom';
 	if (checkId === 'layer3.backend.drops')      return 'headroom';
 	return null;
 }
@@ -235,6 +236,31 @@ export function arrivalRowOf<T extends { stage: string }>(rows: readonly T[]): T
 		if (hit) return hit;
 	}
 	return rows[0] ?? null;
+}
+
+/**
+ * Where a radar's row sits in the pipeline, for ordering its expander.
+ *
+ * The group reads top to bottom as the data moves: it ARRIVES on disk (LB2),
+ * is STAGED where the composite will look (layer3.input), the composite USES
+ * it (layer3.composite), and radarca reports on it last (L2). Sorting by stage
+ * alone leaves the two LB3 families in whatever order the API returned them,
+ * which is alphabetical — putting "composite" above "staged" and reversing the
+ * only two rows whose order carries meaning, because the second is downstream
+ * of the first and a reader diagnosing a gap works down the chain.
+ *
+ * Returns a rank; unknown stages sort last rather than first, so a stage added
+ * without being placed here is visible at the bottom instead of silently
+ * displacing the arrival row at the top.
+ */
+const RADAR_STAGE_ORDER = ['LB2', 'LB3', 'L2'];
+const LB3_FAMILY_ORDER = ['layer3.input.', 'layer3.composite.'];
+
+export function radarRowRank(row: { stage: string; check_id: string }): number {
+	const stage = RADAR_STAGE_ORDER.indexOf(row.stage);
+	const base = (stage < 0 ? RADAR_STAGE_ORDER.length : stage) * 10;
+	const fam = LB3_FAMILY_ORDER.findIndex((p) => row.check_id.startsWith(p));
+	return base + (fam < 0 ? LB3_FAMILY_ORDER.length : fam);
 }
 
 /**
@@ -479,6 +505,12 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	// replaced. The verdict belongs in the summary, where it changes with the
 	// result.
 	if (checkId.startsWith('layer3.composite.'))     return `${target} · composite input`;
+	// Also before the generic branch, and distinct from the line above it: the
+	// two sit next to each other in the same radar group and watch adjacent
+	// stages — what is STAGED for the composite to read, and what the
+	// composite then used. A reader has to tell them apart at a glance, so
+	// they do not share a noun.
+	if (checkId.startsWith('layer3.input.'))         return `${target} · staged for composite`;
 	// "QPE producer", not "DROPS producer": DROPS is the directory name and
 	// QPE is what the script produces. Also the string the Site rail already
 	// used, so the same check no longer has two names in one app.

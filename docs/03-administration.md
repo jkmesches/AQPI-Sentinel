@@ -607,7 +607,12 @@ A few useful patterns:
 
 ## 9. Daily report · `/admin/digest`
 
-![Admin daily report page](images/admin-digest.png)
+<!-- No figure yet: this page is now in scripts/capture_admin_screenshots.py,
+     so the next capture run against a real deploy produces
+     images/admin-digest.png and this comment can become the usual
+     ![Admin daily report page](images/admin-digest.png) line. Referencing a
+     file that does not exist fails `mkdocs build --strict`, which is the
+     release gate. -->
 
 One email each morning covering the previous 24 hours: a row per
 radar and per product with its availability, a sentence describing

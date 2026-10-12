@@ -757,6 +757,25 @@ COMPOSITE_RECEIPT_ALT: str | None = None
 # configured to include. Whether S-band input is still intended is a real
 # question for the AQPI team, raised separately rather than answered by a
 # monitoring threshold. [U]
+#
+# === NEXRAD, added 2026-10-12, and why it was absent before ===
+#
+# An earlier version of this comment justified excluding KBBX/KDAX/KMUX on the
+# grounds that "the three NEXRAD directories under web-files/NEXRAD_L2 do not
+# exist at all, and their recentfiles trees hold zero files". That observation
+# was true and the conclusion drawn from it was wrong: it was an OUTAGE, not a
+# design. Renzo Bechini, 2026-10-12: NEXRAD acquisition stopped when K2 was
+# rebooted on 2026-09-17, the ldm process never restarted, and someone brought
+# it back manually around 2026-10-06 00Z. The composite driver's own arrays
+# have always intended nine inputs.
+#
+# Measured since: KBBX, KDAX and KMUX are each in the published composite's
+# RadarNamesInComposite at 720 of 720 timesteps across 2026-10-11 — a full day
+# at 2-minute cadence, not a handful of samples. [M]
+#
+# The general lesson, which is why this paragraph is long: an expected-set
+# fitted to a window is blind in exactly the window that mattered. Four samples
+# would not have been enough to put them back either.
 COMPOSITE_EXPECTED_RADARS: dict[str, str] = {
     "XEBY":  "XEBY",
     "XSCR":  "XSCR",
@@ -764,6 +783,9 @@ COMPOSITE_EXPECTED_RADARS: dict[str, str] = {
     "XSCW":  "XSCW",
     "XSWR":  "XSWR",
     "CBAND": "SSCB",
+    "KBBX":  "KBBX",
+    "KDAX":  "KDAX",
+    "KMUX":  "KMUX",
 }
 
 # Contribution-age bands. ONE UNIFORM PAIR, not per radar.
@@ -868,6 +890,98 @@ DROPS_SILENT_INFO_S: int = 3_600
 # the producer check cheap enough to run on every radar's folder.
 DROPS_TREE: str = "PRODUCTS/DROPS"
 
+# ---------------------------------------------------------------------------
+# Composite INPUT staging (`recentfiles`)
+# ---------------------------------------------------------------------------
+#
+# The directory the composite actually reads, confirmed by Renzo Bechini on
+# 2026-10-12: "I read all volume files, for every radar (NEXRAD, X-band, and
+# the C-band SSCB), from /trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/
+# recentfiles". Sounak's scripts stage volumes here; the composite reads
+# nothing else.
+#
+# === Why this needs its own check, and what it is NOT ===
+#
+# Three stages, and until now only the ends were watched:
+#
+#     DROPS dated tree   <- layer2.backend.<radar>   (LB2, arrival)
+#     recentfiles/<DIR>  <- NOTHING
+#     composite output   <- layer3.composite.<radar> (LB3, participation)
+#
+# Measured 2026-10-12 17:20Z: XSCW had ZERO files staged here while
+# layer2.backend.XSCW read pass with "newest volume 0.5 min ago" — because LB2
+# reads the DROPS tree and these are different paths. Two checks reporting
+# health on either side of a real break. [M]
+#
+# It would also have caught the NEXRAD outage on its first tick: Renzo reports
+# the KBBX/KDAX/KMUX feeds stopped when K2 was rebooted on 2026-09-17 and did
+# not restart until ~2026-10-06 00Z, and their recentfiles trees held zero
+# files throughout. Eighteen days, found by eye.
+COMPOSITE_INPUT_TREE: str = "PRODUCTS/Radar_processed/recentfiles"
+
+# Radar id -> staging directory. NINE, not six: the composite's input set is
+# not the set of radars this profile monitors for arrival. The three NEXRAD
+# sites have no DROPS tree and no LB2 check, and are watched HERE or nowhere.
+COMPOSITE_INPUT_DIR: dict[str, str] = {
+    "XEBY":  "XEBY",
+    "XSCR":  "XSCR",
+    "XSCV":  "XSCV",
+    "XSCW":  "XSCW",
+    "XSWR":  "XSWR",
+    "CBAND": "SSCB",
+    "KBBX":  "KBBX",
+    "KDAX":  "KDAX",
+    "KMUX":  "KMUX",
+}
+
+# ONE PERMISSIVE PATTERN, searched rather than anchored — the opposite choice
+# from RAW_VOLUME_TS_RE, and deliberately so. Three naming conventions share
+# this tree: [M] 2026-10-12
+#
+#     XSWR_volume_20261008-222259_drops.nc     X-band   (hyphen)
+#     cfrad_KBBX_20261008_221543_drops.nc      NEXRAD   (underscore)
+#     AQPI.SSCB_20261008_222357_drops.nc       C-band   (underscore)
+#
+# An anchored per-radar pattern here would repeat the CBAND failure recorded in
+# layer2_backend_radar: one shared anchored pattern matched 0 of 295 CBAND
+# files and the check rendered a directory holding 295 current files as "no
+# data directory for the current UTC day". What makes that failure dangerous is
+# not the pattern — it is reporting OUR blindness as the SUBJECT'S outage. So
+# the protection here is not a cleverer regex: the check reports "directory has
+# entries but none parse" as an ERROR naming this pattern, never as "nothing
+# staged". See Layer3InputStagingCheck.
+COMPOSITE_INPUT_TS_RE: str = r"(\d{8})[-_](\d{6})"
+
+# How much history this tree holds. Renzo: "I think the last hour of data is
+# retained"; measured 2026-10-12, oldest file 0.9-1.0 h in every populated
+# directory. [M]
+#
+# TWO CONSEQUENCES, both load-bearing for any check reading this tree:
+#
+#   1. A look-back beyond this finds nothing and MUST NOT be read as
+#      staleness. That is the same conflation the LB2 rollover fix removed,
+#      in a different directory — and the look-back helper is the wrong tool
+#      here, because here the absence of old files is the design.
+#   2. "Empty" is a TERMINAL state, not an age. Once staging stops, the
+#      evidence ages out inside the hour, so this check cannot distinguish
+#      "stopped 70 minutes ago" from "stopped three days ago" and must not
+#      phrase its summary as though it could. This is the opposite of LB2's
+#      dated tree, where the history persists and the age is real.
+COMPOSITE_INPUT_RETENTION_S: int = 3_600
+
+# Warn-only, and no fail band at all for now. One observation is not a
+# distribution, and this file has spent a week correcting bands fitted to too
+# little: the per-radar contribution band that was blind on XSCR, the
+# LB2_FRESHNESS flattening, and COMPOSITE_CONTRIB_FAIL_S which is now known to
+# fire on contributions the composite accepted. The staged-age distribution
+# will come from this check's own series once it has one.
+#
+# 900 s is a ceiling, not a characterisation: the single sample on 2026-10-12
+# showed newest staged volumes at 0.1-6.0 min across nine directories, so this
+# is roughly 2.5x the slowest observed and exists only to notice staging that
+# has stalled rather than stopped. [U]
+COMPOSITE_INPUT_STALE_WARN_S: int = 900
+
 
 if SETTINGS.profile == "xqpi":
     from .profiles import xqpi as _xqpi       # noqa: E402
@@ -885,6 +999,7 @@ if SETTINGS.profile == "xqpi":
     COMPOSITE_RECEIPT_ALT = _xqpi.COMPOSITE_RECEIPT_ALT
     COMPOSITE_RUN_LOG_DIR = _xqpi.COMPOSITE_RUN_LOG_DIR
     DROPS_TREE = _xqpi.DROPS_TREE
+    COMPOSITE_INPUT_DIR = _xqpi.COMPOSITE_INPUT_DIR
     SITE_NAME = _xqpi.SITE_NAME
     DATA_SOURCE = _xqpi.DATA_SOURCE
     RADAR_META_OVERRIDE = _xqpi.RADAR_META
@@ -935,16 +1050,24 @@ if LB2_FRESHNESS == "filename":
     del _re, _rid, _pat, _c
 
 
-# A radar in the expected set that Sentinel does not otherwise monitor has no
-# RADAR_SILENT_FAIL_S entry, so the derived contribution band would silently
-# fall back to a default that was characterised for something else. Catch it
-# here: the expected set is a claim about radars we can already judge.
-_unmonitored = sorted(set(COMPOSITE_EXPECTED_RADARS) - set(RADAR_FOLDER))
+# A radar in the expected set that Sentinel does not monitor ANYWHERE cannot be
+# judged: its participation would be asserted against nothing, and its
+# contribution age would be banded by a figure characterised for a different
+# population.
+#
+# Two ways to be monitored, not one. RADAR_FOLDER means this profile watches
+# the radar's arrival in the DROPS tree (LB2). COMPOSITE_INPUT_DIR means it
+# watches what is staged for the composite (layer3.input). NEXRAD has only the
+# second, and that is sufficient to put it in the expected set — what it is NOT
+# sufficient for is a contribution band, which _contrib_bands withholds for
+# exactly these radars rather than letting them inherit the X-band one.
+_monitored = set(RADAR_FOLDER) | set(COMPOSITE_INPUT_DIR)
+_unmonitored = sorted(set(COMPOSITE_EXPECTED_RADARS) - _monitored)
 if _unmonitored:
     raise ValueError(
-        f"COMPOSITE_EXPECTED_RADARS names {_unmonitored}, which are not in "
-        f"RADAR_FOLDER — participation can only be judged for a radar whose "
-        f"arrival this profile also monitors"
+        f"COMPOSITE_EXPECTED_RADARS names {_unmonitored}, which are in neither "
+        f"RADAR_FOLDER nor COMPOSITE_INPUT_DIR — participation can only be "
+        f"judged for a radar this profile monitors somewhere"
     )
 # Two radars mapping to one receipt directory would make both read the same
 # contribution and agree forever, which looks like health.
@@ -955,4 +1078,4 @@ if _dupes:
         f"COMPOSITE_EXPECTED_RADARS maps more than one radar to {_dupes} — "
         f"the receipt directory must identify exactly one radar"
     )
-del _unmonitored, _dupes
+del _monitored, _unmonitored, _dupes

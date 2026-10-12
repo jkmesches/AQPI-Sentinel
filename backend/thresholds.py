@@ -128,6 +128,14 @@ def _seed_from_config() -> dict[str, Any]:
     # normal for that radar.
     globals_["composite_contrib_warn_s"] = int(_config.COMPOSITE_CONTRIB_WARN_S)
     globals_["composite_contrib_fail_s"] = int(_config.COMPOSITE_CONTRIB_FAIL_S)
+    # Composite input staging. WARN only, and there is deliberately no
+    # `..._fail_s` beside it: the check cannot fail on an age until this
+    # threshold's own series has produced a distribution to fit one to. A fail
+    # band seeded here would be an invitation to set a number nothing has
+    # measured — which is the mistake the two lines above are still recovering
+    # from. See config.COMPOSITE_INPUT_STALE_WARN_S.
+    globals_["composite_input_stale_warn_s"] = int(
+        _config.COMPOSITE_INPUT_STALE_WARN_S)
 
     return {
         "products": products,
