@@ -16,9 +16,23 @@ different upstream is its own concern, covered in
 
 ## 1. Choosing a host
 
-Sentinel is light. A 2-vCPU / 4 GB / 30 GB host comfortably runs the
-radarca-scale install (43 checks, ~30 req/min outbound). The
-reference deployment runs on an LXC at those specs and rarely tops
+Sentinel is light. A 2-vCPU / 4 GB / 30 GB host comfortably runs it at
+either scale:
+
+| Configuration | Checks | Outbound to radarca |
+|---|---|---|
+| Display tier only (no backend mounts) | **45** | ~30 req/min |
+| Both tiers (backend mounts present) | **84** | ~30 req/min |
+
+The backend tier adds 39 checks (LB1 13, LB2 7, LB3 19) and **no upstream
+requests at all** — they read mounted files rather than calling radarca, so
+the req/min figure does not move when you enable them. What they do add is
+metadata traffic against the shares: directory listings and stat calls on
+every cadence. On a healthy mount that is negligible; on a stalled NFS mount
+it is where the backend will block, so size the mount's responsiveness rather
+than the host for those.
+
+The reference deployment runs on an LXC at those specs and rarely tops
 1 GB resident — Playwright (used by the L3 overlay check) is the
 fattest single dependency, holding a Chromium worker.
 
