@@ -46,7 +46,14 @@ from ..registry import CHECKS                      # noqa: E402
 from .layer0_episode import attach_episode_suppression  # noqa: E402
 
 _wired = attach_episode_suppression(CHECKS.values())
-assert _wired, "episode suppression wired 0 checks — registry import order broke"
+# Only meaningful where a display tier exists to have episodes. The assertion
+# guards against the registry being imported in the wrong order, which would
+# wire nothing and go unnoticed — but on a profile with no HTTP origin, and
+# since the backend tier became exempt (see attach_episode_suppression), zero
+# IS the right answer: every check here reads the filesystem and none of them
+# can be part of a radarca episode.
+if HAS_RADARCA:
+    assert _wired, "episode suppression wired 0 checks — registry import order broke"
 
 # future:
 # from . import layer4_tier3_cross_radar
