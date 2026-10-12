@@ -58,6 +58,91 @@ async def load_config(pool) -> dict:
     return cfg
 
 
+def _clean_default_source(value) -> dict:
+    """Per-kind fallback source. Validated, because an unrecognised value here
+    would silently resolve to "frontend" for every subject at once."""
+    if value is None:
+        return dict(_digest.DEFAULTS["default_source"])
+    if not isinstance(value, dict):
+        raise HTTPException(400, "default_source must be an object")
+    out = dict(_digest.DEFAULTS["default_source"])
+    for kind in _digest._FAMILIES:
+        if kind not in value:
+            continue
+        src = value[kind]
+        if src not in _digest.SOURCES:
+            raise HTTPException(
+                400, f"default_source.{kind} must be one of "
+                     f"{', '.join(_digest.SOURCES)} — got {src!r}")
+        out[kind] = src
+    return out
+
+
+def _clean_subjects(value) -> dict:
+    """Per-subject overrides, normalised so the blob holds only DEVIATIONS.
+
+    An entry that merely restates the default is dropped. Storing one for
+    every subject the UI rendered would freeze them all against the
+    per-kind default: changing "all products from the backend" afterwards
+    would appear to do nothing, because every product carries an explicit
+    entry saying otherwise. Absence is how a subject follows the default,
+    and absence is also how a NEW subject is reported at all — see the
+    opt-out reasoning on DEFAULTS["subjects"].
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise HTTPException(400, "subjects must be an object")
+    out: dict[str, dict] = {}
+    for raw_key, ent in value.items():
+        kind, _, key = str(raw_key).partition(":")
+        if kind not in _digest._FAMILIES or not key:
+            raise HTTPException(
+                400, f"bad subject key {raw_key!r} — expected "
+                     f"'<{'|'.join(_digest._FAMILIES)}>:<id>'")
+        if not isinstance(ent, dict):
+            raise HTTPException(400, f"subjects[{raw_key!r}] must be an object")
+        clean: dict = {}
+        src = ent.get("source")
+        if src not in (None, ""):
+            if src not in _digest.SOURCES:
+                raise HTTPException(
+                    400, f"subjects[{raw_key!r}].source must be one of "
+                         f"{', '.join(_digest.SOURCES)} — got {src!r}")
+            clean["source"] = src
+        # Only `false` is worth storing. `show: true` is the default, and a
+        # stored `true` is indistinguishable from it while making the blob
+        # grow by one entry per subject per save.
+        if ent.get("show") is False:
+            clean["show"] = False
+        if clean:
+            out[f"{kind}:{key}"] = clean
+    return out
+
+
+@admin_router.get("/subjects")
+async def subjects(request: Request,
+                   user: Annotated[dict, Depends(require_admin)]):
+    """What the picker offers: every subject this deployment registers, and
+    which tiers exist for it.
+
+    From the registry, not from the report window. The picker must be able to
+    configure a radar that has not reported yet, and must NOT offer a source
+    whose tier is not registered here — CBAND has no LB2 check without
+    SENTINEL_SSCB_ROOT, and offering it "backend" would produce a row with no
+    data that reads as an outage rather than as a misconfiguration.
+    """
+    cfg = await load_config(request.app.state.store.pool)
+    return {
+        "sources":        list(_digest.SOURCES),
+        "default_source": cfg.get("default_source")
+                          or dict(_digest.DEFAULTS["default_source"]),
+        "subjects":       cfg.get("subjects") or {},
+        "radars":         _digest.registry_subjects("radar"),
+        "products":       _digest.registry_subjects("product"),
+    }
+
+
 @router.get("/daily")
 async def daily(request: Request, since: str | None = None,
                 until: str | None = None):
@@ -84,7 +169,8 @@ async def put_config(request: Request,
                      body: dict = Body(...)):
     cfg = dict(_digest.DEFAULTS)
     cfg.update(await load_config(request.app.state.store.pool))
-    for k in ("enabled", "recipients", "hour", "tz", "products"):
+    for k in ("enabled", "recipients", "hour", "tz", "products",
+              "default_source", "subjects"):
         if k in body:
             cfg[k] = body[k]
 
@@ -107,6 +193,9 @@ async def put_config(request: Request,
     cfg["recipients"] = [str(x).strip() for x in cfg["recipients"] if str(x).strip()]
     if cfg.get("enabled") and not cfg["recipients"]:
         raise HTTPException(400, "enable the digest only once it has a recipient")
+
+    cfg["default_source"] = _clean_default_source(cfg.get("default_source"))
+    cfg["subjects"] = _clean_subjects(cfg.get("subjects"))
 
     # Pass the dict, NOT json.dumps(cfg) — the pool installs a jsonb codec, so
     # dumping first stores a jsonb STRING where every other settings row is a
