@@ -175,6 +175,12 @@ Some configuration deliberately lives in code or DB, not env:
   `/admin/email`. (Or `alerts.yaml`'s `smtp:` block as fallback.)
 - **VAPID keys** — auto-generated at `settings.vapid_keys`.
 - **Group definitions** — `groups` + `group_members` tables.
+- **Daily-report content** — at `settings.digest` (jsonb), edited via
+  `/admin/digest`: recipients, schedule, and which signal each radar
+  and product is reported from.
+- **Per-tier alarm gate** — at `settings.alarm_tiers` (jsonb), edited
+  on the same page. Its own key, not part of `settings.digest`, so
+  that turning the morning email off cannot change who gets paged.
 
 The pattern: anything an operator might change after deploy lives
 in the database with an admin UI. Env vars are reserved for

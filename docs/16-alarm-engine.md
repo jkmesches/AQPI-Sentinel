@@ -273,6 +273,51 @@ the field — suppressed alarms don't escalate; no email, no push.
 In normal operation, cascade demote handles everything and
 suppression is a no-op. The latter exists for the edge cases.
 
+### Three things that can stop a dispatch
+
+By the time a tick reaches `_dispatch`, four gates have had a say,
+and they are deliberately different in what they claim:
+
+| Gate | Claims | Stops |
+|---|---|---|
+| suppression | "the cause is elsewhere" | escalation, until the cause clears |
+| silence | "don't tell me about this window" | everything, for its window |
+| ack | "I've seen this" | notification, until the condition worsens |
+| **tier gate** | "this half of the stack is not audible" | dispatch only |
+
+The tier gate (`backend/alarms/tiers.py`, `settings['alarm_tiers']`)
+is the newest and the narrowest. It asks one question of
+`stages.stage_tier(alarm["stage"])` — `frontend` for `L0`–`L4`,
+`backend` for `LB1`–`LB3` — and if that tier is switched off, the
+step is not dispatched. Everything else still happens: the alarm
+opens, its severity is recomputed each tick, it shows on the
+timeline and counts in the daily report, and a row lands in
+`notification_log` with `delivery_status = "tier-disabled"` where
+the message would have gone.
+
+Three implementation notes that are easy to get wrong:
+
+- It sits **after** the severity recomputation, not beside the
+  silence check. The silence check returns before severity is
+  recomputed; a gate placed there would pin a whole tier's alarms
+  at whatever severity they held when they opened, for as long as
+  the tier was off.
+- Writing the withheld row **consumes that step's bookkeeping**, so
+  re-enabling a tier does not replay every step that came due while
+  it was off. Later steps still come due on their own delays and a
+  `repeat_interval` still re-evaluates.
+- It **fails open** at every step: missing row, double-encoded blob,
+  unparseable string, database error, unknown stage, non-boolean
+  value. Only an explicit `false` silences a tier. A gate that goes
+  quiet when it cannot read its own configuration is the one
+  failure mode the person it fails cannot notice.
+
+The stage→tier map is stated per stage in `backend/stages.py`
+rather than derived from the `LB` spelling, and
+`validation_tests/test_alarm_tiers.py` asserts it covers the stage
+list exactly — so a stage added without a tier fails a test instead
+of landing silently in whichever half a string test picks.
+
 ### Inconclusive skips are not recovery
 
 A cascade demote means **"we declined to judge"**, not "the target is

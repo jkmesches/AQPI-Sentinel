@@ -67,6 +67,7 @@ PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("groups",       "/admin/groups",       None, None),
     ("alerts",       "/admin/alerts",       None, None),
     ("thresholds",   "/admin/thresholds",   None, None),
+    ("digest",       "/admin/digest",       None, None),
     ("silences",     "/admin/silences",     None, None),
     ("audit",        "/admin/audit",        None, None),
     ("devices",      "/settings/devices",   None, None),
