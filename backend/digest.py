@@ -40,6 +40,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .alarms.suppression import INCONCLUSIVE_SKIP_REASONS
+from .config import HAS_RADARCA
 
 log = logging.getLogger(__name__)
 
@@ -75,13 +76,117 @@ SILENT_FAILURE = "GHOST_UP"
 REPORTED_STATUSES = ("pass", "warn", "fail")
 EXCLUDED_STATUSES = ("error", "skip")
 
+# ---------------------------------------------------------------------------
+# Which signal a subject is reported from
+# ---------------------------------------------------------------------------
+#
+# Every radar and product can be observed two independent ways: the `L*`
+# stages ask the radarca display tier what it believes, and the `LB*` stages
+# read the published files off K2/Trinity and owe the web tier nothing. Until
+# now the report only ever used the first, because it predates the backend
+# tier existing.
+#
+#   frontend   what radarca says            layer2.radar.* / layer1.product.*
+#   backend    what the filesystem says     layer2.backend.* / layer1.backend.*
+#   combined   the WORSE of the two, per timestep
+#
+# "backend" for a radar means LB2 — arrival — and deliberately not LB3. LB2
+# answers the same question the frontend answers (is this radar delivering),
+# just from the other side, which is what makes the three modes comparable.
+# LB3 asks whether a radar reached the composite, which is a different
+# question; folding it in would make a radar that arrives perfectly but is
+# dropped from the composite read as partly unavailable.
+SOURCES = ("frontend", "backend", "combined")
+
+_FAMILIES: dict[str, dict[str, tuple[str, ...]]] = {
+    "radar": {
+        "frontend": ("layer2.radar.",),
+        "backend":  ("layer2.backend.",),
+        "combined": ("layer2.radar.", "layer2.backend."),
+    },
+    "product": {
+        "frontend": ("layer1.product.",),
+        "backend":  ("layer1.backend.",),
+        "combined": ("layer1.product.", "layer1.backend."),
+    },
+}
+
+# Check ids that sit under a family prefix but are not a subject of that
+# family. `layer2.backend.fleet` is a correlation verdict about the whole
+# fleet, not a radar — left in, it would appear as a radar called "fleet" with
+# its own availability row. The home rail excludes it for the same reason.
+_NOT_SUBJECTS = frozenset({"layer2.backend.fleet", "layer2.xband.fleet"})
+
+# Timestep for the combined view, in seconds.
+#
+# The two tiers do not share a clock: L2 runs at 120 s, LB2 at 60 s, and the
+# product checks vary. So "the worse of the two at each timestep" needs a
+# timestep defined, and 60 s is the finest cadence any check runs at — fine
+# enough that a bin almost never holds two runs of the same check, coarse
+# enough that the two tiers' runs for one subject land together.
+#
+# Consequence worth knowing when reading the numbers: for a combined subject
+# the availability denominator counts TIMESTEPS, not runs. "98%" means the
+# worse of the two readings was healthy in 98% of the minutes that had any
+# reading at all. For a single-source subject nothing is binned and the
+# denominator is runs, exactly as before.
+COMBINE_BIN_S = 60
+
+_DEFAULT_SOURCE = "frontend" if HAS_RADARCA else "backend"
+
 DEFAULTS: dict[str, Any] = {
     "enabled":    False,
     "recipients": [],
     "hour":       7,                    # local hour in `tz`
     "tz":         "America/Denver",
     "products":   True,
+    # Per-kind fallback for any subject with no explicit entry below.
+    #
+    # Profile-derived, because "frontend" is not a meaningful default on a
+    # deployment with no display tier. On xqpi there are no `layer2.radar.*`
+    # checks at all, so a hard-coded frontend default would resolve every
+    # radar to a family with no rows and mail out an empty report — and a
+    # report that is empty because of a config default rather than because
+    # nothing happened is the quietest kind of failure this module has. Keyed
+    # on the capability flag, not the profile name, so a third profile has to
+    # answer the question. See config.HAS_RADARCA.
+    "default_source": {"radar": _DEFAULT_SOURCE, "product": _DEFAULT_SOURCE},
+    # Per-subject overrides, keyed "<kind>:<key>" — e.g. "radar:XEBY".
+    #
+    # Absence means "use the default and SHOW it". That direction is
+    # deliberate: an opt-in list would silently drop a newly added radar from
+    # the report, which is the same failure as an expected-set that has to be
+    # edited by hand every time the network changes. A subject is only hidden
+    # by an explicit {"show": false}.
+    "subjects":   {},
+    # Whether a tier's alarms may NOTIFY. Both tiers always record, always
+    # appear on the timeline and always count in this report; these only gate
+    # dispatch. See alarms/engine._process.
+    "alarm_tiers": {"frontend": True, "backend": True},
 }
+
+
+def subject_source(cfg: dict, kind: str, key: str) -> str:
+    """Which signal this subject is reported from."""
+    ent = (cfg.get("subjects") or {}).get(f"{kind}:{key}") or {}
+    src = ent.get("source") or (cfg.get("default_source") or {}).get(kind)
+    return src if src in SOURCES else "frontend"
+
+
+def subject_shown(cfg: dict, kind: str, key: str) -> bool:
+    """False only when something explicitly hid it. See DEFAULTS["subjects"]."""
+    ent = (cfg.get("subjects") or {}).get(f"{kind}:{key}") or {}
+    return bool(ent.get("show", True))
+
+
+def _prefix_re(prefixes: tuple[str, ...]) -> str:
+    """Anchored alternation that strips whichever family prefix matched.
+
+    The prefixes are this module's own constants, so the only metacharacter
+    that can appear is the dot — escaped so `layer2.radar.` cannot match
+    `layer2xradarx`.
+    """
+    return "^(" + "|".join(p.replace(".", r"\.") for p in prefixes) + ")"
 
 
 @dataclass
@@ -290,12 +395,35 @@ def describe(sub: Subject, *, kind: str = "radar",
     return f"healthy in {avail:.0f}% of checks, no sustained outage"
 
 
-async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, Subject]:
-    """Per-subject counts, outage episodes and verdict tallies in one pass."""
+async def _subject_rows(pool, since, until, prefixes: tuple[str, ...],
+                        bin_s: int = 0) -> dict[str, Subject]:
+    """Per-subject counts, outage episodes and verdict tallies in one pass.
+
+    Partitions by SUBJECT KEY rather than by check_id, which is what lets one
+    query serve all three sources. `layer2.radar.XEBY` and
+    `layer2.backend.XEBY` both reduce to `XEBY`, so passing both prefixes
+    gives one series per radar built from two tiers.
+
+    `bin_s` collapses runs into fixed timesteps, taking the WORSE reading in
+    each. It is only needed when more than one prefix is in play, because the
+    two tiers do not share a clock. With `bin_s = 0` the timestep is the run's
+    own timestamp, so the collapse groups one row at a time and this query is
+    equivalent to the single-family version it replaces — the grouping is a
+    no-op, not a behaviour change.
+    """
+    like_any = [p + "%" for p in prefixes]
+    prefix_re = _prefix_re(prefixes)
     rows = await pool.fetch(
         """
-        WITH runs AS (
-            SELECT check_id, finished_at, status, payload->>'reason' AS reason,
+        WITH raw AS (
+            SELECT regexp_replace(check_id, $6, '') AS skey,
+                   -- The timestep. See COMBINE_BIN_S; $7 = 0 means "the run
+                   -- itself", which makes the collapse below a no-op.
+                   CASE WHEN $7 > 0
+                        THEN to_timestamp(
+                               floor(extract(epoch from finished_at) / $7) * $7)
+                        ELSE finished_at END                   AS ts,
+                   finished_at, status, payload->>'reason' AS reason,
                    substring(summary from '→ ([A-Z_]+)') AS verdict,
                    -- Which sub-checks were unhappy on this run. Products
                    -- carry a sub_status map; radars do not, and get NULL,
@@ -322,46 +450,75 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                    -- lowers availability but calling it "offline" would be a
                    -- lie, so it gets its own episodes.
                    CASE WHEN status IN ('fail','error') THEN 2
-                        WHEN status = 'warn' THEN 1 ELSE 0 END AS bad,
-                   lead(finished_at) OVER (PARTITION BY check_id
-                                           ORDER BY finished_at) AS next_at
+                        WHEN status = 'warn' THEN 1 ELSE 0 END AS bad
             FROM check_runs
-            WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+            WHERE check_id LIKE ANY($3::text[])
+              AND NOT (check_id = ANY($5::text[]))
+              AND finished_at > $1 AND finished_at <= $2
               AND status = ANY($4::text[])
+        ),
+        -- One row per (subject, timestep), carrying the WORSE of whatever
+        -- readings landed in it. `bin_bad` is a window rather than a plain
+        -- max() so the sub-check names can be filtered to the readings that
+        -- actually set the verdict; aggregating all of them would attribute a
+        -- healthy tier's sub-checks to an unhealthy timestep.
+        marked AS (
+            SELECT skey, ts, bad, status, sub_names,
+                   max(bad) OVER (PARTITION BY skey, ts) AS bin_bad
+            FROM raw
+        ),
+        -- One row per (subject, timestep). `ts` IS the timestep, so there is
+        -- no separate first_at to carry: an earlier version selected
+        -- min(finished_at) here, which does not exist past `raw` and meant
+        -- this query had never once been executed.
+        runs AS (
+            SELECT skey, ts, bin_bad AS bad,
+                   string_agg(sub_names, ',')
+                     FILTER (WHERE bad = bin_bad)                 AS sub_names,
+                   lead(ts) OVER (PARTITION BY skey ORDER BY ts)   AS next_at
+            FROM marked
+            GROUP BY skey, ts, bin_bad
         ),
         grp AS (
             SELECT *,
-                   row_number() OVER (PARTITION BY check_id ORDER BY finished_at)
-                 - row_number() OVER (PARTITION BY check_id, bad ORDER BY finished_at)
+                   row_number() OVER (PARTITION BY skey ORDER BY ts)
+                 - row_number() OVER (PARTITION BY skey, bad ORDER BY ts)
                    AS g
             FROM runs
         )
-        SELECT check_id, g, bad,
+        SELECT skey, g, bad,
+               -- Timesteps, not raw runs. For a combined subject two tiers
+               -- reporting in one minute is ONE observation of that minute,
+               -- so counting both would double its weight in availability.
                count(*)                                       AS n_runs,
-               min(finished_at)                               AS started,
-               -- The outage ends when the next run happens, not at the last
-               -- bad run: measuring to the last bad run understates every
-               -- outage by one cadence interval.
+               min(ts)                                        AS started,
+               -- The episode ends when the next timestep happens, not at the
+               -- last bad one: measuring to the last bad reading understates
+               -- every outage by one interval.
                max(coalesce(next_at, $2))                     AS ended,
-               count(*) FILTER (WHERE status = 'pass')         AS n_pass,
-               string_agg(sub_names, ',')                      AS sub_names
+               count(*) FILTER (WHERE bad = 0)                AS n_pass,
+               string_agg(sub_names, ',')                     AS sub_names
         FROM grp
-        GROUP BY check_id, g, bad
-        ORDER BY check_id, min(finished_at)
+        GROUP BY skey, g, bad
+        ORDER BY skey, min(ts)
         """,
-        since, until, like, list(REPORTED_STATUSES),
+        since, until, like_any, list(REPORTED_STATUSES),
+        sorted(_NOT_SUBJECTS), prefix_re, int(bin_s),
     )
     # Counted, not reported. See EXCLUDED_STATUSES for why these are kept out
     # of the figures and why the count still has to be shown somewhere.
     excl = await pool.fetch(
         """
-        SELECT check_id, count(*) AS n
+        SELECT regexp_replace(check_id, $6, '') AS skey, count(*) AS n
         FROM check_runs
-        WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+        WHERE check_id LIKE ANY($3::text[])
+          AND NOT (check_id = ANY($5::text[]))
+          AND finished_at > $1 AND finished_at <= $2
           AND status = ANY($4::text[])
         GROUP BY 1
         """,
-        since, until, like, list(EXCLUDED_STATUSES),
+        since, until, like_any, list(EXCLUDED_STATUSES),
+        sorted(_NOT_SUBJECTS), prefix_re,
     )
 
     # Was each subject already unhealthy when the window opened? An episode
@@ -371,41 +528,60 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
     # bounded index scan; beyond that we say "already running" without a date.
     boundary = await pool.fetch(
         """
-        WITH last_before AS (
+        WITH per_check AS (
             -- Lower-bounded on purpose. Without `finished_at > $1 - 1 day`
             -- this DISTINCT ON walks every run a check has ever recorded to
             -- find the newest one before the window, which cost 2.8s of a
             -- 3.1s report. The newest run before `since` is at most one
             -- cadence interval back; a check silent for a whole day has no
             -- boundary state worth reporting.
-            SELECT DISTINCT ON (check_id) check_id, status
+            SELECT DISTINCT ON (check_id) check_id, status,
+                   regexp_replace(check_id, $5, '') AS skey
               FROM check_runs
-             WHERE check_id LIKE $2
+             WHERE check_id LIKE ANY($2::text[])
+               AND NOT (check_id = ANY($4::text[]))
                AND finished_at <= $1 AND finished_at > $1 - interval '1 day'
                AND status = ANY($3::text[])
              ORDER BY check_id, finished_at DESC
+        ),
+        -- Collapse the families to one state per subject, worst wins, so a
+        -- combined subject is "unhealthy at the window edge" when EITHER tier
+        -- was. A subject whose worst edge reading was a pass is dropped, same
+        -- as before.
+        per_subject AS (
+            SELECT skey,
+                   max(CASE WHEN status IN ('fail','error') THEN 2
+                            WHEN status = 'warn' THEN 1 ELSE 0 END) AS cls
+              FROM per_check
+             GROUP BY skey
         )
-        SELECT l.check_id, l.status,
+        SELECT s.skey, s.cls,
+               -- MAX across the families, which is an UPPER BOUND on when the
+               -- combined reading was last healthy: the worst-of cannot have
+               -- been healthy after the later tier stopped passing. An upper
+               -- bound here makes the "already running since X" duration a
+               -- lower bound, so the report never claims a longer outage than
+               -- the data supports.
                (SELECT max(c.finished_at) FROM check_runs c
-                 WHERE c.check_id = l.check_id
+                 WHERE c.check_id LIKE ANY($2::text[])
+                   AND regexp_replace(c.check_id, $5, '') = s.skey
                    AND c.finished_at <= $1
                    AND c.finished_at > $1 - interval '14 days'
                    AND c.status = 'pass') AS last_pass
-          FROM last_before l
-         WHERE l.status <> 'pass'
+          FROM per_subject s
+         WHERE s.cls > 0
         """,
-        since, like, list(REPORTED_STATUSES),
+        since, like_any, list(REPORTED_STATUSES),
+        sorted(_NOT_SUBJECTS), prefix_re,
     )
     prior: dict[str, dict] = {
-        r["check_id"].replace(strip, ""):
-            {"cls": 2 if r["status"] in ("fail", "error") else 1,
-             "last_pass": r["last_pass"]}
+        r["skey"]: {"cls": int(r["cls"]), "last_pass": r["last_pass"]}
         for r in boundary
     }
 
     subs: dict[str, Subject] = {}
     for r in rows:
-        key = r["check_id"].replace(strip, "")
+        key = r["skey"]
         sub = subs.setdefault(key, Subject(key=key, label=key))
         n = int(r["n_runs"])
         # Every run reaching here is a pass, a warn or a fail — the SQL filters
@@ -456,61 +632,120 @@ async def _subject_rows(pool, since, until, like: str, strip: str) -> dict[str, 
                 sub.degraded.append(ep)
 
     for r in excl:
-        key = r["check_id"].replace(strip, "")
+        key = r["skey"]
         subs.setdefault(key, Subject(key=key, label=key)).excluded += int(r["n"])
     return subs
 
 
-async def _verdicts(pool, since, until, like: str, strip: str) -> dict[str, dict[str, int]]:
+async def _verdicts(pool, since, until,
+                    prefixes: tuple[str, ...]) -> dict[str, dict[str, int]]:
+    """Named radarca verdicts (GHOST_UP and friends) per subject.
+
+    Only the radarca checks emit a `→ VERDICT` in their summary; the backend
+    checks state an age and a limit and carry no verdict vocabulary at all. So
+    a backend-only subject simply has no verdicts, and a combined subject's
+    verdicts come from its frontend half. That is the honest answer rather than
+    a gap: "reported online but sent nothing" is a statement about what the
+    display tier CLAIMED, which only the display tier can be wrong about.
+    """
     rows = await pool.fetch(
         """
-        SELECT check_id, substring(summary from '→ ([A-Z_]+)') AS verdict,
+        SELECT regexp_replace(check_id, $4, '') AS skey,
+               substring(summary from '→ ([A-Z_]+)') AS verdict,
                count(*) AS n
         FROM check_runs
-        WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+        WHERE check_id LIKE ANY($3::text[])
+          AND NOT (check_id = ANY($5::text[]))
+          AND finished_at > $1 AND finished_at <= $2
           AND status IN ('fail','error','warn')
         GROUP BY 1, 2
         """,
-        since, until, like,
+        since, until, [p + "%" for p in prefixes], _prefix_re(prefixes),
+        sorted(_NOT_SUBJECTS),
     )
     out: dict[str, dict[str, int]] = {}
     for r in rows:
         if not r["verdict"]:
             continue
-        out.setdefault(r["check_id"].replace(strip, ""), {})[r["verdict"]] = int(r["n"])
+        d = out.setdefault(r["skey"], {})
+        d[r["verdict"]] = d.get(r["verdict"], 0) + int(r["n"])
     return out
 
 
-async def _buckets(pool, since, until, like: str, strip: str,
+async def _buckets(pool, since, until, prefixes: tuple[str, ...],
+                   bin_s: int = 0,
                    n_buckets: int = 8) -> dict[str, list[float | None]]:
     """Availability per equal slice of the window — the shape of the day.
 
     Cheap to compute and it answers "when" without a sentence: a single
     contiguous outage looks different from the same downtime scattered.
+
+    Two levels of grouping, for the same reason _subject_rows has them: the
+    inner one collapses a subject's tiers to one reading per timestep (worst
+    wins), the outer one aggregates those timesteps into the report's slices.
+    With `bin_s = 0` the inner grouping is per-run and collapses nothing.
     """
     span = (until - since).total_seconds() / n_buckets
     rows = await pool.fetch(
         """
-        SELECT check_id,
-               floor(extract(epoch from (finished_at - $1)) / $4)::int AS b,
-               count(*) FILTER (WHERE status = ANY($5::text[]))  AS n,
-               count(*) FILTER (WHERE status = 'pass')           AS n_pass,
-               count(*) FILTER (WHERE status = 'fail')           AS n_fail,
-               count(*) FILTER (WHERE status = 'warn')           AS n_warn,
-               count(*) FILTER (WHERE status = ANY($6::text[]))  AS n_excluded
-        FROM check_runs
-        WHERE check_id LIKE $3 AND finished_at > $1 AND finished_at <= $2
+        WITH raw AS (
+            SELECT regexp_replace(check_id, $6, '') AS skey,
+                   CASE WHEN $8 > 0
+                        THEN to_timestamp(
+                               floor(extract(epoch from finished_at) / $8) * $8)
+                        ELSE finished_at END AS ts,
+                   floor(extract(epoch from (finished_at - $1)) / $4)::int AS b,
+                   status
+            FROM check_runs
+            WHERE check_id LIKE ANY($3::text[])
+              AND NOT (check_id = ANY($7::text[]))
+              AND finished_at > $1 AND finished_at <= $2
+        ),
+        -- One reading per (subject, timestep). `bool_or` on the excluded
+        -- statuses rather than a count, because a timestep where one tier
+        -- errored and the other reported cleanly IS a conclusive timestep --
+        -- the error is a fact about one probe, not about the subject. It is
+        -- only excluded when NOTHING in the timestep produced a verdict.
+        step AS (
+            SELECT skey, ts, min(b) AS b,
+                   -- ONLY the reported statuses set the reading. An `error`
+                   -- maps to NULL, which max() ignores, so a timestep whose
+                   -- other tier passed reads as a pass. Mapping it to 2 (as
+                   -- the single-family version could afford to, because its
+                   -- counters filtered error rows out one level down) made
+                   -- every half-blind minute read as a FAILED minute: XSCW
+                   -- with a dead frontend probe and a perfectly healthy
+                   -- backend came out at 0% availability instead of 100%.
+                   max(CASE WHEN status = ANY($5::text[])
+                            THEN CASE WHEN status = 'fail' THEN 2
+                                      WHEN status = 'warn' THEN 1
+                                      ELSE 0 END
+                       END)                                         AS bad,
+                   bool_or(status = ANY($5::text[]))                AS any_reported
+            FROM raw
+            GROUP BY skey, ts
+        )
+        SELECT skey, b,
+               count(*) FILTER (WHERE any_reported)                 AS n,
+               count(*) FILTER (WHERE any_reported AND bad = 0)     AS n_pass,
+               count(*) FILTER (WHERE any_reported AND bad = 2)     AS n_fail,
+               count(*) FILTER (WHERE any_reported AND bad = 1)     AS n_warn,
+               count(*) FILTER (WHERE NOT any_reported)             AS n_excluded
+        FROM step
         GROUP BY 1, 2
         """,
-        since, until, like, span, list(REPORTED_STATUSES), list(EXCLUDED_STATUSES),
+        since, until, [p + "%" for p in prefixes], span,
+        list(REPORTED_STATUSES), _prefix_re(prefixes),
+        sorted(_NOT_SUBJECTS), int(bin_s),
     )
     out: dict[str, list[dict | None]] = {}
     for r in rows:
-        key = r["check_id"].replace(strip, "")
+        key = r["skey"]
         arr = out.setdefault(key, [None] * n_buckets)
         idx = min(max(int(r["b"]), 0), n_buckets - 1)
         n = int(r["n"] or 0)
-        arr[idx] = {
+        prev = arr[idx]
+        cur = {
             # None, not 0%, when nothing in the slice produced a verdict. A
             # bucket that was entirely errors is "we could not see", and
             # calling that 0% healthy would invent an outage.
@@ -521,6 +756,22 @@ async def _buckets(pool, since, until, like: str, strip: str,
             "n_warn":     int(r["n_warn"] or 0),
             "n_excluded": int(r["n_excluded"] or 0),
         }
+        # A timestep can straddle a slice boundary when bin_s does not divide
+        # the slice, so one (skey, b) may arrive twice. Merge rather than
+        # overwrite: the previous version assigned, which silently dropped
+        # whichever half came first.
+        if prev is None:
+            arr[idx] = cur
+        else:
+            tot = prev["n"] + cur["n"]
+            arr[idx] = {
+                "avail": (100.0 * (prev["n_pass"] + cur["n_pass"]) / tot) if tot else None,
+                "n": tot,
+                "n_pass": prev["n_pass"] + cur["n_pass"],
+                "n_fail": prev["n_fail"] + cur["n_fail"],
+                "n_warn": prev["n_warn"] + cur["n_warn"],
+                "n_excluded": prev["n_excluded"] + cur["n_excluded"],
+            }
     return out
 
 
@@ -547,31 +798,82 @@ async def _chronic_since(pool, check_id: str, target: str):
     )
 
 
+async def _subject_keys(pool, since, until, kind: str) -> set[str]:
+    """Every subject of this kind that produced any run in the window.
+
+    Read across BOTH tiers, not just the configured one. A subject that exists
+    only on the backend side must still be discovered: the xqpi profile
+    registers LB1/LB2 with no radarca checks at all, so a frontend-only
+    universe would report nothing on that deployment.
+
+    Window-scoped on purpose. A radar decommissioned last month should not
+    appear in today's report with an empty row; the admin picker lists the
+    registry instead, which is a different question.
+    """
+    prefixes = _FAMILIES[kind]["combined"]
+    rows = await pool.fetch(
+        """
+        SELECT DISTINCT regexp_replace(check_id, $4, '') AS skey
+        FROM check_runs
+        WHERE check_id LIKE ANY($3::text[])
+          AND NOT (check_id = ANY($5::text[]))
+          AND finished_at > $1 AND finished_at <= $2
+        """,
+        since, until, [p + "%" for p in prefixes], _prefix_re(prefixes),
+        sorted(_NOT_SUBJECTS),
+    )
+    return {r["skey"] for r in rows}
+
+
 async def compute(pool, *, since: datetime, until: datetime,
-                  tz: str = "America/Denver", products: bool = True) -> dict:
+                  tz: str = "America/Denver", products: bool = True,
+                  cfg: dict | None = None) -> dict:
     """Everything the report states, computed once.
 
     Returned as plain data so the email, the JSON endpoint and any future web
     view render the same numbers rather than each recomputing them slightly
     differently.
+
+    `cfg` is the digest settings blob. It decides, per subject, which signal
+    the row is built from and whether the row appears at all — see
+    subject_source / subject_shown. Passing None reports every subject from
+    its kind's default, which is what the pre-v0.8 behaviour was.
     """
     zone = ZoneInfo(tz)
+    cfg = cfg or {}
 
-    async def family(like: str, strip: str, kind: str) -> list[dict]:
-        subs = await _subject_rows(pool, since, until, like, strip)
-        vmap = await _verdicts(pool, since, until, like, strip)
-        bmap = await _buckets(pool, since, until, like, strip)
+    async def family(kind: str, source: str, only: set[str] | None) -> list[dict]:
+        """One (kind, source) group. `only` restricts to those subject keys."""
+        prefixes = _FAMILIES[kind][source]
+        # Binning is only meaningful when two tiers have to be reconciled; a
+        # single family keeps per-run timesteps so its numbers are unchanged
+        # from before this existed.
+        bin_s = COMBINE_BIN_S if len(prefixes) > 1 else 0
+        subs = await _subject_rows(pool, since, until, prefixes, bin_s)
+        vmap = await _verdicts(pool, since, until, prefixes)
+        bmap = await _buckets(pool, since, until, prefixes, bin_s)
         out = []
         for key, sub in subs.items():
+            if only is not None and key not in only:
+                continue
             sub.verdicts = vmap.get(key, {})
             sub.buckets = bmap.get(key, [])
             chronic = None
             avail = sub.availability
             if avail is not None and avail <= 0.5:
-                chronic = await _chronic_since(pool, f"{strip}{key}", key)
+                # Asked of the FIRST family only. A chronic-since date is a
+                # "how long has this been broken" hint for a subject already
+                # at ~0% availability; resolving it across both tiers would
+                # need the same worst-of merge over a 14-day lookback for a
+                # single sentence.
+                chronic = await _chronic_since(pool, f"{prefixes[0]}{key}", key)
             out.append({
                 "key":            key,
                 "kind":           kind,
+                # Which signal this row was built from, so the report can say
+                # so. A reader comparing two rows needs to know when one is
+                # radarca's opinion and the other is the filesystem's.
+                "source":         source,
                 "name":           subject_name(kind, key),
                 "availability":   sub.availability,
                 "judged":         sub.judged,
@@ -596,8 +898,30 @@ async def compute(pool, *, since: datetime, until: datetime,
         out.sort(key=lambda d: (d["availability"] if d["availability"] is not None else 101))
         return out
 
-    radars = await family("layer2.radar.%", "layer2.radar.", "radar")
-    prods = await family("layer1.product.%", "layer1.product.", "product") if products else []
+    async def kind_rows(kind: str) -> list[dict]:
+        """Every shown subject of this kind, each from its configured source.
+
+        The subject universe is read from BOTH families rather than from the
+        configured source, so a radar that exists only on the backend tier
+        (an xqpi profile has no radarca checks at all) is still discovered and
+        still reported.
+        """
+        universe = await _subject_keys(pool, since, until, kind)
+        by_source: dict[str, set[str]] = {}
+        for key in universe:
+            if not subject_shown(cfg, kind, key):
+                continue
+            by_source.setdefault(subject_source(cfg, kind, key), set()).add(key)
+        rows: list[dict] = []
+        for source, keys in sorted(by_source.items()):
+            rows.extend(await family(kind, source, keys))
+        # Worst first: attention should land without hunting. Re-sorted here
+        # because the per-source groups are each sorted only within themselves.
+        rows.sort(key=lambda d: (d["availability"] if d["availability"] is not None else 101))
+        return rows
+
+    radars = await kind_rows("radar")
+    prods = await kind_rows("product") if products else []
 
     totals = await pool.fetchrow(
         """
@@ -1244,7 +1568,8 @@ class DigestTask:
         since = until - timedelta(hours=24)
         data = await compute(pool, since=since, until=until,
                              tz=str(self.cfg.get("tz") or "UTC"),
-                             products=bool(self.cfg.get("products", True)))
+                             products=bool(self.cfg.get("products", True)),
+                             cfg=self.cfg)
         subject = subject_line(data)
         text = render_text(data, _S.public_url)
         html = render_html(data, _S.public_url)

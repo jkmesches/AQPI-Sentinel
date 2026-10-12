@@ -68,6 +68,7 @@ async def daily(request: Request, since: str | None = None,
     return await _digest.compute(
         request.app.state.store.pool, since=s, until=u,
         tz=cfg.get("tz") or "UTC", products=bool(cfg.get("products", True)),
+        cfg=cfg,
     )
 
 
@@ -150,7 +151,8 @@ async def send_test(request: Request,
     s, u = _window((body or {}).get("since"), (body or {}).get("until"))
     data = await _digest.compute(pool, since=s, until=u,
                                  tz=cfg.get("tz") or "UTC",
-                                 products=bool(cfg.get("products", True)))
+                                 products=bool(cfg.get("products", True)),
+                                 cfg=cfg)
     subject = "[TEST] " + _digest.subject_line(data)
     text = _digest.render_text(data, SETTINGS.public_url)
     html = _digest.render_html(data, SETTINGS.public_url)
@@ -174,7 +176,8 @@ async def preview(request: Request,
     s, u = _window((body or {}).get("since"), (body or {}).get("until"))
     data = await _digest.compute(request.app.state.store.pool, since=s, until=u,
                                  tz=cfg.get("tz") or "UTC",
-                                 products=bool(cfg.get("products", True)))
+                                 products=bool(cfg.get("products", True)),
+                                 cfg=cfg)
     return {
         "subject": _digest.subject_line(data),
         "text":    _digest.render_text(data, SETTINGS.public_url),
