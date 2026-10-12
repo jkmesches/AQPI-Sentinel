@@ -70,6 +70,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -803,6 +804,44 @@ class Layer3DropsProducerCheck(Check):
 # Composite INPUT staging
 # --------------------------------------------------------------------------
 
+def _list_parent(path: str, limit: int = 40) -> tuple[list[str] | None, float | None]:
+    """Blocking. (names beside `path`, age of the newest thing among them).
+
+    Only ever called when `path` itself was absent, so this costs nothing in
+    the steady state. It is the difference between "the mount is gone" and
+    "the mount is fine and we are looking for the wrong name", which is a
+    distinction no amount of staring at the failing path can make — and the
+    one the reader will try to make by guessing.
+
+    A dangling symlink reads as absent here while looking present on the host,
+    which is the shape to expect when a tree is assembled from more than one
+    mount. CBAND's raw data is on a different share from the X-bands (see
+    SENTINEL_SSCB_ROOT), so it is the entry most likely to be a link.
+    """
+    parent = os.path.dirname(path.rstrip("/"))
+    try:
+        with os.scandir(parent) as it:
+            names = sorted(e.name for i, e in enumerate(it) if i < limit)
+    except OSError:
+        return None, None
+    # Newest mtime anywhere one level down. A name list alone is the trap the
+    # decoy was built to spring: the abandoned tree had the RIGHT names, the
+    # right conventions and a believable file count, so a sibling listing would
+    # have confirmed "wrong name" with more confidence than the bare error did.
+    # Age is what no amount of name-checking reaches.
+    newest = 0.0
+    for name in names:
+        try:
+            with os.scandir(os.path.join(parent, name)) as it2:
+                for i, e in enumerate(it2):
+                    if i >= limit:
+                        break
+                    newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+        except OSError:
+            continue
+    return names, (time.time() - newest if newest else None)
+
+
 def _scan_staging_blocking(path: str) -> dict[str, Any]:
     """Blocking. What is staged for one radar, in ONE directory read.
 
@@ -926,7 +965,9 @@ class Layer3InputStagingCheck(Check):
         self.alarm_only_depends_on = [lb2] if lb2 in CHECKS else []
 
     def _path(self) -> str:
-        return os.path.join(SETTINGS.backend_root, COMPOSITE_INPUT_TREE,
+        # recentfiles_root, NOT backend_root. See config.COMPOSITE_INPUT_TREE
+        # for the tree this used to resolve to and why it passed.
+        return os.path.join(SETTINGS.recentfiles_root, COMPOSITE_INPUT_TREE,
                             COMPOSITE_INPUT_DIR[self.radar_id])
 
     async def run(self, ctx) -> CheckResult:
@@ -950,14 +991,46 @@ class Layer3InputStagingCheck(Check):
                 payload=payload, metrics={"fs_timeout": 1.0},
             )
         except FileNotFoundError:
-            # The staging directory itself, not its contents. All nine exist
-            # on AQPI; their absence is a statement about the mount or about
+            # The staging directory itself, not its contents. All nine exist on
+            # AQPI; their absence is a statement about the mount or about
             # Sounak's scripts, not about this radar.
+            #
+            # So the error carries the evidence needed to tell those apart,
+            # because "staging directory does not exist" on its own sent two
+            # sessions guessing: at a wrong directory NAME (the id-versus-folder
+            # mapping, which was already correct), at the bind mount, and at a
+            # dangling symlink. The parent listing distinguishes all three in
+            # one line, and the cost is one extra read on a path that is
+            # already failing.
+            sibs, sib_age = await asyncio.to_thread(_list_parent, path)
+            extra = {**payload, "absent": True, "siblings": sibs,
+                     "sibling_newest_age_s": sib_age}
+            if sibs is None:
+                why = ("its parent is unreadable too — the mount or the "
+                       "bind-mount boundary, not this radar")
+            elif not sibs:
+                why = "its parent exists and is EMPTY — nothing is staged at all"
+            elif sib_age is not None and sib_age > COMPOSITE_INPUT_RETENTION_S:
+                # The decisive signal, and the one a sibling NAME list cannot
+                # give: the neighbours are older than this tree retains, so
+                # this is not the live staging tree whatever it is called.
+                why = (f"its {len(sibs)} siblings were last written "
+                       f"{sib_age / 86400:.0f} days ago — this is not a live "
+                       f"staging tree, so the ROOT is wrong, not the name")
+            else:
+                why = (f"its parent holds {len(sibs)} other entr"
+                       f"{'y' if len(sibs) == 1 else 'ies'} "
+                       f"({', '.join(sibs[:6])}{'…' if len(sibs) > 6 else ''}) "
+                       f"— so the tree is mounted and THIS name is not in it")
+            # The resolved path in the SUMMARY, not only the payload. Two
+            # sessions guessed for two rounds at the name and the mount while
+            # the answer sat in payload.path: anyone who knows what that path
+            # should be ends it in one read.
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage,
                 status="error", started_at=t0, finished_at=utcnow(),
-                summary="staging directory does not exist — mount or upstream layout changed",
-                payload={**payload, "absent": True}, metrics={"fs_timeout": 0.0},
+                summary=f"staging directory does not exist — {path} — {why}",
+                payload=extra, metrics={"fs_timeout": 0.0},
             )
         except OSError as e:
             return CheckResult(
@@ -1017,6 +1090,41 @@ class Layer3InputStagingCheck(Check):
             payload["staged_skew_s"] = round(skew, 1)
             metrics["staged_skew_s"] = skew
 
+        # === Older than the tree retains is not staleness, it is the wrong tree ===
+        #
+        # Not a fitted band and not a threshold question: this tree prunes to
+        # about an hour (config.COMPOSITE_INPUT_RETENTION_S, measured), so a
+        # newest staged file older than the ENTIRE retention window is a
+        # contradiction. Either the retention assumption is wrong or this is
+        # not the live staging tree, and both are statements about Sentinel's
+        # configuration rather than about the radar — hence error, not fail.
+        #
+        # This is what v0.8.0 needed and did not have. It resolved the staging
+        # tree under backend_root, found a copy abandoned in March 2026 with
+        # the right eight directory names, and reported "20 staged, newest
+        # 298254.8 min old" as a PASS on every one of them. The age was in the
+        # summary the whole time and nothing judged it.
+        #
+        # Worth being explicit, because it is the opposite of the band removed
+        # an hour earlier: that band was a guess at what "late" means on a tree
+        # working normally, and had no measurement behind it. This is a
+        # consistency check against a documented property of the tree, and
+        # needs none — 202 days against a 1 h window is not a close call.
+        # Removing the unjustified band is what let the wrong root through, so
+        # the lesson is not "keep guessed bands", it is that switching off a
+        # judgement can take an unrelated guarantee with it.
+        if age_s > COMPOSITE_INPUT_RETENTION_S:
+            return CheckResult(
+                check_id=self.id, target=self.target, stage=self.stage,
+                status="error", started_at=t0, finished_at=utcnow(),
+                summary=(f"newest staged file is {age_s / 86400:.1f} days old, "
+                         f"older than this tree's entire "
+                         f"{COMPOSITE_INPUT_RETENTION_S / 3600:.0f} h retention "
+                         f"— {path} is not a live staging tree"),
+                payload={**payload, "beyond_retention": True},
+                metrics=metrics,
+            )
+
         if warn_s is None:
             # No band — see config.COMPOSITE_INPUT_STALE_WARN_S. B_fresh is
             # not added to `sub` at all rather than being set to a passing
@@ -1067,9 +1175,15 @@ if SETTINGS.backend_root:
     # a profile-name comparison.
     if DROPS_TREE:
         register(Layer3DropsProducerCheck())
-    # Nine on AQPI, none on xqpi — the table says so rather than the profile
-    # name. Registered AFTER layer2_backend_radar (see checks/__init__._ALWAYS)
-    # so each instance can read the registry to find out whether it has an LB2
+    # Gated on its OWN root, not on backend_root. Unset means these checks do
+    # not exist, which is the honest answer for a deployment that has not
+    # mounted the staging share — and is why the setting has no default. The
+    # version that defaulted it under backend_root registered all nine against
+    # a tree abandoned in March and reported eight of them healthy.
+    #
+    # Registered AFTER layer2_backend_radar (see checks/__init__._ALWAYS) so
+    # each instance can read the registry to find out whether it has an LB2
     # check to gate its alarm on.
-    for _rid in sorted(COMPOSITE_INPUT_DIR):
-        register(Layer3InputStagingCheck(radar_id=_rid))
+    if SETTINGS.recentfiles_root:
+        for _rid in sorted(COMPOSITE_INPUT_DIR):
+            register(Layer3InputStagingCheck(radar_id=_rid))

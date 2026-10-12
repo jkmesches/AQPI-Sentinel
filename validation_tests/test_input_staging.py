@@ -55,6 +55,10 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 # registry and passes by measuring nothing.
 os.environ.setdefault("SENTINEL_BACKEND_ROOT", "/nonexistent-for-tests")
 os.environ.setdefault("SENTINEL_SSCB_ROOT", "/nonexistent-for-tests/sscb")
+# Its OWN root, and these checks do not exist without it. Deliberately not
+# derived from SENTINEL_BACKEND_ROOT here either: a test that quietly accepts
+# the backend root would pass against exactly the misconfiguration that shipped.
+os.environ.setdefault("SENTINEL_RECENTFILES_ROOT", "/nonexistent-for-tests/trinity")
 
 import backend.checks as _all                                   # noqa: E402,F401
 from backend.checks import layer3_backend_processing as lb3     # noqa: E402
@@ -202,6 +206,29 @@ def main() -> int:
           r.payload.get("staged_entries") == 3,
           str(r.payload.get("staged_entries")))
 
+    print("\nolder than the tree retains is the wrong tree, not a late radar")
+    # v0.8.0 resolved this tree under backend_root, found a copy abandoned in
+    # March 2026 with the right eight directory names, and reported
+    # "20 staged, newest 298254.8 min old" as a PASS on every one of them.
+    # Needs no fitted band: 202 days against a 1 h retention window is a
+    # contradiction, not a close call.
+    d = stage_dir(tmp, "XEBY_decoy", {declared(202 * 86400, rid="XEBY"): 0})
+    r = run("XEBY", d)
+    check("an age past the whole retention window is an ERROR",
+          r.status == "error", f"{r.status}: {r.summary}")
+    check("...blaming the tree, not the radar",
+          "not a live staging tree" in r.summary, r.summary)
+    check("...and naming the resolved path, which is the thing to check",
+          "XEBY_decoy" in r.summary, r.summary)
+    check("...flagged in the payload for the reprocess engine",
+          r.payload.get("beyond_retention") is True)
+    # And it must not fire on anything inside the window, band or no band.
+    d = stage_dir(tmp, "XEBY_live", {declared(COMPOSITE_INPUT_RETENTION_S - 60,
+                                               rid="XEBY"): 0})
+    r = run("XEBY", d)
+    check("a file inside the retention window is untouched by it",
+          r.status == "pass", f"{r.status}: {r.summary}")
+
     print("\nwith no band, the age is recorded and not judged")
     # Shipped as a uniform 900 s for about an hour. Measured the same
     # afternoon: NEXRAD newest-declared ages reached 855 s, so 900 left 45 s of
@@ -211,7 +238,7 @@ def main() -> int:
     check("there is no band to be wrong about yet",
           COMPOSITE_INPUT_STALE_WARN_S is None,
           str(COMPOSITE_INPUT_STALE_WARN_S))
-    d = stage_dir(tmp, "XSCW_old", {declared(4000): 0})
+    d = stage_dir(tmp, "XSCW_old", {declared(3400): 0})
     r = run("XSCW", d)
     check("a very old staged volume does not warn", r.status == "pass",
           f"{r.status}: {r.summary}")
@@ -223,7 +250,7 @@ def main() -> int:
           "B_fresh" not in (r.payload.get("sub_status") or {}),
           str(r.payload.get("sub_status")))
     check("...while the age is still recorded, which is what a band needs",
-          3990 <= r.payload["age_s"] <= 4010, str(r.payload.get("age_s")))
+          3390 <= r.payload["age_s"] <= 3410, str(r.payload.get("age_s")))
     check("...and the summary claims no verdict about it",
           "STALE" not in r.summary, r.summary)
 
@@ -282,6 +309,51 @@ def main() -> int:
     check("...and says which", "directory does not exist" in r.summary, r.summary)
     check("...and is marked absent for the reprocess engine",
           r.payload.get("absent") is True)
+
+    print("\nan absent directory carries the evidence to explain itself")
+    # "staging directory does not exist" on its own sent two sessions guessing
+    # on 2026-10-12 — at a wrong directory NAME, at the bind mount, and at a
+    # dangling symlink — for a check whose own parent listing separates all
+    # three. The guesswork is the bug this closes.
+    peers = tmp / "tree_present"
+    for name in ("XEBY", "XSCR", "XSCV", "XSCW", "XSWR", "KBBX"):
+        (peers / name).mkdir(parents=True, exist_ok=True)
+    r = run("CBAND", peers / "SSCB")
+    check("a mounted tree missing ONE name says exactly that",
+          "THIS name is not in it" in r.summary, r.summary)
+    check("...and names the siblings, so the right name is readable off the row",
+          "XEBY" in r.summary and r.payload.get("siblings") == sorted(
+              ["XEBY", "XSCR", "XSCV", "XSCW", "XSWR", "KBBX"]),
+          str(r.payload.get("siblings")))
+
+    empty_parent = tmp / "tree_empty" / "recentfiles"
+    empty_parent.mkdir(parents=True, exist_ok=True)
+    r = run("CBAND", empty_parent / "SSCB")
+    check("an empty parent is distinguished from a missing one",
+          "EMPTY" in r.summary, r.summary)
+    check("...and records the empty listing rather than None",
+          r.payload.get("siblings") == [], str(r.payload.get("siblings")))
+
+    r = run("CBAND", tmp / "no_such_tree" / "recentfiles" / "SSCB")
+    check("an unreadable parent points at the mount, not at the radar",
+          "parent is unreadable" in r.summary and "not this radar" in r.summary,
+          r.summary)
+    check("...and records siblings as None, which is not the same as empty",
+          r.payload.get("siblings") is None, str(r.payload.get("siblings")))
+    # A dangling symlink is the shape a multi-mount tree produces: present to
+    # the host, absent inside the container. It must read as the sibling case,
+    # because the parent IS mounted.
+    link_parent = tmp / "tree_link"
+    link_parent.mkdir(parents=True, exist_ok=True)
+    (link_parent / "XEBY").mkdir(exist_ok=True)
+    (link_parent / "SSCB").symlink_to(tmp / "nowhere_at_all")
+    r = run("CBAND", link_parent / "SSCB")
+    check("a dangling symlink reads as 'the name is here but does not resolve'",
+          r.status == "error" and "THIS name is not in it" in r.summary,
+          r.summary)
+    check("...and the listing SHOWS it, which is what identifies a broken link",
+          "SSCB" in (r.payload.get("siblings") or []),
+          str(r.payload.get("siblings")))
 
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall input-staging assertions passed")

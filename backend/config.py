@@ -47,6 +47,10 @@ class Settings:
     profile: str                           # "aqpi" (default) or "xqpi" — see backend/profiles
     backend_root: Path | None              # K2 web-files root, read-only bind mount
     sscb_root: Path | None                 # C-band tree on trinity, read-only
+    # The composite's INPUT staging share. Its own root, with NO default and
+    # no fallback, because it is not under backend_root and assuming it was
+    # produced a silent decoy — see COMPOSITE_INPUT_TREE.
+    recentfiles_root: Path | None
 
 
 def _opt_path(var: str) -> Path | None:
@@ -74,6 +78,7 @@ def _load() -> Settings:
         profile=os.environ.get("SENTINEL_PROFILE", "aqpi").strip().lower() or "aqpi",
         backend_root=_opt_path("SENTINEL_BACKEND_ROOT"),
         sscb_root=_opt_path("SENTINEL_SSCB_ROOT"),
+        recentfiles_root=_opt_path("SENTINEL_RECENTFILES_ROOT"),
         data_dir=data_dir,
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
         api_port=int(os.environ.get("SENTINEL_API_PORT", "8000")),
@@ -932,6 +937,28 @@ DROPS_TREE: str = "PRODUCTS/DROPS"
 # the KBBX/KDAX/KMUX feeds stopped when K2 was rebooted on 2026-09-17 and did
 # not restart until ~2026-10-06 00Z, and their recentfiles trees held zero
 # files throughout. Eighteen days, found by eye.
+# === THIS IS NOT UNDER backend_root, AND ASSUMING IT WAS SHIPPED A DECOY ===
+#
+# The staging tree is on trinity: Renzo gave the path as
+# /trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/recentfiles. v0.8.0
+# resolved it relative to SETTINGS.backend_root, which on cira-aqpi is the K2
+# tree /k2/projects/aqpi/XBand/web-files. That path EXISTS and is not empty:
+#
+#   /k2/.../PRODUCTS/Radar_processed/recentfiles/
+#     KBBX KDAX KMUX XEBY XSCR XSCV XSCW XSWR    20 files each
+#     newest file 202-207 days old (March 2026); no SSCB at all
+#
+# Right names, right filename conventions, believable counts, abandoned in
+# March. So eight checks reported PASS against a dead tree and CBAND reported
+# an error only because the dead tree never had an SSCB — the one FAILING row
+# was the only true one. [M] 2026-10-12
+#
+# Hence its own root with NO DEFAULT. Unset means the staging checks do not
+# register at all, which is a stated absence; a backend_root-relative default
+# is what turned "we cannot see this tree" into nine confident verdicts about
+# the wrong one. Same reasoning as DROPS_TREE being empty on xqpi rather than
+# inherited, and the same reason CBAND has SENTINEL_SSCB_ROOT: a tree on a
+# different share needs its own setting, not an assumption.
 COMPOSITE_INPUT_TREE: str = "PRODUCTS/Radar_processed/recentfiles"
 
 # Radar id -> staging directory. NINE, not six: the composite's input set is
@@ -1114,3 +1141,33 @@ if _dupes:
         f"the receipt directory must identify exactly one radar"
     )
 del _monitored, _unmonitored, _dupes
+
+# Two radars staging into one directory would make both checks read the same
+# files and agree forever, which looks like health. Same hazard as the receipt
+# directory guard above, same reason.
+_in_dupes = sorted({d for d in COMPOSITE_INPUT_DIR.values()
+                    if list(COMPOSITE_INPUT_DIR.values()).count(d) > 1})
+if _in_dupes:
+    raise ValueError(
+        f"COMPOSITE_INPUT_DIR maps more than one radar to {_in_dupes} — a "
+        f"staging directory must identify exactly one radar"
+    )
+# The two dicts must agree about any radar they both name. They are different
+# QUESTIONS — one is where the composite's receipt reports a radar, the other
+# is where its input is staged — so they stay separate tables, and today they
+# happen to give the same answer for every shared key. If that ever stops being
+# true it will be because somebody edited one of them, and a monitoring system
+# that reads two names for one radar reports on whichever it reached first.
+#
+# CBAND is the only radar where either name differs from the id (SSCB), which
+# is exactly the case a reader checks by eye and gets wrong: it is also the one
+# radar whose raw tree is on a separate mount, so "CBAND is special here" is
+# true in three places for three different reasons.
+_disagree = sorted(r for r in set(COMPOSITE_INPUT_DIR) & set(COMPOSITE_EXPECTED_RADARS)
+                   if COMPOSITE_INPUT_DIR[r] != COMPOSITE_EXPECTED_RADARS[r])
+if _disagree:
+    raise ValueError(
+        f"COMPOSITE_INPUT_DIR and COMPOSITE_EXPECTED_RADARS disagree about "
+        f"{_disagree} — one radar, two directory names"
+    )
+del _in_dupes, _disagree

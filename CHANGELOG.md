@@ -28,6 +28,48 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The staging check was reading a tree abandoned in March 2026, and reported
+  eight of nine radars healthy against it.** `COMPOSITE_INPUT_TREE` resolved
+  relative to `SENTINEL_BACKEND_ROOT`. The staging tree is not under it: Renzo
+  gave the path as `/trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/
+  recentfiles`, while `backend_root` on cira-aqpi is the K2 tree
+  `/k2/projects/aqpi/XBand/web-files`.
+
+  That path exists and is not empty. It holds a copy of the staging tree with
+  the right eight directory names, the right filename conventions and 20 files
+  each, last written 202–207 days ago, and no `SSCB` at all. So eight checks
+  reported **pass** against dead data — `layer3.input.XEBY` read "20 staged,
+  newest 298254.8 min old" and passed — and the one row that failed, CBAND,
+  failed only because the dead tree never had an SSCB. The single error was the
+  only true result in the check.
+
+  `SENTINEL_RECENTFILES_ROOT` is now its own setting with **no default and no
+  fallback**, and its own `/recentfiles` bind mount. Unset, the nine
+  `layer3.input.*` checks do not register — a stated absence, because a guessed
+  path is worse than an absent check. Same reasoning as `SENTINEL_SSCB_ROOT`.
+
+- **A staged age beyond the tree's whole retention window is now an error.**
+  Not a fitted band: this tree prunes to about an hour, so 202 days is a
+  contradiction rather than a close call, and it says the ROOT is wrong rather
+  than blaming the radar. This is what would have caught the decoy on the first
+  tick.
+
+  Worth recording honestly: removing the unjustified 900 s band an hour earlier
+  was right on its own terms, and it is what hid this. With `B_fresh` enabled
+  all eight would have reported ~290,000 minutes stale immediately. The lesson
+  is not "keep guessed bands" — it is that switching a judgement off can take
+  an unrelated guarantee with it, so look for what else goes dark.
+
+- **An absent staging directory now explains itself.** The summary carries the
+  **resolved path** rather than only the payload — two sessions guessed for two
+  rounds at the directory name and the bind mount while the answer sat in
+  `payload.path`. On absence the check also lists the parent and reports the
+  siblings' newest age: a name list alone is the trap the decoy springs, since
+  it had all the right names, and only age distinguishes "wrong name" from
+  "dead tree".
+
 ## [0.8.1] — 2026-10-12
 
 Four corrections to v0.8.0, every one of them found by independent

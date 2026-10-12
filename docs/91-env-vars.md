@@ -162,6 +162,22 @@ These don't normally need to be set — included for completeness.
 
 ---
 
+### `SENTINEL_RECENTFILES_ROOT`
+
+Container path to the share holding the composite's input staging tree
+(`PRODUCTS/Radar_processed/recentfiles`). On cira-aqpi that is trinity's
+`aqpiqpedev` tree, **not** the K2 tree `SENTINEL_BACKEND_ROOT` points at, so it
+needs its own read-only bind mount.
+
+Unset, the nine `layer3.input.*` checks do not register. That is the intended
+behaviour and not a degradation: v0.8.0 resolved this path relative to
+`SENTINEL_BACKEND_ROOT`, which on cira-aqpi contains a copy of the tree
+abandoned in March 2026 — right directory names, right filename conventions,
+20 files each, 202 days stale — and reported eight radars healthy against it.
+A guessed path is worse than an absent check, which is why this one has no
+default and no fallback. Same reasoning as `SENTINEL_SSCB_ROOT`: a tree on a
+different share gets its own setting.
+
 ## What's NOT an env var
 
 Some configuration deliberately lives in code or DB, not env:

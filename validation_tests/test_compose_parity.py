@@ -175,8 +175,12 @@ def main() -> int:
     # (read-only mounts of K2 and trinity). They were added to both compose
     # files but not here, so this assertion has been red — and therefore
     # measuring nothing — since that release.
+    # /recentfiles arrived in v0.8.2 with the composite input staging checks.
+    # It is a THIRD share, not a subtree of /backend, and the release that
+    # assumed otherwise reported eight radars healthy against a copy of the
+    # tree abandoned in March 2026.
     EXPECTED_BACKEND_MOUNTS = {"/data/archive", "/data/cold", "/data/backups",
-                               "/backend", "/sscb"}
+                               "/backend", "/sscb", "/recentfiles"}
     for label, doc in (("prod.yml", prod), ("ghcr.yml", ghcr)):
         got = volume_targets(doc["services"]["backend"])
         check(f"{label}: backend mounts parse to real container paths",
