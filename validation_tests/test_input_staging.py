@@ -302,6 +302,42 @@ def main() -> int:
           r.payload["sub_status"] == {"A_staged": "pass"},
           str(r.payload.get("sub_status")))
 
+    print("\nthe root pointing one level too shallow says so by name")
+    # The misconfiguration the old variable name invited: in v0.8.2 the code
+    # appended PRODUCTS/Radar_processed/recentfiles, so RECENTFILES_ROOT had to
+    # point two levels ABOVE recentfiles. It was set from the name instead and
+    # every row read
+    # /recentfiles/PRODUCTS/Radar_processed/recentfiles/KBBX — a doubled path
+    # reported as "the mount or the bind-mount boundary", which is true and
+    # useless.
+    project = tmp / "project_root"
+    deep = project / "PRODUCTS" / "Radar_processed" / "recentfiles" / "KBBX"
+    deep.mkdir(parents=True, exist_ok=True)
+    # SETTINGS is a frozen dataclass, so swap the whole object rather than a
+    # field — the same way a deployment changes it, by restarting with a
+    # different env rather than by mutation.
+    import dataclasses as _dc
+    orig_settings = lb3.SETTINGS
+    try:
+        lb3.SETTINGS = _dc.replace(orig_settings, recentfiles_root=str(project))
+        chk = lb3.Layer3InputStagingCheck(radar_id="KBBX")
+        orig_now = lb3.utcnow
+        lb3.utcnow = lambda: _NOW
+        try:
+            r = asyncio.run(chk.run(None))
+        finally:
+            lb3.utcnow = orig_now
+    finally:
+        lb3.SETTINGS = orig_settings
+    check("it names the variable rather than reporting a broken mount",
+          "SENTINEL_RECENTFILES_ROOT" in r.summary, r.summary)
+    check("...and says which way it is wrong",
+          "too shallow" in r.summary and "not the project root" in r.summary,
+          r.summary)
+    check("...and shows the path that DOES exist, which is the fix",
+          r.payload.get("misconfigured_root", "").endswith("recentfiles/KBBX"),
+          str(r.payload.get("misconfigured_root")))
+
     print("\na missing directory is not an empty one")
     r = run("XSCW", tmp / "does_not_exist")
     check("is an error about the mount, not a fail about the radar",

@@ -49,7 +49,7 @@ class Settings:
     sscb_root: Path | None                 # C-band tree on trinity, read-only
     # The composite's INPUT staging share. Its own root, with NO default and
     # no fallback, because it is not under backend_root and assuming it was
-    # produced a silent decoy — see COMPOSITE_INPUT_TREE.
+    # produced a silent decoy — see COMPOSITE_INPUT_HOST_SUBPATH.
     recentfiles_root: Path | None
 
 
@@ -1006,7 +1006,21 @@ DROPS_TREE: str = "PRODUCTS/DROPS"
 # the wrong one. Same reasoning as DROPS_TREE being empty on xqpi rather than
 # inherited, and the same reason CBAND has SENTINEL_SSCB_ROOT: a tree on a
 # different share needs its own setting, not an assumption.
-COMPOSITE_INPUT_TREE: str = "PRODUCTS/Radar_processed/recentfiles"
+# The HOST-side subpath, for pointing the bind mount at. NOT joined by any
+# code: SETTINGS.recentfiles_root IS the recentfiles directory, so the check
+# appends only the per-radar directory name.
+#
+# It used to be joined, and the join is what made the setting's name a lie — a
+# variable called RECENTFILES_ROOT that had to point two levels ABOVE
+# recentfiles. The value was then prescribed from the name rather than from the
+# code that consumed it, which produced
+# `/recentfiles/PRODUCTS/Radar_processed/recentfiles/KBBX` on all nine rows.
+# Anyone would make that mistake; the name invited it.
+#
+# Dropping the join also lets the mount be the recentfiles subtree alone.
+# Joining it here forced the only workable mount to be the WHOLE aqpiqpedev
+# project read-only, which is wider than this check needs.
+COMPOSITE_INPUT_HOST_SUBPATH: str = "PRODUCTS/Radar_processed/recentfiles"
 
 # Radar id -> staging directory. NINE, not six: the composite's input set is
 # not the set of radars this profile monitors for arrival. The three NEXRAD

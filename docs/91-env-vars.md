@@ -164,10 +164,24 @@ These don't normally need to be set — included for completeness.
 
 ### `SENTINEL_RECENTFILES_ROOT`
 
-Container path to the share holding the composite's input staging tree
-(`PRODUCTS/Radar_processed/recentfiles`). On cira-aqpi that is trinity's
-`aqpiqpedev` tree, **not** the K2 tree `SENTINEL_BACKEND_ROOT` points at, so it
-needs its own read-only bind mount.
+Container path naming the composite's input staging directory **itself** — the
+check appends only the per-radar directory name. On cira-aqpi the host side is
+trinity's tree, **not** the K2 tree `SENTINEL_BACKEND_ROOT` points at, so it
+needs its own read-only bind mount:
+
+```bash
+SENTINEL_RECENTFILES_HOST_PATH=/trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/recentfiles
+SENTINEL_RECENTFILES_ROOT=/recentfiles
+```
+
+In v0.8.2 the code appended `PRODUCTS/Radar_processed/recentfiles` itself, so
+this had to point two levels *above* `recentfiles` — a variable called
+`RECENTFILES_ROOT` that must not name `recentfiles`. It was duly set from the
+name rather than from the code, producing
+`/recentfiles/PRODUCTS/Radar_processed/recentfiles/KBBX` on all nine rows.
+Mounting the subtree directly is also a narrower exposure than the whole
+project. If it is set too shallow, the check now says so by name rather than
+reporting a missing mount.
 
 Unset, the nine `layer3.input.*` checks do not register. That is the intended
 behaviour and not a degradation: v0.8.0 resolved this path relative to
