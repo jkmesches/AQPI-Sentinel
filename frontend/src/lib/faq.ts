@@ -31,15 +31,17 @@ export const FAQ: FaqItem[] = [
 		id: 'what-we-watch',
 		q: 'What is Sentinel actually watching?',
 		blocks: [
-			{ kind: 'p', text: 'The **public-facing radarca service**, not the radars directly. Sentinel has no privileged access to CSU-CHILL infrastructure and no feed from the radar processors — it reads exactly what a browser visiting radarca would read, and reasons about it.' },
-			{ kind: 'note', text: 'That limit shapes every answer here. When Sentinel says "XSWR is not reporting", the precise claim is *its data is not reaching radarca\'s public API* — which could be the radar, the ingest pipeline, the publishing step, or the API itself.' }
+			{ kind: 'p', text: 'Two things, by two independent routes, and the difference between them is the most useful signal Sentinel produces.' },
+			{ kind: 'p', text: 'The **display tier** is the public radarca service: Sentinel reads exactly what a browser visiting radarca would read — no privileged API, no feed from the radar processors. The **backend tier** reads the published files directly off the backend shares (K2, and Trinity for CBAND) over a read-only mount, with radarca not involved at all.' },
+			{ kind: 'p', text: 'Every stage belongs to one tier or the other: `L*` stages ask radarca what it believes, `LB*` stages read the files. Where the two disagree, **the disagreement is the finding** — usually that the data exists and something in the display tier is not showing it. A deployment with no backend mount runs the display tier alone, and says so rather than implying coverage it does not have.' },
+			{ kind: 'note', text: 'Neither tier sees inside the processing itself. When Sentinel says "XSWR is not reporting", the precise claim is about what reached a named place — radarca\'s public API, or a named directory on disk — not about the radar hardware.' }
 		]
 	},
 	{
 		id: 'data-sources',
 		q: 'Where does the data come from?',
 		blocks: [
-			{ kind: 'p', text: 'Five public endpoints:' },
+			{ kind: 'p', text: 'Five public endpoints make up the **display tier**:' },
 			{
 				kind: 'table',
 				head: ['Endpoint', 'What we take from it'],
@@ -51,7 +53,19 @@ export const FAQ: FaqItem[] = [
 					['the rendered site', 'Whether overlays actually draw, via a real browser']
 				]
 			},
-			{ kind: 'p', text: 'Scan times come from the **filenames** (`..._20260826-0049.png`), which is how we can say "the newest scan is 6 minutes old" rather than merely "some images exist".' }
+			{ kind: 'p', text: 'Scan times come from the **filenames** (`..._20260826-0049.png`), which is how we can say "the newest scan is 6 minutes old" rather than merely "some images exist".' },
+			{ kind: 'p', text: 'The **backend tier** reads files rather than APIs, on a read-only mount:' },
+			{
+				kind: 'table',
+				head: ['Source', 'What we take from it'],
+				rows: [
+					['The product trees on K2', 'Whether each product is really being produced, independent of what radarca shows'],
+					['The DROPS dated trees', 'Whether each radar\'s scans are landing on disk right now'],
+					['PRODUCTS/Radar_processed/recentfiles', 'Whether each radar is staged where the composite will actually read it'],
+					['The composite\'s own output', 'Which radars contributed to each composite, as opposed to which were expected to']
+				]
+			},
+			{ kind: 'note', text: 'A deployment without those mounts simply runs without the `LB` stages.' }
 		]
 	},
 	{
@@ -59,7 +73,8 @@ export const FAQ: FaqItem[] = [
 		q: 'How often does it check, and does that load your servers?',
 		blocks: [
 			{ kind: 'p', text: 'Cadences run from 30 s (is the internet up) to 1 h (slow forecast products); most radar and product checks run every **120 s**. Total outbound traffic is roughly **30 requests/minute**.' },
-			{ kind: 'p', text: 'We actively work to keep that low. All six radar checks used to fetch `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and now share one memoized fetch per cycle. If our traffic is ever a problem, tell us: the cadences are configuration, not architecture.' }
+			{ kind: 'p', text: 'We actively work to keep that low. All six radar checks used to fetch `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and now share one memoized fetch per cycle. If our traffic is ever a problem, tell us: the cadences are configuration, not architecture.' },
+			{ kind: 'note', text: 'That figure covers the display tier only. The backend-tier checks read mounted files and make **no upstream requests at all**, so everything added to the `LB` stages — product production, radar arrival, composite staging and participation — cost radarca exactly nothing.' }
 		]
 	},
 	{
@@ -134,16 +149,18 @@ export const FAQ: FaqItem[] = [
 				head: ['XEBY', 'XSCV', 'XSCW', 'XSCR', 'XSWR', 'CBAND'],
 				rows: [['300', '660', '720', '780', '660', '1080']]
 			},
-			{ kind: 'note', text: '**Raising a threshold cannot hide an outage.** A radar publishing *no* images is marked not-fresh regardless of any threshold. Thresholds only govern the "images present but not advancing" case — a frozen feed — where the cost is detection latency, not detection.' }
+			{ kind: 'note', text: '**Raising a threshold cannot hide an outage.** A radar publishing *no* images is marked not-fresh regardless of any threshold. Thresholds only govern the "images present but not advancing" case — a frozen feed — where the cost is detection latency, not detection.' },
+			{ kind: 'p', text: 'Two rules were learned expensively, and they are why some sub-checks show no verdict at all rather than a green one. **A band is fitted per class, never per radar:** a limit derived from one radar\'s own history goes blind exactly where that history is already bad, and fitting it to XSCW\'s 18-hour stalls makes 18 hours "normal for XSCW". The per-radar freshness numbers above are the exception that proves it — they are measured against publication lag, which genuinely is per radar.' },
+			{ kind: 'p', text: '**No band is better than a guessed one.** Where there is not yet enough measurement to set a limit, the sub-check is omitted rather than set to pass. "We did not judge this" and "we judged it healthy" are different claims, and a series recording the second for a period it never assessed is worse than one with an honest gap.' }
 		]
 	},
 	{
 		id: 'systemic',
 		q: 'Five radars went red at once. Is that five outages?',
 		blocks: [
-			{ kind: 'p', text: 'Almost certainly one. Radars at Santa Cruz, Sonoma, East Bay, Santa Clara and Sierra do not fail in the same second.' },
-			{ kind: 'p', text: 'Measured over 14 days, **80%** of all `GHOST_UP` readings happened while four or five radars were silent simultaneously; only **3%** were isolated to one radar. The clearest case: four sites entered `GHOST_UP` at `2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54` — sub-second alignment, 79 hours apart.' },
-			{ kind: 'p', text: 'Sentinel now runs a fleet-correlation check that recognizes this shape and raises **one** systemic alarm instead of five, while still showing each radar\'s individual verdict. An isolated single-radar failure is unaffected and still pages normally.' },
+			{ kind: 'p', text: 'Almost certainly one. Radars at Santa Cruz, Sonoma, East Bay, Coyote Valley and Sawyer Ridge do not fail in the same second.' },
+			{ kind: 'p', text: 'Over the 14 days to 2026-08-25, **80.2%** of all `GHOST_UP` readings happened while four or five radars were silent simultaneously; only **2.8%** were isolated to one radar. The clearest case: four sites — XSWR, XSCR, XSCV and XSCW — entered `GHOST_UP` at `2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54`. Sub-second alignment, 79.0 hours apart.' },
+			{ kind: 'p', text: 'Sentinel now runs a fleet-correlation check that recognizes this shape and raises **one** systemic alarm instead of five, while still showing each radar\'s individual verdict. It fails when at least four of the five X-band radars are unhealthy at once; CBAND is deliberately excluded, being a different band at a different site. An isolated single-radar failure is unaffected and still pages normally.' },
 			{ kind: 'note', text: 'That 79-hour episode was a **real** data outage. The correlation logic makes the count accurate, not the problem smaller.' }
 		]
 	},
@@ -155,7 +172,7 @@ export const FAQ: FaqItem[] = [
 			{ kind: 'p', text: '**Raw observations are never modified.** The scan count and newest-scan timestamp are what we measured; only the interpretation is recomputed.' },
 			{ kind: 'p', text: '**The original verdict is preserved** in the row, including the threshold that produced it. You can always see what we said at the time, and why.' },
 			{ kind: 'p', text: '**Runs where no data existed are never reclassified.** A genuine stoppage cannot be tuned away.' },
-			{ kind: 'note', text: 'Worked example — the August recalibration: 231,430 rows re-evaluated, 6,406 corrected, zero rows deleted, and the 79-hour outage still recorded in full across all five radars.' }
+			{ kind: 'note', text: 'Worked example — the August recalibration: 231,430 rows re-evaluated, 6,406 corrected, zero rows deleted, and the 79-hour outage still recorded in full across all four sites it covered.' }
 		]
 	},
 	{
@@ -172,6 +189,7 @@ export const FAQ: FaqItem[] = [
 				]
 			},
 			{ kind: 'p', text: 'Recipients, escalation steps and on-call schedules live under Admin → Alerts and Admin → Groups, including recurring quiet hours and per-device routing on mobile.' },
+			{ kind: 'p', text: 'One switch sits above all of that: alarms can be enabled or disabled **per observation tier**, so a site whose backend mounts are new and still being tuned can record every `LB` reading while paging on none of them. The gate is on dispatch only — a gated alarm still opens, still carries its severity, still appears on the timeline and in the daily report, and records where the message *would* have gone. It never gates evaluation, because a tier that stopped recording would leave a hole in the history that nothing could see later.' },
 			{ kind: 'p', text: '**To stop being paged for something you already know about, acknowledge it.** An ack stops every channel for that alarm — email, console, webhook, and any repeat — and it silences it for the whole team, not just you, because whoever acks is taking ownership of it. Un-acking resumes paging.' },
 			{ kind: 'p', text: 'For planned work use a **silence** rather than muting a check permanently — silenced alarms still appear on the dashboard and in the record, they just stop paging. Prefer a silence over an ack when you know the window in advance, because a silence covers the check regardless of how the underlying alarm comes and goes.' },
 			{ kind: 'note', text: 'If you are seeing noise you believe is wrong, that is worth reporting rather than silencing. The three largest sources of false alarms found so far were a stale threshold, a color that made "couldn\'t measure" look identical to "broken", and — until v0.2.1 — a bug that let a permanently-down radar re-announce itself every few hours because an upstream blip had been mistaken for a recovery.' }
@@ -255,7 +273,7 @@ export const FAQ: FaqItem[] = [
 		id: 'image-archive',
 		q: 'Do you keep the images? Can I see what Sentinel actually saw?',
 		blocks: [
-			{ kind: 'p', text: 'Yes. Every frame a Layer 4 check evaluates is stored, currently about **298,000 captures / 22 GB**. Clicking a cell in the timeline shows the frame that produced that verdict, not a fresh fetch of whatever is current now.' },
+			{ kind: 'p', text: 'Yes. Every frame a Layer 4 check evaluates is stored — roughly **298,000 captures / 22 GB** when this page was last revised, and growing with every cycle. Clicking a cell in the timeline shows the frame that produced that verdict, not a fresh fetch of whatever is current now.' },
 			{ kind: 'p', text: 'Storage is **content-addressed**: a file is named by the SHA-256 of its own bytes. That has three consequences worth knowing:' },
 			{
 				kind: 'table',
@@ -269,13 +287,33 @@ export const FAQ: FaqItem[] = [
 			{ kind: 'p', text: 'Two indexes sit over it: one from hash to metadata (size, dimensions, first and last seen), and one from the upstream source string to the hash, which is what lets the map replay history from our own copies instead of asking radarca again.' },
 			{ kind: 'note', text: 'This is also why map scrubbing is polite. Frames already captured are served from the archive, so moving through a time window costs radarca nothing.' }
 		]
+	},
+	{
+		id: 'daily-report',
+		q: 'What does the daily report tell me that the dashboard does not?',
+		blocks: [
+			{ kind: 'p', text: 'The dashboard answers "what is true now". The daily report answers "what happened over a window, and how much of it did we actually see" — a different question, and the one that gets forgotten.' },
+			{ kind: 'p', text: 'Each radar and product gets a row carrying availability, how long it was offline or degraded, how many distinct outages there were, how many were short blips, and **how many of its failures were silent** — broken while the status feed said otherwise. Above them sits the share of the window that was *conclusive*: minutes where Sentinel could actually form an opinion, as opposed to minutes it spent blind. A report that says 93% conclusive is telling you the remaining 7% is unknown, not healthy.' },
+			{ kind: 'p', text: 'Because every subject is watched by two tiers, each row has to be summarized from one of them, and that is configurable per subject under Admin → Daily report:' },
+			{
+				kind: 'table',
+				head: ['Source', 'Summarizes from'],
+				rows: [
+					['frontend', 'the radarca-derived `L*` checks'],
+					['backend', 'the file-reading `LB*` checks'],
+					['combined', 'both, binned to the minute — a minute counts as bad if either tier says so']
+				]
+			},
+			{ kind: 'note', text: 'The default follows the deployment: `frontend` where radarca is configured, `backend` where it is not. Subjects can also be hidden from the report entirely — useful for a radar known to be offline for a season, which would otherwise dominate every morning\'s email.' }
+		]
 	}
 ];
 
 /** Things Sentinel deliberately does not do — shown after the questions. */
 export const FAQ_LIMITS: string[] = [
 	'It does not assess **scientific quality** of radar products. L4 checks catch gross image anomalies — saturated, frozen, empty, ring artifacts — not calibration error or subtle bias.',
-	'It does not see **inside** radarca. Every conclusion is inferred from public outputs.',
+	'It does not see **inside the processing**. The backend tier reads the files the processing writes and the display tier reads what radarca publishes; neither can see the code in between, so "the composite is wrong" is not a question Sentinel can answer — only "the composite was built without XSCR".',
+	'It watches the three **NEXRAD** sites only where they enter the AQPI pipeline — staged for the composite, and contributing to it. There is no scan-level, image-level or declared-status check for them anywhere in Sentinel.',
 	'It cannot distinguish "the radar stopped" from "the pipeline stopped publishing it" for a single radar. Correlation across radars is what separates those, and it needs more than one radar to work.',
-	'Its history is only as good as its thresholds, which is why they are re-tuned monthly and why past verdicts can be corrected.'
+	'Its history is only as good as its thresholds, which is why they are re-tuned monthly and why past verdicts can be corrected. Where a threshold has not been measured yet the sub-check is left out rather than guessed — an absent verdict is a real state, not a display bug.'
 ];

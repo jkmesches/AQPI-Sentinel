@@ -11,18 +11,28 @@ minutes, and keeps the evidence.
 
 ## 1. What is Sentinel actually watching?
 
-The **public-facing radarca service**, not the radars directly.
+Two things, by two independent routes, and the difference between them is the
+most useful signal Sentinel produces.
 
-Sentinel has no privileged access to CSU-CHILL infrastructure, no feed from
-the radar processors, and no back door. It reads exactly what a browser
-visiting radarca would read, and reasons about it.
+The **display tier** is the public radarca service. Sentinel reads exactly
+what a browser visiting radarca would read — no privileged API, no feed from
+the radar processors — and reasons about it.
 
-That is a deliberate limit and it shapes every answer below. When Sentinel
-says "XSWR is not reporting," the precise claim is *"XSWR's data is not
-reaching radarca's public API,"* which could be the radar, the ingest
-pipeline, the publishing step, or the API. Sentinel can usually tell you
-**which** of those by correlating across radars and products — see Q7 — but
-it cannot see inside the pipeline.
+The **backend tier** reads the published files directly, off the backend
+shares (K2, and Trinity for CBAND), over a read-only mount. radarca is not
+involved in any of it.
+
+Every stage belongs to one tier or the other: `L*` stages ask radarca what it
+believes, `LB*` stages read the files. Where the two disagree, **the
+disagreement is the finding** — usually that the data exists and something in
+the display tier is not showing it. See Q4 for the stages, Q8 for how one
+upstream event is told apart from five radar faults.
+
+Neither tier sees inside the processing itself. When Sentinel says "XSWR is
+not reporting," the precise claim is about what reached a named place —
+radarca's public API, or a named directory on disk — not about the radar
+hardware. A deployment with no backend mount runs the display tier alone, and
+the interface says so rather than implying coverage it does not have.
 
 ## 2. Where does the data come from?
 
@@ -40,6 +50,18 @@ Scan timestamps come from the **filenames** (`..._20260826-0049.png`), which
 is how we can tell "the newest scan is 6 minutes old" rather than merely "some
 images exist."
 
+Those five are the display tier. The **backend tier** reads files rather than
+APIs, on a read-only mount:
+
+| Source | What we take from it |
+|---|---|
+| The product trees on K2 | Whether each product is really being produced, independent of what radarca shows |
+| The DROPS dated trees | Whether each radar's scans are landing on disk right now |
+| `PRODUCTS/Radar_processed/recentfiles` | Whether each radar is staged where the composite will actually read it |
+| The composite's own output | Which radars contributed to each composite, as opposed to which were expected to |
+
+A deployment without those mounts simply runs without the `LB` stages.
+
 ## 3. How often does it check, and does that load your servers?
 
 Cadences run from 30 s (is the internet up) to 1 h (slow forecast products);
@@ -50,6 +72,11 @@ We actively work to keep that low. All six radar checks used to fetch
 `/api/radar-status/` independently — 4,320 calls/day where 720 suffice — and
 now share one memoized fetch per cycle. If our traffic is ever a problem for
 you, tell us; the cadences are configuration, not architecture.
+
+That figure covers the display tier only. The backend-tier checks read mounted
+files and make **no upstream requests at all**, so everything added to the
+`LB` stages — product production, radar arrival, composite staging and
+participation — cost radarca exactly nothing.
 
 ## 4. What do the stages mean?
 
@@ -75,7 +102,15 @@ The `LB` stages sit deliberately outside that chain. They read the published
 files straight off the backend shares, so radarca being down tells you nothing
 about whether a product exists — and that independence is the point. Where an
 `LB` stage and its radarca counterpart disagree, the `LB` answer is the one
-describing reality.
+describing reality, and the disagreement itself is the useful signal: the data
+is being produced but something in the display tier is not showing it.
+
+The home page puts that comparison on one row. Each radar and product carries
+two readings, tagged **K2** (the backend tree — Trinity for CBAND) and **RC**
+(radarca), plotted on the same fixed scale against the same threshold. When
+one trace falls and the other does not, that is the disagreement, visible
+without reading anything. A deployment with no backend mount shows a single
+column and no tags.
 
 <!-- The answers below are duplicated in prose in frontend/src/lib/faq.ts,
      rendered at /faq in a running Sentinel. The WORDING is deliberately
@@ -99,6 +134,10 @@ staging directories held **zero files** while the composite went on publishing
 a directory nothing in Sentinel looked at. `layer3.input.<radar>` watches it
 now, for all nine composite inputs including the three NEXRAD sites, which
 have no other coverage anywhere in Sentinel.
+
+`LB3` also watches the QPE producer, and that one is deliberately non-paging:
+nothing in the live product chain reads the tree it writes, so a stall there
+is worth seeing and not worth waking anyone for.
 
 ## 5. What is the difference between fail, error, warn and skip?
 
@@ -174,21 +213,38 @@ is marked not-fresh regardless of any threshold. Thresholds only govern the
 "images present but not advancing" case — a frozen feed — where the cost is
 detection latency, not detection.
 
+Two rules were learned expensively, and they are why some sub-checks show no
+verdict at all rather than a green one:
+
+- **A band is fitted per class, never per radar.** A limit derived from one
+  radar's own history goes blind exactly where that history is already bad:
+  fit it to XSCW's 18-hour stalls and 18 hours becomes "normal for XSCW".
+  The per-radar freshness numbers above are the exception that proves it —
+  they are measured against publication lag, which genuinely is per radar.
+- **No band is better than a guessed one.** Where there is not yet enough
+  measurement to set a limit, the sub-check is omitted rather than set to
+  pass. "We did not judge this" and "we judged it healthy" are different
+  claims, and a series that records the second for a period it never
+  assessed is worse than one with an honest gap.
+
 ## 8. Five radars went red at once. Is that five outages?
 
 Almost certainly one.
 
-Radars at Santa Cruz, Sonoma, East Bay, Santa Clara and Sierra do not fail in
-the same second. Measured over 14 days, **80%** of all `GHOST_UP` readings
-happened while four or five radars were silent simultaneously; only **3%**
-were isolated to one radar. The clearest case: four sites entered `GHOST_UP`
-at `2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54` — sub-second
-alignment, 79 hours apart.
+Radars at Santa Cruz, Sonoma, East Bay, Coyote Valley and Sawyer Ridge do not
+fail in the same second. Over the 14 days to 2026-08-25, **80.2%** of all
+`GHOST_UP` readings happened while four or five radars were silent
+simultaneously; only **2.8%** were isolated to one radar. The clearest case:
+four sites — XSWR, XSCR, XSCV and XSCW — entered `GHOST_UP` at
+`2026-08-13 12:29:52` and left it at `2026-08-16 19:29:54`. Sub-second
+alignment, 79.0 hours apart.
 
 Sentinel now runs a fleet-correlation check that recognizes this shape and
 raises **one** systemic alarm instead of five, while still showing each
-radar's individual verdict. An isolated single-radar failure is unaffected and
-still pages normally.
+radar's individual verdict. It fails when at least four of the five X-band
+radars are unhealthy at once; `CBAND` is deliberately excluded, being a
+different band at a different site. An isolated single-radar failure is
+unaffected and still pages normally.
 
 Worth saying plainly: that 79-hour episode was a **real** data outage. The
 correlation logic makes the count accurate, not the problem smaller.
@@ -211,7 +267,7 @@ than a setting we have since learned was wrong. Three rules make that safe:
 
 The August recalibration is a worked example: 231,430 rows re-evaluated,
 6,406 corrected (all `GHOST_UP` → `HEALTHY`), zero rows deleted, and the
-79-hour outage still recorded in full across all five radars.
+79-hour outage still recorded in full across all four sites it covered.
 
 ## 10. Who gets alerted, and how do I stop being paged for something I know about?
 
@@ -224,6 +280,15 @@ Alarms route by **severity tier**:
 Recipients, escalation steps and on-call schedules live under `/admin/alerts`
 and `/admin/groups`, including recurring quiet hours and per-device routing on
 mobile.
+
+One switch sits above all of that: alarms can be enabled or disabled **per
+observation tier**. A site whose backend mounts are new and still being tuned
+can record every `LB` reading while paging on none of them. The gate is on
+dispatch only — a gated alarm still opens, still carries its severity, still
+appears on the timeline and in the daily report, and records where the message
+*would* have gone, so "what did Sentinel not tell me, and when" stays
+answerable. It never gates evaluation: a tier that stopped recording would
+leave a hole in the history that nothing could see later.
 
 **To stop being paged for something you already know about, acknowledge it.**
 An ack stops every channel for that alarm — email, console, webhook, and any
@@ -346,8 +411,10 @@ The scale of it is visible in the record: **15,326** captures are marked
 `OK_SAME_FRAME`, meaning upstream had published nothing new since the previous
 check. Every one of those would previously have been a candidate for a false
 FROZEN. Reprocessing the history with the source comparison in place took the
-FROZEN count from **13,837 to 263** (August 2026); it stands at 265 today, the
-difference being two genuine ones since.
+FROZEN count from **13,837 to 263** (August 2026); it stood at 265 in October
+2026, the difference being two genuine ones since. These are counters over a
+growing archive — treat them as the shape of the problem, not as today's
+totals.
 
 The lesson generalizes: a detector that cannot tell "nothing changed" from
 "nothing new arrived" will confidently report a fault that does not exist.
@@ -360,8 +427,9 @@ The lesson generalizes: a detector that cannot tell "nothing changed" from
 
 ## 14. Do you keep the images? Can I see what Sentinel actually saw?
 
-Yes. Every frame a Layer 4 check evaluates is stored — currently about
-**298,000 captures, 22 GB**. Clicking a cell in the timeline shows the frame
+Yes. Every frame a Layer 4 check evaluates is stored — roughly **298,000
+captures and 22 GB** when this page was last revised, and growing with every
+cycle. Clicking a cell in the timeline shows the frame
 that produced *that* verdict, not a fresh fetch of whatever happens to be
 current now. Evidence for a past call does not drift.
 
@@ -383,6 +451,37 @@ nothing.
 
 ---
 
+## 15. What does the daily report tell me that the dashboard does not?
+
+The dashboard answers "what is true now". The daily report answers "what
+happened over a window, and how much of it did we actually see" — which are
+different questions, and the second one is the one that gets forgotten.
+
+Each radar and product gets a row carrying availability, how long it was
+offline or degraded, how many distinct outages there were, how many were
+short blips, and **how many of its failures were silent** — broken while the
+status feed said otherwise. Above them sits the share of the window that was
+*conclusive*: minutes where Sentinel could actually form an opinion, as
+opposed to minutes it spent blind. A report that says 93% conclusive is
+telling you the remaining 7% is unknown, not healthy.
+
+Because every subject is watched by two tiers (Q1), each row has to be
+summarized from one of them, and that is configurable per subject under
+`/admin/digest`:
+
+| Source | Summarizes from |
+|---|---|
+| `frontend` | the radarca-derived `L*` checks |
+| `backend` | the file-reading `LB*` checks |
+| `combined` | both, binned to the minute — a minute counts as bad if either tier says so |
+
+The default follows the deployment: `frontend` where radarca is configured,
+`backend` where it is not. Subjects can also be hidden from the report
+entirely, for a radar that is known to be offline for a season and would
+otherwise dominate every morning's email.
+
+---
+
 ## What Sentinel does not do
 
 Worth being explicit, so the readings aren't over-read:
@@ -390,10 +489,19 @@ Worth being explicit, so the readings aren't over-read:
 - It does not assess **scientific quality** of radar products. L4 checks catch
   gross image anomalies — saturated, frozen, empty, ring artifacts — not
   calibration error or subtle bias.
-- It does not see **inside** radarca. Every conclusion is inferred from public
-  outputs.
+- It does not see **inside the processing**. The backend tier reads the files
+  the processing writes and the display tier reads what radarca publishes;
+  neither can see the code in between, so "the composite is wrong" is not a
+  question Sentinel can answer — only "the composite was built without XSCR".
+- It watches the three **NEXRAD** sites only where they enter the AQPI
+  pipeline — staged for the composite, and contributing to it. There is no
+  scan-level, image-level or declared-status check for them anywhere in
+  Sentinel, because the public endpoints that would support one are CSU's
+  X-band ones.
 - It cannot distinguish "the radar stopped" from "the pipeline stopped
   publishing it" for a single radar. Correlation across radars (Q8) is what
   separates those, and it needs more than one radar to work.
 - Its history is only as good as its thresholds, which is why they are
-  re-tuned monthly and why past verdicts can be corrected (Q9).
+  re-tuned monthly and why past verdicts can be corrected (Q9). Where a
+  threshold has not been measured yet, the sub-check is left out rather than
+  guessed (Q7) — an absent verdict is a real state, not a display bug.
