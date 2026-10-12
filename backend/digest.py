@@ -159,11 +159,13 @@ DEFAULTS: dict[str, Any] = {
     # edited by hand every time the network changes. A subject is only hidden
     # by an explicit {"show": false}.
     "subjects":   {},
-    # Whether a tier's alarms may NOTIFY. Both tiers always record, always
-    # appear on the timeline and always count in this report; these only gate
-    # dispatch. See alarms/engine._process.
-    "alarm_tiers": {"frontend": True, "backend": True},
 }
+
+# The per-tier NOTIFICATION gate is deliberately not here, though the admin
+# page presents the two controls side by side. It lives in its own settings
+# key — see alarms/tiers.py for why: this blob is a reporting config, and an
+# alerting gate inside it would mean that turning the morning email off
+# changed who gets paged at 03:00.
 
 
 def subject_source(cfg: dict, kind: str, key: str) -> str:
