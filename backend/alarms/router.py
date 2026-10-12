@@ -13,12 +13,45 @@ First-match wins. Severity model (v0.1.2+):
                                                      means upstream is unreachable)
   pass / skip   no alarm opens                       —
 
-This gives operators three meaningful tiers via severity_floor:
-  - floor=info       → notify on everything (warn-status included)
-  - floor=warn       → notify only on broken (fail/error)
-  - floor=critical   → notify only on long-running outages (>30 min open)
+``severity_floor`` — READ THIS BEFORE TUNING A ROUTE
+----------------------------------------------------
+A route's ``severity_floor`` RAISES severity and never suppresses anything.
+``compute_severity`` applies it as ``_max_sev(route.severity_floor, sev)``, so
+a floor can only move an alarm up the ladder. Nothing on the notification path
+filters on severity at all: ``engine.evaluate`` opens an alarm for any status
+but pass/skip/inconclusive, the step loop in ``engine._process`` fires every
+step whose delay has elapsed, and ``_dispatch`` has no severity test. What
+decides whether an alarm notifies is the hold-down, the policy's step delays,
+``repeat_interval``, acks, silences, and the per-tier gate — not its severity.
 
-Route ``severity_floor`` raises the severity if the floor is higher.
+This docstring used to claim the opposite, in a table four lines above the
+sentence that contradicted it:
+
+    floor=info       → notify on everything (warn-status included)
+    floor=warn       → notify only on broken (fail/error)
+    floor=critical   → notify only on long-running outages (>30 min open)
+
+Those are the semantics of a DIFFERENT ``severity_floor``: the one in
+``push.py``, on a per-device push subscription's routing, which really does
+filter (``if sev_rank < floor_rank: return False``). One name, two opposite
+behaviours, in one system. Verified 2026-10-12.
+
+The consequence worth knowing before "fixing" this. The L0 route carries
+``severity_floor: critical`` and exists, by its own comment, to page fast —
+``hold_down: 2m`` because "five minutes is too much latency to accept". Under
+the actual behaviour that floor makes an L0 alarm critical at open, which is
+what was wanted. Under the documented reading it would mean "notify only once
+this has been open 30 minutes", because a ``fail`` opens at severity ``warn``
+and only reaches ``critical`` after ``PROMOTE_AFTER_S``. So implementing the
+documented behaviour would silently add a 30-minute delay to the one route
+whose whole purpose is speed, and L0 would need changing in the same commit.
+
+Whether the route-level key should start filtering as documented, or be
+renamed to match what it does, is an operator decision and not a cleanup: it
+changes notification semantics across all eight stages. Until it is made, this
+describes the behaviour rather than the intent, and no warn band can be made
+quiet by configuration — see DEFAULT_BACKEND_MAX_AGE_S in
+checks/layer1_backend_product.py.
 
 Prior model (v0.1.1-): warn/fail/error all mapped to severity=warn, making
 severity_floor unable to distinguish "degraded" from "broken." Reshaped in
