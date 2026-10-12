@@ -30,6 +30,15 @@ unknown`.
 
 ### Fixed
 
+- **Correction to the v0.8.0 notes:** the staging check's entry said LB2 and
+  `layer3.input` read "different paths". They read different **objects** — the
+  DROPS dated tree holds one PPI sweep per file at one elevation, `recentfiles`
+  holds an assembled volume of four. Their freshness numbers are therefore not
+  two views of one quantity and must not be reconciled or used to check each
+  other; a discrepancy between them is structural. It also narrows the XSCW
+  finding: sweeps are arriving and no volume is being assembled or staged from
+  them, which points at the assembly step rather than at transport.
+
 - **The staging check shipped with a threshold that would have paged three
   times an hour, indefinitely.** `composite_input_stale_warn_s` went out in
   v0.8.0 at a uniform 900 s, described in its own comment as "a ceiling, not a

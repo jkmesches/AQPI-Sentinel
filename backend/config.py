@@ -909,9 +909,24 @@ DROPS_TREE: str = "PRODUCTS/DROPS"
 #     composite output   <- layer3.composite.<radar> (LB3, participation)
 #
 # Measured 2026-10-12 17:20Z: XSCW had ZERO files staged here while
-# layer2.backend.XSCW read pass with "newest volume 0.5 min ago" — because LB2
-# reads the DROPS tree and these are different paths. Two checks reporting
-# health on either side of a real break. [M]
+# layer2.backend.XSCW read pass with "newest volume 0.5 min ago". Two checks
+# reporting health on either side of a real break. [M]
+#
+# They are not merely different PATHS — they hold different OBJECTS, and that
+# is load-bearing for anyone reading both numbers:
+#
+#     dated tree   aqpi.swyr-20261012-011918_4317_21_3.5_PPI.netcdf.gz
+#                  one PPI SWEEP at one elevation
+#     recentfiles  XSWR_volume_20261008-222259_drops.nc
+#                  an assembled VOLUME (the run log reports #sweeps = 4)
+#
+# So LB2's freshness and this check's freshness are not two views of one
+# quantity, cannot be reconciled, and must not be used to sanity-check each
+# other -- a discrepancy between them is structural, not a fault. It also
+# narrows what XSCW's break IS: sweeps are arriving and no volume is being
+# assembled or staged from them, which points at the assembly step rather than
+# at transport. Site codes differ too (`swyr` dated, `XSWR` staged), so nothing
+# can join the two trees by name either. [M] 2026-10-12
 #
 # It would also have caught the NEXRAD outage on its first tick: Renzo reports
 # the KBBX/KDAX/KMUX feeds stopped when K2 was rebooted on 2026-09-17 and did
