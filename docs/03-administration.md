@@ -605,7 +605,102 @@ A few useful patterns:
 
 ---
 
-## 9. Audit log · `/admin/audit`
+## 9. Daily report · `/admin/digest`
+
+![Admin daily report page](images/admin-digest.png)
+
+One email each morning covering the previous 24 hours: a row per
+radar and per product with its availability, a sentence describing
+what happened, and a link to the checks behind it. It is organized
+by SUBJECT rather than by alarm on purpose — an alarm-centric
+summary of 2026-09-05 would have opened with "nothing needs
+attention" (every open alarm was acknowledged) on a day XSWR had
+been offline for a continuous 9 h 14 m.
+
+### Schedule and recipients
+
+`send daily` arms it, `send at` sets the local hour and zone, and
+`include` decides whether products appear as well as radars.
+**Send test** delivers one copy to a single address, never to the
+configured recipients, whether or not the daily send is armed.
+**Preview** renders the current window without sending.
+
+### Which signal each row is built from
+
+Every radar and product is watched twice, and this is where you
+choose which reading the report uses:
+
+| Source | Reads | Check families |
+|---|---|---|
+| `radarca` | what the display tier believes | `layer2.radar.*`, `layer1.product.*` |
+| `backend files` | what has actually landed on K2/Trinity | `layer2.backend.*`, `layer1.backend.*` |
+| `worse of both` | the less healthy of the two, per timestep | both |
+
+Set a default per kind, then override individual subjects in the
+collapsible lists below. Only the rows you change are stored, so
+anything left on `default` — including a radar added next month —
+follows the default when you change it later.
+
+Two things to know when reading the resulting numbers:
+
+- **`worse of both` counts TIMESTEPS, not runs.** The two tiers do
+  not share a clock (L2 runs at 120 s, LB2 at 60 s), so the merge
+  bins to 60 s and takes the worse reading in each bin. "98%" means
+  the worse of the two readings was healthy in 98% of the minutes
+  that had any reading at all. A single-source row still counts
+  runs, exactly as before — nothing is binned.
+- **Where the tiers disagree, the disagreement is the signal.** A
+  radar that radarca calls healthy while no files arrive is the
+  case this whole second tier exists to catch; `worse of both` is
+  how it reaches the morning email.
+
+For a radar, "backend" means **LB2 — arrival**, deliberately not
+LB3. LB2 answers the same question radarca does (is this radar
+delivering) from the other side, which is what makes the three
+modes comparable. LB3 asks whether a radar reached the composite,
+a different question; folding it in would make a radar that
+arrives perfectly but is dropped from the composite read as partly
+unavailable.
+
+A source is greyed out when this deployment has no checks for that
+tier, and the row says which tier it does have. If a row's resolved
+source needs a tier that is absent, the row is flagged in amber —
+it would be built from a family with no rows, which in the report
+looks like an outage rather than like a misconfiguration. CBAND is
+the live example: it has no LB2 check unless `SENTINEL_SSCB_ROOT`
+is set, because it does not live under the X-band trees.
+
+> Unchecking a subject removes it from the **report** only. Its
+> checks keep running, its alarms keep firing and it stays on the
+> timeline.
+
+### Alarm notifications by tier
+
+Separate from everything above, and saved separately: two switches
+deciding whether each tier's alarms may **notify**.
+
+Turning a tier off stops dispatch and nothing else. Its alarms
+still open, still carry their severity, still appear on the
+timeline, still count in this report, and each withheld message is
+recorded against its alarm — `GET /api/alarms/<id>` shows it with
+`delivery_status = "tier-disabled"`, so afterwards you can see
+what Sentinel decided not to tell you. Re-enabling does **not**
+replay the backlog; the tier is audible again from the next repeat
+interval onward.
+
+Use it when one tier is noise you have already understood — the
+backend checks are newly deployed on a site and still being tuned,
+or radarca is known to be lying this week. The alternative people
+otherwise reach for is deleting routes out of `alerts.yaml`, which
+loses the alarms along with the noise.
+
+The gate fails open at every step: a missing setting, a malformed
+value, an unreadable database, an unrecognised stage — all leave
+both tiers audible. Only an explicit `false` silences one.
+
+---
+
+## 10. Audit log · `/admin/audit`
 
 ![Admin audit page](images/admin-audit.png)
 
@@ -635,7 +730,7 @@ DELETE FROM admin_audit WHERE created_at < now() - interval '5 years';
 
 ---
 
-## 10. Common configuration recipes
+## 11. Common configuration recipes
 
 Concrete answers to "how do I do X" questions.
 
@@ -692,7 +787,7 @@ the admin who clicked. Exercises every step of the pipeline.
 
 ---
 
-## 11. Where to go from here
+## 12. Where to go from here
 
 - **[`04-maintenance.md`](MAINTENANCE.md)** — day-2 ops: logs,
   backups, rollback, performance tuning.

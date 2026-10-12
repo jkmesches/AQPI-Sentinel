@@ -28,6 +28,69 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **The daily report can be built from either tier, or from the worse of
+  both.** Until now it read only the radarca stages (`layer2.radar.*` /
+  `layer1.product.*` were hard-coded in `digest.compute`), so every backend
+  check added since LB1 was absent from the one artifact that reaches people
+  who never open the dashboard. Each radar and product now carries a choice
+  of three signals — `frontend` (what radarca believes), `backend` (what has
+  landed on K2/Trinity) and `combined` (the less healthy of the two, per
+  timestep) — set per subject, or per kind, from `/admin/digest`. Subjects can
+  also be hidden from the report without touching their checks or alarms.
+
+  With no configuration every subject resolves to its kind's default and the
+  numbers are the ones the report printed before, so an existing deployment
+  upgrades unchanged. The default itself is derived from `config.HAS_RADARCA`:
+  on a profile with no display tier (xqpi) it is `backend`, because a
+  hard-coded `frontend` default would have resolved every radar to a family
+  with no rows and mailed out an empty report.
+
+  Worth knowing when reading the output: a `combined` row's availability
+  counts **timesteps, not runs**. The two tiers do not share a clock — L2 runs
+  at 120 s, LB2 at 60 s — so the merge bins to 60 s and takes the worse
+  reading in each bin. Counting both tiers' runs would double a combined row's
+  denominator and stop it being comparable to the single-source row printed
+  beside it. For a radar, `backend` means LB2 (arrival) and deliberately not
+  LB3: LB3 asks whether a radar reached the composite, which would make a
+  radar that arrives perfectly but is dropped from the composite read as
+  partly unavailable.
+
+- **Alarm notifications can be silenced per tier** — `settings['alarm_tiers']`,
+  two switches on the same admin page. Gates **dispatch only**: a gated
+  alarm still opens, still has its severity recomputed each tick, still
+  appears on the timeline and still counts in the daily report, and each
+  withheld message is recorded against its alarm with
+  `delivery_status = "tier-disabled"`, so "what did Sentinel decide not to
+  tell me, and when" stays answerable. Re-enabling does not replay the
+  backlog — a deliberate quiet period that ends in a burst is the
+  crying-wolf failure the hold-down exists to prevent. The gate fails open
+  on every unreadable input, including an unknown stage; only an explicit
+  `false` silences a tier.
+
+  Stored under its own settings key rather than inside the digest blob: that
+  blob is a reporting config, and an alerting gate living in it would mean
+  that turning the morning email off changed who gets paged at 03:00.
+
+- **`make test-db`** and the first validation test that needs Postgres
+  (`validation_tests/test_digest_sources.py`). The tier merge lives in SQL, so
+  a Python double would have tested a re-implementation; it builds a
+  throwaway schema from a 239-timestep synthetic day and drops it again. It
+  caught both bugs listed below on its first run.
+
+### Fixed
+
+- **`_buckets` counted an errored probe as a failed minute.** Only reachable
+  through the new two-level grouping, where `bad` is computed per timestep
+  before the reported-status filter applies. A subject whose radarca probe was
+  erroring while its backend tier reported cleanly came out at 0% availability
+  instead of 100% — `error` is a fact about Sentinel, not about the radar.
+
+- **`_subject_rows` referenced `finished_at` past the CTE that carried it**,
+  so the rewritten query threw `UndefinedColumnError` on its first real call.
+  The value was unused.
+
 ## [0.7.4] — 2026-10-05
 
 Finishes the job v0.7.3 started. That release removed the clipped prose from the
