@@ -28,6 +28,13 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-12
+
+Four corrections to v0.8.0, every one of them found by independent
+measurement rather than by re-reading the code. Two were in constants and
+wording I had written hours earlier; the author's own review caught none of
+them.
+
 ### Fixed
 
 - **LB2 said "newest volume" while reading one PPI sweep per file.** On the
