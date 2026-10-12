@@ -88,6 +88,11 @@ services:
       # paths and must match the mounts below.
       SENTINEL_BACKEND_ROOT: ${SENTINEL_BACKEND_ROOT:-}
       SENTINEL_SSCB_ROOT:    ${SENTINEL_SSCB_ROOT:-}
+      # The composite's input staging share. Its own mount: it is NOT under
+      # SENTINEL_BACKEND_ROOT, and v0.8.0 assumed it was — see
+      # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
+      # do not register.
+      SENTINEL_RECENTFILES_ROOT: ${SENTINEL_RECENTFILES_ROOT:-}
     volumes:
       # === Load-bearing: these accept a HOST PATH, not just a volume name ===
       #
@@ -124,6 +129,7 @@ services:
       # valid, and :ro so Sentinel can never modify what it monitors.
       - ${SENTINEL_BACKEND_HOST_PATH:-sentinel_backend_unset}:/backend:ro
       - ${SENTINEL_SSCB_HOST_PATH:-sentinel_sscb_unset}:/sscb:ro
+      - ${SENTINEL_RECENTFILES_HOST_PATH:-sentinel_recentfiles_unset}:/recentfiles:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
@@ -152,10 +158,11 @@ volumes:
     name: sentinel_cold
   sentinel_backups:
   # Fallbacks so the file stays valid when the LB1/LB2 shares are not configured.
-  # A deploy with the NFS mounts points SENTINEL_BACKEND_HOST_PATH / _SSCB_HOST_PATH
+  # A deploy with the NFS mounts points SENTINEL_BACKEND_HOST_PATH / _SSCB_HOST_PATH / _RECENTFILES_HOST_PATH
   # at the real host paths and these go unused.
   sentinel_backend_unset:
   sentinel_sscb_unset:
+  sentinel_recentfiles_unset:
 
 networks:
   sentinel:
