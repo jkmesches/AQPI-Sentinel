@@ -28,7 +28,50 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-12
+
 ### Added
+
+- **A check on the composite's input staging — `layer3.input.<radar>`, nine of
+  them.** Three stages sit between a radar and a composite and only the ends
+  were watched. Measured 2026-10-12: XSCW had **zero** files staged in
+  `PRODUCTS/Radar_processed/recentfiles` while `layer2.backend.XSCW` read pass
+  with "newest volume 0.5 min ago" — LB2 reads the DROPS tree and these are
+  different paths. Two checks reporting health on either side of a real break,
+  with the composite building a third of its output without that radar. The
+  same shape hid the three NEXRAD feeds for eighteen days after a K2 reboot
+  left `ldm` stopped, and it would have been caught on the first tick.
+
+  `A_staged` (anything staged at all) fails from day one; `B_fresh` is
+  **warn-capped with no fail arm** until the check's own series supports a
+  band — one afternoon's sample is not a distribution, and this release also
+  contains the consequences of three bands that were fitted to too little.
+
+  Three properties that are the design rather than details: a directory whose
+  entries match no pattern is an **error naming our pattern**, never "nothing
+  staged"; the alarm is gated on LB2 through `alarm_only_depends_on` so XSCV
+  being legitimately down does not page while the reading stays recorded and
+  true; and because the tree retains about an hour, "empty" is a terminal
+  state and not an age, so the summary never implies a duration it cannot
+  know. It also records `staged_skew_s` — what a file declares versus when it
+  was written — which is the only quantity separating a stalled producer from
+  one replaying old scans.
+
+- **NEXRAD is monitored.** KBBX, KDAX and KMUX are in
+  `COMPOSITE_EXPECTED_RADARS` and have staging checks. They had been excluded
+  on the grounds that "the three NEXRAD directories do not exist and their
+  trees hold zero files" — a true observation of an 18-day outage, recorded as
+  though it were design intent. Renzo Bechini, 2026-10-12: acquisition stopped
+  when K2 was rebooted on 2026-09-17, `ldm` never restarted, and it was fixed
+  manually around 2026-10-06. Measured since: each is in the published
+  composite at **720 of 720** timesteps across 2026-10-11.
+
+  They carry **no contribution band**, rather than inheriting the X-band one.
+  Over the same day NEXRAD p50 ran 597–717 s against X-band's 140–236 s, so
+  the uniform band would fire on most of their healthy runs — a band of the
+  wrong shape, not the wrong number, because the difference is longer volume
+  scans delivered over LDM. Their ages are recorded and not judged.
+
 
 - **The daily report can be built from either tier, or from the worse of
   both.** Until now it read only the radarca stages (`layer2.radar.*` /
@@ -80,6 +123,32 @@ unknown`.
   caught both bugs listed below on its first run.
 
 ### Fixed
+
+- **A radarca outage could silence the backend tier's alarms.** Every `LB*`
+  check was being given `alarm_only_depends_on = [layer0.origin.episode]` by
+  `attach_episode_suppression`, whose premise — "everything except the exempt
+  prefixes calls radarca" — was written before the backend tier existed. So a
+  radarca slow episode suppressed alarms from checks that read K2 and Trinity
+  and owe the web tier nothing.
+
+  That is backwards in the worst way available: the backend tier exists to be
+  the independent witness when radarca is misbehaving, and where the two
+  disagree the disagreement is the signal — so a radarca episode was exactly
+  when those alarms mattered and exactly when they went quiet. It also slipped
+  past the test meant to catch it, which asserted `depends_on == []` on the
+  classes while the wiring happened to instances at import time. Now keyed on
+  `stages.stage_tier()`, so a new backend check family is exempt by declaring
+  an LB stage rather than by someone remembering a prefix list.
+
+- **The composite's staleness guard, in this repo's own words.** The LB3 module
+  docstring still said the composite "applies no staleness guard to its
+  inputs". It does — a 15-minute delay check inside the composite program,
+  downstream of the `ls -1rt` selection in the driver, which is why reading the
+  driver alone says otherwise. Corrected in place rather than deleted, with the
+  consequence stated: a run-log block proves a file was READ, which is upstream
+  of that discard, and is therefore weaker evidence than the check was written
+  to assume.
+
 
 - **LB2 read "the UTC day just started" as "nothing is arriving".** A dated
   radar tree (`XSCR/%Y/%m/%d`) has no directory for a new day until that day's
