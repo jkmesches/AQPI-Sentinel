@@ -28,6 +28,27 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-12
+
+Four corrections to v0.8.0's staging check, two of them to things it was
+reading rather than to what it computed. The common failure is one thing:
+a path or a name that resolved to something PLAUSIBLE but wrong — an
+abandoned copy of the input tree, a fallback to a week-old directory, and
+two unrelated artifacts both called QPE.
+
+### ⚠ Upgrade note — this release needs an operator action
+
+`SENTINEL_RECENTFILES_ROOT` and a `/recentfiles` bind mount are now required
+for the nine `layer3.input.*` checks to exist at all. **Set both**, or those
+checks will silently not register.
+
+That is the intended behaviour: in v0.8.0 the same path was derived from
+`SENTINEL_BACKEND_ROOT` and resolved to a copy of the staging tree abandoned in
+March 2026, where eight of nine radars reported healthy against 202-day-old
+files. An absent check is better than a confident wrong one, so this setting
+has no default and no fallback. See the entry below and
+`ops/.env.prod.example`.
+
 ### Fixed
 
 - **LB2's layout resolver had a fallback to an abandoned tree.** A radar in
