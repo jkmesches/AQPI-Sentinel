@@ -134,8 +134,14 @@ def _seed_from_config() -> dict[str, Any]:
     # band seeded here would be an invitation to set a number nothing has
     # measured — which is the mistake the two lines above are still recovering
     # from. See config.COMPOSITE_INPUT_STALE_WARN_S.
-    globals_["composite_input_stale_warn_s"] = int(
-        _config.COMPOSITE_INPUT_STALE_WARN_S)
+    # None, and seeded anyway. The key has to exist for the admin panel to
+    # offer it — that panel derives its global list from this seed, which is
+    # how three LB3 thresholds shipped uneditable in v0.7.0 — but there is no
+    # defensible number yet, and null means the sub-check is not assessed.
+    # Setting it in the panel switches the check on.
+    globals_["composite_input_stale_warn_s"] = (
+        int(_config.COMPOSITE_INPUT_STALE_WARN_S)
+        if _config.COMPOSITE_INPUT_STALE_WARN_S is not None else None)
 
     return {
         "products": products,

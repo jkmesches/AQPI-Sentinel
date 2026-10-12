@@ -202,16 +202,49 @@ def main() -> int:
           r.payload.get("staged_entries") == 3,
           str(r.payload.get("staged_entries")))
 
-    print("\nstale staging warns, and cannot fail")
-    d = stage_dir(tmp, "XSCW_stale",
-                  {declared(COMPOSITE_INPUT_STALE_WARN_S + 600): 0})
+    print("\nwith no band, the age is recorded and not judged")
+    # Shipped as a uniform 900 s for about an hour. Measured the same
+    # afternoon: NEXRAD newest-declared ages reached 855 s, so 900 left 45 s of
+    # headroom over the worst observation in a five-minute window — and
+    # alerts.yaml routes `stage: LB3` to the standard policy with hourly
+    # repeats, making that three recurring PAGES rather than dashboard noise.
+    check("there is no band to be wrong about yet",
+          COMPOSITE_INPUT_STALE_WARN_S is None,
+          str(COMPOSITE_INPUT_STALE_WARN_S))
+    d = stage_dir(tmp, "XSCW_old", {declared(4000): 0})
     r = run("XSCW", d)
-    check("warns", r.status == "warn", f"{r.status}: {r.summary}")
-    check("...never fails on an age, because no band has been fitted",
-          r.payload["sub_status"]["B_fresh"] == "warn",
+    check("a very old staged volume does not warn", r.status == "pass",
+          f"{r.status}: {r.summary}")
+    # "not judged" and "judged healthy" are different claims. Recording the
+    # second would make the staged-age series look assessed for the whole
+    # period it was not, which is the same conflation as counting a demoted
+    # skip as a pass.
+    check("...and B_fresh is ABSENT, not set to pass",
+          "B_fresh" not in (r.payload.get("sub_status") or {}),
           str(r.payload.get("sub_status")))
-    check("...and says it is the staging that is stale",
-          "STAGING STALE" in r.summary, r.summary)
+    check("...while the age is still recorded, which is what a band needs",
+          3990 <= r.payload["age_s"] <= 4010, str(r.payload.get("age_s")))
+    check("...and the summary claims no verdict about it",
+          "STALE" not in r.summary, r.summary)
+
+    print("\nsetting a band switches the sub-check on")
+    # The mechanism has to be live and waiting for a number, not absent — or
+    # the operator who finally measures one has nowhere to put it.
+    import backend.thresholds as _th
+    orig = _th.get_global
+    _th.get_global = lambda k, default=None: (
+        600 if k == "composite_input_stale_warn_s" else orig(k, default))
+    try:
+        r = run("XSCW", d)
+    finally:
+        _th.get_global = orig
+    check("a stored threshold is picked up by the live check",
+          r.status == "warn", f"{r.status}: {r.summary}")
+    check("...and then it says the staging is stale",
+          "STAGING STALE" in r.summary and r.payload["sub_status"]["B_fresh"] == "warn",
+          r.summary)
+    check("...and still never fails, because the band is warn-capped",
+          r.status != "fail", r.status)
 
     print("\ndotfiles are skipped before matching, not after")
     # A writer's temporaries carry a real parseable timestamp and are the
@@ -239,7 +272,7 @@ def main() -> int:
           580 <= r.payload.get("staged_skew_s", 0) <= 620,
           str(r.payload.get("staged_skew_s")))
     check("...and does not change the verdict",
-          r.payload["sub_status"]["B_fresh"] in ("pass", "warn"),
+          r.payload["sub_status"] == {"A_staged": "pass"},
           str(r.payload.get("sub_status")))
 
     print("\na missing directory is not an empty one")

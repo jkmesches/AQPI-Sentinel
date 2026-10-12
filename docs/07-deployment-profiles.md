@@ -199,9 +199,32 @@ feeds for eighteen days after a K2 reboot left `ldm` stopped.
 | Sub-check | Means |
 |---|---|
 | `A_staged` | at least one volume is staged. Empty is the headline failure — the composite has nothing to read |
-| `B_fresh` | how old the newest staged observation is. **Warn-capped**, with no fail arm, until this check's own series supports a band |
+| `B_fresh` | how old the newest staged observation is. **Not assessed at all** until a band exists — see below |
 
-Three properties worth knowing before changing it:
+`B_fresh` has **no band**, and the sub-check is absent from the result rather
+than set to a passing value — "we did not judge this" and "we judged it
+healthy" are different claims. The age is still recorded in the payload and the
+metric, which is what a band will eventually be fitted from, and setting
+`composite_input_stale_warn_s` (here or in the admin panel) switches the
+sub-check on.
+
+It shipped with a uniform 900 s for about an hour, described as a ceiling. It
+was measured the same afternoon and was wrong twice over: too tight, with 45 s
+of headroom over the worst observation in a five-minute window, and the wrong
+*shape* — one number across three delivery mechanisms.
+
+| Class | Radars | Newest-declared age, max observed |
+|---|---|---|
+| X-band | XSWR, XSCR, XEBY | 323–440 s |
+| C-band | SSCB | 516 s |
+| NEXRAD | KBBX, KDAX, KMUX | 826–855 s |
+
+Since `alerts.yaml` routes `stage: LB3` to the standard policy with hourly
+repeats, a uniform 900 s would have been three recurring *pages*, not dashboard
+noise. The replacement must be per class and must come from hours rather than
+minutes — NEXRAD arrives in bursts, and ten ticks cannot bound a bursty tail.
+
+Three further properties worth knowing before changing it:
 
 - **An unreadable directory is OUR fault, not the radar's.** Entries that match
   no pattern produce an `error` naming the pattern, never "nothing staged".

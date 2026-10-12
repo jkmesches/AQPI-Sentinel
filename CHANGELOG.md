@@ -28,6 +28,29 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The staging check shipped with a threshold that would have paged three
+  times an hour, indefinitely.** `composite_input_stale_warn_s` went out in
+  v0.8.0 at a uniform 900 s, described in its own comment as "a ceiling, not a
+  characterisation". Measured the same afternoon over ten ticks: NEXRAD
+  newest-declared ages reach 826–855 s against X-band's 323–440 s, so 900 s
+  left 45 s of headroom over the worst observation in a five-minute window —
+  and `alerts.yaml` routes `stage: LB3` to the standard policy with hourly
+  repeats, making that three recurring pages rather than dashboard noise. It
+  was also one number across three delivery mechanisms, reproducing in a
+  brand-new check the per-class error already recorded against
+  `COMPOSITE_CONTRIB_FAIL_S` two sections above it.
+
+  There is now **no band**: `B_fresh` is absent from the result rather than set
+  to a passing value, because "we did not judge this" and "we judged it
+  healthy" are different claims and the second would make the staged-age series
+  look assessed for the whole period it was not. The age is still recorded,
+  which is what a band will be fitted from, and setting the threshold in the
+  admin panel switches the sub-check on — the mechanism is live and waiting for
+  a number rather than absent. Nothing was deployed from v0.8.0, so this never
+  reached an operator.
+
 ## [0.8.0] — 2026-10-12
 
 ### Added

@@ -969,18 +969,38 @@ COMPOSITE_INPUT_TS_RE: str = r"(\d{8})[-_](\d{6})"
 #      dated tree, where the history persists and the age is real.
 COMPOSITE_INPUT_RETENTION_S: int = 3_600
 
-# Warn-only, and no fail band at all for now. One observation is not a
-# distribution, and this file has spent a week correcting bands fitted to too
-# little: the per-radar contribution band that was blind on XSCR, the
-# LB2_FRESHNESS flattening, and COMPOSITE_CONTRIB_FAIL_S which is now known to
-# fire on contributions the composite accepted. The staged-age distribution
-# will come from this check's own series once it has one.
+# NO BAND. None means the staged-age sub-check is not assessed at all: the age
+# is recorded in the payload and the metric, and no verdict is formed from it.
 #
-# 900 s is a ceiling, not a characterisation: the single sample on 2026-10-12
-# showed newest staged volumes at 0.1-6.0 min across nine directories, so this
-# is roughly 2.5x the slowest observed and exists only to notice staging that
-# has stalled rather than stopped. [U]
-COMPOSITE_INPUT_STALE_WARN_S: int = 900
+# This shipped as 900 s for about an hour, described as "a ceiling, not a
+# characterisation". It was measured the same afternoon and it was wrong, in
+# both of the ways this file has now been wrong three times. [M] 2026-10-12,
+# ten ticks at 30 s:
+#
+#   class    radars                 newest-declared age, max
+#   X-band   XSWR, XSCR, XEBY               323-440 s
+#   C-band   SSCB                               516 s
+#   NEXRAD   KBBX, KDAX, KMUX               826-855 s
+#
+#   1. TOO TIGHT. 900 s leaves 45 s of headroom over the worst thing observed
+#      in a five-minute window, so the three NEXRAD sites warn routinely — and
+#      alerts.yaml routes `stage: LB3` to the standard policy with hourly
+#      repeats, so that is three recurring PAGES, not dashboard noise.
+#   2. WRONG SHAPE. One uniform number across three delivery mechanisms,
+#      reproducing in a brand-new check exactly the per-class error recorded
+#      above at COMPOSITE_CONTRIB_FAIL_S. NEXRAD arrives in bursts over LDM;
+#      KDAX went from 16 to 18 files in one tick with its newest declared age
+#      dropping from 826 s to 435 s.
+#
+# The replacement must be per class and must come from hours, not minutes: ten
+# ticks cannot bound a bursty tail. Until then there is no number here, because
+# a threshold nobody can justify is worse than no threshold — that is the whole
+# lesson of the two constants above, and writing a third guess while recording
+# why the first two were guesses would be remarkable.
+#
+# Setting this (here or in the admin panel) switches the sub-check on, so the
+# mechanism is live and waiting for a number rather than absent.
+COMPOSITE_INPUT_STALE_WARN_S: int | None = None
 
 
 if SETTINGS.profile == "xqpi":
