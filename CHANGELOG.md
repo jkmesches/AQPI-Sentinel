@@ -28,6 +28,123 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-10-12
+
+A correctness release with one behaviour change and two decisions written
+down. Nothing here is a new feature; v0.8.3's staging work is unchanged.
+
+The behaviour change is LB1's sampling interval, which matters only on a
+deployment with the backend mounts — so this is the release that should land
+on `cira-aqpi`, together with the `SENTINEL_RECENTFILES_DIR` change v0.8.3
+still requires there. See the v0.8.3 upgrade note below; it applies verbatim.
+
+### Changed
+
+- **LB1 no longer samples each product at its own publish interval.**
+  `Layer1BackendProductCheck` took its cadence from
+  `PRODUCTS[pid]["cadence_s"]`, the UPSTREAM PUBLISH interval, on the stated
+  reasoning that there is "no value in running faster than the product is
+  published". Sampling a signal at its own period is aliasing by
+  construction, and it held for **11 of the 13 products** — the five hourly
+  ones at 3600 s against 3600 s, `fcst_precip_rate` at 900 against 900, and
+  five at 120 against 120.
+
+  Three costs, two of them observed rather than inferred: a missed publish
+  unnoticed for up to a full publish interval at arbitrary phase; a derived
+  "observed cadence" that is a property of the sampler rather than the product
+  (water_* intervals read as 31–170 minutes, 32% over limit, entirely the
+  instrument — two consecutive hourly publishes landing in one sampling gap);
+  and a panel threshold edit taking up to an hour to apply, seen directly when
+  `max_water_*` picked up an edit in 2 minutes while `water_*` had last run 40
+  minutes earlier.
+
+  LB1 now reads its own `backend_cadence_s`, defaulting to
+  `config.BACKEND_PRODUCT_CADENCE_S = 120`. Not a fitted number and nothing is
+  judged against it: it is the rate `max_water_depth`/`max_water_level` have
+  already run at in production, it is the fastest publish any product has, and
+  it leaves ≥7x oversampling on the slowest.
+
+  **The requested fix was `cadence_s` 3600 → 300 and would have been wrong.**
+  That key is shared with the radarca-facing L1 check, which takes it through
+  `derive_check_cadence()` at half the publish rate — so the edit would have
+  moved L1 for those products from 1800 s to 150 s, a 12x increase in polling
+  against CSU's public service, as a side effect of a change whose entire
+  purpose is a local filesystem stat. The two keys are now separate and a test
+  asserts L1's rate is unchanged.
+
+- **Route `severity_floor` is renamed `severity_at_least`.** The old spelling
+  still loads and logs a deprecation warning naming the replacement; both set
+  means the new one wins and the mismatch is logged. This back-compat is
+  load-bearing rather than courteous: `Route` ignores unknown keys, so a bare
+  rename would have left every existing `alerts.yaml` parsing cleanly with
+  **L0's setting silently dropped**, and each deployment carries its own copy.
+
+### Fixed
+
+- **`alarms/router.py` documented a suppression mechanism that does not
+  exist.** Its docstring promised three tiers — `floor=warn → notify only on
+  broken` — four lines above the sentence that contradicted it
+  (`severity_floor` *raises* severity). `_max_sev` returns the higher of the
+  two, always, and **nothing on the notification path filters on severity**:
+  `evaluate` opens an alarm for any status but pass/skip/inconclusive, the
+  step loop fires every due step, `_dispatch` has no severity test.
+
+  Those documented semantics are real but belong to a **different**
+  `severity_floor` — the one in `push.py`, on per-device push routing, which
+  genuinely filters. One identifier, two opposite behaviours in one system.
+
+  Renaming was chosen over implementing the documentation, because the L0
+  route depends on the actual behaviour: it carries the key to be critical
+  *at open* in order to page fast (`hold_down: 2m`, "five minutes is too much
+  latency to accept"). Under the filtering reading, `critical` would mean
+  "notify only once open past 30 minutes", so shipping the documented
+  behaviour would have silently delayed the one route whose entire purpose is
+  speed. Nothing depended on the filtering reading, because it never existed.
+
+### Decisions recorded (no code)
+
+- **A warn arm for `B_freshness` was considered and declined**, recorded at
+  `DEFAULT_BACKEND_MAX_AGE_S` where it would be proposed again. The intent it
+  would serve — "a missed publish on a flood product should be visible" — is
+  already served by the existing fail at ~1.5x the publish interval; and
+  nothing can make a warn quiet, so the arm would open an alarm and re-notify
+  hourly on LB1 for every ordinary late publish. That is the v0.8.1 band's
+  failure exactly. **The prerequisite for a "late" state is a way to record a
+  verdict without notifying, not a threshold.**
+
+- `DEFAULT_BACKEND_MAX_AGE_S` now documents the convention a deployment picks
+  between (~1.5x publish interval = one miss fails; ~2.25x = only two or more
+  fail) and states that per-product values live in the `settings.thresholds`
+  blob, not in that constant. It deliberately records **no** deployment's
+  chosen number: the blob has no rationale field, and a comment asserting a
+  value it does not control would be wrong the first time someone edits the
+  panel.
+
+### Documentation
+
+- The **FAQ is corrected on both surfaces** (`docs/04-faq.md` and the in-app
+  `/faq`). Six claims were wrong rather than merely stale, including Q1's "no
+  privileged access … reads exactly what a browser would read", false since
+  the LB tier and contradicting Q4; two radars that do not exist ("Santa
+  Clara", "Sierra" → Coyote Valley, Sawyer Ridge); a cross-reference to the
+  wrong question; and the 79-hour outage described as covering five radars
+  when the episode covered four sites. A new Q15 covers the daily report,
+  which had no entry on either surface. Live counters are dated rather than
+  refreshed.
+
+- Both FAQ copies now **point at each other**, because `test_faq_parity`
+  compares only the questions and a factual correction applied to one copy is
+  silent in the other. An answer-level parity test was considered and
+  rejected on evidence — it would not have caught this, since both surfaces
+  carried the same wrong claim before and the same corrected one after.
+
+- **Stale check counts** in `docs/02-deployment.md`, `docs/MAINTENANCE.md` and
+  `README.md` ("43 checks", "72 checks") now give both configurations,
+  measured: **45** display-tier-only, **84** with the backend mounts
+  (LB1 13, LB2 7, LB3 19), confirmed against both live deployments. The
+  sizing guidance also states that the backend tier adds no upstream requests
+  at all, and that what it does add is mount metadata traffic.
+
 ### Fixed
 
 - **Retracted: the XSCW finding was never a conjunction.** Three releases of
