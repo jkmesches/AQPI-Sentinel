@@ -912,11 +912,33 @@ DROPS_SILENT_INFO_S: int = 3_600
 # COMP_* composite files and were 0-2 min fresh while this tree was over a week
 # quiet. See Layer3DropsProducerCheck.
 #
-# TWO AGES, AND THEY DISAGREE: the check reports ~182.6 h from DIRECTORY
-# mtimes, a host listing gave ~282 h from FILE mtimes, because the check walks
-# deeper. Both say stale and neither is "the age" without saying which it is —
-# the same directory-versus-file, mtime-versus-declared distinction that has
-# cost three wrong conclusions here this week.
+# TWO AGES, AND THE DISAGREEMENT IS NOT WHAT EITHER OF US FIRST SAID. The check
+# reports ~182.6 h; a host listing reported ~282 h. Neither "the check walks
+# deeper" nor "a directory was touched without a write" is the explanation:
+#
+#   newest FILE   DROPS/ebay/2026/10/05/aqpi.ebay-20261005-040613_...   182 h
+#   DROPS/ebay/2026  (an ANCESTOR directory)                            282 h
+#
+# An ancestor being older than a leaf file is ordinary dated-tree nesting —
+# writing into 2026/10/05 touches 2026/10/05, not 2026 — so the 282 h measured
+# a different LEVEL, not a different basis. There is no touched-without-a-write
+# signal and nothing to chase there.
+#
+# WHAT THAT EXPOSES, WHICH IS WORSE THAN THE DISCREPANCY: the one-stat
+# justification above was verified against a DAY directory, and the check stats
+# the RADAR FOLDER (`DROPS/ebay`) — see Layer3DropsProducerCheck.read_all,
+# which does exactly one stat per folder and walks nothing. If this tree is
+# dated, `ebay/`'s own mtime changes when a YEAR directory is added, not when a
+# file lands, and the number would mean "when a new year began" while the
+# comment claims "something last landed here". The two observed figures happen
+# to agree closely, which is either coincidence or evidence the tree is flat —
+# and a basis that is right by coincidence is the thing this file keeps
+# learning not to accept. [U], and it needs one listing of `DROPS/ebay/` to
+# settle: year directories or files.
+#
+# Per-level mtimes in that tree are also irregular in ways nobody has explained
+# (2026/09 reads older than its own child 2026/09/30). Deliberately recording
+# no theory for that: it is exactly the kind of pattern that invites one.
 #
 # NOT a radar volume source. LB2 used to fall back to this layout for a radar
 # in neither tree table; see layer2_backend_radar._radar_path for why that is
