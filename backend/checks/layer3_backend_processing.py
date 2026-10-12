@@ -730,6 +730,23 @@ class Layer3DropsProducerCheck(Check):
     overwritten in place (verified against a 629-entry day directory — every
     entry carries its own scan timestamp, there is no fixed-name entry, and
     there are no dotfiles), so the mtime is a true "something last landed".
+
+    === That verification was done at a different LEVEL than this check reads ===
+
+    `read_all` below does exactly one stat on `DROPS/<folder>` and walks
+    nothing. The justification above was established against a DAY directory.
+    Those are the same thing only if `DROPS/<folder>` holds files directly; if
+    it holds year directories — and a path observed on 2026-10-12 was
+    `DROPS/ebay/2026/10/05/aqpi.ebay-...` — then this folder's mtime changes
+    when a new YEAR is created, not when a file lands, and it would answer a
+    different question from the one the summary states.
+
+    The two independently measured figures agree closely (182.6 h here against
+    a 182 h newest file), so in practice the number currently looks right. A
+    basis that is right by coincidence is still unverified, and this module has
+    spent a week on exactly that class of error, so it is marked [U] in
+    config.DROPS_TREE rather than assumed either way. One listing of
+    `DROPS/ebay/` settles it: year directories or files.
     """
 
     id = "layer3.backend.drops"
