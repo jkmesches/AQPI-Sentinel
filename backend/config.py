@@ -890,9 +890,14 @@ DROPS_SILENT_INFO_S: int = 3_600
 
 # DROPS entries are CREATED, never overwritten in place — every entry carries
 # its own scan timestamp and there is no fixed-name entry, verified against a
-# 629-entry day directory with no dotfiles. So directory mtime is a true
-# "something last landed here" time and one stat suffices, which is what makes
-# the producer check cheap enough to run on every radar's folder.
+# 629-entry day directory with no dotfiles. So a DAY DIRECTORY's mtime is a
+# true "something last landed here" time.
+#
+# That is the level it was verified at, and from v0.7.0 until 2026-10-12 the
+# producer check applied it one level up, stat'ing the RADAR FOLDER. Measured:
+# every radar folder holds zero direct files and exactly one year directory, so
+# output lands in <radar>/2026/10/05/ and never touches <radar>. See
+# Layer3DropsProducerCheck._drops_newest — the check now walks to the files.
 # Read ONLY by Layer3DropsProducerCheck, which watches whether
 # Gen_X-band_QPE.py is still producing. The tree under backend_root is stale as
 # of 2026-10-12, so that check should be reporting a stalled producer — which
@@ -912,33 +917,25 @@ DROPS_SILENT_INFO_S: int = 3_600
 # COMP_* composite files and were 0-2 min fresh while this tree was over a week
 # quiet. See Layer3DropsProducerCheck.
 #
-# TWO AGES, AND THE DISAGREEMENT IS NOT WHAT EITHER OF US FIRST SAID. The check
-# reports ~182.6 h; a host listing reported ~282 h. Neither "the check walks
-# deeper" nor "a directory was touched without a write" is the explanation:
+# THE OLD AGE WAS COINCIDENCE, AND THE CHECK COULD NOT SEE RECOVERY. Listing
+# resolved it on 2026-10-12: every radar folder holds 0 direct files and 1 year
+# directory. All five folders read an identical 182 h and are owned by a
+# different user from their contents, so that mtime was a SWEEP over their
+# direct entries at 2026-10-04 22:07 — not output arrival. The newest file is
+# ~6 h later, and both round to 182 h at hour granularity, which is the only
+# reason they looked like they agreed.
 #
-#   newest FILE   DROPS/ebay/2026/10/05/aqpi.ebay-20261005-040613_...   182 h
-#   DROPS/ebay/2026  (an ANCESTOR directory)                            282 h
+# The consequence that mattered more than the wrong number: if the producer
+# resumed, files would land in a new day directory and the folder mtime would
+# stay frozen, so the check would report the same stall forever. Its agreement
+# with reality during a real stall was therefore no evidence that it worked —
+# a frozen clock and a stopped producer are indistinguishable in exactly that
+# state, which is the state it was observed in. Fixed by walking to the files.
 #
-# An ancestor being older than a leaf file is ordinary dated-tree nesting —
-# writing into 2026/10/05 touches 2026/10/05, not 2026 — so the 282 h measured
-# a different LEVEL, not a different basis. There is no touched-without-a-write
-# signal and nothing to chase there.
-#
-# WHAT THAT EXPOSES, WHICH IS WORSE THAN THE DISCREPANCY: the one-stat
-# justification above was verified against a DAY directory, and the check stats
-# the RADAR FOLDER (`DROPS/ebay`) — see Layer3DropsProducerCheck.read_all,
-# which does exactly one stat per folder and walks nothing. If this tree is
-# dated, `ebay/`'s own mtime changes when a YEAR directory is added, not when a
-# file lands, and the number would mean "when a new year began" while the
-# comment claims "something last landed here". The two observed figures happen
-# to agree closely, which is either coincidence or evidence the tree is flat —
-# and a basis that is right by coincidence is the thing this file keeps
-# learning not to accept. [U], and it needs one listing of `DROPS/ebay/` to
-# settle: year directories or files.
-#
-# Per-level mtimes in that tree are also irregular in ways nobody has explained
+# Per-level mtimes in that tree remain irregular in ways nobody has explained
 # (2026/09 reads older than its own child 2026/09/30). Deliberately recording
-# no theory for that: it is exactly the kind of pattern that invites one.
+# no theory: it is exactly the kind of pattern that invites one, and the
+# producer is the thing to look at if the crontab says still-scheduled.
 #
 # NOT a radar volume source. LB2 used to fall back to this layout for a radar
 # in neither tree table; see layer2_backend_radar._radar_path for why that is

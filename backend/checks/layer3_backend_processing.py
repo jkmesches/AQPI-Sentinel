@@ -684,6 +684,89 @@ class Layer3CompositeParticipationCheck(Check):
         return _final(self, t0, sub, payload, metrics, summary)
 
 
+_DROPS_LOOKBACK_DAYS = 2
+
+
+def _drops_newest(folder: str) -> float | None:
+    """Blocking. When output last landed under one DROPS radar folder.
+
+    === Why this is not one stat on the folder ===
+
+    It was, from v0.7.0 until 2026-10-12, and the folder's mtime does not
+    answer this question. Measured: every radar folder holds ZERO direct files
+    and exactly one year directory, so files land in `<folder>/2026/10/05/` and
+    never touch `<folder>` itself. [M]
+
+    Two consequences, and the second is the one that matters:
+
+      1. The number meant "when something was last added to this folder" —
+         which, with all five folders reading an identical 182 h and owned by a
+         different user from their contents, was a sweep over their direct
+         entries and not output arrival at all.
+      2. THE CHECK COULD NOT DETECT RECOVERY. If the producer resumed, new
+         files would land in a new day directory and `<folder>`'s mtime would
+         stay frozen, so the check would report the same stall forever. Its
+         agreement with reality during an actual stall was therefore not
+         evidence that it worked: a frozen clock and a stopped producer are
+         indistinguishable in exactly that one state.
+
+    So this walks to the files. The original justification — DROPS entries are
+    created and never overwritten, so a directory mtime is a true "something
+    last landed" — is sound at the level it was VERIFIED, which was a day
+    directory, and that is the level used here.
+
+    Handles both layouts rather than assuming the dated one: a folder holding
+    files directly is read directly. Guessing a layout is what the rest of this
+    week was about.
+
+    An empty newest day directory falls back one day, for the reason the LB2
+    rollover fix exists: just after 00Z the day's directory can exist before
+    its first file does, and reading that as "output arrived" would be the
+    same not-finished-yet-read-as-fine error inverted.
+    """
+    with os.scandir(folder) as it:
+        entries = [e for e in it if not e.name.startswith(".")]
+    files = [e for e in entries if not e.is_dir(follow_symlinks=False)]
+    if files:
+        # Flat layout — the shape the original one-stat basis assumed.
+        return max(e.stat(follow_symlinks=False).st_mtime for e in files)
+
+    # Dated layout. Descend by NUMERIC name, not lexical order over everything:
+    # a stray non-numeric entry would otherwise sort last and be mistaken for
+    # the newest period.
+    def newest_numeric(path: str) -> str | None:
+        with os.scandir(path) as it:
+            names = sorted((e.name for e in it
+                            if e.is_dir(follow_symlinks=False) and e.name.isdigit()),
+                           key=lambda n: (len(n), n))
+        return names[-1] if names else None
+
+    days: list[str] = []
+    cur = folder
+    for _ in range(3):                       # %Y / %m / %d
+        nxt = newest_numeric(cur)
+        if nxt is None:
+            break
+        cur = os.path.join(cur, nxt)
+        days.append(cur)
+    if len(days) < 3:
+        return None
+
+    # The newest day, then the one before it if the newest is empty.
+    parent = os.path.dirname(days[-1])
+    with os.scandir(parent) as it:
+        dnames = sorted((e.name for e in it
+                         if e.is_dir(follow_symlinks=False) and e.name.isdigit()),
+                        key=lambda n: (len(n), n))
+    for dname in reversed(dnames[-_DROPS_LOOKBACK_DAYS:]):
+        with os.scandir(os.path.join(parent, dname)) as it:
+            mtimes = [e.stat(follow_symlinks=False).st_mtime for e in it
+                      if not e.name.startswith(".")]
+        if mtimes:
+            return max(mtimes)
+    return None
+
+
 class Layer3DropsProducerCheck(Check):
     """Is Gen_X-band_QPE.py still producing? INFORMATIONAL by design.
 
@@ -726,27 +809,10 @@ class Layer3DropsProducerCheck(Check):
     restating one fact — the duplication the fleet correlation exists to
     prevent. Per-folder detail is in ``sub_status`` instead.
 
-    Directory mtime is a sound basis here: DROPS entries are CREATED and never
-    overwritten in place (verified against a 629-entry day directory — every
-    entry carries its own scan timestamp, there is no fixed-name entry, and
-    there are no dotfiles), so the mtime is a true "something last landed".
-
-    === That verification was done at a different LEVEL than this check reads ===
-
-    `read_all` below does exactly one stat on `DROPS/<folder>` and walks
-    nothing. The justification above was established against a DAY directory.
-    Those are the same thing only if `DROPS/<folder>` holds files directly; if
-    it holds year directories — and a path observed on 2026-10-12 was
-    `DROPS/ebay/2026/10/05/aqpi.ebay-...` — then this folder's mtime changes
-    when a new YEAR is created, not when a file lands, and it would answer a
-    different question from the one the summary states.
-
-    The two independently measured figures agree closely (182.6 h here against
-    a 182 h newest file), so in practice the number currently looks right. A
-    basis that is right by coincidence is still unverified, and this module has
-    spent a week on exactly that class of error, so it is marked [U] in
-    config.DROPS_TREE rather than assumed either way. One listing of
-    `DROPS/ebay/` settles it: year directories or files.
+    Freshness comes from `_drops_newest`, which walks to the files. It used to
+    be one stat on the radar folder, which could not detect recovery — see that
+    function for the measurement and for why the old number agreed with reality
+    by coincidence.
     """
 
     id = "layer3.backend.drops"
@@ -775,7 +841,7 @@ class Layer3DropsProducerCheck(Check):
             out: dict[str, float | None] = {}
             for rid, folder in folders.items():
                 try:
-                    out[rid] = os.stat(os.path.join(root, folder)).st_mtime
+                    out[rid] = _drops_newest(os.path.join(root, folder))
                 except OSError:
                     out[rid] = None
             return out

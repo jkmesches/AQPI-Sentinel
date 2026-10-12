@@ -28,6 +28,37 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The DROPS producer check could not detect recovery.** Since v0.7.0 it did
+  one stat on `DROPS/<radar>`. Listing settled it on 2026-10-12: every radar
+  folder holds **zero direct files and one year directory**, so output lands in
+  `<radar>/2026/10/05/` and never touches `<radar>` itself. The one-stat basis
+  was verified against a *day* directory and applied one level up.
+
+  The number therefore meant "when something was last added to this folder" —
+  all five read an identical 182 h and are owned by a different user from their
+  contents, so that was a sweep, not output arrival. And had the producer
+  resumed, new files would have landed in a new day directory while the folder
+  mtime stayed frozen: the check would have reported the same stall forever.
+
+  So its agreement with the real stall was never evidence that it worked. A
+  frozen clock and a stopped producer are indistinguishable in exactly the one
+  state it was observed in. It now walks to the files, handles the flat layout
+  too rather than assuming the dated one, and falls back a day when the newest
+  day directory exists but is empty — the LB2 rollover lesson inverted, since a
+  directory created before its first file must not read as output arriving.
+
+  The historical series for `layer3.backend.drops` has been measuring folder
+  sweeps rather than output arrival for its whole lifetime; do not re-derive
+  anything from it.
+
+  Its own test was passing on the bug: the fixture created empty folders and
+  asserted that "a fresh DROPS tree passes", which it did because a
+  just-created directory looks new. The fixture now writes real files into a
+  dated tree with the folder mtimes deliberately frozen a week back, so the
+  assertion distinguishes output age from folder age.
+
 ## [0.8.2] — 2026-10-12
 
 Four corrections to v0.8.0's staging check, two of them to things it was
