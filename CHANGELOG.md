@@ -74,6 +74,20 @@ unknown`.
   day directory exists but is empty — the LB2 rollover lesson inverted, since a
   directory created before its first file must not read as output arriving.
 
+  Freshness comes from the DECLARED timestamp in the filename, not the mtime —
+  the same choice `LB2_FRESHNESS = "filename"` exists to make, and today's
+  finding sharpens rather than softens it: something swept these directories'
+  mtimes without writing data, so mtime on this tree is demonstrably not a
+  record of arrival. The existing per-radar patterns match DROPS names
+  unchanged, so this needed no new table and no new import guard.
+
+  It reads the flat layout, then today and yesterday from the clock (via
+  `first_resolvable`, without which all five folders report stalled in the
+  first minutes of every UTC day — the LB2 nuisance alarm in a different
+  tree), then falls back to a bounded walk so a producer dead eight days still
+  reports its true age instead of "nothing today or yesterday". The walk is
+  capped at today, so a stray future-dated directory cannot blind it.
+
   The historical series for `layer3.backend.drops` has been measuring folder
   sweeps rather than output arrival for its whole lifetime; do not re-derive
   anything from it.

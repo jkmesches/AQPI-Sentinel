@@ -479,14 +479,25 @@ def main() -> int:
         files is what makes the assertion mean anything, and it is the same
         directory-exists-but-declares-nothing conflation as the LB2 rollover.
         """
+        # Clear first. The fresh case writes a 1-minute-old file, and without
+        # this the "dead 12 h" case below still has it and reads 1 minute —
+        # the old fixture got away with ageing the folder mtime because that
+        # was the only thing the check read, which is the bug.
+        import shutil as _sh
+        for rid, folder in RADAR_FOLDER.items():
+            if rid != "CBAND":
+                _sh.rmtree(os.path.join(root, folder), ignore_errors=True)
         when = time.time() - age_s
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(when))
         day = time.strftime("%Y/%m/%d", time.gmtime(when))
         for rid, folder in RADAR_FOLDER.items():
             if rid == "CBAND":
                 continue
             d = os.path.join(root, folder, day)
             os.makedirs(d, exist_ok=True)
-            f = os.path.join(d, f"aqpi.{folder}-x_PPI.netcdf.drops")
+            # The NAME carries the time; mtime is set elsewhere on purpose so
+            # a regression to reading mtimes fails rather than passes.
+            f = os.path.join(d, f"aqpi.{folder}-{stamp}_3257_2_2_PPI.netcdf.drops")
             with open(f, "w") as fh:
                 fh.write("x")
             os.utime(f, (when, when))
@@ -564,22 +575,40 @@ def test_drops_newest() -> None:
     import tempfile
     from backend.checks.layer3_backend_processing import _drops_newest
 
+    from datetime import datetime as _dt, timezone as _tz
+    from backend.config import RAW_VOLUME_TS_RE
+
     now = _time.time()
+    NOW = _dt.fromtimestamp(now, _tz.utc)
+    PAT = RAW_VOLUME_TS_RE["XEBY"]
     root = Path(tempfile.mkdtemp(prefix="drops-"))
 
-    def touch(p: Path, age_s: float) -> None:
-        p.parent.mkdir(parents=True, exist_ok=True)
+    def touch(folder: Path, site: str, age_s: float, *, dated: bool = True) -> str:
+        """Write one DROPS file whose NAME declares `age_s` ago.
+
+        The name is what matters now: freshness comes from the declared
+        timestamp, not the mtime, for the same reason LB2_FRESHNESS is
+        "filename" — and because something swept these directories' mtimes
+        without writing data, so mtime on this tree is demonstrably not a
+        record of arrival. The mtimes below are set to a DIFFERENT time on
+        purpose, so a test that silently went back to reading them fails.
+        """
+        when = _dt.fromtimestamp(now - age_s, _tz.utc)
+        name = f"aqpi.{site}-{when:%Y%m%d-%H%M%S}_3257_2_2_PPI.netcdf.drops"
+        d = folder / when.strftime("%Y/%m/%d") if dated else folder
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / name
         p.write_text("x")
-        os.utime(p, (now - age_s, now - age_s))
+        os.utime(p, (now - 999_999, now - 999_999))
+        return name
 
     # Recovery: the radar folder is frozen a week back, a file landed a minute
     # ago in a NEW day directory. The old one-stat basis reports the week.
     ebay = root / "ebay"
-    touch(ebay / "2026" / "10" / "05" / "aqpi.ebay-20261005-040613_PPI.netcdf.drops",
-          182 * 3600)
-    touch(ebay / "2026" / "10" / "13" / "aqpi.ebay-20261013-101500_PPI.netcdf.drops", 60)
+    touch(ebay, "ebay", 182 * 3600)
+    touch(ebay, "ebay", 60)
     os.utime(ebay, (now - 182 * 3600, now - 182 * 3600))
-    got = _drops_newest(str(ebay))
+    got = _drops_newest(str(ebay), PAT, NOW)
     check("recovery in a new day directory is visible",
           got is not None and now - got < 120,
           f"{(now - got) / 3600:.1f} h" if got else "None")
@@ -589,17 +618,16 @@ def test_drops_newest() -> None:
 
     # A genuine stall still reads as stale.
     scrz = root / "scrz"
-    touch(scrz / "2026" / "10" / "05" / "aqpi.scrz-20261005-040000_PPI.netcdf.drops",
-          182 * 3600)
-    got = _drops_newest(str(scrz))
+    touch(scrz, "scrz", 182 * 3600)
+    got = _drops_newest(str(scrz), PAT, NOW)
     check("a real stall still reports the true age",
           got is not None and abs((now - got) - 182 * 3600) < 120,
           f"{(now - got) / 3600:.1f} h" if got else "None")
 
     # The flat layout the original basis assumed must still work.
     flat = root / "flat"
-    touch(flat / "aqpi.flat-20261013-101500_PPI.netcdf.drops", 300)
-    got = _drops_newest(str(flat))
+    touch(flat, "flat", 300, dated=False)
+    got = _drops_newest(str(flat), PAT, NOW)
     check("a folder holding files directly is read directly",
           got is not None and abs((now - got) - 300) < 60,
           f"{(now - got):.0f} s" if got else "None")
@@ -608,22 +636,38 @@ def test_drops_newest() -> None:
     # fresh — the LB2 rollover lesson, inverted: a directory created before its
     # first file must not count as output having arrived.
     scvw = root / "scvw"
-    touch(scvw / "2026" / "10" / "12" / "aqpi.scvw-20261012-090000_PPI.netcdf.drops",
-          4 * 3600)
-    (scvw / "2026" / "10" / "13").mkdir(parents=True, exist_ok=True)
-    got = _drops_newest(str(scvw))
+    touch(scvw, "scvw", 4 * 3600)
+    (scvw / NOW.strftime("%Y/%m/%d")).mkdir(parents=True, exist_ok=True)
+    got = _drops_newest(str(scvw), PAT, NOW)
     check("an empty new day directory does not read as fresh output",
           got is not None and abs((now - got) - 4 * 3600) < 120,
           f"{(now - got) / 3600:.1f} h" if got else "None")
 
     # A non-numeric stray must not be mistaken for the newest period.
     swyr = root / "swyr"
-    touch(swyr / "2026" / "10" / "05" / "aqpi.swyr-20261005-040000_PPI.netcdf.drops",
-          182 * 3600)
+    touch(swyr, "swyr", 182 * 3600)
     (swyr / "tmp").mkdir(parents=True, exist_ok=True)
-    got = _drops_newest(str(swyr))
+    got = _drops_newest(str(swyr), PAT, NOW)
     check("a non-numeric stray directory is not taken for the newest year",
           got is not None and abs((now - got) - 182 * 3600) < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
+
+    # A stray FUTURE-dated directory must not blind the walk. A pure
+    # descend-by-newest-name would pick 2099, find it empty, and report
+    # nothing; the walk is capped at today for exactly this.
+    scwa = root / "scwa"
+    touch(scwa, "scwa", 182 * 3600)
+    (scwa / "2099" / "01" / "01").mkdir(parents=True, exist_ok=True)
+    got = _drops_newest(str(scwa), PAT, NOW)
+    check("a future-dated stray directory does not blind the walk",
+          got is not None and abs((now - got) - 182 * 3600) < 120,
+          f"{(now - got) / 3600:.1f} h" if got else "None")
+
+    # And the declared time is what is read, not the mtime — every file above
+    # was stamped ~11.6 days old on disk regardless of its name.
+    check("freshness comes from the declared name, not the file mtime",
+          got is not None and abs((now - got) - 999_999) > 3600,
+          f"mtimes say {999_999 / 3600:.0f} h; check says "
           f"{(now - got) / 3600:.1f} h" if got else "None")
 
 
