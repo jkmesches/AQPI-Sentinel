@@ -66,10 +66,34 @@ def _special_trees() -> dict[str, str]:
     return {"CBAND": str(SETTINGS.sscb_root).rstrip("/") + "/%Y/%m/%d"}
 
 
+class NoRadarTree(ValueError):
+    """This radar has no configured volume tree. See _radar_path."""
+
+
 def _radar_path(radar_id: str, now) -> str:
-    # Three layouts, most specific first: a radar on its own mount (CBAND via
-    # SENTINEL_SSCB_ROOT), a radar dated inside this profile's own mount (XQPI's
-    # FLOW), and AQPI's flat DROPS tree.
+    """Where this radar's volumes land. Two layouts, most specific first:
+    a radar on its own mount (CBAND via SENTINEL_SSCB_ROOT), and a radar dated
+    inside this profile's own mount (the X-bands, and XQPI's FLOW).
+
+    === There used to be a third, and it was a decoy waiting to happen ===
+
+    A radar in neither table fell through to the flat
+    `backend_root/PRODUCTS/DROPS/<folder>` layout. Measured 2026-10-12, that
+    tree on cira-aqpi is 7.6 days stale — an abandoned copy, like the
+    `recentfiles` one that produced eight false passes the same day. [M]
+
+    No registered radar used it: all five X-bands are in RADAR_DATED_TREE and
+    CBAND resolves through _special_trees(). So the fallback was not reading
+    stale data, it was WAITING to. A radar added without a RADAR_DATED_TREE
+    entry would have been silently redirected to week-old files and reported
+    on them confidently, which is the identical failure one registration away.
+
+    So it raises instead. A missing entry is now a startup error naming the
+    radar and the table to add it to, which is the same no-default-no-fallback
+    decision as SENTINEL_RECENTFILES_ROOT: a guessed path is worse than a
+    refusal, and a guessed path that resolves to something plausible is worse
+    than both.
+    """
     tmpl = _special_trees().get(radar_id)
     if tmpl:
         return now.astimezone(timezone.utc).strftime(tmpl)
@@ -77,8 +101,12 @@ def _radar_path(radar_id: str, now) -> str:
     if rel:
         return now.astimezone(timezone.utc).strftime(
             os.path.join(SETTINGS.backend_root, rel))
-    return os.path.join(SETTINGS.backend_root, "PRODUCTS", "DROPS",
-                        RADAR_FOLDER[radar_id])
+    raise NoRadarTree(
+        f"{radar_id} has no volume tree: add it to config.RADAR_DATED_TREE, "
+        f"or give it its own mount the way CBAND has SENTINEL_SSCB_ROOT. It "
+        f"used to fall back to PRODUCTS/DROPS/{RADAR_FOLDER.get(radar_id, '?')}, "
+        f"which is an abandoned tree."
+    )
 
 
 # Generous: one FLOW day holds ~2,900 volumes. If a directory ever exceeds
@@ -751,6 +779,11 @@ if SETTINGS.backend_root:
     for _rid in RADAR_FOLDER:
         if _rid == "CBAND" and not SETTINGS.sscb_root:
             continue
+        # Resolve once HERE so a radar with no configured tree fails at
+        # import, naming itself, rather than on its first tick — or, as it
+        # did until 2026-10-12, resolving quietly to an abandoned directory
+        # and reporting on week-old files.
+        _radar_path(_rid, utcnow())
         register(Layer2BackendRadarCheck(radar_id=_rid))
     if _FLEET_ACTIVE:
         register(Layer2BackendFleetCheck())

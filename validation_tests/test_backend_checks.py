@@ -84,6 +84,24 @@ def main() -> int:
     # A local-time template silently reads yesterday's directory for several
     # hours a day depending on the host's zone.
     late = datetime(2026, 10, 3, 23, 30, tzinfo=timezone.utc)
+    # The flat PRODUCTS/DROPS/<folder> layout used to be the fallback for any
+    # radar in neither table. Measured 2026-10-12, that tree on cira-aqpi is
+    # 7.6 days stale — so the fallback was not reading abandoned data, it was
+    # WAITING to, one registration away. A radar added without a
+    # RADAR_DATED_TREE entry would have been redirected to week-old files and
+    # reported on them confidently: the identical failure to the `recentfiles`
+    # decoy that produced eight false passes the same day.
+    try:
+        got = lb2._radar_path("KNEW", now)
+        check("a radar with no configured tree raises rather than guessing",
+              False, f"returned {got}")
+    except lb2.NoRadarTree as e:
+        check("a radar with no configured tree raises rather than guessing", True)
+        check("...and the error names the table to add it to",
+              "RADAR_DATED_TREE" in str(e), str(e)[:80])
+        check("...and warns that the old fallback was an abandoned tree",
+              "abandoned" in str(e), str(e)[-60:])
+
     check("23:30Z lands on the 3rd", lb2._radar_path("CBAND", late).endswith("/10/03"),
           lb2._radar_path("CBAND", late))
     early = datetime(2026, 10, 4, 0, 30, tzinfo=timezone.utc)

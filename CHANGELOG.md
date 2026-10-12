@@ -30,6 +30,21 @@ unknown`.
 
 ### Fixed
 
+- **LB2's layout resolver had a fallback to an abandoned tree.** A radar in
+  neither `RADAR_DATED_TREE` nor `_special_trees()` fell through to the flat
+  `backend_root/PRODUCTS/DROPS/<folder>` layout, which on cira-aqpi is 7.6 days
+  stale. No registered radar used it — all five X-bands are dated and CBAND has
+  its own mount — so it was not reading abandoned data, it was **waiting to**.
+  A radar added without a dated-tree entry would have been silently redirected
+  to week-old files and reported on them confidently: the same failure as the
+  `recentfiles` decoy below, one registration away.
+
+  It now raises, naming the radar and the table to add it to, and the
+  registration loop resolves each radar once so the failure is at startup
+  rather than on the first tick. Same no-default-no-fallback decision as
+  `SENTINEL_RECENTFILES_ROOT`: a guessed path is worse than a refusal, and a
+  guessed path that resolves to something plausible is worse than both.
+
 - **The staging check was reading a tree abandoned in March 2026, and reported
   eight of nine radars healthy against it.** `COMPOSITE_INPUT_TREE` resolved
   relative to `SENTINEL_BACKEND_ROOT`. The staging tree is not under it: Renzo
