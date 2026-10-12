@@ -687,12 +687,27 @@ class Layer3CompositeParticipationCheck(Check):
 class Layer3DropsProducerCheck(Check):
     """Is Gen_X-band_QPE.py still producing? INFORMATIONAL by design.
 
+    === The published qpe_* products are NOT this script's output ===
+
+    They look like it. `layer1.backend.qpe_15min` and friends watch files named
+    `qpe_15m_step_COMP_20261012_184200_rainfall.nc.png` — derived from `COMP_*`
+    COMPOSITE files, a different artifact that happens to share the letters
+    QPE. Measured 2026-10-12: all three published QPE products were 0-2 min
+    fresh while this producer's tree had been quiet for over a week. [M]
+
+    So a healthy `layer1.backend.qpe_*` row says NOTHING about whether this
+    script is running, and a stall here does not make any published product
+    wrong. I proposed exactly that inference as a way to tell a stalled
+    producer from an abandoned output tree, and it would have returned a
+    confident wrong answer — the same shape as the `recentfiles` decoy and the
+    sweep-versus-volume confusion, two things named alike taken for one thing.
+
     === Why this is capped at warn ===
 
-    DROPS holds this script's output and nothing in the live product chain
-    reads it, so a stall here does not make any published product wrong. LB2
-    used to gate radar health on it, which is how one dead script became five
-    radar failures for twelve hours.
+    Nothing in the live product chain reads DROPS, per the above, so a stall
+    here does not make any published product wrong. LB2 used to gate radar
+    health on it, which is how one dead script became five radar failures for
+    twelve hours.
 
     The lesson is not "stop watching DROPS" — it is "watch it at the right
     severity". In this codebase's severity model a ``warn`` maps to ``info``

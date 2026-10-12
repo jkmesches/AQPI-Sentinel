@@ -894,11 +894,29 @@ DROPS_SILENT_INFO_S: int = 3_600
 # "something last landed here" time and one stat suffices, which is what makes
 # the producer check cheap enough to run on every radar's folder.
 # Read ONLY by Layer3DropsProducerCheck, which watches whether
-# Gen_X-band_QPE.py is still producing. Measured 2026-10-12 the tree under
-# backend_root is 7.6 days stale, so that check should currently be reporting a
-# stalled producer — which is what it is for, and why it is warn-capped and
-# non-paging. Whether the producer genuinely stopped or this copy was abandoned
-# like `recentfiles` was is [U] and worth establishing before anyone acts on it.
+# Gen_X-band_QPE.py is still producing. The tree under backend_root is stale as
+# of 2026-10-12, so that check should be reporting a stalled producer — which
+# is what it is for, and why it is warn-capped and non-paging.
+#
+# WHETHER THE PRODUCER STOPPED, OR THIS COPY WAS ABANDONED the way
+# `recentfiles` was on the same share the same day, is [U] and LEANS to the
+# former. Probed 2026-10-12: no live DROPS tree at five candidate paths on
+# trinity or K2; all five radar folders quiet simultaneously, which is
+# producer-level rather than radar-level; the script itself sits on granite at
+# /home/ldm/radar_proc/Gen_X-band_QPE.py and is not running as a process. What
+# that does NOT distinguish is a cron job between runs from a stopped one, and
+# ldm's crontab needs privilege nobody on this side has. Five guessed paths is
+# also not an exhaustive search.
+#
+# Do not reach for the published qpe_* products to settle it — they derive from
+# COMP_* composite files and were 0-2 min fresh while this tree was over a week
+# quiet. See Layer3DropsProducerCheck.
+#
+# TWO AGES, AND THEY DISAGREE: the check reports ~182.6 h from DIRECTORY
+# mtimes, a host listing gave ~282 h from FILE mtimes, because the check walks
+# deeper. Both say stale and neither is "the age" without saying which it is —
+# the same directory-versus-file, mtime-versus-declared distinction that has
+# cost three wrong conclusions here this week.
 #
 # NOT a radar volume source. LB2 used to fall back to this layout for a radar
 # in neither tree table; see layer2_backend_radar._radar_path for why that is
