@@ -58,7 +58,7 @@ os.environ.setdefault("SENTINEL_SSCB_ROOT", "/nonexistent-for-tests/sscb")
 # Its OWN root, and these checks do not exist without it. Deliberately not
 # derived from SENTINEL_BACKEND_ROOT here either: a test that quietly accepts
 # the backend root would pass against exactly the misconfiguration that shipped.
-os.environ.setdefault("SENTINEL_RECENTFILES_ROOT", "/nonexistent-for-tests/trinity")
+os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/trinity")
 
 import backend.checks as _all                                   # noqa: E402,F401
 from backend.checks import layer3_backend_processing as lb3     # noqa: E402
@@ -302,7 +302,32 @@ def main() -> int:
           r.payload["sub_status"] == {"A_staged": "pass"},
           str(r.payload.get("sub_status")))
 
-    print("\nthe root pointing one level too shallow says so by name")
+    print("\nthe OLD variable name is not read, so a stale config fails safe")
+    # Renamed in v0.8.3 because the meaning inverted: v0.8.2 appended
+    # PRODUCTS/Radar_processed/recentfiles, so the same value is correct on one
+    # version and wrong on the next. Reading the old name would silently
+    # REINTERPRET a correct v0.8.2 config into nine plausible "staging
+    # directory does not exist" rows whose real cause is the image tag.
+    import subprocess as _sp
+    env = {**os.environ, "SENTINEL_RECENTFILES_ROOT": "/some/project/root"}
+    env.pop("SENTINEL_RECENTFILES_DIR", None)
+    out = _sp.run(
+        [sys.executable, "-c",
+         "import backend.config as c, backend.checks, backend.registry as r;"
+         "print('DIR=', c.SETTINGS.recentfiles_dir);"
+         "print('N=', len([i for i in r.CHECKS if i.startswith('layer3.input.')]))"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True, text=True, env=env)
+    check("the old name does not populate the setting",
+          "DIR= None" in out.stdout, out.stdout.strip()[:80])
+    check("...so the nine checks do not register, which is the safe outcome",
+          "N= 0" in out.stdout, out.stdout.strip()[:80])
+    check("...and startup says so, naming the rename and the new meaning",
+          "renamed to SENTINEL_RECENTFILES_DIR" in out.stderr
+          and "recentfiles` directory" in out.stderr,
+          out.stderr.strip()[-120:])
+
+    print("\nthe dir pointing one level too shallow says so by name")
     # The misconfiguration the old variable name invited: in v0.8.2 the code
     # appended PRODUCTS/Radar_processed/recentfiles, so RECENTFILES_ROOT had to
     # point two levels ABOVE recentfiles. It was set from the name instead and
@@ -319,7 +344,7 @@ def main() -> int:
     import dataclasses as _dc
     orig_settings = lb3.SETTINGS
     try:
-        lb3.SETTINGS = _dc.replace(orig_settings, recentfiles_root=str(project))
+        lb3.SETTINGS = _dc.replace(orig_settings, recentfiles_dir=str(project))
         chk = lb3.Layer3InputStagingCheck(radar_id="KBBX")
         orig_now = lb3.utcnow
         lb3.utcnow = lambda: _NOW
@@ -330,7 +355,7 @@ def main() -> int:
     finally:
         lb3.SETTINGS = orig_settings
     check("it names the variable rather than reporting a broken mount",
-          "SENTINEL_RECENTFILES_ROOT" in r.summary, r.summary)
+          "SENTINEL_RECENTFILES_DIR" in r.summary, r.summary)
     check("...and says which way it is wrong",
           "too shallow" in r.summary and "not the project root" in r.summary,
           r.summary)

@@ -162,7 +162,15 @@ These don't normally need to be set — included for completeness.
 
 ---
 
-### `SENTINEL_RECENTFILES_ROOT`
+### `SENTINEL_RECENTFILES_DIR`
+
+> **Renamed in v0.8.3** from `SENTINEL_RECENTFILES_ROOT`, which is no longer
+> read. The meaning inverted with the name: v0.8.2 appended
+> `PRODUCTS/Radar_processed/recentfiles` to it, so the *same value* is correct
+> on v0.8.2 and wrong here. A stale config therefore fails as **unset** — the
+> checks do not register, and the backend logs the rename at startup — rather
+> than resolving to a wrong path and producing nine plausible failures whose
+> real cause is the image tag.
 
 Container path naming the composite's input staging directory **itself** — the
 check appends only the per-radar directory name. On cira-aqpi the host side is
@@ -171,7 +179,7 @@ needs its own read-only bind mount:
 
 ```bash
 SENTINEL_RECENTFILES_HOST_PATH=/trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/recentfiles
-SENTINEL_RECENTFILES_ROOT=/recentfiles
+SENTINEL_RECENTFILES_DIR=/recentfiles
 ```
 
 In v0.8.2 the code appended `PRODUCTS/Radar_processed/recentfiles` itself, so

@@ -47,10 +47,11 @@ class Settings:
     profile: str                           # "aqpi" (default) or "xqpi" — see backend/profiles
     backend_root: Path | None              # K2 web-files root, read-only bind mount
     sscb_root: Path | None                 # C-band tree on trinity, read-only
-    # The composite's INPUT staging share. Its own root, with NO default and
-    # no fallback, because it is not under backend_root and assuming it was
-    # produced a silent decoy — see COMPOSITE_INPUT_HOST_SUBPATH.
-    recentfiles_root: Path | None
+    # The composite's INPUT staging DIRECTORY — the `recentfiles` directory
+    # itself, with only a per-radar name appended. Its own setting, with NO
+    # default and no fallback, because it is not under backend_root and
+    # assuming it was produced a silent decoy. See COMPOSITE_INPUT_HOST_SUBPATH.
+    recentfiles_dir: Path | None
 
 
 def _opt_path(var: str) -> Path | None:
@@ -58,6 +59,39 @@ def _opt_path(var: str) -> Path | None:
     without worrying about the empty-string case."""
     v = os.environ.get(var, "").strip()
     return Path(v) if v else None
+
+
+# === Renamed in v0.8.3, and NOT read under the old name on purpose ===
+#
+# It was SENTINEL_RECENTFILES_ROOT, and in v0.8.2 the code appended
+# PRODUCTS/Radar_processed/recentfiles to it — so the variable had to point two
+# levels ABOVE recentfiles. v0.8.3 drops that join, which inverts what the same
+# value means.
+#
+# Reading the old name would therefore silently REINTERPRET a correct v0.8.2
+# config as a wrong one: `/trinity/projects/aqpiqpedev` resolves to
+# `/recentfiles/KBBX`, and the deployment gets nine plausible "staging
+# directory does not exist" rows whose cause is the image tag. A value that is
+# right or wrong depending on which version is running is a worse trap than the
+# original name, which was at least wrong consistently.
+#
+# So the old name is not read. A stale config fails as UNSET — the nine checks
+# do not register, which is the designed safe outcome — and this says so at
+# startup rather than leaving someone to wonder where the rows went. Not fatal:
+# the whole monitoring stack refusing to boot over one optional check group
+# would be a worse outcome than the group being absent.
+def _warn_renamed_recentfiles() -> None:
+    import logging
+    if os.environ.get("SENTINEL_RECENTFILES_ROOT", "").strip() and not \
+            os.environ.get("SENTINEL_RECENTFILES_DIR", "").strip():
+        logging.getLogger(__name__).error(
+            "SENTINEL_RECENTFILES_ROOT is set but is no longer read: it was "
+            "renamed to SENTINEL_RECENTFILES_DIR in v0.8.3, and its MEANING "
+            "changed with it. It must now name the `recentfiles` directory "
+            "ITSELF (container path, e.g. /recentfiles), not the project root "
+            "above it, and the host mount should point at "
+            "<project>/%s. Until it is set, the layer3.input.* checks do not "
+            "register.", "PRODUCTS/Radar_processed/recentfiles")
 
 
 def _load() -> Settings:
@@ -78,7 +112,7 @@ def _load() -> Settings:
         profile=os.environ.get("SENTINEL_PROFILE", "aqpi").strip().lower() or "aqpi",
         backend_root=_opt_path("SENTINEL_BACKEND_ROOT"),
         sscb_root=_opt_path("SENTINEL_SSCB_ROOT"),
-        recentfiles_root=_opt_path("SENTINEL_RECENTFILES_ROOT"),
+            recentfiles_dir=_opt_path("SENTINEL_RECENTFILES_DIR"),
         data_dir=data_dir,
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
         api_port=int(os.environ.get("SENTINEL_API_PORT", "8000")),
@@ -110,6 +144,7 @@ def _load() -> Settings:
 
 
 SETTINGS = _load()
+_warn_renamed_recentfiles()
 
 
 # --------------------------------------------------------------------------

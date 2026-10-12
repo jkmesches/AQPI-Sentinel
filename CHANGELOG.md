@@ -30,7 +30,21 @@ unknown`.
 
 ### Fixed
 
-- **`SENTINEL_RECENTFILES_ROOT` now names the `recentfiles` directory itself.**
+- **`SENTINEL_RECENTFILES_ROOT` is renamed to `SENTINEL_RECENTFILES_DIR`, and
+  the old name is no longer read.** The rename is the point, not cosmetic: the
+  *meaning* of the value inverted, so the same string is correct on v0.8.2 and
+  wrong here. Reading the old name would silently reinterpret a working config
+  into nine plausible "staging directory does not exist" rows whose real cause
+  is the image tag — a value that is right or wrong depending on which version
+  is running is a worse trap than the original name, which at least was wrong
+  consistently.
+
+  A stale config now fails as **unset**: the nine checks do not register, which
+  is the designed safe outcome, and the backend logs the rename and the new
+  meaning at startup. Not fatal — the whole stack refusing to boot over one
+  optional check group would be worse than the group being absent.
+
+- **`SENTINEL_RECENTFILES_DIR` now names the `recentfiles` directory itself.**
   In v0.8.2 the code appended `PRODUCTS/Radar_processed/recentfiles`, so the
   setting had to point two levels *above* `recentfiles` — a variable called
   `RECENTFILES_ROOT` that must not name `recentfiles`. It was duly set from the
@@ -40,7 +54,7 @@ unknown`.
 
   **Config break, affecting the one deployment mid-setup.** Point
   `SENTINEL_RECENTFILES_HOST_PATH` at the `recentfiles` directory and set
-  `SENTINEL_RECENTFILES_ROOT=/recentfiles`. This also lets the bind mount be
+  `SENTINEL_RECENTFILES_DIR=/recentfiles`. This also lets the bind mount be
   the `recentfiles` subtree alone: with the join in place, the only workable
   mount was the whole project read-only, wider than the check needs.
 
@@ -49,7 +63,7 @@ unknown`.
 
 - **A root set one level too shallow now says so by name.** The check probes
   the one misconfiguration the old name invited and reports
-  "`SENTINEL_RECENTFILES_ROOT` points one level too shallow: X does not exist
+  "`SENTINEL_RECENTFILES_DIR` points one level too shallow: X does not exist
   but Y does", naming the path that would work. Two stats, only on a path that
   already failed. Deliberately a runtime probe rather than a startup assertion:
   a mount can come up after the process does, and refusing to boot on a slow
@@ -108,7 +122,7 @@ two unrelated artifacts both called QPE.
 
 ### ⚠ Upgrade note — this release needs an operator action
 
-`SENTINEL_RECENTFILES_ROOT` and a `/recentfiles` bind mount are now required
+`SENTINEL_RECENTFILES_DIR` and a `/recentfiles` bind mount are now required
 for the nine `layer3.input.*` checks to exist at all. **Set both**, or those
 checks will silently not register.
 
@@ -133,7 +147,7 @@ has no default and no fallback. See the entry below and
   It now raises, naming the radar and the table to add it to, and the
   registration loop resolves each radar once so the failure is at startup
   rather than on the first tick. Same no-default-no-fallback decision as
-  `SENTINEL_RECENTFILES_ROOT`: a guessed path is worse than a refusal, and a
+  `SENTINEL_RECENTFILES_DIR`: a guessed path is worse than a refusal, and a
   guessed path that resolves to something plausible is worse than both.
 
 - **The staging check was reading a tree abandoned in March 2026, and reported
@@ -151,7 +165,7 @@ has no default and no fallback. See the entry below and
   failed only because the dead tree never had an SSCB. The single error was the
   only true result in the check.
 
-  `SENTINEL_RECENTFILES_ROOT` is now its own setting with **no default and no
+  `SENTINEL_RECENTFILES_DIR` is now its own setting with **no default and no
   fallback**, and its own `/recentfiles` bind mount. Unset, the nine
   `layer3.input.*` checks do not register — a stated absence, because a guessed
   path is worse than an absent check. Same reasoning as `SENTINEL_SSCB_ROOT`.
