@@ -126,6 +126,11 @@ print("@@" + json.dumps({
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
     "lb2_freshness": config.LB2_FRESHNESS,
     "composite_expected": dict(config.COMPOSITE_EXPECTED_RADARS),
+    "composite_input":    dict(config.COMPOSITE_INPUT_DIR),
+    "contrib_bands": {r: __import__(
+        "backend.checks.layer3_backend_processing",
+        fromlist=["x"])._contrib_bands(r)
+        for r in config.COMPOSITE_EXPECTED_RADARS},
     "drops_tree": config.DROPS_TREE,
     "fleet_active": __import__(
         "backend.checks.layer3_backend_processing", fromlist=["x"]) is not None
@@ -464,18 +469,43 @@ def main() -> int:
 
     # ---- LB3 and fleet correlation --------------------------------------
     print("\nLB3 watches the gap between arrival and publication:")
-    check("aqpi expects all six radars in the composite",
-          sorted(aqpi["composite_expected"]) == sorted(aqpi["radars"]),
+    check("aqpi expects every radar it monitors for arrival",
+          set(aqpi["radars"]) <= set(aqpi["composite_expected"]),
           str(sorted(aqpi["composite_expected"])))
     check("...and CBAND's receipt directory is SSCB, not derivable from its id",
           aqpi["composite_expected"].get("CBAND") == "SSCB",
           str(aqpi["composite_expected"].get("CBAND")))
-    # The composite driver's own arrays intend nine inputs; the three NEXRAD
-    # trees do not exist at all and that predates everything we have logs for.
-    # Deriving `expected` from those arrays would fire forever on day one.
-    check("...and no NEXRAD radar is in the expected set",
-          not any(r.startswith("K") for r in aqpi["composite_expected"]),
-          str(sorted(aqpi["composite_expected"])))
+    # NEXRAD was excluded until 2026-10-12 on the strength of "the three
+    # directories hold zero files". That was true, and it was an 18-day ldm
+    # outage after a K2 reboot, not the design — the composite driver's own
+    # arrays have always intended nine inputs, and KBBX/KDAX/KMUX are each in
+    # the published composite at 720 of 720 timesteps across 2026-10-11.
+    #
+    # The assertion that replaced "no NEXRAD is expected" is deliberately not
+    # "NEXRAD is expected": what went wrong was an expected-set fitted to a
+    # window, so what this pins is the INVARIANT that made it recoverable —
+    # every expected radar is one this profile watches somewhere, which is the
+    # same condition config.py raises on.
+    check("...and every expected radar is monitored somewhere",
+          set(aqpi["composite_expected"])
+          <= set(aqpi["radars"]) | set(aqpi["composite_input"]),
+          str(sorted(set(aqpi["composite_expected"])
+                     - set(aqpi["radars"]) - set(aqpi["composite_input"]))))
+    check("...and the NEXRAD sites are watched by staging, not by arrival",
+          all(r not in aqpi["radars"] and r in aqpi["composite_input"]
+              for r in ("KBBX", "KDAX", "KMUX")),
+          str(sorted(aqpi["composite_input"])))
+    # A contribution band fitted to X-band must not reach them. See
+    # _contrib_bands: NEXRAD p50 ran 597-717 s against X-band's 140-236 s, so
+    # the uniform band would fire on most of their healthy runs. Read out of
+    # the subprocess payload rather than imported here — this file deliberately
+    # never imports backend in the parent, so that each profile is probed in a
+    # fresh interpreter with its own env.
+    bands = aqpi["contrib_bands"]
+    check("...and carry no contribution band, rather than inheriting one",
+          all(bands.get(r) is None for r in ("KBBX", "KDAX", "KMUX"))
+          and bands.get("XEBY") is not None,
+          f'KBBX={bands.get("KBBX")} XEBY={bands.get("XEBY")}')
     check("xqpi expects only FLOW",
           sorted(xqpi["composite_expected"]) == ["FLOW"],
           str(sorted(xqpi["composite_expected"])))
