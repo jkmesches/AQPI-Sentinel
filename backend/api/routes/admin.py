@@ -326,7 +326,7 @@ async def test_alert(
         "check_id":       route.match.get("check_id") or "test.synthetic",
         "target":         route.match.get("target")   or "TEST",
         "stage":          route.match.get("stage")    or "L0",
-        "severity":       route.severity_floor or "warn",
+        "severity":       route.severity_at_least or "warn",
         "status_at_open": route.match.get("status_at_open") or "warn",
         "opened_at":      datetime.now(timezone.utc),
         "suppressed_by":  None,

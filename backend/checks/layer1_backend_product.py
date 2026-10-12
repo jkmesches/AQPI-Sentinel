@@ -58,8 +58,26 @@ FS_TIMEOUT_S = 5.0
 #
 # Either is defensible and the choice is the deployment's, but it is a choice --
 # a value between one and two publish intervals will fire on every ordinary late
-# publish, and the next person reads it firing and widens it back. B_freshness is
-# also binary (pass/fail, no warn arm), so there is no "late" state to land in.
+# publish, and the next person reads it firing and widens it back.
+#
+# B_freshness is binary (pass/fail) and a warn arm was CONSIDERED AND DECLINED
+# on 2026-10-12. Do not add one without re-opening the two reasons:
+#
+#   1. The operator intent it would serve is already served. "A missed publish
+#      on a flood product should be visible" is satisfied by a fail at ~1.5x
+#      the publish interval. A "late" state between late and missed adds a
+#      verdict nobody has said they would act on differently.
+#   2. Nothing can make it quiet. A `warn` opens an alarm (engine.evaluate
+#      returns early only for inconclusive and pass/skip), and NOTHING on the
+#      notification path filters on severity -- the step loop fires every due
+#      step and _dispatch has no severity test. So a warn arm here would open
+#      an alarm and re-notify on the route's repeat_interval (LB1: hourly)
+#      for every ordinary late publish. That is the v0.8.1 band's failure
+#      exactly, and renaming severity_floor to severity_at_least did not
+#      change it -- see alarms/router.py.
+#
+# If a "late" state is wanted later, the prerequisite is a way to record a
+# verdict without notifying, not a threshold.
 DEFAULT_BACKEND_MAX_AGE_S = 1_800
 
 

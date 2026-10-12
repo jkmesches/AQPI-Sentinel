@@ -13,9 +13,12 @@ First-match wins. Severity model (v0.1.2+):
                                                      means upstream is unreachable)
   pass / skip   no alarm opens                       —
 
-``severity_floor`` — READ THIS BEFORE TUNING A ROUTE
-----------------------------------------------------
-A route's ``severity_floor`` RAISES severity and never suppresses anything.
+``severity_at_least`` — READ THIS BEFORE TUNING A ROUTE
+-------------------------------------------------------
+A route's ``severity_at_least`` RAISES severity and never suppresses anything.
+It was called ``severity_floor`` until 2026-10-12; that spelling still loads
+and logs a deprecation warning, because this model ignores unknown keys and a
+silent rename would have dropped L0's setting with nothing to show for it.
 ``compute_severity`` applies it as ``_max_sev(route.severity_floor, sev)``, so
 a floor can only move an alarm up the ladder. Nothing on the notification path
 filters on severity at all: ``engine.evaluate`` opens an alarm for any status
@@ -34,10 +37,14 @@ sentence that contradicted it:
 Those are the semantics of a DIFFERENT ``severity_floor``: the one in
 ``push.py``, on a per-device push subscription's routing, which really does
 filter (``if sev_rank < floor_rank: return False``). One name, two opposite
-behaviours, in one system. Verified 2026-10-12.
+behaviours in one system — verified 2026-10-12, and the reason the route-level
+key was renamed rather than made to match its documentation. The push-side key
+keeps the name: it is a per-device subscription filter, where "floor" reads
+correctly, and its values live in stored routing blobs that a rename would
+have required migrating.
 
-The consequence worth knowing before "fixing" this. The L0 route carries
-``severity_floor: critical`` and exists, by its own comment, to page fast —
+The consequence that decided it. The L0 route carries
+``severity_at_least: critical`` and exists, by its own comment, to page fast —
 ``hold_down: 2m`` because "five minutes is too much latency to accept". Under
 the actual behaviour that floor makes an L0 alarm critical at open, which is
 what was wanted. Under the documented reading it would mean "notify only once
@@ -46,16 +53,20 @@ and only reaches ``critical`` after ``PROMOTE_AFTER_S``. So implementing the
 documented behaviour would silently add a 30-minute delay to the one route
 whose whole purpose is speed, and L0 would need changing in the same commit.
 
-Whether the route-level key should start filtering as documented, or be
-renamed to match what it does, is an operator decision and not a cleanup: it
-changes notification semantics across all eight stages. Until it is made, this
-describes the behaviour rather than the intent, and no warn band can be made
-quiet by configuration — see DEFAULT_BACKEND_MAX_AGE_S in
+So the choice was between making the key filter as documented — which would
+have added that delay and required changing L0 in the same commit — and
+renaming it to match what it does. Renaming was taken: it changes no
+behaviour, and nothing depended on the filtering reading because the filtering
+never existed.
+
+One thing the rename does NOT do is unblock a warn band. There is still no
+configuration that makes a `warn` quiet, so a warn arm anywhere would open an
+alarm and re-notify on its route's interval. See DEFAULT_BACKEND_MAX_AGE_S in
 checks/layer1_backend_product.py.
 
 Prior model (v0.1.1-): warn/fail/error all mapped to severity=warn, making
-severity_floor unable to distinguish "degraded" from "broken." Reshaped in
-v0.1.2 so the routing tier maps cleanly onto operational priority.
+the floor unable to distinguish "degraded" from "broken." Reshaped in v0.1.2
+so the routing tier maps cleanly onto operational priority.
 
 Severity tracks the CURRENT status, not the status that opened the alarm.
 Until 2026-09-15 it read `status_at_open` only, which made severity a
@@ -195,8 +206,8 @@ class Router:
                 at_open in ("fail", "error") or now_status in ("fail", "error")):
             sev = _max_sev("critical", sev)
         # apply floor
-        if route and route.severity_floor:
-            sev = _max_sev(route.severity_floor, sev)
+        if route and route.severity_at_least:
+            sev = _max_sev(route.severity_at_least, sev)
         # Ratchet. Severity may rise within an alarm's life and must not fall:
         # a check flapping fail→warn while the alarm stays open would
         # otherwise quietly walk the severity back down, and a de-escalation
