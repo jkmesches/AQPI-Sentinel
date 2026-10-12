@@ -693,6 +693,87 @@ def main() -> int:
           evidence_url("", "layer1.product.qpe_15min", "qpe_15min",
                        "2026-09-10T13:00:00+00:00", "2026-09-11T13:00:00+00:00") is None)
 
+    # -- the admin config, validated on the way IN -------------------------
+    #
+    # Every value here reaches the report through a settings blob, and the
+    # consequences of a bad one are all quiet: a misspelled source resolves to
+    # "frontend" for every subject at once, and a stored entry that merely
+    # restates the default freezes that subject against later changes to the
+    # default. So the endpoint normalises rather than trusting the client.
+    print("\nadmin config validation")
+    from backend.api.routes.digest import (                     # noqa: E402
+        _clean_default_source, _clean_subjects,
+    )
+    from fastapi import HTTPException                           # noqa: E402
+
+    def rejects(fn, arg) -> bool:
+        try:
+            fn(arg)
+        except HTTPException:
+            return True
+        return False
+
+    check("no default_source means the profile's default",
+          _clean_default_source(None) == DEFAULTS["default_source"],
+          str(_clean_default_source(None)))
+    check("a stated default is kept",
+          _clean_default_source({"radar": "combined"})["radar"] == "combined")
+    check("an unstated kind keeps its default",
+          _clean_default_source({"radar": "combined"})["product"]
+          == DEFAULTS["default_source"]["product"])
+    check("a misspelled source is refused, not silently defaulted",
+          rejects(_clean_default_source, {"radar": "frontnd"}))
+    check("so is a non-object", rejects(_clean_default_source, "backend"))
+
+    check("subjects: an override is kept",
+          _clean_subjects({"radar:XEBY": {"source": "combined"}})
+          == {"radar:XEBY": {"source": "combined"}})
+    check("subjects: show=false is kept — it is the only hiding mechanism",
+          _clean_subjects({"radar:XEBY": {"show": False}})
+          == {"radar:XEBY": {"show": False}})
+    check("subjects: show=true is dropped, being the default",
+          _clean_subjects({"radar:XEBY": {"show": True}}) == {},
+          str(_clean_subjects({"radar:XEBY": {"show": True}})))
+    check("subjects: an empty source means 'follow the default'",
+          _clean_subjects({"radar:XEBY": {"source": ""}}) == {})
+    check("subjects: an entry that restates the default is dropped whole",
+          _clean_subjects({"radar:XEBY": {"source": None, "show": True}}) == {})
+    check("subjects: both fields survive together",
+          _clean_subjects({"product:qpe_1hr": {"source": "backend",
+                                               "show": False}})
+          == {"product:qpe_1hr": {"source": "backend", "show": False}})
+    check("subjects: a key with no kind is refused",
+          rejects(_clean_subjects, {"XEBY": {"source": "backend"}}))
+    check("subjects: an unknown kind is refused",
+          rejects(_clean_subjects, {"gauge:XEBY": {"source": "backend"}}))
+    check("subjects: a kind with no id is refused",
+          rejects(_clean_subjects, {"radar:": {"source": "backend"}}))
+    check("subjects: a bad source is refused",
+          rejects(_clean_subjects, {"radar:XEBY": {"source": "combine"}}))
+    check("subjects: a non-object entry is refused",
+          rejects(_clean_subjects, {"radar:XEBY": "combined"}))
+
+    # The picker's universe comes from the registry, so it can offer a radar
+    # that has not reported yet — and must not offer a tier that is not
+    # registered on this deployment.
+    print("\nthe picker's universe")
+    from backend.digest import registry_subjects                # noqa: E402
+    import backend.checks as _reg                               # noqa: E402,F401
+    rs = registry_subjects("radar")
+    check("every radar entry says which tiers it has",
+          rs and all({"key", "name", "frontend", "backend"} <= set(e) for e in rs),
+          str(rs[:1]))
+    check("entries are sorted by id, so the panel does not reshuffle",
+          [e["key"] for e in rs] == sorted(e["key"] for e in rs))
+    check("a fleet verdict is not offered as a subject",
+          all(e["key"] != "fleet" for e in rs))
+    check("at least one tier is true for every entry",
+          all(e["frontend"] or e["backend"] for e in rs))
+    ps = registry_subjects("product")
+    check("products are enumerated the same way", bool(ps))
+    check("and carry their human name",
+          any(e["name"] for e in ps), str(ps[:1]))
+
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall digest assertions passed")
     return 1 if failures else 0

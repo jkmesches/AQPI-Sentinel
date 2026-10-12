@@ -181,6 +181,41 @@ def subject_shown(cfg: dict, kind: str, key: str) -> bool:
     return bool(ent.get("show", True))
 
 
+def registry_subjects(kind: str) -> list[dict]:
+    """Every subject of this kind this deployment registers, and on which tiers.
+
+    The CONFIGURATION surface, which is a different question from what the
+    report covers. compute() reads its universe from the window — a radar
+    decommissioned last month should not appear in today's report with an
+    empty row — but the admin picker has to list a radar that has not reported
+    yet, or it cannot be configured before it starts.
+
+    Read from the registry rather than from a list, so a profile that declines
+    the radarca checks (registry.DECLINED, see config.HAS_RADARCA) shows those
+    subjects as backend-only instead of offering a source with nothing behind
+    it. Each entry says which tiers exist for that subject; a `source` the UI
+    offers for a tier that is not registered would resolve to a family with no
+    rows, which reads as "no data" rather than as a misconfiguration.
+    """
+    from .registry import CHECKS
+    fams = _FAMILIES[kind]
+    out: dict[str, dict] = {}
+    for cid in CHECKS:
+        if cid in _NOT_SUBJECTS:
+            continue
+        for source in ("frontend", "backend"):
+            pre = fams[source][0]
+            if not cid.startswith(pre):
+                continue
+            key = cid[len(pre):]
+            ent = out.setdefault(key, {
+                "key": key, "kind": kind, "name": subject_name(kind, key),
+                "frontend": False, "backend": False,
+            })
+            ent[source] = True
+    return sorted(out.values(), key=lambda d: d["key"])
+
+
 def _prefix_re(prefixes: tuple[str, ...]) -> str:
     """Anchored alternation that strips whichever family prefix matched.
 
