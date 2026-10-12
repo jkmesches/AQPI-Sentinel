@@ -30,6 +30,31 @@ unknown`.
 
 ### Fixed
 
+- **`SENTINEL_RECENTFILES_ROOT` now names the `recentfiles` directory itself.**
+  In v0.8.2 the code appended `PRODUCTS/Radar_processed/recentfiles`, so the
+  setting had to point two levels *above* `recentfiles` — a variable called
+  `RECENTFILES_ROOT` that must not name `recentfiles`. It was duly set from the
+  name rather than from the code that consumed it, and every one of the nine
+  rows read
+  `/recentfiles/PRODUCTS/Radar_processed/recentfiles/KBBX`.
+
+  **Config break, affecting the one deployment mid-setup.** Point
+  `SENTINEL_RECENTFILES_HOST_PATH` at the `recentfiles` directory and set
+  `SENTINEL_RECENTFILES_ROOT=/recentfiles`. This also lets the bind mount be
+  the `recentfiles` subtree alone: with the join in place, the only workable
+  mount was the whole project read-only, wider than the check needs.
+
+  `ops/.env.prod.example` carried the same confusion — it described a container
+  path and gave a host path as the example — and is corrected.
+
+- **A root set one level too shallow now says so by name.** The check probes
+  the one misconfiguration the old name invited and reports
+  "`SENTINEL_RECENTFILES_ROOT` points one level too shallow: X does not exist
+  but Y does", naming the path that would work. Two stats, only on a path that
+  already failed. Deliberately a runtime probe rather than a startup assertion:
+  a mount can come up after the process does, and refusing to boot on a slow
+  NFS mount would trade this for a worse failure.
+
 - **The DROPS producer check could not detect recovery.** Since v0.7.0 it did
   one stat on `DROPS/<radar>`. Listing settled it on 2026-10-12: every radar
   folder holds **zero direct files and one year directory**, so output lands in

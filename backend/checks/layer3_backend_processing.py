@@ -78,7 +78,7 @@ from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
                       COMPOSITE_CONTRIB_OVERRIDE_S, COMPOSITE_CONTRIB_WARN_S,
                       COMPOSITE_EXPECTED_RADARS, COMPOSITE_INPUT_DIR,
                       COMPOSITE_INPUT_RETENTION_S, COMPOSITE_INPUT_STALE_WARN_S,
-                      COMPOSITE_INPUT_TREE, COMPOSITE_INPUT_TS_RE,
+                      COMPOSITE_INPUT_HOST_SUBPATH, COMPOSITE_INPUT_TS_RE,
                       COMPOSITE_RECEIPT,
                       COMPOSITE_RECEIPT_SETTLE_S, COMPOSITE_RUN_LOG_DIR,
                       DROPS_SILENT_INFO_S, DROPS_TREE, MAX_RUN_LOG_ENTRIES,
@@ -1013,7 +1013,7 @@ class Layer3InputStagingCheck(Check):
     tree holds per-elevation PPI SWEEPS and this one holds assembled VOLUMES.
     So this check's age and LB2's age are not two views of one quantity, and a
     discrepancy between them is structural rather than a fault — do not
-    sanity-check one against the other. See config.COMPOSITE_INPUT_TREE. The same shape hid the NEXRAD feeds for
+    sanity-check one against the other. See config.COMPOSITE_INPUT_HOST_SUBPATH. The same shape hid the NEXRAD feeds for
     eighteen days: their staging directories held zero files from 2026-09-17
     to ~2026-10-06 and nothing in Sentinel could say so, because nothing was
     looking at the one directory where it was visible.
@@ -1063,9 +1063,11 @@ class Layer3InputStagingCheck(Check):
         self.alarm_only_depends_on = [lb2] if lb2 in CHECKS else []
 
     def _path(self) -> str:
-        # recentfiles_root, NOT backend_root. See config.COMPOSITE_INPUT_TREE
-        # for the tree this used to resolve to and why it passed.
-        return os.path.join(SETTINGS.recentfiles_root, COMPOSITE_INPUT_TREE,
+        # recentfiles_root IS the recentfiles directory — only the per-radar
+        # name is appended. See config.COMPOSITE_INPUT_HOST_SUBPATH for why
+        # this no longer joins a subpath, and config.COMPOSITE_INPUT_DIR for
+        # why the name is a mapping (CBAND stages as SSCB).
+        return os.path.join(SETTINGS.recentfiles_root,
                             COMPOSITE_INPUT_DIR[self.radar_id])
 
     async def run(self, ctx) -> CheckResult:
@@ -1100,6 +1102,29 @@ class Layer3InputStagingCheck(Check):
             # dangling symlink. The parent listing distinguishes all three in
             # one line, and the cost is one extra read on a path that is
             # already failing.
+            # The specific misconfiguration this setting invites: pointing it
+            # at the PROJECT root rather than at recentfiles. Checked before
+            # anything else because it has a precise answer, and because the
+            # generic "parent unreadable" message is what an operator got for
+            # it on the first deploy. Two stats, only on a path that already
+            # failed. Deliberately a runtime probe rather than a startup
+            # assertion: a mount can come up after the process does, and
+            # refusing to boot on a slow NFS mount would trade this for a
+            # worse failure.
+            deep = os.path.join(SETTINGS.recentfiles_root or "",
+                                COMPOSITE_INPUT_HOST_SUBPATH,
+                                COMPOSITE_INPUT_DIR[self.radar_id])
+            if await asyncio.to_thread(os.path.isdir, deep):
+                return CheckResult(
+                    check_id=self.id, target=self.target, stage=self.stage,
+                    status="error", started_at=t0, finished_at=utcnow(),
+                    summary=(f"SENTINEL_RECENTFILES_ROOT points one level too "
+                             f"shallow: {path} does not exist but {deep} does. "
+                             f"It must name the recentfiles directory itself, "
+                             f"not the project root above it."),
+                    payload={**payload, "absent": True, "misconfigured_root": deep},
+                    metrics={"fs_timeout": 0.0},
+                )
             sibs, sib_age = await asyncio.to_thread(_list_parent, path)
             extra = {**payload, "absent": True, "siblings": sibs,
                      "sibling_newest_age_s": sib_age}
