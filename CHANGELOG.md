@@ -30,6 +30,20 @@ unknown`.
 
 ### Fixed
 
+- **LB2 said "newest volume" while reading one PPI sweep per file.** On the
+  filename basis the dated tree holds a sweep per file, not a volume: measured
+  across 4,004 files on XSWR and XSCR, every file carries its own declared
+  instant (2,154 instants for 2,154 files; 1,850 for 1,850; zero shared, stable
+  hour by hour). What groups them into a volume is the sequence field — four
+  elevations to a sequence — which this check does not read.
+
+  Now "newest observation", not "newest sweep". CBAND comes off a different
+  tree from a different producer whose names carry no elevation or sequence,
+  and FLOW on xqpi is equally unmeasured, so naming them all "sweep" would
+  trade an inaccuracy about five radars for one about two. "Observation" is
+  what `_newest_declared` actually returns and asserts nothing about the
+  object; what the object is, per radar, is still open.
+
 - **Correction to the v0.8.0 notes:** the staging check's entry said LB2 and
   `layer3.input` read "different paths". They read different **objects** — the
   DROPS dated tree holds one PPI sweep per file at one elevation, `recentfiles`

@@ -167,7 +167,7 @@ def main() -> int:
     print("\nrollover — today's directory does not exist yet")
     t = FakeTree({YESTERDAY: 74.0})
     r = run_with(t)
-    check("passes, because the newest volume is 74 s old", r.status == "pass",
+    check("passes, because the newest observation is 74 s old", r.status == "pass",
           r.summary)
     check("falls back only after trying today first",
           t.reads == [TODAY, YESTERDAY], str(t.reads))

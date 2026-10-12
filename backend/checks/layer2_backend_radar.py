@@ -480,7 +480,7 @@ class Layer2BackendRadarCheck(Check):
             payload["days_tried"] = len(set(candidates))
             _lb_publish_verdict(self.radar_id, "SILENT", t0)
             return _final(self, t0, sub, payload, metrics,
-                          "BACKEND SILENT — no volume declared today or "
+                          "BACKEND SILENT — nothing declared today or "
                           "yesterday (over 24 h)")
         except re.error as e:
             # NOT "UNREADABLE". Shared config fails every radar in the same
@@ -531,7 +531,31 @@ class Layer2BackendRadarCheck(Check):
             self.radar_id,
             "SILENT" if sub["A_arriving"] == "fail" else "ARRIVING", t0)
 
-        what = "newest volume" if LB2_FRESHNESS == "filename" else "last arrival"
+        # "observation", not "volume" and not "sweep".
+        #
+        # It said "newest volume" until 2026-10-12, and on the X-bands that
+        # named the wrong object: the dated tree holds one PPI SWEEP per file.
+        # Measured across 4,004 files on XSWR and XSCR, every file carries its
+        # own declared instant — 2,154 instants for 2,154 files and 1,850 for
+        # 1,850, zero shared, stable hour by hour. What groups them into a
+        # volume is the SEQ field, four elevations to a sequence (XSWR 540
+        # sequences, XSCR 463), and nothing in this check reads it. [M]
+        #
+        # The obvious repair is "newest sweep", and it is wrong for the same
+        # reason the shared filename pattern was: CBAND comes off a different
+        # tree from a different producer, its names carry no elevation and no
+        # sequence, and nobody has measured what one of its files contains.
+        # FLOW on xqpi is likewise unmeasured. Naming them all "sweep" would
+        # trade an inaccuracy about five radars for one about two, which is
+        # not a fix.
+        #
+        # So: the quantity this check actually has is the newest observation
+        # time any filename in the directory DECLARES — see _newest_declared,
+        # which is what the word has to match. True of a sweep, true of a
+        # volume, true of whatever CBAND writes, and it asserts nothing about
+        # the object. What the object IS, per radar, remains open.
+        what = ("newest observation" if LB2_FRESHNESS == "filename"
+                else "last arrival")
         summary = (f"{what} {age_s / 60:.1f} min ago"
                    f"  (silent limit {silent_s / 60:.0f} min)")
         if sub["A_arriving"] == "fail":
