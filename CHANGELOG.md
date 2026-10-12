@@ -28,6 +28,28 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-10-12
+
+v0.8.2's staging check reached production and worked: nine rows live, and
+XSCW's break reported by a check for the first time rather than by someone
+listing a directory. Getting there took two failed deploys, and this release
+is mostly about the configuration that caused them.
+
+### ⚠ Breaking — change `.env.prod` and deploy in the SAME step
+
+`SENTINEL_RECENTFILES_ROOT` is renamed to **`SENTINEL_RECENTFILES_DIR`**, and
+it now names the `recentfiles` directory **itself**:
+
+```bash
+SENTINEL_RECENTFILES_HOST_PATH=/trinity/projects/aqpiqpedev/PRODUCTS/Radar_processed/recentfiles
+SENTINEL_RECENTFILES_DIR=/recentfiles
+```
+
+A v0.8.2 config is **wrong** here and is not read, so it fails as unset: the
+nine `layer3.input.*` checks do not register and the backend logs the rename at
+startup. That is deliberate — see the first entry below. The host path also
+narrows from the whole project to the `recentfiles` subtree.
+
 ### Fixed
 
 - **`SENTINEL_RECENTFILES_ROOT` is renamed to `SENTINEL_RECENTFILES_DIR`, and
