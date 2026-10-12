@@ -28,6 +28,64 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-10-12
+
+One fix: the last L1 sub-check a retroactive reprocess could not touch now
+can be. No configuration change, no upgrade note.
+
+### Fixed
+
+- **`D_cadence` is reprocessable.** Its only input — the median spacing
+  between a manifest's step timestamps — was written to `metrics`, and
+  `check_runs` stores the payload only (metrics go to `metric_samples`). The
+  reprocess engine documented the gap in two places and handled it correctly,
+  leaving `D_cadence` at its recorded value rather than recomputing from an
+  assumed spacing.
+
+  It became operational when `cadence_s` was set from `/admin/thresholds`:
+  `D_cadence` went to `warn` on `water_depth` and `water_level` because the
+  stored value no longer matched those manifests' real hourly step spacing,
+  and the one tool built to resolve exactly that could not clear it. Since
+  `D_cadence` was the only non-passing sub-check, the reprocess moved nothing.
+
+  `median_dt_s` now goes to the payload as well, assigned in one statement
+  with the metric so the two cannot drift, and `_reverdict_l1` recomputes the
+  verdict under the current threshold blob — mirroring the live branch
+  exactly, `cadence_s: None` → pass included. **A row written before this
+  change carries no `median_dt_s` and keeps its recorded verdict**; "we cannot
+  re-derive this" is left as recorded rather than guessed.
+
+  Duplicated rather than moved, on the codebase's own precedent: LB3 already
+  writes its contribution age to both `payload["age_s"]` and
+  `metrics["contrib_age_s"]`, and LB1 does the same with a comment giving this
+  reason. The tolerance default is imported from the check module rather than
+  restated, since a second copy is how a live path and a reprocess path come
+  to disagree about one row.
+
+  **Audited for the same shape elsewhere: one hole, not a class.** Every
+  metrics key in every check module was checked against what reaches the
+  payload. `headroom` is display; `age_s` and `step_count_delta` are
+  re-derived from payload keys; `backend_max_age_s`/`backend_silent_s` are
+  thresholds re-read from the store by design; `file_count` → `A_present` is
+  not a threshold call; `included` is a mirror of `A_included`, which
+  `_reverdict_lb3` preserves deliberately; and LB3's `contrib_age_s` is
+  already in the payload under a different spelling. `median_dt_s` was the
+  only verdict input that existed solely in metrics.
+
+### Note
+
+- The `cadence_s` edit that surfaced this never did what it was intended to
+  do. **No scheduler reads `cadence_s` from the thresholds store** — both the
+  L1 and LB1 checks set their interval at construction from `config.py` — so
+  that panel knob cannot change a poll rate. Its only live effect is the
+  `D_cadence` comparison. v0.8.4's `backend_cadence_s` is what actually
+  changed LB1's sampling, confirmed in production at 115–123 s against the
+  previous hourly. This makes `cadence_s` the third identifier this week
+  carrying two unrelated meanings, after `severity_floor` and `cadence_s` as a
+  shared L1/LB1 poll rate. Giving `D_cadence` its own `expected_step_dt_s`,
+  defaulting to `cadence_s`, is the obvious next step and is **not** in this
+  release.
+
 ## [0.8.4] — 2026-10-12
 
 A correctness release with one behaviour change and two decisions written
