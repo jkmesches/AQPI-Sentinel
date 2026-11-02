@@ -28,6 +28,14 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.8.6] — 2026-11-01
+
+One fix, in the surface most likely to be trusted at a glance: the map drew a
+radar green when nothing had reported on it. On XQPI that was every radar, so
+the FLOW marker was green regardless of what the radar was doing. No
+configuration change and no migration; the map simply stops claiming health it
+cannot observe.
+
 ### Fixed
 
 - **The map drew a radar green when nothing had reported it.** `MapView`
