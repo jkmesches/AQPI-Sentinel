@@ -9,6 +9,8 @@
 	import TimeControls from '$lib/components/TimeControls.svelte';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
+	import { radarStatusByTarget, radarStatusOf } from '$lib/radarStatus';
+	import { isAlerting } from '$lib/grouping';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS } from '$lib/mapPrefs';
 
@@ -525,11 +527,11 @@
 		};
 	});
 
-	const radarStatus = $derived.by(() => {
-		const out: Record<string, string> = {};
-		for (const r of sentinel.rollup?.stages?.L2 ?? []) out[r.target] = r.status;
-		return out;
-	});
+	// Worst reading per radar, across every stage that observes one — L2 (what
+	// radarca declares), LB2 (volumes landing on disk), LB3 (still in the
+	// composite). See $lib/radarStatus for why this cannot read L2 alone: on
+	// XQPI that stage is empty, because nothing serves FLOW over HTTP.
+	const radarStatus = $derived(radarStatusByTarget(sentinel.rollup?.stages));
 
 	const selectableRadars = $derived(
 		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
@@ -579,7 +581,7 @@
 		return {
 			type: 'FeatureCollection' as const,
 			features: radars.map((r) => {
-				const status = radarStatus[r.id] ?? (r.kind === 'nexrad' ? 'skip' : 'pass');
+				const status = radarStatusOf(radarStatus, r.id);
 				const active = isActive(r.id);
 				return {
 					type: 'Feature' as const,
@@ -613,7 +615,7 @@
 				const a = (i / N) * 2 * Math.PI;
 				coords.push([r.lon + dLon * Math.cos(a), r.lat + dLat * Math.sin(a)]);
 			}
-			const status = radarStatus[r.id] ?? (r.kind === 'nexrad' ? 'skip' : 'pass');
+			const status = radarStatusOf(radarStatus, r.id);
 			return {
 				type: 'Feature' as const,
 				geometry: { type: 'Polygon' as const, coordinates: [coords] },
@@ -1382,9 +1384,17 @@
 	const selectNone = () => setSelection([]);
 	const selectXband = () =>
 		setSelection(selectableRadars.filter((r) => r.kind === 'xband').map((r) => r.id));
+	// `isAlerting`, not `!== 'pass'`: the two differ exactly on `skip`, and a
+	// radar nothing has reported is unknown rather than down. Selecting those
+	// would select the whole fleet on any profile before its first run. The
+	// default here used to be `pass`, which failed the other way — on XQPI,
+	// where no L2 stage exists, every radar read pass and this selected
+	// nothing however broken the fleet was.
 	const selectDown = () =>
 		setSelection(
-			selectableRadars.filter((r) => (radarStatus[r.id] ?? 'pass') !== 'pass').map((r) => r.id)
+			selectableRadars
+				.filter((r) => isAlerting(radarStatusOf(radarStatus, r.id)))
+				.map((r) => r.id)
 		);
 
 	// ---- periodic scan refresh ---------------------------------------------
@@ -2380,7 +2390,7 @@
 		<!-- Per-radar rows — full-row click toggles, solo on hover -->
 		<ul class="border-t border-[var(--color-border)]">
 			{#each selectableRadars as r}
-				{@const st = radarStatus[r.id] ?? 'skip'}
+				{@const st = radarStatusOf(radarStatus, r.id)}
 				{@const checked = isActive(r.id)}
 				<li
 					class="group relative flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-1.5 text-[11px] cursor-pointer transition-colors {checked

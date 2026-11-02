@@ -14,8 +14,7 @@
 	import { url as apiUrl } from '$lib/origin';
 	import { resolveHomeView, type HomeView } from '$lib/site';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
-	import { isFleetCheck } from '$lib/format';
-	import { worstOf } from '$lib/grouping';
+	import { radarStatusByTarget, radarStatusOf } from '$lib/radarStatus';
 
 	// Stadia styles — same as desktop MapView. Theme-locked at mount.
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
@@ -178,27 +177,12 @@
 
 	// Worst reading per radar, across every stage that observes one.
 	//
-	// This read L2 alone, which has two consequences. On a profile with no
-	// radarca origin — XQPI, where FLOW is monitored entirely off the
-	// filesystem — every marker rendered in the `skip` colour on a working
-	// deployment. And on AQPI a radar could be silent on disk (LB2 fail) while
-	// radarca still claimed it was fine, and the map would draw it green.
-	//
-	// LB3 is included: a radar that has dropped out of the composite is not
-	// fully healthy, and the map is the surface where "which radars are
-	// contributing right now" is the actual question being asked.
-	const statusByRadar = $derived.by(() => {
-		const out: Record<string, string> = {};
-		const st = sentinel.rollup?.stages ?? {};
-		for (const stage of ['L2', 'LB2', 'LB3']) {
-			for (const r of st[stage] ?? []) {
-				if (isFleetCheck(r.check_id)) continue;          // not a radar
-				if (r.check_id === 'layer3.backend.drops') continue;
-				out[r.target] = worstOf([out[r.target], r.status].filter(Boolean) as string[]);
-			}
-		}
-		return out;
-	});
+	// This rule lived here, inline, and the desktop map kept an older copy that
+	// read L2 alone and defaulted to `pass` — so FLOW rendered permanently
+	// green on XQPI while this surface reported it correctly. Both now call the
+	// one implementation; see $lib/radarStatus for the reasoning this comment
+	// used to carry, including why LB3 belongs in the set.
+	const statusByRadar = $derived(radarStatusByTarget(sentinel.rollup?.stages));
 
 	function centerColorFor(s: string): string {
 		const t = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
@@ -231,7 +215,7 @@
 		return {
 			type: 'FeatureCollection' as const,
 			features: radars.map((r) => {
-				const s = statusByRadar[r.id] ?? 'skip';
+				const s = radarStatusOf(statusByRadar, r.id);
 				return {
 					type: 'Feature' as const,
 					geometry: { type: 'Point' as const, coordinates: [r.lon, r.lat] },
