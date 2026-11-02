@@ -28,6 +28,33 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The map drew a radar green when nothing had reported it.** `MapView`
+  derived each marker's status from the `L2` stage alone and defaulted an
+  unmatched radar to `pass`. On XQPI that is every radar: `layer2_radar` is in
+  `config.RADARCA_ONLY_MODULES` because nothing serves FLOW over HTTP, so the
+  stage registers no checks, and FLOW rendered green regardless of what the
+  radar was doing — through an outage of any length. FLOW's real reading was in
+  `LB2` the whole time, which is why the dashboard and the mobile map were
+  right while the desktop map was not.
+
+  Two further surfaces carried the same default. The picker's **down** button
+  filtered on `(radarStatus[id] ?? 'pass') !== 'pass'`, so on XQPI it selected
+  nothing however broken the fleet was; it now composes `isAlerting`, which
+  excludes `skip` as well as `pass` — a radar nothing reported is unknown, not
+  down. The range rings took the marker's default and so were mis-coloured with
+  it.
+
+  The rule now lives once, in `$lib/radarStatus`: worst reading across
+  `L2`/`LB2`/`LB3`, fleet-correlation and DROPS-producer rows excluded, and a
+  radar with no reading anywhere resolves to `skip`, never `pass`. The mobile
+  map had already grown the correct reducer inline and is switched onto the
+  shared one, so the two copies cannot drift again. Covered by
+  `validation_tests/js/run_radar_status.mjs`, whose load-bearing assertion is
+  the one about absence — every other assertion in it passes while the bug is
+  live.
+
 ## [0.8.5] — 2026-10-12
 
 One fix: the last L1 sub-check a retroactive reprocess could not touch now
