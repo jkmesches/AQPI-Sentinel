@@ -28,6 +28,62 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-16
+
+Two map layers were showing less than they had. One was blank in the state
+an operator sees first, and the other was drawing a hole where the data it
+needed was available all along.
+
+Both were found by comparing against the source rather than by reading the
+code, and the second corrects a claim [0.10.0] made confidently and wrongly.
+
+### Fixed
+
+- **The NEXRAD overlay is no longer blank in the live view.** It requested
+  Iowa State's time-enabled WMS and sent no `TIME` whenever the scrubber sat
+  at the live end, which is where it sits by default. That endpoint does not
+  fall back to the newest slice; it answers 200 with a near-empty image.
+  Measured at the same bbox and size, no `TIME` returned 5,057 bytes and
+  painted 0.05% of its pixels, while every 5-minute mark from the current one
+  back to 40 minutes returned 67-111 KB and painted 7.7% to 13.8%. The layer
+  appeared only if you scrubbed back a step.
+
+  This is the worst failure the layer can have, because it is the
+  independent check on AQPI's own products. An operator reading it would
+  have taken "nothing drawn" for "the other network sees nothing here". The
+  live frame now carries an explicit time snapped to the current 5-minute
+  mark, which also holds the URL steady long enough for the frame caches to
+  work. No lag is subtracted, because the current mark already serves.
+
+- **Stream-gauge popups show observed flow up to the current hour.** The
+  observed series was requested with a bare date, which returns the day
+  ending at that date's 00Z, so late in the UTC day the trace stopped up to
+  24 hours short of the forecast.
+
+  [0.10.0] described that hole as the upstream's own shape and drew it as a
+  labelled band. That was wrong. Both stream endpoints accept `YYYYMMDD_HH`
+  and return the 25 hours ending at the hour given, so observed now runs to
+  the current hour and overlaps the forecast as it does on the upstream's
+  own chart. The earlier conclusion came from testing one argument form and
+  generalizing from it, without first comparing against how the source
+  renders the same site.
+
+  The gap band is kept, since a hole remains possible, but it now reports
+  that observations for that site are behind rather than explaining a shape
+  the chart always had.
+
+### Changed
+
+- **"ground truth" is gone from the NEXRAD toggle.** The two networks do not
+  measure the same thing at the same height, S-band at long range on a
+  higher beam against X-band close to the ground, so disagreement at the
+  edges is expected rather than diagnostic. The layer tells an operator a
+  storm is real and does not adjudicate intensity.
+
+- **The tilt elevation picker names the display tier instead of addressing
+  it**, reading "Default (RadarCA)" rather than the 28-character hostname
+  carried in the header.
+
 ## [0.10.0] - 2026-11-16
 
 Three ways the map could show you something older than it looked, and a
