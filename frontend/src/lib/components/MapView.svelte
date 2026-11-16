@@ -14,6 +14,7 @@
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
+	import { parseStepTs } from '$lib/gaugeSeries';
 
 	interface RadarMeta {
 		id: string;
@@ -328,10 +329,14 @@
 	// newest-step that has fallen into the past counts as stale.
 	const STALE_AFTER_H = 3;
 
+	// parseStepTs reads the API's unmarked timestamps as UTC rather than as
+	// the viewer's local time. See $lib/gaugeSeries for why that matters.
+	// The scrubber labels are unaffected: `day`, `date` and `time` come
+	// formatted from the backend and are never re-parsed here.
 	const compositeAgeH = $derived.by(() => {
 		if (composite === 'none' || steps.length === 0) return null;
 		const ts = steps
-			.map((s) => (s.ts ? Date.parse(s.ts) : NaN))
+			.map((s) => (s.ts ? parseStepTs(s.ts) : NaN))
 			.filter((n) => !Number.isNaN(n));
 		if (ts.length === 0) return null;
 		return (Date.now() - Math.max(...ts)) / 3_600_000;
