@@ -14,7 +14,8 @@
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
-	import { parseStepTs } from '$lib/gaugeSeries';
+	import { parseStepTs, gaugeSeries } from '$lib/gaugeSeries';
+	import type { GaugePoint, GaugeFetch } from '$lib/gaugeSeries';
 
 	interface RadarMeta {
 		id: string;
@@ -1780,7 +1781,6 @@
 		const dd = String(d.getUTCDate()).padStart(2, '0');
 		return `${yyyy}${mm}${dd}`;
 	}
-	type GaugeFetch = { headers?: string[]; values?: (string | number)[] };
 	async function fetchGaugeData(comid: string, kind: 'forecast' | 'observed', ts: string): Promise<GaugeFetch | null> {
 		try {
 			const r = await fetch(
@@ -1809,6 +1809,140 @@
 		}
 		return pairs.join('  ·  ');
 	}
+
+	const GC_W = 288, GC_H = 92;          // fits a 320px popup with its padding
+	const GC_PAD_L = 34, GC_PAD_R = 4, GC_PAD_T = 6, GC_PAD_B = 14;
+
+	/** Escape text bound for an SVG attribute or text node. */
+	function svgEsc(s: string): string {
+		return s.replace(/[&<>"]/g, (c) =>
+			({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+	}
+
+	/** Render a value with enough significant figures to be readable. */
+	function gaugeNum(v: number): string {
+		if (v === 0) return '0';
+		const a = Math.abs(v);
+		if (a >= 100) return v.toFixed(0);
+		if (a >= 1) return v.toFixed(2);
+		if (a >= 0.01) return v.toFixed(3);
+		return v.toExponential(1);
+	}
+
+	/**
+	 * Draw observed and forecast flow as one hydrograph.
+	 *
+	 * One y axis, because both series are the same measure, and it starts at
+	 * zero because flow has a true zero. Forecast is dashed as well as
+	 * differently colored, so the two are told apart without relying on hue.
+	 * A dotted rule marks now, which is the only thing separating the measured
+	 * part of the line from the predicted part.
+	 *
+	 * No unit is printed. The upstream publishes bare numbers and documents no
+	 * unit for them, and a guessed one on a chart about flooding is worse than
+	 * none.
+	 *
+	 * @param obs Observed points, oldest first.
+	 * @param fcst Forecast points, oldest first.
+	 * @returns SVG markup, or an empty string when there is nothing to draw.
+	 */
+	function gaugeChartSvg(obs: GaugePoint[], fcst: GaugePoint[]): string {
+		const all = [...obs, ...fcst];
+		if (all.length < 2) return '';
+		const t0 = Math.min(...all.map((p) => p.t));
+		const t1 = Math.max(...all.map((p) => p.t));
+		const vmax = Math.max(...all.map((p) => p.v));
+		if (!(t1 > t0)) return '';
+		// A flat-zero series still deserves a readable axis rather than a
+		// divide-by-zero, so give it a nominal top.
+		const top = vmax > 0 ? vmax * 1.08 : 1;
+		const x = (t: number) =>
+			GC_PAD_L + ((t - t0) / (t1 - t0)) * (GC_W - GC_PAD_L - GC_PAD_R);
+		const y = (v: number) =>
+			GC_H - GC_PAD_B - (v / top) * (GC_H - GC_PAD_T - GC_PAD_B);
+		const path = (pts: GaugePoint[]) =>
+			pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`)
+				.join(' ');
+		// Day of month as well as hour: the window spans two to three days,
+		// so a bare hour would not say which one.
+		const hhmm = (t: number) => {
+			const d = new Date(t);
+			return `${String(d.getUTCDate()).padStart(2, '0')} `
+				+ `${String(d.getUTCHours()).padStart(2, '0')}`
+				+ `${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
+		};
+		const now = Date.now();
+		const nowRule = now > t0 && now < t1
+			? `<line class="gc-now" x1="${x(now).toFixed(1)}" y1="${GC_PAD_T}" `
+			  + `x2="${x(now).toFixed(1)}" y2="${GC_H - GC_PAD_B}"></line>`
+			: '';
+		// Mark the hole between the two series rather than leaving blank
+		// plot area, which reads as a broken chart. The two never meet late
+		// in the UTC day: see gapNote.
+		const gapStart = obs.length ? obs[obs.length - 1].t : 0;
+		const gapEnd = fcst.length ? fcst[0].t : 0;
+		const gapBand = gapStart && gapEnd && gapEnd - gapStart > 1.5 * 3_600_000
+			? `<rect class="gc-gap" x="${x(gapStart).toFixed(1)}" y="${GC_PAD_T}"`
+			  + ` width="${(x(gapEnd) - x(gapStart)).toFixed(1)}"`
+			  + ` height="${GC_H - GC_PAD_T - GC_PAD_B}"></rect>`
+			  + `<text class="gc-gaplabel" x="${((x(gapStart) + x(gapEnd)) / 2).toFixed(1)}"`
+			  + ` y="${(GC_H - GC_PAD_B) / 2 + 3}" text-anchor="middle">no data</text>`
+			: '';
+		// Native tooltips over invisible targets: a hover layer that needs no
+		// script inside a popup MapLibre owns and may tear down at any moment.
+		const hits = all.map((p) => {
+			const kind = obs.includes(p) ? 'observed' : 'forecast';
+			return `<rect class="gc-hit" x="${(x(p.t) - 4).toFixed(1)}" y="${GC_PAD_T}"`
+				+ ` width="8" height="${GC_H - GC_PAD_T - GC_PAD_B}">`
+				+ `<title>${svgEsc(hhmm(p.t))} ${kind} ${svgEsc(gaugeNum(p.v))}</title></rect>`;
+		}).join('');
+		return `
+			<svg class="gauge-chart" viewBox="0 0 ${GC_W} ${GC_H}" role="img"
+			     aria-label="observed and forecast flow, ${svgEsc(hhmm(t0))} to ${svgEsc(hhmm(t1))}">
+				<line class="gc-axis" x1="${GC_PAD_L}" y1="${GC_H - GC_PAD_B}"
+				      x2="${GC_W - GC_PAD_R}" y2="${GC_H - GC_PAD_B}"></line>
+				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_PAD_T + 7}"
+				      text-anchor="end">${svgEsc(gaugeNum(top))}</text>
+				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_H - GC_PAD_B}"
+				      text-anchor="end">0</text>
+				<text class="gc-tick" x="${GC_PAD_L}" y="${GC_H - 3}">${svgEsc(hhmm(t0))}</text>
+				<text class="gc-tick" x="${GC_W - GC_PAD_R}" y="${GC_H - 3}"
+				      text-anchor="end">${svgEsc(hhmm(t1))}</text>
+				${gapBand}
+				${nowRule}
+				${obs.length > 1 ? `<path class="gc-obs" d="${path(obs)}"></path>` : ''}
+				${fcst.length > 1 ? `<path class="gc-fcst" d="${path(fcst)}"></path>` : ''}
+				${hits}
+			</svg>
+			<div class="gauge-legend">
+				<span><i class="gl-obs"></i>observed</span>
+				<span><i class="gl-fcst"></i>forecast</span>
+			</div>
+			${gapNote(obs, fcst)}`;
+	}
+
+	/**
+	 * Explain the hole between the two series, when there is one.
+	 *
+	 * The observed endpoint runs to the previous midnight UTC and no further:
+	 * asking for today returns yesterday 00Z through today 00Z, and asking
+	 * for tomorrow returns nothing. So late in the UTC day the observed trace
+	 * stops up to 24 hours short of the forecast, and the gap on the chart is
+	 * the upstream's shape rather than a dropout. Saying so is cheaper than
+	 * letting someone read it as missing data.
+	 *
+	 * @param obs Observed points, oldest first.
+	 * @param fcst Forecast points, oldest first.
+	 * @returns A muted note, or an empty string when the series nearly meet.
+	 */
+	function gapNote(obs: GaugePoint[], fcst: GaugePoint[]): string {
+		if (obs.length === 0 || fcst.length === 0) return '';
+		const gapH = (fcst[0].t - obs[obs.length - 1].t) / 3_600_000;
+		if (gapH < 1.5) return '';
+		return `<div class="gauge-muted" style="margin-top:3px">`
+			+ `observed runs to the last 00Z, ${Math.round(gapH)} h before the`
+			+ ` forecast starts</div>`;
+	}
 	async function onStreamGaugeClick(e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) {
 		if (!e.features || e.features.length === 0 || !map) return;
 		const f = e.features[0];
@@ -1819,8 +1953,7 @@
 		// in app.css, which routes through Sentinel's theme tokens — so
 		// the popup follows light/dark without inline overrides.
 		const liveSlot = isLive
-			? `<div data-slot="forecast"><span class="gauge-muted">loading forecast…</span></div>
-			   <div data-slot="observed"><span class="gauge-muted">loading observed…</span></div>`
+			? `<div data-slot="chart"><span class="gauge-muted">loading flow…</span></div>`
 			: `<div class="gauge-muted">basic-status site (no live data)</div>`;
 		const html = `
 			<div class="gauge-popup">
@@ -1840,10 +1973,14 @@
 		]);
 		const el = popup.getElement();
 		if (!el) return;
-		const fEl = el.querySelector('[data-slot="forecast"]');
-		const oEl = el.querySelector('[data-slot="observed"]');
-		if (fEl) fEl.innerHTML = `<span class="gauge-muted">forecast:</span> ${gaugeSummaryHtml(fcst)}`;
-		if (oEl) oEl.innerHTML = `<span class="gauge-muted">observed:</span> ${gaugeSummaryHtml(obs)}`;
+		const slot = el.querySelector('[data-slot="chart"]');
+		if (!slot) return;
+		const chart = gaugeChartSvg(gaugeSeries(obs), gaugeSeries(fcst));
+		// One point, or none, cannot be a line. Fall back to the figures
+		// rather than showing an empty frame that looks like a broken chart.
+		slot.innerHTML = chart || `
+			<div><span class="gauge-muted">forecast:</span> ${gaugeSummaryHtml(fcst)}</div>
+			<div><span class="gauge-muted">observed:</span> ${gaugeSummaryHtml(obs)}</div>`;
 	}
 
 	// Terrain stack — DEM source from AWS Open Data terrarium-format
