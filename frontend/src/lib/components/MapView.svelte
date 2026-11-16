@@ -1792,8 +1792,8 @@
 	// Click handler for stream-gauge markers. Renders a MapLibre popup
 	// with the COMID + status; for R-status sites, fires the two
 	// per-COMID time-series fetches and populates the popup body in
-	// place once both land (or both fail). Forecast wants YYYYMMDD_HH
-	// (UTC); observed wants YYYYMMDD (UTC).
+	// place once both land (or both fail). Both endpoints take YYYYMMDD_HH
+	// (UTC), and both answer with the 25 hours ENDING at that hour.
 	function utcHourString(d: Date): string {
 		const yyyy = d.getUTCFullYear();
 		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -1801,11 +1801,28 @@
 		const hh = String(d.getUTCHours()).padStart(2, '0');
 		return `${yyyy}${mm}${dd}_${hh}`;
 	}
-	function utcDayString(d: Date): string {
-		const yyyy = d.getUTCFullYear();
-		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-		const dd = String(d.getUTCDate()).padStart(2, '0');
-		return `${yyyy}${mm}${dd}`;
+
+	/**
+	 * Observed flow for the 25 hours ending now.
+	 *
+	 * The hour matters. `get_observed_stream_data` takes a bare date too, and
+	 * answers it with the day ending at that date's 00Z, which late in the UTC
+	 * day stops up to 24 hours short of the forecast and leaves a hole between
+	 * the two series. Given the hour it runs to that hour instead, so the two
+	 * overlap the way the upstream's own chart shows them.
+	 *
+	 * Falls back one hour when the current one is not published yet, which the
+	 * upstream reports as a `status: unavailable` body rather than an error.
+	 *
+	 * @param comid The USGS site id.
+	 * @param now The current time.
+	 * @returns The reply, or null when neither hour could be fetched.
+	 */
+	async function fetchObserved(comid: string, now: Date): Promise<GaugeFetch | null> {
+		const first = await fetchGaugeData(comid, 'observed', utcHourString(now));
+		if (first?.headers && first.headers.length > 1) return first;
+		const prev = new Date(now.getTime() - 3_600_000);
+		return fetchGaugeData(comid, 'observed', utcHourString(prev));
 	}
 	async function fetchGaugeData(comid: string, kind: 'forecast' | 'observed', ts: string): Promise<GaugeFetch | null> {
 		try {
@@ -1902,9 +1919,9 @@
 			? `<line class="gc-now" x1="${x(now).toFixed(1)}" y1="${GC_PAD_T}" `
 			  + `x2="${x(now).toFixed(1)}" y2="${GC_H - GC_PAD_B}"></line>`
 			: '';
-		// Mark the hole between the two series rather than leaving blank
-		// plot area, which reads as a broken chart. The two never meet late
-		// in the UTC day: see gapNote.
+		// Mark a hole between the two series rather than leaving blank plot
+		// area, which reads as a broken chart. Normally they overlap and
+		// nothing is drawn here: see gapNote.
 		const gapStart = obs.length ? obs[obs.length - 1].t : 0;
 		const gapEnd = fcst.length ? fcst[0].t : 0;
 		const gapBand = gapStart && gapEnd && gapEnd - gapStart > 1.5 * 3_600_000
@@ -1948,26 +1965,25 @@
 	}
 
 	/**
-	 * Explain the hole between the two series, when there is one.
+	 * Say how long the observed trace has been missing, when it has.
 	 *
-	 * The observed endpoint runs to the previous midnight UTC and no further:
-	 * asking for today returns yesterday 00Z through today 00Z, and asking
-	 * for tomorrow returns nothing. So late in the UTC day the observed trace
-	 * stops up to 24 hours short of the forecast, and the gap on the chart is
-	 * the upstream's shape rather than a dropout. Saying so is cheaper than
-	 * letting someone read it as missing data.
+	 * The two series normally overlap by an hour or two, because observed
+	 * runs to the current hour and the forecast starts a little before it. A
+	 * hole therefore means the upstream is behind on observations for this
+	 * site rather than that the chart is drawn wrong, and that is worth
+	 * stating on a chart someone reads for a rising creek.
 	 *
 	 * @param obs Observed points, oldest first.
 	 * @param fcst Forecast points, oldest first.
-	 * @returns A muted note, or an empty string when the series nearly meet.
+	 * @returns A muted note, or an empty string when the series meet.
 	 */
 	function gapNote(obs: GaugePoint[], fcst: GaugePoint[]): string {
 		if (obs.length === 0 || fcst.length === 0) return '';
 		const gapH = (fcst[0].t - obs[obs.length - 1].t) / 3_600_000;
 		if (gapH < 1.5) return '';
 		return `<div class="gauge-muted" style="margin-top:3px">`
-			+ `observed runs to the last 00Z, ${Math.round(gapH)} h before the`
-			+ ` forecast starts</div>`;
+			+ `no observations for ${Math.round(gapH)} h before the forecast`
+			+ ` starts</div>`;
 	}
 	async function onStreamGaugeClick(e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) {
 		if (!e.features || e.features.length === 0 || !map) return;
@@ -1995,7 +2011,7 @@
 		const now = new Date();
 		const [fcst, obs] = await Promise.all([
 			fetchGaugeData(props.comid, 'forecast', utcHourString(now)),
-			fetchGaugeData(props.comid, 'observed', utcDayString(now))
+			fetchObserved(props.comid, now)
 		]);
 		const el = popup.getElement();
 		if (!el) return;
