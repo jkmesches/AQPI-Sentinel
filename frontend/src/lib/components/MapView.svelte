@@ -429,6 +429,15 @@
 	// control, which were all hard-coded to AQPI.
 	let siteName = $state('AQPI Sentinel');
 	let dataSource = $state('radarca.engr.colostate.edu');
+	/**
+	 * What the tilt picker calls the display tier.
+	 *
+	 * Not `dataSource`, which is a hostname meant for the header. The picker
+	 * is offered only where that tier exists, so naming it rather than
+	 * printing its address keeps a 28-character string out of an option label
+	 * narrow enough to clip it.
+	 */
+	const RADARCA_LABEL = 'RadarCA';
 	let hasRadarca = $state(true);
 	// The products this deployment publishes, when its ids are not the ones
 	// COMPOSITE_GROUPS below knows. Null keeps that table.
@@ -2709,7 +2718,6 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">NEXRAD</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">ground truth</span>
 			</span>
 			<span class="num text-[9.5px] {nexradEnabled ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{nexradEnabled ? 'ON' : 'OFF'}
@@ -2928,9 +2936,9 @@
 								if (!MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
 							}
 						}}
-						title={`Pick a scan elevation. Default uses ${dataSource}'s single sweep. Drives the time strip on the radar's 7-frame loop.`}
+						title={`Pick a scan elevation. Default uses ${RADARCA_LABEL}'s single sweep. Drives the time strip on the radar's 7-frame loop.`}
 					>
-						<option value={0}>Default ({dataSource})</option>
+						<option value={0}>Default ({RADARCA_LABEL})</option>
 						{#each tiltRadarMeta.elevations ?? [] as ang, i}
 							<option value={i + 1}>{ang}° EL</option>
 						{/each}
