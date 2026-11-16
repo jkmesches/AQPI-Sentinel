@@ -28,6 +28,16 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-16
+
+The map gains a layer about the ground rather than the weather. Rain falling
+on a recent burn scar is a different event from the same rain falling
+anywhere else, and the map showed only half of that conjunction.
+
+It also carries the fix for a load-order bug the new layer ran into and could
+not work around, which had been quietly dropping saved overlay toggles since
+those layers shipped.
+
 ### Added
 
 - **Burn-scar overlay on the map, for both AQPI and XQPI.** CAL FIRE
