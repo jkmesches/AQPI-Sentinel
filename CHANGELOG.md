@@ -28,6 +28,81 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-16
+
+Three ways the map could show you something older than it looked, and a
+chart where there had been a list of numbers.
+
+None of the three announced itself. A stale banner over live data, a frame
+time frozen at page load, and a camera setting overwritten with the value
+that replaced it all read as working software, which is why each was found
+by measuring the deployed instance rather than by reading the code.
+
+### Added
+
+- **Stream-gauge popups draw a hydrograph instead of listing numbers.**
+  Clicking a real-time site printed its series as key:value pairs, 25 of
+  them for the observed window and 18 for the forecast. Both series are the
+  same measure, so they share one axis, and it starts at zero because flow
+  has a true zero: autoscaling would draw a dry creek's daily wobble with
+  the same swing as a storm. Forecast is dashed as well as differently
+  colored, so the two never depend on hue, and both palettes were validated
+  against their own surface in each theme.
+
+  The gap between the two series is the upstream's shape, not a dropout.
+  `get_observed_stream_data` serves whole days ending at 00Z and refuses
+  any date past today, so the newest observation available is the last UTC
+  midnight while the forecast starts about an hour before now. That leaves
+  up to 24 hours uncovered, widest just before midnight. The chart bands
+  and labels the gap rather than bridging it with an older forecast run,
+  which would put predictions where a reader looks for observations.
+
+  No unit is printed, because the upstream publishes bare numbers and
+  documents no unit for them.
+
+### Fixed
+
+- **The "not current" banner no longer appears over live data.**
+  `/api/upstream/product_steps` publishes UTC without a `Z` or an offset,
+  and ECMAScript reads an unmarked date-time as the viewer's local time, so
+  every composite age was wrong by that viewer's offset. West of UTC a
+  stale product could read as fresh; more than three hours east of it every
+  live product read as stale. Measured against a six-minute-old composite
+  in five zones: no banner at Denver, UTC or Berlin, banner at Kolkata and
+  Auckland. The suite that guards this now runs once per zone, because
+  reading an unmarked timestamp as local time is correct at UTC and a test
+  run only there passes against the bug.
+
+- **The banner no longer reports the previous product's age under the new
+  product's name.** `composite` changes the instant the picker is used
+  while the step list catches up later, and the age was computed from
+  whichever list happened to be in hand. The list now records which product
+  it describes. A slow upstream widened the window to seconds, which is why
+  this was visible on the AQPI deployment and nearly invisible elsewhere.
+
+- **An open page's timeline keeps up with the live edge.** The step list
+  was built once per selection and never refreshed, so the newest frame the
+  scrubber could reach was the newest frame that existed when the page
+  loaded. Measured: the scrubber read 22:14 for a 7.6 minute watch while
+  the API advanced to 22:22, and only a reload moved it. It now reloads on
+  the existing 120 s tick, holding the operator's position by timestamp
+  rather than by index.
+
+- **A radar's frame listing can no longer freeze until a restart.** The
+  background refresh read radarca alone, and the local archive was
+  consulted only on a completely cold cache, so where the upstream listing
+  fails every time the listing froze at the first request after start while
+  L4 went on archiving a frame every 120 s. It now falls back to the
+  archive. The refresh task also held no strong reference, and because its
+  dedup key is cleared in that task's `finally`, a collected task would
+  have frozen that radar permanently.
+
+- **A camera pitch set by hand survives a reload.** The 3D-terrain refresh
+  eased the camera flat whenever the toggle was off, and it runs at load
+  and on every theme swap rather than only on a click. The `moveend`
+  handler then persisted the flattened value, so the setting was destroyed
+  rather than ignored. A seeded pitch of 42 read back 0; it now reads 42.
+
 ## [0.9.0] - 2026-11-16
 
 The map gains a layer about the ground rather than the weather. Rain falling
