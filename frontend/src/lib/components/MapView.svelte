@@ -1796,21 +1796,38 @@
 		}
 	}
 
-	// 3D mesh terrain — drape the whole scene over the DEM and pitch the
-	// camera. Disabling resets pitch to 0 so the operator goes back to a
-	// clean top-down view.
+	// 3D mesh terrain — drape the whole scene over the DEM.
 	const PITCH_3D = 50;
+
+	/**
+	 * Make the map's terrain match `terrain3DOn`, without moving the camera.
+	 *
+	 * The pitch lives in toggleTerrain3D instead, because this runs at load
+	 * and on every theme swap as well as on a toggle. Pitching from here
+	 * flattened any saved pitch on arrival, and the `moveend` handler then
+	 * persisted the flattened camera, so a pitched view could not be kept.
+	 */
 	function refreshTerrain3D() {
 		if (!map || !styleReady) return;
 		if (terrain3DOn) {
 			ensureTerrainSource();
 			map.setTerrain({ source: 'terrain-dem', exaggeration: 1.2 });
-			map.easeTo({ pitch: PITCH_3D, duration: 700 });
 		} else {
 			map.setTerrain(null);
-			map.easeTo({ pitch: 0, duration: 500 });
 			removeTerrainSourceIfUnused();
 		}
+	}
+
+	/**
+	 * Flip the 3D mesh and pitch the camera to match.
+	 *
+	 * Turning it on tilts to PITCH_3D so the relief reads; turning it off
+	 * returns to top-down. A saved camera is left alone on load, so a view
+	 * the operator pitched by hand comes back as they left it.
+	 */
+	function toggleTerrain3D() {
+		terrain3DOn = !terrain3DOn;
+		map?.easeTo({ pitch: terrain3DOn ? PITCH_3D : 0, duration: 600 });
 	}
 
 	// Watershed outlines + reservoir markers. Inserted before the radar
@@ -2471,7 +2488,7 @@
 		</button>
 		<button
 			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
-			onclick={() => (terrain3DOn = !terrain3DOn)}
+			onclick={toggleTerrain3D}
 			title="3D terrain mesh — pitches the camera and drapes the scene over an elevation mesh. Raster overlays may distort at the edges."
 		>
 			<span class="flex items-center gap-2">
