@@ -535,8 +535,34 @@
 			HEIGHT: '1100',
 			BBOX: bbox
 		});
-		if (timeIso) params.set('TIME', timeIso);
+		// TIME is always sent, never omitted. This is the WMS-T endpoint
+		// (n0q-t.cgi), and a GetMap with no TIME does not fall back to the
+		// newest slice: it answers 200 with a 5 KB near-empty PNG. Measured
+		// against the service, same bbox and size: no TIME paints 0.05% of
+		// its pixels, while every 5-minute mark from the current one back to
+		// 40 minutes paints 7.7% to 13.8% and returns 67-111 KB. So the live
+		// view, which is the default and the one an operator compares
+		// against, showed an empty layer, and scrubbing back one step made it
+		// appear. That reads as "NEXRAD sees nothing here", which is the one
+		// thing a ground-truth layer must never say wrongly.
+		params.set('TIME', timeIso ?? nexradLatestIso());
 		return `${NEXRAD_WMS}?${params.toString()}`;
+	}
+
+	/**
+	 * The newest NEXRAD slice, as the service indexes them.
+	 *
+	 * The mosaic is published on 5-minute marks, and the current mark is
+	 * already served: measured at 23:15Z, a request for 23:15Z returned the
+	 * same 108,357 bytes as the non-time endpoint's latest. So no lag is
+	 * subtracted here. Snapping also keeps the URL stable for five minutes,
+	 * which lets the blob cache and the browser cache hold the live frame.
+	 *
+	 * @returns An ISO 8601 UTC timestamp on a 5-minute boundary.
+	 */
+	function nexradLatestIso(): string {
+		const ms = 5 * 60_000;
+		return `${new Date(Math.floor(Date.now() / ms) * ms).toISOString().slice(0, 19)}Z`;
 	}
 
 	const EXTENT_LARGE = { west: -124.005, east: -121.195, south: 36.5, north: 39.505 };
