@@ -1902,8 +1902,22 @@
 
 		map.on('load', () => {
 			if (!map) return;
-			addBaseSourcesAndLayers(theme.resolved);
+			// === Load-bearing: styleReady goes up BEFORE the layers go on ===
+			//
+			// addBaseSourcesAndLayers calls refresh* for composite, nexrad,
+			// geography, terrain and stream gauges, and every one of those
+			// early-returns on `!styleReady`. With the flag set
+			// afterwards, a toggle restored from prefs renders nothing on
+			// arrival: the panel reads ON, the map is bare, and the layer
+			// appears only once something pokes it, which for a persisted
+			// toggle means switching it off and on by hand.
+			//
+			// The theme-swap path above already orders it this way and says
+			// why. This one did not, so a saved watershed or stream-gauge
+			// toggle has been silently ignored at load since those layers
+			// shipped.
 			styleReady = true;
+			addBaseSourcesAndLayers(theme.resolved);
 			// Only now may the prefs writer run. Before this point the
 			// component is still assembling restored state, and an early save
 			// would persist a half-built snapshot over the user's real one.
