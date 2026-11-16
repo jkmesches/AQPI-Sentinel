@@ -513,14 +513,21 @@ RADAR_META_OVERRIDE: dict[str, dict] = {}
 # AQPI deployment has always used.
 HOME_VIEW: dict = {}
 
-# Regional map furniture this deployment has data for. All three AQPI layers
-# are Northern California — the static files are literally named
+# Regional map furniture this deployment has data for. The first three AQPI
+# layers are Northern California: the static files are literally named
 # `watersheds-huc8-norcal.geojson` and `reservoirs-norcal.json`, and
 # stream_gauges is served through radarca. On a profile watching a radar in
 # Pasadena they would draw Bay Area geography 375 km off-screen, or fail, while
 # still offering a toggle that appears to do nothing. A named list rather than
 # a boolean so a future deployment can have some and not others.
-MAP_OVERLAYS: tuple[str, ...] = ("watersheds", "reservoirs", "stream_gauges")
+#
+# burn_scars is the exception, and the reason this list carries a per-profile
+# asset rather than one file. Its data is clipped per deployment and shipped as
+# `burn-scars-<profile>.json`, so every profile with a file can offer it. See
+# scripts/fetch_burn_scars.py for how those files are built.
+MAP_OVERLAYS: tuple[str, ...] = (
+    "watersheds", "reservoirs", "stream_gauges", "burn_scars",
+)
 
 # Geographic bounds for this profile's composite overlays, when it supplies
 # them. Empty means "use MapView's own per-product table", which is AQPI's and

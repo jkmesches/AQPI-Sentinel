@@ -88,13 +88,19 @@ RADAR_FOLDER = {"FLOW": "flow"}
 # One radar, so there is nothing to fit between; the ring IS the extent.
 HOME_VIEW = {"center": [FLOW_LON, FLOW_LAT], "zoom": 9.5}  # [M] computed here
 
-# No regional overlays. AQPI's watersheds, reservoirs and stream gauges are all
-# Northern California datasets — two static NorCal files and one radarca-served
-# feed — none of which describes the ground under FLOW. Offering the toggles
+# Burn scars only. AQPI's watersheds, reservoirs and stream gauges are all
+# Northern California datasets, two static NorCal files and one radarca-served
+# feed, none of which describes the ground under FLOW. Offering those toggles
 # anyway would draw Bay Area geography far off-screen or silently fail, and a
-# control that does nothing is worse than an absent one. Southern California
-# equivalents can be added here when they exist.
-MAP_OVERLAYS: tuple[str, ...] = ()
+# control that does nothing is worse than an absent one.
+#
+# Burn scars are different because the data is clipped per profile rather than
+# shared: `burn-scars-xqpi.json` covers the composite_ref extent below. That
+# matters more here than on AQPI. The Eaton perimeter runs from -118.162 to
+# -118.013, which puts its western edge within a few hundred meters of FLOW at
+# -118.171, so intense rain over that scar is the debris-flow case this radar
+# is placed to watch.
+MAP_OVERLAYS: tuple[str, ...] = ("burn_scars",)
 
 # --------------------------------------------------------------------------
 # Composite overlay bounds — PER PRODUCT, because the families do not share one

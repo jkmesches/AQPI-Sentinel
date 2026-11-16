@@ -17,9 +17,33 @@
  * as a side effect of adding a second profile.
  */
 
-/** Regional map furniture. All of AQPI's are Northern California datasets. */
-export const ALL_OVERLAYS = ['watersheds', 'reservoirs', 'stream_gauges'] as const;
+/**
+ * Regional map furniture. The first three are Northern California datasets,
+ * shared by every AQPI deployment. `burn_scars` is clipped per profile and
+ * loaded from `burn-scars-<profile>.json`, so a deployment offers it only
+ * when its own file has been generated.
+ */
+export const ALL_OVERLAYS = [
+	'watersheds', 'reservoirs', 'stream_gauges', 'burn_scars'
+] as const;
 export type Overlay = (typeof ALL_OVERLAYS)[number];
+
+/**
+ * Profile slugs are interpolated into a static asset path, so the shape is
+ * constrained here rather than trusted. Anything with a slash, a dot or a
+ * percent escape is rejected.
+ *
+ * A rejected or absent profile becomes the empty string rather than `aqpi`,
+ * which is the opposite of how the rest of this module falls back. The
+ * difference is that the other fallbacks are cosmetic, while this one picks a
+ * geographic dataset: defaulting an XQPI deployment to `aqpi` would draw
+ * Northern California fire perimeters 375 km off the map it is watching, and
+ * they would look exactly as authoritative as the right ones. An empty
+ * profile draws nothing, which is the honest answer when the backend did not
+ * say which network this is.
+ */
+const PROFILE_RE = /^[a-z0-9_-]{1,32}$/;
+const PROFILE_UNKNOWN = '';
 
 /** Geographic bounds for a raster overlay, in the shape MapView already uses. */
 export interface Extent {
@@ -35,6 +59,13 @@ export interface Product {
 }
 
 export interface SiteMap {
+	/**
+	 * Which radar network this instance watches, e.g. "aqpi" or "xqpi".
+	 * Names the per-profile overlay assets, so it is validated against
+	 * PROFILE_RE before it reaches a URL. Empty means the backend did not
+	 * say, and a caller must draw no per-profile data rather than guess.
+	 */
+	profile: string;
 	/** What this deployment calls itself, e.g. "AQPI Sentinel". */
 	name: string;
 	/** What the header names as the data source. */
@@ -143,6 +174,7 @@ export async function resolveHomeView(
 	url = '/api/version'
 ): Promise<SiteMap> {
 	const miss: SiteMap = {
+		profile: PROFILE_UNKNOWN,
 		name: FALLBACK_NAME, dataSource: FALLBACK_SOURCE, hasRadarca: true,
 		products: null, home: fallback, overlays: ALL_OVERLAYS,
 		compExtent: null, compExtentProvisional: []
@@ -154,6 +186,11 @@ export async function resolveHomeView(
 		const hv = body?.home_view;
 		const ov = body?.map_overlays;
 		return {
+			// An old backend that predates the field, or a hand-edited one,
+			// yields the empty string rather than a guess at which network
+			// this is. See PROFILE_UNKNOWN.
+			profile: typeof body?.profile === 'string' && PROFILE_RE.test(body.profile)
+				? body.profile : PROFILE_UNKNOWN,
 			home: looksLikeHomeView(hv)
 				? { center: [hv.center[0], hv.center[1]], zoom: hv.zoom }
 				: fallback,

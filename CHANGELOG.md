@@ -28,6 +28,28 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **Burn-scar overlay on the map, for both AQPI and XQPI.** CAL FIRE
+  perimeters, shaded by how long ago each burned, with an age slider beside
+  the toggle. The slider runs 1 to 5 years and opens at 2, which is where
+  post-fire debris-flow risk is highest. Intense rain over a recent scar is
+  the case the layer exists for, so the fill stays faint and the outline
+  carries the shape: at full opacity a stack of nested perimeters hides the
+  QPE composite underneath, which is the thing being watched.
+
+  This is the first overlay whose data is clipped per deployment rather than
+  shared. `burn-scars-aqpi.json` covers the Bay Area composite extent,
+  `burn-scars-xqpi.json` the Southern California one, and `/api/version`'s
+  `profile` now reaches the frontend so the map can pick the right file. The
+  XQPI case is the pointed one: the Eaton perimeter's western edge sits
+  within a few hundred meters of FLOW.
+
+  Regenerate with `scripts/fetch_burn_scars.py` after CAL FIRE publishes a
+  season, which happens the following spring. The panel shows the newest
+  ignition date in the file, so an empty recent window reads as the
+  publication lag rather than as no fires. See `docs/MAINTENANCE.md`.
+
 ### Fixed
 
 - **A persisted map layer no longer stays dark until you toggle it by hand.**
