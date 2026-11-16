@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from ...checks.transports import CheckContext  # noqa: TID252  relative, as every import in this module
 from ...config import HAS_RADARCA, PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
 from ... import fs_products as _fs
 from ...errors import humanize_error
@@ -213,6 +214,8 @@ _PD_REFRESHING: set[str] = set()
 _XB_TTL_S = 90.0
 _XB_CACHE: dict[tuple[str, str], tuple[float, list]] = {}
 _XB_REFRESHING: set[tuple[str, str]] = set()
+# Strong references to the in-flight refresh tasks. See _spawn_xband_refresh.
+_XB_TASKS: set[_asyncio.Task[None]] = set()
 
 
 async def _xband_fetch_listing(ctx, folder: str, prefix: str) -> list:
@@ -225,13 +228,56 @@ async def _xband_fetch_listing(ctx, folder: str, prefix: str) -> list:
     return r.json().get("images") or []
 
 
-async def _xband_refresh_bg(ctx, folder: str, prefix: str) -> None:
+def _spawn_xband_refresh(ctx: CheckContext, folder: str, prefix: str,
+                         pool: object = None) -> None:
+    """Start one background listing refresh and keep a reference to it.
+
+    asyncio holds only a weak reference to a bare task, so a fire-and-forget
+    refresh can be collected before it runs. The key is added to
+    _XB_REFRESHING here and removed in the task's `finally`, so a task that
+    never runs leaves the key set and no further refresh is scheduled for
+    that radar, freezing its listing for the life of the process.
+
+    Args:
+        ctx: Request context carrying the HTTP client.
+        folder: The radar's upstream folder name.
+        prefix: The product prefix to list.
+        pool: Database pool for the archive fallback, or None to skip it.
+    """
+    key = (folder, prefix)
+    _XB_REFRESHING.add(key)
+    task = _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix, pool))
+    _XB_TASKS.add(task)
+    task.add_done_callback(_XB_TASKS.discard)
+
+
+async def _xband_refresh_bg(ctx: CheckContext, folder: str, prefix: str,
+                            pool: object = None) -> None:
+    """Replace one radar's cached frame listing, preferring upstream.
+
+    Falls back to the local archive when the upstream listing fails, which is
+    what keeps the listing moving on a deployment with no display tier to ask
+    and during any outage of one. The archive gains a frame per radar every
+    120 s from L4, so it is a live source rather than a last resort; without
+    this the cached listing could only age, however current the data under it
+    was, until the process restarted.
+
+    Args:
+        ctx: Request context carrying the HTTP client.
+        folder: The radar's upstream folder name.
+        prefix: The product prefix to list.
+        pool: Database pool for the archive fallback, or None to skip it.
+    """
     key = (folder, prefix)
     try:
         imgs = await _xband_fetch_listing(ctx, folder, prefix)
         _XB_CACHE[key] = (_time_mod.monotonic() + _XB_TTL_S, imgs)
-    except Exception:
-        pass          # keep serving the stale list; the next request retries
+    except Exception:  # noqa: BLE001  any upstream failure means fall back
+        # Hold the TTL either way, so upstream is retried rather than hammered
+        # once it comes back.
+        local = await _xband_listing_local(pool, folder, prefix)
+        if local:
+            _XB_CACHE[key] = (_time_mod.monotonic() + _XB_TTL_S, local)
     finally:
         _XB_REFRESHING.discard(key)
 
@@ -274,8 +320,7 @@ async def _xband_listing_cached(ctx, folder: str, prefix: str, pool=None) -> lis
     hit = _XB_CACHE.get(key)
     if hit is not None:
         if hit[0] <= now and key not in _XB_REFRESHING:
-            _XB_REFRESHING.add(key)
-            _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix))
+            _spawn_xband_refresh(ctx, folder, prefix, pool)
         return hit[1]                       # fresh or stale, answer now
 
     # Cold. Prefer our own archive over blocking on a 3-8s upstream call —
@@ -284,8 +329,7 @@ async def _xband_listing_cached(ctx, folder: str, prefix: str, pool=None) -> lis
     if local:
         _XB_CACHE[key] = (now, local)       # already stale: refresh right away
         if key not in _XB_REFRESHING:
-            _XB_REFRESHING.add(key)
-            _asyncio.create_task(_xband_refresh_bg(ctx, folder, prefix))
+            _spawn_xband_refresh(ctx, folder, prefix, pool)
         return local
 
     imgs = await _xband_fetch_listing(ctx, folder, prefix)

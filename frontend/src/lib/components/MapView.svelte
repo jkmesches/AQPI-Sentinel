@@ -312,6 +312,15 @@
 	interface Step { i: number; ts: string | null; imageName: string; day: string; date: string; time: string }
 	let steps = $state<Step[]>([]);
 	let stepIdx = $state(-1);
+	/**
+	 * Which composite `steps` describes, or '' when it came from somewhere
+	 * else (radars, NEXRAD, tilt).
+	 *
+	 * `composite` changes the instant the picker is used, while the step list
+	 * only catches up when loadComposite's fetch returns. Anything reading
+	 * both has to know whether they agree yet.
+	 */
+	let stepsFor = $state('');
 	let playing = $state(false);
 	let playTimer: ReturnType<typeof setInterval> | undefined;
 	let activity = $state<number[]>([]);     // non-empty pixel fraction per step
@@ -335,6 +344,12 @@
 	// formatted from the backend and are never re-parsed here.
 	const compositeAgeH = $derived.by(() => {
 		if (composite === 'none' || steps.length === 0) return null;
+		// The list can still describe the product that was selected a moment
+		// ago, because `composite` changes on click while loadComposite is
+		// still fetching. Reporting that one's age under this one's name is
+		// how a fresh product got a "not current" banner that a reload
+		// cleared, and the slower the upstream the longer it showed.
+		if (stepsFor !== composite) return null;
 		const ts = steps
 			.map((s) => (s.ts ? parseStepTs(s.ts) : NaN))
 			.filter((n) => !Number.isNaN(n));
@@ -755,9 +770,50 @@
 		return { steps: merged.steps as Step[], idx: merged.idx };
 	}
 
-	async function loadComposite() {
-		stopPlay();
-		activity = [];
+	/**
+	 * Serialises step loads. Each call takes a ticket and drops its results if
+	 * a later call has started, so a slow response for the product the user
+	 * has already moved on from cannot overwrite the current one. Switching
+	 * products twice in quick succession used to leave whichever request
+	 * finished last in charge, which on a slow upstream was the earlier one.
+	 */
+	let stepsToken = 0;
+
+	/**
+	 * Reload the step list on a timer, keeping the operator where they are.
+	 *
+	 * The list is otherwise built once per selection change and never again,
+	 * so an open page's timeline stops at whatever the newest frame was when
+	 * it loaded. Measured against the deployed instance: the scrubber read
+	 * 22:14 for eight minutes while the API advanced to 22:22, and only a
+	 * reload moved it. That is a map quietly showing an older frame the
+	 * longer it is left open, which is the one thing it must not do.
+	 *
+	 * Parked on a step means parked on that TIMESTAMP, not that index: new
+	 * frames arrive at the live end and shift the indices under it.
+	 */
+	async function refreshStepsInPlace(): Promise<void> {
+		// Playback and tilt both drive the scrubber themselves; a reload
+		// underneath either would fight whoever is holding it.
+		if (playing || tiltEngaged) return;
+		const wasLive = stepIdx >= steps.length - 1;
+		const heldTs = wasLive ? null : (steps[stepIdx]?.ts ?? null);
+		await loadComposite({ keepPosition: { wasLive, heldTs } });
+	}
+
+	type KeepPosition = { wasLive: boolean; heldTs: string | null };
+
+	async function loadComposite(
+		opts: { keepPosition?: KeepPosition } = {}
+	): Promise<void> {
+		const token = ++stepsToken;
+		const keep = opts.keepPosition;
+		// A background reload must not stop playback or wipe the activity
+		// trace; only a real selection change means those are now wrong.
+		if (!keep) {
+			stopPlay();
+			activity = [];
+		}
 		// Tilt mode owns the scrubber when engaged — its 7 radar-display
 		// frames replace the radarca/composite step list. Highest priority.
 		if (tiltEngaged) {
@@ -769,16 +825,18 @@
 						`/api/upstream/tilt_steps?radar=${r.id}&el=${tiltEl}&moment=${tiltMoment}`
 					);
 					const j = await resp.json();
+					if (token !== stepsToken) return;
 					_tiltGeo = { lon: j.center[0], lat: j.center[1], range_km: j.range_km };
 					const frames = (j.steps ?? []) as { frame: number; ts: string }[];
 					// radar-display frame 0 = newest. Order oldest→newest so the
 					// rightmost scrubber position (steps[last]) is the live frame.
 					const ordered = [...frames].sort((a, b) => b.frame - a.frame);
-					steps = ordered.map((f, idx) => tiltStep(f.frame, f.ts, idx));
+					setSteps(ordered.map((f, idx) => tiltStep(f.frame, f.ts, idx)), '');
 					stepIdx = steps.length - 1;
 				} catch {
+					if (token !== stepsToken) return;
 					_tiltGeo = null;
-					steps = [];
+					setSteps([], '');
 					stepIdx = -1;
 				}
 			}
@@ -787,37 +845,83 @@
 		}
 		_tiltGeo = null;
 		if (composite !== 'none') {
+			// Captured before the await: `composite` can change while this is
+			// in flight, and the list has to be labelled with what it actually
+			// describes rather than with whatever is selected when it lands.
+			const want = composite;
 			try {
-				const r = await fetch(`/api/upstream/product_steps?product_id=${composite}`);
+				const r = await fetch(`/api/upstream/product_steps?product_id=${want}`);
 				const j = await r.json();
-				steps = j.steps as Step[];
+				if (token !== stepsToken) return;
+				setSteps(j.steps as Step[], want);
 				stepIdx = j.current_idx ?? steps.length - 1;
 			} catch {
-				steps = [];
+				if (token !== stepsToken) return;
+				setSteps([], want);
 				stepIdx = -1;
 			}
-			loadActivity(`product_id=${composite}`);
+			loadActivity(`product_id=${want}`);
 		} else if (activeRadars.length > 0) {
 			const found = await loadStepsFromAnyActiveRadar();
+			if (token !== stepsToken) return;
 			if (found) {
-				steps = found.steps;
+				setSteps(found.steps, '');
 				stepIdx = found.idx;
 			} else {
-				steps = [];
+				setSteps([], '');
 				stepIdx = -1;
 			}
 		} else if (nexradEnabled) {
 			// NEXRAD-only mode: no composite, no radars — synthesize the
 			// step list from NEXRAD's 5-min frame cadence so the operator
 			// gets a working playback control instead of a dead scrubber.
-			steps = synthesizeNexradSteps();
+			setSteps(synthesizeNexradSteps(), '');
 			stepIdx = steps.length - 1;
 			activity = [];
 		} else {
-			steps = [];
+			setSteps([], '');
 			stepIdx = -1;
 		}
+		if (keep) restorePosition(keep);
 		syncAllToStep();
+	}
+
+	/**
+	 * Put the scrubber back where it was after a background reload.
+	 *
+	 * @param keep Where the operator was before the list was replaced.
+	 */
+	function restorePosition(keep: KeepPosition): void {
+		if (steps.length === 0) {
+			stepIdx = -1;
+			return;
+		}
+		// At the live end, stay at the live end: that is a request for "the
+		// newest frame", so it should follow the newest frame.
+		if (keep.wasLive || !keep.heldTs) {
+			stepIdx = steps.length - 1;
+			return;
+		}
+		const same = steps.findIndex((s) => s.ts === keep.heldTs);
+		// A held frame that has aged out of the window is gone, so fall back
+		// to the oldest frame still available rather than jumping to live,
+		// which would look like the map had decided to move on by itself.
+		stepIdx = same >= 0 ? same : 0;
+	}
+
+	/**
+	 * Replace the step list and say which composite it describes.
+	 *
+	 * Paired so the two cannot drift: anything reading an age off `steps` has
+	 * to know whether the list belongs to the product now selected.
+	 *
+	 * @param next The new step list.
+	 * @param forProduct The composite id it describes, or '' for any other
+	 *     source (radars, NEXRAD, tilt).
+	 */
+	function setSteps(next: Step[], forProduct: string): void {
+		steps = next;
+		stepsFor = forProduct;
 	}
 
 	let activityToken = 0;
@@ -1500,6 +1604,10 @@
 		if (!mapAlive() || !styleReady) return;
 		try {
 			_bumpForceBuster();
+			// Extend the timeline before repainting it. Refreshing the imagery
+			// alone left the scrubber pinned to the frame list this page
+			// loaded with, so the newest frame it could reach only got older.
+			await refreshStepsInPlace();
 			if (composite !== 'none' && map!.getSource('comp-overlay')) {
 				await renderCompositeFrame();
 			}
