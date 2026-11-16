@@ -28,6 +28,18 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A persisted map layer no longer stays dark until you toggle it by hand.**
+  On initial load `styleReady` was set *after* `addBaseSourcesAndLayers`, and
+  every `refresh*` that call runs early-returns on `!styleReady`. So a
+  watersheds, reservoir, terrain or stream-gauge toggle restored from saved
+  settings rendered nothing on arrival: the panel read ON and the map was
+  bare, and the layer appeared only once something poked it. The theme-swap
+  path has ordered this correctly, with a comment saying why, since it
+  shipped; the load path did not. Found while adding the burn-scar layer,
+  which could not work around it.
+
 ## [0.8.6] — 2026-11-01
 
 One fix, in the surface most likely to be trusted at a glance: the map drew a
