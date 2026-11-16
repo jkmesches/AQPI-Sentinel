@@ -30,6 +30,17 @@
 const KEY = 'sentinel-map-prefs';
 const VERSION = 1;
 
+/**
+ * Range of the burn-scar age slider, in years since the fire's alarm date.
+ *
+ * Exported so the slider's bounds and the value it is clamped to on load
+ * cannot drift apart. The upper bound is 5 because post-fire debris-flow risk
+ * is elevated for roughly two to five years, and the lower is 1 because a
+ * zero-year window would hide every scar and read as a broken layer.
+ */
+export const BURN_SCAR_YEARS_MIN = 1;
+export const BURN_SCAR_YEARS_MAX = 5;
+
 /** The pre-consolidation keys, migrated once then left alone. */
 const LEGACY_BOOL_KEYS: [keyof MapPrefs, string][] = [
 	['watersheds',   'sentinel-map-watersheds'],
@@ -60,6 +71,9 @@ export interface MapPrefs {
 	terrain: boolean;
 	terrain3D: boolean;
 	streamGauges: boolean;
+	burnScars: boolean;
+	/** Oldest scar the layer draws, in years. See BURN_SCAR_YEARS_MIN/MAX. */
+	burnScarYears: number;
 	tiltEl: number;
 	camera: MapCamera | null;
 }
@@ -76,6 +90,11 @@ export const DEFAULT_PREFS: MapPrefs = {
 	terrain: false,
 	terrain3D: false,
 	streamGauges: false,
+	burnScars: false,
+	// Two years, not the slider's full range: the scars that matter for
+	// debris flow are the recent ones, and the wider windows stack enough
+	// overlapping perimeters to obscure the composite underneath.
+	burnScarYears: 2,
 	tiltEl: 0,
 	camera: null
 };
@@ -95,6 +114,20 @@ function num(v: unknown, d: number, lo: number, hi: number): number {
 	const n = typeof v === 'number' ? v : Number(v);
 	if (!Number.isFinite(n)) return d;
 	return Math.min(hi, Math.max(lo, n));
+}
+
+/**
+ * Read a whole number of years, rejecting anything that is not a number.
+ *
+ * `num` above coerces, and `JSON.stringify` writes NaN and Infinity as
+ * `null`, which `Number()` turns into 0. For the age window that clamps to
+ * the minimum rather than falling back to the default, so a corrupt blob
+ * quietly shows the narrowest window with nothing on screen to say why.
+ * `camera` below rejects the same coercion for the same reason.
+ */
+function years(v: unknown, fallback: number, lo: number, hi: number): number {
+	if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+	return Math.min(hi, Math.max(lo, Math.round(v)));
 }
 
 /** A camera is only usable if every field is finite and on the globe. */
@@ -183,6 +216,9 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 		terrain:      bool(obj.terrain, DEFAULT_PREFS.terrain),
 		terrain3D:    bool(obj.terrain3D, DEFAULT_PREFS.terrain3D),
 		streamGauges: bool(obj.streamGauges, DEFAULT_PREFS.streamGauges),
+		burnScars:    bool(obj.burnScars, DEFAULT_PREFS.burnScars),
+		burnScarYears: years(obj.burnScarYears, DEFAULT_PREFS.burnScarYears,
+		                     BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX),
 		tiltEl:       num(obj.tiltEl, DEFAULT_PREFS.tiltEl, 0, 90),
 		camera:       camera(obj.camera)
 	};

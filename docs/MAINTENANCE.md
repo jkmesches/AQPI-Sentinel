@@ -346,6 +346,45 @@ Idempotent re-runs are the bedrock — if your script can't safely
 be re-run, the rollout window during which it's "partially applied"
 is a window where the system is in a state nobody documented.
 
+### Refresh the burn-scar overlay (annual)
+
+The map's burn-scar layer draws CAL FIRE perimeters from a static file per
+profile, `frontend/static/data/burn-scars-<profile>.json`. It is the only
+map asset that ages, so it is the only one with a calendar on it.
+
+CAL FIRE publishes a fire season the following spring. Re-run after that
+lands, roughly April:
+
+```bash
+python scripts/fetch_burn_scars.py --profile aqpi
+python scripts/fetch_burn_scars.py --profile xqpi
+python validation_tests/test_burn_scar_assets.py
+```
+
+The script prints the newest ignition date it found. Check that against the
+season you expected to pick up, because a service that silently stops
+updating produces a file that looks fine and is a year stale. The layer's
+panel shows the same date under the age slider, so a user can see how
+current the data is without asking.
+
+!!! warning "A file from the season in progress does not exist"
+
+    The service carries nothing from the current year, so the two years
+    before today will always look thin in the second half of a fire season.
+    That is the publication lag. The 2025 season appeared in spring 2026; the
+    2026 season appears in spring 2027.
+
+A bad regeneration is guarded twice. The script refuses to write a file over
+1.5 MB, and `test_burn_scar_assets.py` re-checks that ceiling plus the fields
+the layer reads. Run the test rather than eyeballing the output: a perimeter
+with no `ALARM_DATE` is dropped by the age filter with no error, so a file
+can lose features and still look right.
+
+If you add a third profile, give it a bounding box in `PROFILE_BOXES` in the
+script and add `burn_scars` to its `MAP_OVERLAYS`. A profile that lists the
+overlay without shipping a file offers a toggle that fetches a 404 and draws
+nothing, which reads as a region with no fires; the test catches that pairing.
+
 ### Edit detection thresholds
 
 `/admin/thresholds` is the canonical place. The page has four sections:

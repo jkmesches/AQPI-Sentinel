@@ -114,6 +114,46 @@ export function runTests(mod) {
 	check('opacity is clamped into range', p.opacity === 1, String(p.opacity));
 	check('tilt is clamped into range', p.tiltEl === 0, String(p.tiltEl));
 
+	// The burn-scar age window drives a MapLibre filter and the slider's
+	// value at once. A stored 0 would hide every scar while the layer reads
+	// as on, which looks like a broken overlay rather than a stale setting.
+	console.log('\nthe burn-scar age window stays inside the slider:');
+	{
+		const { BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } = mod;
+		check('the slider range is 1..5 years',
+		      BURN_SCAR_YEARS_MIN === 1 && BURN_SCAR_YEARS_MAX === 5,
+		      `${BURN_SCAR_YEARS_MIN}..${BURN_SCAR_YEARS_MAX}`);
+		check('the default is 2 years, inside that range',
+		      DEFAULT_PREFS.burnScarYears === 2
+		      && DEFAULT_PREFS.burnScarYears >= BURN_SCAR_YEARS_MIN
+		      && DEFAULT_PREFS.burnScarYears <= BURN_SCAR_YEARS_MAX,
+		      String(DEFAULT_PREFS.burnScarYears));
+		check('the layer is off by default', DEFAULT_PREFS.burnScars === false);
+		for (const [label, stored, want] of [
+			['zero', 0, BURN_SCAR_YEARS_MIN],
+			['negative', -4, BURN_SCAR_YEARS_MIN],
+			['past the maximum', 99, BURN_SCAR_YEARS_MAX],
+			['a string', 'two', DEFAULT_PREFS.burnScarYears],
+			['null', null, DEFAULT_PREFS.burnScarYears],
+			['NaN through JSON', NaN, DEFAULT_PREFS.burnScarYears],
+			['an in-range value', 4, 4]
+		]) {
+			reset();
+			store.set(KEY, JSON.stringify({ burnScarYears: stored }));
+			const q = loadPrefs(VOCAB);
+			check(`${label} loads as ${want}`, q.burnScarYears === want,
+			      String(q.burnScarYears));
+		}
+		// A blob written before this shipped has neither key.
+		reset();
+		store.set(KEY, JSON.stringify({ opacity: 0.5, watersheds: true }));
+		const old = loadPrefs(VOCAB);
+		check('an older blob gets the defaults, not undefined',
+		      old.burnScars === false && old.burnScarYears === 2,
+		      `${old.burnScars},${old.burnScarYears}`);
+		check('...without disturbing what it did store', old.watersheds === true);
+	}
+
 	// A camera off the globe would send MapLibre somewhere undefined.
 	for (const [label, cam] of [
 		['longitude out of range', { lng: 999, lat: 37, zoom: 8 }],

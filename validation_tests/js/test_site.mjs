@@ -37,14 +37,14 @@ export function runTests(mod) {
       const r = await run({ version: '0.6.0', map_overlays: [...ALL_OVERLAYS] });
       check('falls back to the Bay Area centre', r.home.center[0] === -122.6);
       check('and its zoom', r.home.zoom === 7.2);
-      check('with every overlay offered', r.overlays.length === 3,
+      check('with every overlay offered', r.overlays.length === ALL_OVERLAYS.length,
         JSON.stringify(r.overlays));
     }
     {
       // An older backend predating the field must not lose its overlays.
       const r = await run({ version: '0.5.6' });
-      check('a payload with NO map_overlays key keeps all three',
-        r.overlays.length === 3, JSON.stringify(r.overlays));
+      check('a payload with NO map_overlays key keeps them all',
+        r.overlays.length === ALL_OVERLAYS.length, JSON.stringify(r.overlays));
     }
 
     console.log('\nevery failure path still yields a usable camera:');
@@ -64,7 +64,8 @@ export function runTests(mod) {
     }
     {
       const r = await resolveHomeView(BAY, boom);
-      check('a thrown fetch -> fallback', r.home.zoom === 7.2 && r.overlays.length === 3);
+      check('a thrown fetch -> fallback',
+        r.home.zoom === 7.2 && r.overlays.length === ALL_OVERLAYS.length);
     }
 
     console.log('\na lat/lon swap is rejected rather than opening mid-ocean:');
@@ -148,6 +149,51 @@ export function runTests(mod) {
       check('only known names survive',
         JSON.stringify([...r.overlays]) === JSON.stringify(['watersheds', 'reservoirs']),
         JSON.stringify(r.overlays));
+    }
+    {
+      // burn_scars is the one overlay whose asset is per profile, so a
+      // profile that lists it alone must keep it rather than fall through
+      // to the "absent key" default of every overlay.
+      const r = await run({ map_overlays: ['burn_scars'] });
+      check('a lone burn_scars list survives intact',
+        JSON.stringify([...r.overlays]) === JSON.stringify(['burn_scars']),
+        JSON.stringify(r.overlays));
+    }
+
+    console.log('\nthe profile slug is constrained, because it builds a path:');
+    {
+      // It is interpolated into /data/burn-scars-<profile>.json, so a value
+      // with a slash or a dot would climb out of /data.
+      const r = await run({ profile: 'xqpi' });
+      check('a plain slug passes through', r.profile === 'xqpi', r.profile);
+    }
+    for (const [label, value] of [
+      ['path traversal', '../../etc/passwd'],
+      ['a bare slash', 'a/b'],
+      ['a dot segment', '..'],
+      ['an extension', 'aqpi.json'],
+      ['a percent escape', '%2e%2e'],
+      ['an absolute URL', 'https://evil.test/x'],
+      ['an empty string', ''],
+      ['a number', 7],
+      ['null', null],
+      ['uppercase', 'AQPI']
+    ]) {
+      const r = await run({ profile: value });
+      check(`${label} yields no profile`, r.profile === '', String(r.profile));
+    }
+    {
+      // The unknown profile is '' and NOT 'aqpi', unlike every other
+      // fallback in this module. The others are cosmetic; this one picks a
+      // geographic dataset, and guessing 'aqpi' on an XQPI deployment draws
+      // Northern California perimeters 375 km off the map it is watching.
+      const r = await run({ version: '0.5.6' });
+      check('an older backend names no profile', r.profile === '', r.profile);
+      const f = await resolveHomeView(BAY, boom);
+      check('a failed fetch names no profile', f.profile === '', f.profile);
+      check('...and does NOT guess aqpi', f.profile !== 'aqpi', f.profile);
+      check('...while still identifying as AQPI everywhere cosmetic',
+        f.name === 'AQPI Sentinel', f.name);
     }
 
     console.log(failures.length

@@ -12,7 +12,8 @@
 	import { radarStatusByTarget, radarStatusOf } from '$lib/radarStatus';
 	import { isAlerting } from '$lib/grouping';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
-	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS } from '$lib/mapPrefs';
+	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
+	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
 
 	interface RadarMeta {
 		id: string;
@@ -158,6 +159,10 @@
 	let terrainOn = $state(false);
 	let terrain3DOn = $state(false);
 	let streamGaugesOn = $state(false);
+	let burnScarsOn = $state(false);
+	// Oldest scar drawn, in years since ignition. Bounded by the constants
+	// mapPrefs clamps to, so the slider and the restored value agree.
+	let burnScarYears = $state(DEFAULT_PREFS.burnScarYears);
 	const WATERSHEDS_KEY = 'sentinel-map-watersheds';
 	const RESERVOIRS_KEY = 'sentinel-map-reservoirs';
 	const TERRAIN_KEY = 'sentinel-map-terrain';
@@ -207,6 +212,57 @@
 		const data = (await r.json()) as GeoJSON.FeatureCollection;
 		reservoirsData = data;
 		return data;
+	}
+	let burnScarsData: GeoJSON.FeatureCollection | null = null;
+	// Newest ignition in the loaded file, e.g. "Dec 2025". Empty until the
+	// data arrives, and the panel hides the line rather than showing a date
+	// it does not have.
+	let burnScarThrough = $state('');
+
+	/** Format the newest ALARM_DATE in a collection as "Mon YYYY". */
+	function newestBurnScar(data: GeoJSON.FeatureCollection): string {
+		let newest = 0;
+		for (const f of data.features) {
+			const alarm = f.properties?.['ALARM_DATE'];
+			if (typeof alarm === 'number' && alarm > newest) newest = alarm;
+		}
+		if (newest <= 0) return '';
+		return new Date(newest).toLocaleDateString('en-US', {
+			month: 'short', year: 'numeric', timeZone: 'UTC'
+		});
+	}
+
+	/**
+	 * Fetch this deployment's burn-scar perimeters.
+	 *
+	 * The asset is per profile, unlike the two above: the NorCal and SoCal
+	 * perimeter sets are different data clipped to different boxes. The
+	 * profile slug is validated in $lib/site before it reaches this path.
+	 * Returns an empty collection on a missing file so a deployment whose
+	 * file has not been generated draws nothing rather than throwing out of
+	 * refreshGeography and leaving the other layers unbuilt.
+	 */
+	async function loadBurnScars(): Promise<GeoJSON.FeatureCollection> {
+		if (burnScarsData) return burnScarsData;
+		const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+		// Empty means /api/version never said which network this is. Guessing
+		// would put one region's perimeters on another region's map, where
+		// they look exactly as authoritative as the right ones.
+		if (!siteProfile) return empty;
+		try {
+			const r = await fetch(`/data/burn-scars-${siteProfile}.json`);
+			if (!r.ok) return empty;
+			const data = (await r.json()) as GeoJSON.FeatureCollection;
+			// Checked before the cache is written, so a file that parses as
+			// JSON without being a FeatureCollection is not stored and handed
+			// to addSource on the next call.
+			if (!Array.isArray(data?.features)) return empty;
+			burnScarsData = data;
+			burnScarThrough = newestBurnScar(data);
+			return data;
+		} catch {
+			return empty;
+		}
 	}
 	async function loadStreamGauges(): Promise<GeoJSON.FeatureCollection> {
 		if (streamGaugesData) return streamGaugesData;
@@ -320,11 +376,16 @@
 	// its only radar off-screen. See $lib/site.
 	const FALLBACK_HOME: HomeView = { center: [-122.6, 37.95], zoom: 7.2 };
 	let home = $state<HomeView>(FALLBACK_HOME);
-	// Which regional overlays this deployment has data for. AQPI's three are
-	// all Northern California; a profile without them should not offer a
-	// toggle that silently does nothing.
+	// Which regional overlays this deployment has data for. AQPI's three
+	// geographic ones are all Northern California; a profile without them
+	// should not offer a toggle that silently does nothing.
 	let overlays = $state<readonly Overlay[]>(ALL_OVERLAYS);
 	const hasOverlay = (o: Overlay) => overlays.includes(o);
+	// Names the per-profile burn-scar asset. Validated in $lib/site against a
+	// slug pattern, so it is safe to interpolate into a path here. Empty
+	// until /api/version answers, and stays empty if it never names a
+	// profile, which loadBurnScars treats as "draw nothing".
+	let siteProfile = $state('');
 	/** Can this composite be put on the map at all? */
 	function placeable(id: string): boolean {
 		if (id === 'none') return true;
@@ -379,6 +440,8 @@
 		terrainOn       = p.terrain;
 		terrain3DOn     = p.terrain3D;
 		streamGaugesOn  = p.streamGauges;
+		burnScarsOn     = p.burnScars;
+		burnScarYears   = p.burnScarYears;
 		tiltEl          = p.tiltEl;
 		// Camera is deliberately NOT applied here. On mount the map is
 		// constructed at the saved camera instead (no visible snap), and Reset
@@ -392,7 +455,8 @@
 			composite, moment: currentMoment, activeRadars: [...activeRadars],
 			nexrad: nexradEnabled, opacity: overlayOpacity, panelOpen,
 			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
-			terrain3D: terrain3DOn, streamGauges: streamGaugesOn, tiltEl,
+			terrain3D: terrain3DOn, streamGauges: streamGaugesOn,
+			burnScars: burnScarsOn, burnScarYears, tiltEl,
 			camera: c && map
 				? { lng: c.lng, lat: c.lat, zoom: map.getZoom(),
 				    bearing: map.getBearing(), pitch: map.getPitch() }
@@ -407,6 +471,7 @@
 		void composite; void currentMoment; void activeRadars; void nexradEnabled;
 		void overlayOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
 		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
+		void burnScarsOn; void burnScarYears;
 		if (!prefsReady) return;
 		savePrefs(currentPrefs());
 	});
@@ -1332,6 +1397,16 @@
 		void streamGaugesOn;
 		refreshStreamGauges(theme.resolved);
 	});
+	// Burn scars. The toggle rebuilds the layers; the age slider only pushes
+	// a new filter, so dragging it does not refetch or re-add anything.
+	$effect(() => {
+		void burnScarsOn;
+		refreshBurnScars(theme.resolved);
+	});
+	$effect(() => {
+		void burnScarYears;
+		applyBurnScarFilter();
+	});
 
 	// ---- bulk-action helpers ------------------------------------------------
 	// Fit the viewport to encompass every currently-active radar's range circle
@@ -1524,6 +1599,7 @@
 		refreshTerrain(t);
 		refreshTerrain3D();
 		refreshStreamGauges(t);
+		refreshBurnScars(t);
 	}
 
 	// Stream gauges — USGS sites parsed from radarca's stream_data.csv,
@@ -1814,6 +1890,113 @@
 		}
 	}
 
+	// Burn scars — CAL FIRE perimeters, shaded by how long ago each burned.
+	//
+	// Age drives both the filter and the color, and it is computed in the
+	// style expression from ALARM_DATE rather than baked into the file, so
+	// the layer stays honest between regenerations. ALARM_DATE is the
+	// ignition date in epoch milliseconds; YEAR_ alone would bucket a
+	// January fire with the December one eleven months later, which is the
+	// difference between inside and outside the debris-flow window.
+	const BURN_SCAR_SOURCE = 'burn-scars';
+	const BURN_SCAR_FILL = 'burn-scar-fill';
+	const BURN_SCAR_LINE = 'burn-scar-line';
+	const YEAR_MS = 365.25 * 24 * 3600 * 1000;
+
+	/**
+	 * Years since ignition, as a style expression.
+	 *
+	 * `Date.now()` is read when the layer is built, so a tab left open for
+	 * days drifts. Irrelevant against a one-to-five-year scale, and the
+	 * alternative is re-evaluating every feature on a timer.
+	 */
+	function burnScarAge(): maplibregl.ExpressionSpecification {
+		return ['/', ['-', Date.now(), ['get', 'ALARM_DATE']], YEAR_MS];
+	}
+
+	/** Features inside the slider's window, skipping any with no date. */
+	function burnScarFilter(): maplibregl.FilterSpecification {
+		return ['all', ['has', 'ALARM_DATE'], ['<=', burnScarAge(), burnScarYears]];
+	}
+
+	/** Push a new slider value onto the live layers without refetching. */
+	function applyBurnScarFilter() {
+		if (!mapAlive() || !map || !styleReady) return;
+		for (const id of [BURN_SCAR_FILL, BURN_SCAR_LINE]) {
+			if (map.getLayer(id)) map.setFilter(id, burnScarFilter());
+		}
+	}
+
+	async function refreshBurnScars(t: 'light' | 'dark') {
+		if (!map || !styleReady) return;
+		for (const lyr of [BURN_SCAR_LINE, BURN_SCAR_FILL]) {
+			if (map.getLayer(lyr)) map.removeLayer(lyr);
+		}
+		if (map.getSource(BURN_SCAR_SOURCE)) map.removeSource(BURN_SCAR_SOURCE);
+		if (!burnScarsOn) return;
+
+		const data = await loadBurnScars();
+		// === Load-bearing: re-check the world after the await ===
+		//
+		// The first fetch takes a network round trip, and three things can
+		// change under it. The user can toggle the layer back off, in which
+		// case the call that saw `burnScarsOn` false already ran and removed
+		// nothing, so returning here is the only thing that keeps the scars
+		// off a map whose panel reads OFF. The theme can swap, which would
+		// paint the layer in the palette captured before the swap. And the
+		// component can be destroyed, where `map` is still set but its style
+		// is gone, so `getSource` throws into an unhandled rejection.
+		//
+		// `mapAlive()` covers the last one; the other two need their own
+		// test, since neither is visible from the map object.
+		if (!mapAlive() || !map || !styleReady) return;
+		if (!burnScarsOn || t !== theme.resolved) return;
+		if (map.getSource(BURN_SCAR_SOURCE)) return;
+		map.addSource(BURN_SCAR_SOURCE, { type: 'geojson', data });
+
+		const age = burnScarAge();
+		const filter = burnScarFilter();
+		// Fill stays faint because these overlap heavily: 392 perimeters in
+		// the XQPI box, many nested inside a larger fire's footprint. At the
+		// opacity an isolated polygon wants, a stack of four reads as solid
+		// and hides the composite underneath. The outline carries the shape.
+		map.addLayer(
+			{
+				id: BURN_SCAR_FILL,
+				type: 'fill',
+				source: BURN_SCAR_SOURCE,
+				filter,
+				// Newer scars draw above older ones, so a fresh burn inside an
+				// old footprint is not buried by it.
+				layout: { 'fill-sort-key': ['-', 0, age] },
+				paint: {
+					'fill-color': ['interpolate', ['linear'], age,
+						0, t === 'light' ? '#b4310f' : '#ff7a45',
+						5, t === 'light' ? '#8a6a52' : '#9c7f66'],
+					'fill-opacity': ['interpolate', ['linear'], age, 0, 0.3, 5, 0.1]
+				}
+			},
+			'radar-halo'
+		);
+		map.addLayer(
+			{
+				id: BURN_SCAR_LINE,
+				type: 'line',
+				source: BURN_SCAR_SOURCE,
+				filter,
+				layout: { 'line-sort-key': ['-', 0, age] },
+				paint: {
+					'line-color': ['interpolate', ['linear'], age,
+						0, t === 'light' ? '#8f2409' : '#ff8d5c',
+						5, t === 'light' ? '#7d5f49' : '#8e735c'],
+					'line-width': ['interpolate', ['linear'], age, 0, 1.5, 5, 0.9],
+					'line-opacity': ['interpolate', ['linear'], age, 0, 0.9, 5, 0.45]
+				}
+			},
+			'radar-halo'
+		);
+	}
+
 	// Compute a default bearing so the northernmost X-band/CBAND radar sits
 	// at the top-left of the viewport and the southernmost at the bottom-
 	// right (rotated diagonal). Asked-for 2026-05-18 ("KSCW top-left, KSCR
@@ -1854,18 +2037,26 @@
 		dataSource = site.dataSource;
 		hasRadarca = site.hasRadarca;
 		siteProducts = site.products;
+		siteProfile = site.profile;
 		// A persisted composite this deployment cannot place would otherwise
 		// stay selected and render nothing with no explanation.
 		if (!placeable(composite)) composite = firstPlaceable();
-		// A persisted toggle for an overlay this deployment does not have would
-		// otherwise stay on and fetch a dataset for the wrong region.
-		if (!hasOverlay('watersheds')) watershedsOn = false;
-		if (!hasOverlay('reservoirs')) reservoirsOn = false;
-		if (!hasOverlay('stream_gauges')) streamGaugesOn = false;
 		// Second pass, now able to drop a decommissioned radar or a renamed
 		// product rather than handing a stale id to MapLibre.
 		const restored = loadPrefs(prefsVocabulary());
 		applyPrefs(restored);
+		// A persisted toggle for an overlay this deployment does not have would
+		// otherwise stay on and fetch a dataset for the wrong region.
+		//
+		// === Load-bearing: this runs AFTER applyPrefs, not before ===
+		//
+		// applyPrefs assigns every toggle straight from the restored blob, so
+		// dropping them first just hands the value back. The toggle then reads
+		// on with its row hidden, which leaves no way to turn it off.
+		if (!hasOverlay('watersheds')) watershedsOn = false;
+		if (!hasOverlay('reservoirs')) reservoirsOn = false;
+		if (!hasOverlay('stream_gauges')) streamGaugesOn = false;
+		if (!hasOverlay('burn_scars')) burnScarsOn = false;
 		// Build the map AT the saved camera rather than jumping to it after
 		// load: a jumpTo here would render the default view first and visibly
 		// snap, and it would also fight the fitBounds paths on slow loads.
@@ -2314,6 +2505,57 @@
 				{streamGaugesOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{/if}
+		{#if hasOverlay('burn_scars')}
+		<!-- Burn scars, with the age window below it. The slider shows only
+		     while the layer is on: out of context it reads as a control over
+		     something else in the Geography group. -->
+		<button
+			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => (burnScarsOn = !burnScarsOn)}
+			title="CAL FIRE perimeters, shaded by how long ago each burned. Intense rain over a recent scar is the debris-flow case."
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {burnScarsOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Burn scars</span>
+				<span class="text-[9.5px] text-[var(--color-faint)]">CAL FIRE</span>
+			</span>
+			<span class="num text-[9.5px] {burnScarsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{burnScarsOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+		{#if burnScarsOn}
+		<div class="flex items-center gap-2 px-3 pb-1 pt-0.5">
+			<span class="text-[9.5px] text-[var(--color-faint)]">age</span>
+			<input
+				type="range"
+				min={BURN_SCAR_YEARS_MIN}
+				max={BURN_SCAR_YEARS_MAX}
+				step="1"
+				value={burnScarYears}
+				oninput={(e) => (burnScarYears = Number((e.target as HTMLInputElement).value))}
+				class="flex-1 accent-[var(--color-warn)]"
+				title="oldest scar to draw, in years since ignition"
+				aria-label="burn scar age window, in years"
+			/>
+			<span class="num w-[3.2rem] text-right text-[9.5px] text-[var(--color-muted)]">
+				≤{burnScarYears} yr
+			</span>
+		</div>
+		{#if burnScarThrough}
+			<!-- CAL FIRE publishes a season the following spring, so the year in
+			     progress is always missing. Without this line an empty recent
+			     window reads as "no fires" rather than as a data lag. -->
+			<p class="px-3 pb-2 text-[9px] leading-tight text-[var(--color-faint)]">
+				perimeters through {burnScarThrough}
+			</p>
+		{/if}
+		{/if}
+		<div class="border-b border-[var(--color-border)]"></div>
 		{/if}
 
 		<!-- Radars section header with inline moment tabs -->
