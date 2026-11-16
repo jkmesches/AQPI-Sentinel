@@ -215,6 +215,49 @@ svg.spark path.stroke { opacity: 0.95; }
 .gauge-popup .gauge-muted { color: var(--color-muted); }
 .gauge-popup .gauge-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
 
+/* Stream-gauge hydrograph.
+   Two series of the same measure, so one y axis, and that axis starts at zero
+   because flow has a true zero and the question is how much water there is.
+   Autoscaling to the observed min/max would draw the 1.2x diurnal wobble of a
+   dry creek with the same full-height swing as a storm.
+   Both pairs below pass the categorical checks (lightness band, chroma floor,
+   CVD separation, normal-vision floor, contrast) against their own surface,
+   dark selected separately rather than flipped. The forecast series is dashed
+   as well as differently colored, so the two never rely on hue alone. */
+:root, [data-theme="dark"] {
+	--gauge-observed: #3b82f6;
+	--gauge-forecast: #ea580c;
+}
+[data-theme="light"] {
+	--gauge-observed: #1d4ed8;
+	--gauge-forecast: #c2410c;
+}
+.gauge-chart { display: block; width: 100%; height: auto; margin-top: 6px; }
+.gauge-chart .gc-axis { stroke: var(--color-border-strong); stroke-width: 1; }
+.gauge-chart .gc-now { stroke: var(--color-faint); stroke-width: 1; stroke-dasharray: 2 2; }
+.gauge-chart .gc-tick { fill: var(--color-muted); font: 8.5px var(--font-mono); }
+.gauge-chart .gc-obs {
+	fill: none; stroke: var(--gauge-observed); stroke-width: 2;
+	stroke-linejoin: round; stroke-linecap: round;
+}
+.gauge-chart .gc-fcst {
+	fill: none; stroke: var(--gauge-forecast); stroke-width: 2;
+	stroke-dasharray: 4 3; stroke-linejoin: round; stroke-linecap: round;
+}
+.gauge-chart .gc-hit { fill: transparent; }
+/* The stretch the upstream serves nothing for, marked so it reads as absent
+   data rather than as a chart that failed to draw. */
+.gauge-chart .gc-gap { fill: var(--color-surface-hi); }
+.gauge-chart .gc-gaplabel { fill: var(--color-faint); font: 8.5px var(--font-mono); }
+.gauge-legend {
+	margin-top: 4px; display: flex; gap: 10px;
+	color: var(--color-muted); font-size: 10px;
+}
+.gauge-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.gauge-legend i { display: inline-block; width: 12px; height: 0; border-top-width: 2px; }
+.gauge-legend .gl-obs { border-top: 2px solid var(--gauge-observed); }
+.gauge-legend .gl-fcst { border-top: 2px dashed var(--gauge-forecast); }
+
 /* Radar pin hover tooltip — compact name + scan elevations + range. */
 .radar-hover-popup .maplibregl-popup-content { padding: 6px 9px !important; }
 .radar-pop { font: 11px/1.45 var(--font-mono); white-space: nowrap; }
