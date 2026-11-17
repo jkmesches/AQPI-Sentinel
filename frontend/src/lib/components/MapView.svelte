@@ -333,10 +333,24 @@
 	// and the map would happily draw it as if it were current inundation.
 	// That is the dangerous case: stale data that looks live.
 	//
-	// Derived from the loaded step list rather than a new API: forecast
-	// products legitimately carry FUTURE steps (negative age), so only a
-	// newest-step that has fallen into the past counts as stale.
-	const STALE_AFTER_H = 3;
+	// Whether a product counts as stale is L1's question, and `unhealthyProducts`
+	// below already carries its answer. The banner used to decide for itself,
+	// with one threshold of 3 hours for every product, while the backend holds a
+	// per-product `max_freshness_s` spanning 360 s for the composites to 90,000 s
+	// for max_water_*. A 250-to-1 range behind a single number is wrong in both
+	// directions: max_water_depth raised the banner at 3 h against a 25 h
+	// expectation, with L1 reporting pass beside it, and a composite whose feed
+	// had died stayed unmarked for three hours against a 6-minute expectation.
+	// The second is the failure this guard exists to catch.
+	//
+	// Taking L1's verdict rather than a copy of its thresholds also keeps the
+	// banner and the picker's "not updating" mark from contradicting each other,
+	// since both now read the same row. Nothing is drawn when L1 has no row for
+	// the product yet, which is the quiet answer rather than a guessed one.
+	//
+	// The age below stays, as the text the banner shows once it is raised.
+	// Forecast products legitimately carry FUTURE steps, so a negative age is
+	// normal and is reported as such rather than suppressed.
 
 	// parseStepTs reads the API's unmarked timestamps as UTC rather than as
 	// the viewer's local time. See $lib/gaugeSeries for why that matters.
@@ -356,7 +370,6 @@
 		if (ts.length === 0) return null;
 		return (Date.now() - Math.max(...ts)) / 3_600_000;
 	});
-	const compositeStale = $derived(compositeAgeH !== null && compositeAgeH > STALE_AFTER_H);
 
 	function humanAge(h: number): string {
 		if (h >= 48) return `${Math.floor(h / 24)} days`;
@@ -373,6 +386,11 @@
 		}
 		return out;
 	});
+
+	/** Declared after unhealthyProducts, which it reads. See the guard above. */
+	const compositeStale = $derived(
+		composite !== 'none' && !!unhealthyProducts[composite]
+	);
 
 	const stepLabel = $derived(
 		stepIdx >= 0 && stepIdx < steps.length
@@ -2729,11 +2747,14 @@
 		     operator reading a 50-day-old inundation frame as current, and a
 		     subtle marker would not stop that. Non-interactive so it never
 		     blocks map controls. -->
-		{#if compositeStale && compositeAgeH !== null}
+		{#if compositeStale}
 			<div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 max-w-[92%]">
 				<div class="rounded-sm border border-[var(--color-warn)] bg-[var(--color-warn)]/[0.14] px-3 py-1.5 text-center shadow-xl backdrop-blur">
 					<div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
-						⚠ Not current — {humanAge(compositeAgeH)} old
+						<!-- The age is omitted while the step list still describes the
+						     product selected a moment ago, since it would be that
+						     one's age. The warning itself is not withheld for it. -->
+						⚠ Not current{compositeAgeH !== null ? ` — ${humanAge(compositeAgeH)} old` : ''}
 					</div>
 					<div class="mt-0.5 text-[10.5px] num text-[var(--color-default)]">
 						{productLabel(composite)} last updated {stepLabel || '—'}. Upstream stopped publishing; this is not live data.
