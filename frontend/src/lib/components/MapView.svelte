@@ -323,7 +323,6 @@
 	 */
 	let stepsFor = $state('');
 	let playing = $state(false);
-	let playTimer: ReturnType<typeof setInterval> | undefined;
 	let activity = $state<number[]>([]);     // non-empty pixel fraction per step
 	// === Stale-composite guard ===
 	//
@@ -973,9 +972,22 @@
 		}
 	}
 
+	/**
+	 * A layer's swap, loaded and ready, held until the whole frame is.
+	 *
+	 * The prepare* functions below return one of these rather than swapping
+	 * as soon as their own image decodes. Each layer used to apply the moment
+	 * it was ready, so a step appeared on screen in pieces: measured during
+	 * playback with six radars, 65% of frames landed in two or more visible
+	 * stages up to 232 ms apart, against 30% at one radar. The cadence was
+	 * never the problem (3-4% of the intended interval, nothing dropped); the
+	 * reassembly inside each frame was.
+	 */
+	type FrameApply = () => void;
+
 	let _compositeToken = 0;
-	async function renderCompositeFrame() {
-		if (!map || !styleReady) return;
+	async function prepareComposite(): Promise<FrameApply | null> {
+		if (!map || !styleReady) return null;
 		// The profile's box replaces the per-product table wholesale: its
 		// product ids are not AQPI's, so a lookup would miss and silently draw
 		// nothing. `composite === 'none'` still means no overlay.
@@ -983,9 +995,11 @@
 			? null
 			: (compExtent?.[composite] ?? (compExtent ? null : COMP_EXTENT[composite]));
 		if (!e || stepIdx < 0) {
-			if (map.getLayer('comp-overlay-layer')) map.removeLayer('comp-overlay-layer');
-			if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
-			return;
+			const m = map;
+			return () => {
+				if (m.getLayer('comp-overlay-layer')) m.removeLayer('comp-overlay-layer');
+				if (m.getSource('comp-overlay')) m.removeSource('comp-overlay');
+			};
 		}
 		const myToken = ++_compositeToken;
 		const isCurrent = () => myToken === _compositeToken && !!map && styleReady;
@@ -1020,33 +1034,43 @@
 		// Preload first so the inflate+premultiply lands off the main path,
 		// then ask MapLibre to swap in the cached bytes.
 		const ok = await preloadImage(url, isCurrent);
-		if (!ok || !isCurrent()) return;
-		const src = map!.getSource('comp-overlay') as maplibregl.ImageSource | undefined;
-		if (src && typeof src.updateImage === 'function') {
-			src.updateImage({ url, coordinates: coords });
-		} else {
-			if (map!.getLayer('comp-overlay-layer')) map!.removeLayer('comp-overlay-layer');
-			if (map!.getSource('comp-overlay')) map!.removeSource('comp-overlay');
-			map!.addSource('comp-overlay', { type: 'image', url, coordinates: coords });
-			addOverlayBelowMarkers(map!, {
-				id: 'comp-overlay-layer',
-				type: 'raster',
-				source: 'comp-overlay',
-				paint: { 'raster-opacity': 0.7 }
-			});
-		}
+		if (!ok || !isCurrent()) return null;
+		return () => {
+			if (!map) return;
+			const src = map.getSource('comp-overlay') as maplibregl.ImageSource | undefined;
+			if (src && typeof src.updateImage === 'function') {
+				src.updateImage({ url, coordinates: coords });
+			} else {
+				if (map.getLayer('comp-overlay-layer')) map.removeLayer('comp-overlay-layer');
+				if (map.getSource('comp-overlay')) map.removeSource('comp-overlay');
+				map.addSource('comp-overlay', { type: 'image', url, coordinates: coords });
+				addOverlayBelowMarkers(map, {
+					id: 'comp-overlay-layer',
+					type: 'raster',
+					source: 'comp-overlay',
+					paint: { 'raster-opacity': 0.7 }
+				});
+			}
+		};
+	}
+
+	/** Load and apply the composite on its own, for callers outside a frame. */
+	async function renderCompositeFrame(): Promise<void> {
+		(await prepareComposite())?.();
 	}
 
 	function refreshComposite() {
 		// kept for back-compat (called from theme swap + initial mount) —
 		// just reissues the current step.
-		renderCompositeFrame();
+		void renderCompositeFrame();
 	}
 
 	// ---- time-control actions ---------------------------------------------
 	function stopPlay() {
 		playing = false;
-		if (playTimer) { clearInterval(playTimer); playTimer = undefined; }
+		// Retire the generation as well: a loop already awaiting a frame
+		// checks this before scheduling the next one.
+		_playLoopId++;
 	}
 	// `activity` is the per-step non-empty-pixel fraction returned from
 	// /api/upstream/activity. Dead-still steps (activity ≈ 0) carry no info
@@ -1073,37 +1097,102 @@
 		}
 		return i;
 	}
-	function tick() {
-		if (steps.length === 0) return;
-		stepIdx = _nextInterestingStep(stepIdx);
-		syncAllToStep();
+	/**
+	 * How long a frame stays on screen before the next one is requested.
+	 *
+	 * The interval used to grow by 180 ms per radar, on the reasoning that
+	 * more layers need more time. Measurement says otherwise: at one, three
+	 * and six radars the displayed cadence held to within 3-4% of its target
+	 * and no frame ever ran late, so the penalty was buying nothing and cost
+	 * six radars nearly half the playback speed (1.88 s a frame against
+	 * 0.98 s at one radar).
+	 *
+	 * The loop now waits for the frame instead of guessing at it, so this is
+	 * a dwell rather than a budget: the real interval is whichever is longer,
+	 * this or the time the frame took to load.
+	 */
+	const FRAME_DWELL_MS = 900;
+
+	let _playLoopId = 0;
+
+	/**
+	 * Advance the scrubber for as long as playback is on.
+	 *
+	 * Each pass awaits the whole frame before starting the dwell, so a slow
+	 * frame delays the next one rather than being painted over by it. The
+	 * previous setInterval fired on the clock whether or not the last frame
+	 * had landed.
+	 *
+	 * @param id This loop's generation, to stop a superseded loop.
+	 */
+	async function runPlayLoop(id: number): Promise<void> {
+		// service loop: exits when `playing` goes false or a newer loop starts
+		while (playing && id === _playLoopId) {
+			const started = performance.now();
+			if (steps.length === 0) return;
+			stepIdx = _nextInterestingStep(stepIdx);
+			await syncAllToStep();
+			if (!playing || id !== _playLoopId) return;
+			const left = FRAME_DWELL_MS - (performance.now() - started);
+			if (left > 0) {
+				await new Promise<void>((resolve) => setTimeout(resolve, left));
+			}
+		}
 	}
-	// Per-frame load count under typical settings: 1 composite + N radars +
-	// 1 NEXRAD ≈ 1+N+1 image decodes per tick. Keep the average load below
-	// ~5 images per second so the main thread never falls behind.
-	function _playIntervalMs(): number {
-		const n = activeRadars.length;
-		const ms = 600 + n * 180 + (composite !== 'none' ? 200 : 0) + (nexradEnabled ? 200 : 0);
-		return Math.min(ms, 3000);
-	}
+
 	function togglePlay() {
 		if (playing) {
 			stopPlay();
 		} else {
 			if (steps.length === 0) return;
 			playing = true;
-			playTimer = setInterval(tick, _playIntervalMs());
+			void runPlayLoop(++_playLoopId);
 		}
 	}
-	function syncAllToStep() {
+	let _frameToken = 0;
+
+	/**
+	 * A frame that will not finish is not allowed to stall playback. The
+	 * deadline only catches a genuinely stuck load, since a warm frame lands
+	 * in well under a second and a cold one in a few.
+	 */
+	const FRAME_DEADLINE_MS = 8000;
+
+	/**
+	 * Load every layer for the current step, then swap them together.
+	 *
+	 * The barrier is the point. Each layer used to swap the moment its own
+	 * image decoded, so one step arrived on screen in stages and the map
+	 * showed a composite from step N beside a radar from step N-1 for up to
+	 * 232 ms. Holding the swaps until all of them are ready costs nothing in
+	 * cadence, because the loads already ran concurrently, and it removes the
+	 * reassembly an operator was reading as jitter.
+	 *
+	 * A layer that fails or times out contributes no swap and leaves its own
+	 * imagery alone, so one bad frame cannot freeze the others.
+	 */
+	async function syncAllToStep(): Promise<void> {
 		// In tilt mode the scrubber drives the radar-display frames only —
 		// composite/NEXRAD/per-radar run on a different (radarca) timebase,
 		// so we don't try to align them. refreshTilt renders the frame;
 		// when not engaged it tears the overlay down.
-		if (!tiltEngaged) {
-			renderCompositeFrame();
-			syncNexradTime();
-			syncRadarOverlayTime();
+		if (tiltEngaged) {
+			refreshTilt();
+			return;
+		}
+		const token = ++_frameToken;
+		const deadline = new Promise<'late'>((resolve) =>
+			setTimeout(() => resolve('late'), FRAME_DEADLINE_MS));
+		const frame = Promise.all([
+			prepareComposite().catch(() => null),
+			prepareNexrad().catch(() => null),
+			prepareRadars().catch((): FrameApply[] => [])
+		]);
+		const settled = await Promise.race([frame, deadline]);
+		if (token !== _frameToken || !mapAlive() || !styleReady) return;
+		if (settled !== 'late') {
+			const [comp, nex, rads] = settled;
+			for (const apply of [comp, nex, ...rads]) apply?.();
 		}
 		refreshTilt();
 	}
@@ -1209,10 +1298,10 @@
 		}
 	});
 
-	async function syncNexradTime() {
-		if (!map || !nexradEnabled) return;
+	async function prepareNexrad(): Promise<FrameApply | null> {
+		if (!map || !nexradEnabled) return null;
 		const src = map.getSource('nexrad') as maplibregl.ImageSource | undefined;
-		if (!src || typeof src.updateImage !== 'function') return;
+		if (!src || typeof src.updateImage !== 'function') return null;
 		const e = EXTENT_LARGE;
 		const url = nexradImageUrl(nexradTimeIso);
 		const token = ++nexradFetchToken;
@@ -1220,8 +1309,8 @@
 		if (!blobUrl) {
 			try {
 				const r = await fetch(url);
-				if (token !== nexradFetchToken) return;   // a newer step superseded us
-				if (!r.ok) return;
+				if (token !== nexradFetchToken) return null;  // superseded
+				if (!r.ok) return null;
 				const blob = await r.blob();
 				blobUrl = URL.createObjectURL(blob);
 				nexradBlobs.set(url, blobUrl);
@@ -1235,19 +1324,27 @@
 					}
 				}
 			} catch {
-				return;
+				return null;
 			}
 		}
-		if (token !== nexradFetchToken || !blobUrl) return;
-		src.updateImage({
-			url: blobUrl,
-			coordinates: [
-				[e.west, e.north],
-				[e.east, e.north],
-				[e.east, e.south],
-				[e.west, e.south]
-			]
-		});
+		if (token !== nexradFetchToken || !blobUrl) return null;
+		const ready = blobUrl;
+		return () => {
+			src.updateImage({
+				url: ready,
+				coordinates: [
+					[e.west, e.north],
+					[e.east, e.north],
+					[e.east, e.south],
+					[e.west, e.south]
+				]
+			});
+		};
+	}
+
+	/** Load and apply the NEXRAD frame on its own, outside a frame barrier. */
+	async function syncNexradTime(): Promise<void> {
+		(await prepareNexrad())?.();
 	}
 
 	const radarLayerId = (id: string) => `radar-${id}-layer`;
@@ -1432,8 +1529,19 @@
 	}
 
 	let _radarSyncToken = 0;
-	async function syncRadarOverlayTime() {
-		if (!map || !styleReady) return;
+
+	/**
+	 * Load every active radar's frame, concurrently, and return their swaps.
+	 *
+	 * The loads run together rather than one after another. Awaiting each
+	 * radar in turn left the decode semaphore (4 slots) holding one image at
+	 * a time, so six radars cost six serial round trips and the play loop
+	 * paid for it with a 180 ms per-radar interval penalty.
+	 *
+	 * @returns One apply per radar whose frame changed and loaded.
+	 */
+	async function prepareRadars(): Promise<FrameApply[]> {
+		if (!map || !styleReady) return [];
 		const myToken = ++_radarSyncToken;
 		const isCurrent = () => myToken === _radarSyncToken && !!map && styleReady;
 		// Snapshot the targets so a later mutation to activeRadars doesn't
@@ -1446,28 +1554,41 @@
 			})
 			.filter((t): t is { id: string; url: string; e: { west: number; north: number; east: number; south: number } } => t !== null);
 
-		for (const t of targets) {
-			if (!isCurrent()) return;
+		const prepared = await Promise.all(targets.map(async (t) => {
 			// Skip frames already on screen. MapLibre re-fetches and re-decodes
 			// on every updateImage even when the URL is identical, and this
 			// runs on each step change plus the 120s poke. The URL carries the
 			// time and _forceBuster, so a genuine refresh still gets through.
-			if (_appliedRadarUrl.get(t.id) === t.url) continue;
+			if (_appliedRadarUrl.get(t.id) === t.url) return null;
 			const ok = await preloadImage(t.url, isCurrent);
-			if (!ok || !isCurrent()) continue;
-			const src = map!.getSource(radarSrcId(t.id)) as maplibregl.ImageSource | undefined;
+			if (!ok || !isCurrent()) return null;
+			return t;
+		}));
+
+		const applies: FrameApply[] = [];
+		for (const t of prepared) {
+			if (!t || !isCurrent()) continue;
+			const src = map.getSource(radarSrcId(t.id)) as maplibregl.ImageSource | undefined;
 			if (!src) continue;
-			src.updateImage({
-				url: t.url,
-				coordinates: [
-					[t.e.west, t.e.north],
-					[t.e.east, t.e.north],
-					[t.e.east, t.e.south],
-					[t.e.west, t.e.south]
-				]
+			applies.push(() => {
+				src.updateImage({
+					url: t.url,
+					coordinates: [
+						[t.e.west, t.e.north],
+						[t.e.east, t.e.north],
+						[t.e.east, t.e.south],
+						[t.e.west, t.e.south]
+					]
+				});
+				_appliedRadarUrl.set(t.id, t.url);
 			});
-			_appliedRadarUrl.set(t.id, t.url);
 		}
+		return applies;
+	}
+
+	/** Load and apply the radar overlays on their own, outside a barrier. */
+	async function syncRadarOverlayTime(): Promise<void> {
+		for (const apply of await prepareRadars()) apply();
 	}
 
 	// ---- reactive sync ------------------------------------------------------
@@ -2485,10 +2606,12 @@
 		visHandler = () => {
 			if (document.hidden) {
 				if (scanRefresh) { clearInterval(scanRefresh); scanRefresh = undefined as any; }
-				if (playTimer) { clearInterval(playTimer); playTimer = undefined; }
+				// Retire the running loop without clearing `playing`, so the
+				// control still reads as playing and resumes on return.
+				_playLoopId++;
 			} else {
 				if (!scanRefresh) scanRefresh = setInterval(pokeOverlays, 120_000);
-				if (playing && !playTimer) playTimer = setInterval(tick, _playIntervalMs());
+				if (playing) void runPlayLoop(++_playLoopId);
 			}
 		};
 		document.addEventListener('visibilitychange', visHandler);
