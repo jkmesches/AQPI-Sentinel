@@ -28,6 +28,58 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-17
+
+Playback stops reassembling itself in front of you, and the map stops
+arguing with the dashboard about which products are stale.
+
+Both came from measuring rather than reading. The playback fault was the
+opposite of what the code suggested, and the staleness fault had been
+hidden by the timezone bug [0.10.0] fixed.
+
+### Changed
+
+- **Every layer of a playback frame now swaps at once.** Each overlay used
+  to apply the moment its own image decoded, so a step arrived on screen in
+  stages and the map showed a composite from step N beside a radar from
+  step N-1. Sampling the canvas at ~11 Hz through 70 s of playback, 65% of
+  frames at six radars landed in two or more visible stages up to 232 ms
+  apart, against 30% at one radar. After the change: 12% and 3%.
+
+  The cadence was never the problem. Frames landed within 3-4% of the
+  intended interval at every radar count and none ran late or was dropped,
+  which is what ruled out the timer outpacing the loads.
+
+- **Playback no longer slows down as products are added.** The radar loads
+  awaited each other in turn, leaving the four-slot decode budget holding
+  one image at a time, and the interval added 180 ms per radar on an
+  assumption the measurement contradicts. Loads now run together and the
+  loop waits for the frame rather than guessing at it, so a slow frame
+  delays the next instead of being painted over by it. Six radars went from
+  1.80 s a frame to 0.888 s, and one, three and six radars now all run at
+  about 0.89 s where they used to run at 0.96 s, 1.33 s and 1.80 s.
+
+### Fixed
+
+- **The "not current" banner follows L1 instead of its own threshold.** It
+  applied a flat three hours to every product while the backend holds a
+  per-product `max_freshness_s` running from 360 s for the composites to
+  90,000 s for `max_water_*`. Across a 250-to-1 range a single number is
+  wrong both ways: `max_water_depth` raised the banner at 3.2 h against a
+  25 h expectation, with L1 reporting pass on the same product in the panel
+  beside it, while a composite whose feed had died stayed unmarked for
+  three hours against a six-minute expectation. The second is the failure
+  the banner exists to catch.
+
+  The verdict now comes from the same L1 rows the product picker already
+  marks, so the two surfaces cannot disagree and no threshold is duplicated
+  in the frontend. Copying `max_freshness_s` across was the first plan and
+  was dropped on measurement: across 24 samples of healthy operation
+  comp_ref ages ran a median of 293 s and a maximum of 366 s, so its 360 s
+  expectation sits inside the normal spread and 8% of healthy samples would
+  have raised the banner. L1 owns that threshold along with the tolerance
+  it applies before calling a product failed.
+
 ## [0.11.0] - 2026-11-16
 
 Two map layers were showing less than they had. One was blank in the state
