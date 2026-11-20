@@ -113,7 +113,9 @@ def test_unmounted() -> None:
 
 
 def main() -> int:
-    day = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    # Near now, because the listing keeps only the last hour. A fixed hour
+    # would make this test pass or fail depending on the time of day.
+    day = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=10)
     print("--- a deployment that mounts the tree (the AQPI deployment, the XQPI deployment) ---")
     with tempfile.TemporaryDirectory() as root:
         test_mounted(root, day)
