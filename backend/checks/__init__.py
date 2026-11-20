@@ -23,6 +23,7 @@ _ALWAYS = (
     "layer2_backend_radar",    # LB2 (gated) + the fleet correlation check
     "layer3_backend_processing",  # LB3 (gated)
     "layer0_episode",          # attach_episode_suppression (+1 radarca-gated)
+    "layer4_image",            # image QC, off the mount when there is one
 )
 
 # The radarca-only module list is config.RADARCA_ONLY_MODULES — one canonical
