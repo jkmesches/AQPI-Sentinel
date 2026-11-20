@@ -153,10 +153,17 @@ function camera(v: unknown): MapCamera | null {
 }
 
 function pick(v: unknown, allowed: readonly string[] | undefined, d: string): string {
-	if (typeof v !== 'string') return d;
 	// No vocabulary supplied means the caller cannot validate; keep the value.
-	if (!allowed) return v;
-	return allowed.includes(v) ? v : d;
+	if (!allowed) return typeof v === 'string' ? v : d;
+	if (typeof v === 'string' && allowed.includes(v)) return v;
+	// The fallback is validated too, because the defaults here are AQPI's and
+	// a profile can reject one. Returning it unchecked is how `comp_ref`
+	// stayed selected on XQPI, whose only composite is `composite_ref`: the
+	// map then asked for a product that deployment does not publish, the
+	// picker had no option matching the value and rendered blank, and no
+	// overlay loaded at all.
+	if (allowed.includes(d)) return d;
+	return allowed[0] ?? d;
 }
 
 function migrateLegacy(): Partial<MapPrefs> {
@@ -172,17 +179,39 @@ function migrateLegacy(): Partial<MapPrefs> {
 	return out;
 }
 
+/**
+ * Coerce the vocabulary-governed fields of an already-built prefs object.
+ *
+ * The three early returns in loadPrefs hand DEFAULT_PREFS straight back: on a
+ * first visit, on corrupt JSON, and when storage throws. Those defaults are
+ * AQPI's, so a deployment publishing none of them got a composite it cannot
+ * place. On XQPI that meant `comp_ref` against a vocabulary of `composite_ref`
+ * alone, and the first visit is the common path rather than an edge case.
+ *
+ * @param p Prefs to coerce, usually the defaults.
+ * @param vocab What this deployment actually has.
+ * @returns The same prefs with composite, moment and radars made legal.
+ */
+function withVocabulary(p: MapPrefs, vocab: PrefsVocabulary): MapPrefs {
+	return {
+		...p,
+		composite:    pick(p.composite, vocab.composites, DEFAULT_PREFS.composite),
+		moment:       pick(p.moment, vocab.moments, DEFAULT_PREFS.moment),
+		activeRadars: p.activeRadars.filter((r) => !vocab.radars || vocab.radars.includes(r))
+	};
+}
+
 export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 	let raw: string | null = null;
 	try {
 		raw = localStorage.getItem(KEY);
 	} catch {
-		return { ...DEFAULT_PREFS };
+		return withVocabulary({ ...DEFAULT_PREFS }, vocab);
 	}
 
 	// Nothing stored under the new key: fold the old individual keys in once,
 	// so upgrading does not silently reset toggles people already set.
-	if (!raw) return { ...DEFAULT_PREFS, ...migrateLegacy() };
+	if (!raw) return withVocabulary({ ...DEFAULT_PREFS, ...migrateLegacy() }, vocab);
 
 	let obj: Record<string, unknown>;
 	try {
@@ -192,7 +221,7 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 	} catch {
 		// Corrupt or hand-edited. Drop it rather than failing on every load.
 		try { localStorage.removeItem(KEY); } catch { /* */ }
-		return { ...DEFAULT_PREFS };
+		return withVocabulary({ ...DEFAULT_PREFS }, vocab);
 	}
 
 	// A blob from a newer build may use a vocabulary this one does not have.
@@ -231,11 +260,14 @@ export function savePrefs(p: MapPrefs): void {
 }
 
 /** Reset to defaults, including the legacy keys so nothing is resurrected. */
-export function clearPrefs(): MapPrefs {
+export function clearPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 	try {
 		localStorage.removeItem(KEY);
 		for (const [, key] of LEGACY_BOOL_KEYS) localStorage.removeItem(key);
 		localStorage.removeItem(LEGACY_PANEL_KEY);
 	} catch { /* */ }
-	return { ...DEFAULT_PREFS };
+	// Takes the vocabulary for the same reason loadPrefs does. Without it,
+	// Reset hands back AQPI's defaults and breaks a map the caller had just
+	// corrected, which on XQPI means one click undoing the composite fix.
+	return withVocabulary({ ...DEFAULT_PREFS }, vocab);
 }

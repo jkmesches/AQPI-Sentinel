@@ -470,7 +470,11 @@
 	function prefsVocabulary() {
 		return {
 			radars: radars.map((r) => r.id),
-			composites: Object.keys(COMP_EXTENT),
+			// The profile's own ids when it supplies them, exactly as
+			// `placeable` resolves them. Reading COMP_EXTENT here described
+			// AQPI on every deployment, so XQPI accepted a stored `comp_ref`
+			// as valid and restored a product it cannot place.
+			composites: Object.keys(compExtent ?? COMP_EXTENT),
 			moments: MOMENTS.map((m) => m.key)
 		};
 	}
@@ -524,7 +528,7 @@
 	});
 
 	function resetMapSettings() {
-		const d = clearPrefs();
+		const d = clearPrefs(prefsVocabulary());
 		applyPrefs(d);
 		if (map) map.jumpTo({ center: home.center, zoom: home.zoom, bearing: 0, pitch: 0 });
 	}
@@ -1625,6 +1629,15 @@
 		void currentMoment;
 		void nexradEnabled;             // toggling NEXRAD when nothing else is on
 		void tiltEl;                    // entering/leaving tilt rebuilds the step list
+		// Nothing is loaded until onMount has validated the restored state
+		// against what this deployment publishes. `composite` holds the
+		// module default until then, and that default is AQPI's `comp_ref`,
+		// so an ungated first run asked XQPI for a product it does not have
+		// and took a 404 on every page load. prefsReady flips inside the
+		// map's own load handler, which is after the site payload and after
+		// the correction, so the first real run still happens there.
+		void prefsReady;
+		if (!prefsReady) return;
 		untrack(() => { loadComposite(); });
 	});
 	$effect(() => {
@@ -2495,13 +2508,20 @@
 		hasRadarca = site.hasRadarca;
 		siteProducts = site.products;
 		siteProfile = site.profile;
-		// A persisted composite this deployment cannot place would otherwise
-		// stay selected and render nothing with no explanation.
-		if (!placeable(composite)) composite = firstPlaceable();
 		// Second pass, now able to drop a decommissioned radar or a renamed
 		// product rather than handing a stale id to MapLibre.
 		const restored = loadPrefs(prefsVocabulary());
 		applyPrefs(restored);
+		// A composite this deployment cannot place would otherwise stay
+		// selected and render nothing with no explanation.
+		//
+		// === Load-bearing: this runs AFTER applyPrefs, not before ===
+		//
+		// Same trap as the overlay drops below. applyPrefs assigns `composite`
+		// straight from the restored blob, so correcting it first just hands
+		// the value back. On XQPI that left `comp_ref` selected, the picker
+		// blank with no matching option, and `product_steps` 404ing in a loop.
+		if (!placeable(composite)) composite = firstPlaceable();
 		// A persisted toggle for an overlay this deployment does not have would
 		// otherwise stay on and fetch a dataset for the wrong region.
 		//
