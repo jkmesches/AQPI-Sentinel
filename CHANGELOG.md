@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-20
+
+The dashboard's sparklines stopped updating on the one deployment large
+enough to trip a cap, and did it in the shape that means "this upstream has
+stopped".
+
+### Fixed
+
+- **The sparkline refresh is batched under the endpoint's own cap.** It sent
+  every series in one request. `metrics_recent` raises 400 above
+  `_MAX_SERIES`, which is 64, and the AQPI deployment registers 84 checks, so every
+  poll tick failed outright, and no metric sample reached the browser after
+  the initial seed.
+
+  The symptom is the one that endpoint exists to prevent. Sparklines render
+  at page load and then never receive another point, while the component's
+  5 s ticker keeps advancing its window, so the trace drains away from the
+  right edge on a perfectly healthy system. An emptying right edge is what
+  that component uses to report a dead upstream, the signal it was
+  rewritten to carry after the 2026-05-19 outage.
+
+  Only production was ever large enough to cross the cap. the test deployment registers
+  45 checks and the XQPI deployment registers 10, so this survived four releases
+  unseen. Raising the cap was the alternative and was dropped, because it
+  moves the cliff rather than removing it.
+
+  Measured on the AQPI deployment before the fix, with the boundary confirmed by hand
+  at 64 series returning 200 and 65 returning 400. Verified after against
+  that deployment's real backend: zero requests of status 400 or above,
+  against three per twenty seconds before. 28 assertions in
+  `test_metrics_batching.mjs` cover the sizes around the cap, the rejected
+  batch sizes and the merge.
+
 ## [0.12.1] - 2026-11-20
 
 Two map layers were carrying AQPI's geography onto a deployment that is
