@@ -28,6 +28,60 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-20
+
+Sentinel stops asking RadarCA for imagery it can read off the mount, and
+FLOW's radar overlay works for the first time.
+
+### Changed
+
+- **Radar frames and products are served from the published tree.** The map
+  fetched every frame from RadarCA, for bytes rendered onto a mount Sentinel
+  already reads for every other check. That put an origin whose p90 on a
+  status endpoint ran 8-13 s, with half-hourly episodes reaching 42 s, in
+  front of every scrub.
+
+  The choice is keyed on whether the tree is mounted, never on the profile.
+  the test deployment runs the aqpi profile with no
+  `SENTINEL_BACKEND_ROOT`, so it has no tree to read and keeps RadarCA as
+  its only origin. Keying on the profile would have passed on both CSU
+  deployments and left the test deployment with an empty radar overlay.
+
+  With a mount the chain is the tree, then Sentinel's own archive, and
+  RadarCA is never asked. The archive tier still earns its place because a
+  wedged NFS mount answers neither `listdir` nor `open`, and it held 95-100%
+  of each radar's rolling window when measured on 2026-08-28, so the map
+  degrades to slightly behind rather than to dark.
+
+  Logical source strings keep their `xband_chivo/<folder>/<name>` shape, so
+  the LRU, the archive, the single-flight and the negative cache stay keyed
+  as they were and nothing stored before this is orphaned.
+
+  The prewarm sweep follows the same path. It was pulling 445 frames every
+  300 s through RadarCA, and now fills the archive from the tree instead.
+
+### Added
+
+- **FLOW's radar overlay.** `radar_steps` on the XQPI deployment returned zero steps
+  for every moment and `xband_scan.png` answered 404, because FLOW's frames
+  have never been reachable over HTTP. They sit on the secondary archive at
+  `PRODUCT_IMAGES/%Y/%m/%d/FLOW/<moment>/`, 472 frames per moment per day at
+  a 150 s cadence, and are read directly now.
+
+  XQPI also gains the moment vocabulary it was missing. Its directories and
+  filenames use the moment name unchanged where AQPI renames four of its
+  five, so `radar_steps` resolved Reflectivity to AQPI's `CorrReflectivity`
+  and found nothing.
+
+### Fixed
+
+- **The NEXRAD and AQPI moment prefixes are confirmed against the tree.**
+  Reading the mounts settled two things that had only ever been inferred
+  from RadarCA's API. The prefixes on disk match `MOMENT_TO_PREFIX_DEFAULT`
+  and its CBAND special case exactly, so the X-band RhoHV gap in
+  `EXPECTED_ABSENT_MOMENTS` is a property of the tree. XQPI publishes only
+  elevation 3.5, matching `ELEVATION_PUBLISHED`.
+
 ## [0.12.2] - 2026-11-20
 
 The dashboard's sparklines stopped updating on the one deployment large
