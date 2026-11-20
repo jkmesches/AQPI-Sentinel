@@ -39,14 +39,18 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from .config import PRODUCTS, RADAR_FOLDER, SETTINGS, moment_to_prefix
+from .config import RADAR_FOLDER, SETTINGS, X_MOMENTS
 from .checks.layer2_radar import EXPECTED_ABSENT_MOMENTS
 
 log = logging.getLogger(__name__)
 
-# Moments Sentinel knows how to resolve to an upstream prefix.
-ALL_MOMENTS = ["Reflectivity", "Differential Reflectivity", "Velocity",
-               "PhiDP", "RhoHV"]
+# Moments Sentinel knows how to resolve to a prefix, per profile.
+#
+# This was AQPI's five spelled out, which on XQPI asked for a RhoHV FLOW does
+# not publish and spelled its two differential moments with spaces the tree
+# does not use. config.X_MOMENTS follows MOMENT_TO_PREFIX, so each profile
+# sweeps its own vocabulary.
+ALL_MOMENTS = list(X_MOMENTS)
 
 
 def moment_streams() -> list[tuple[str, str]]:
@@ -130,20 +134,34 @@ class Prewarmer:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _one_moment(self, radar: str, moment: str) -> None:
-        from .api.routes.upstream import (_serve_source, _xband_listing_cached)
+        """Pull one radar's newest frame for one moment into the caches.
+
+        Goes through the same resolver the map does, so a deployment that
+        mounts the published tree reads it here too. Passing no fetcher used
+        to mean radarca's imageData, which kept this sweep scraping 445
+        frames every interval for bytes already on local storage.
+        """
+        from . import fs_products as _fs
+        from .api.routes.upstream import (_serve_source, _xband_frames,
+                                          _xband_fs_fetcher)
         ctx = self.app.state.context
         store = getattr(self.app.state, "store", None)
         async with self._sem:
             try:
-                folder = RADAR_FOLDER[radar]
-                prefix = moment_to_prefix(radar, moment)
-                imgs = await _xband_listing_cached(
-                    ctx, folder, prefix, store.pool if store else None)
-                if not imgs:
+                frames = await _xband_frames(
+                    radar, moment, ctx, store.pool if store else None)
+                if not frames:
                     return
-                _b, _ct, prov = await _serve_source(self.app, ctx, imgs[-1])
+                ts, source = frames[-1]
+                # Without a mount, `_xband_frames` returned radarca's own
+                # sources and a filesystem fetcher would fail on every one.
+                # None keeps imageData, which the test deployment still depends on.
+                fetcher = (_xband_fs_fetcher(radar, moment, ts, source)
+                           if _fs.available() else None)
+                _b, _ct, prov = await _serve_source(
+                    self.app, ctx, source, fetcher=fetcher)
                 self._count(prov)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001  one radar must not stop the sweep
                 self.stats["errors"] += 1
                 log.debug("prewarm %s/%s: %s", radar, moment, e)
 
