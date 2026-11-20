@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-20
+
+Something finally opens a product frame on the deployment where nothing did.
+
+### Added
+
+- **Layer 4 image QC runs against the mount.** LB1 answers whether a file
+  arrived and never opens it, so a producer writing truncated or empty PNGs
+  stayed green. the XQPI deployment showed that live: requests for the newest composite
+  frame returned 502 from the PNG signature check while LB1 called the
+  product healthy, because no check on that deployment read a frame's bytes
+  at all. It registered no L4 stage, since `layer4_image` sat in
+  `RADARCA_ONLY_MODULES` and fetched everything over HTTP.
+
+  L4 now prefers the mount, the same rule the serving path uses, so it
+  inspects the bytes an operator will be shown. A failed mount read is
+  reported rather than quietly retried against RadarCA, because noticing
+  when the tree is wrong is the reason to run. Without a mount the HTTP path
+  stands, and the test deployment still uses it.
+
+  Targets moved from the module into the profile, because the ids differ.
+  AQPI keeps its six radars and three mosaic products. XQPI gains FLOW plus
+  all four published products, since one producer writes them all and a
+  truncated write is not product-specific. That is 5 new checks there, with
+  the 9 on AQPI unchanged.
+
+### Changed
+
+- **`x-sentinel-cache` names the origin rather than the tier.** It reported
+  `upstream` for a local read, which became misleading in devtools at the
+  moment that header started answering the interesting question. A frame
+  read off the published tree now says `mount`.
+
 ## [0.13.1] - 2026-11-20
 
 The scrubber came back with two days on it.
