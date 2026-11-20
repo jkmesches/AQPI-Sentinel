@@ -225,6 +225,63 @@ export function runTests(mod) {
 	      p.playing === undefined && p.stepIdx === undefined,
 	      JSON.stringify({ playing: p.playing, stepIdx: p.stepIdx }));
 
+	// --- 8. a vocabulary that rejects the default itself -----------------
+	//
+	// Every default here is AQPI's, and a profile may publish none of them.
+	// XQPI's only composite is `composite_ref`, so `comp_ref` is not merely
+	// an unknown stored value, it is an unreachable fallback. Returning it
+	// anyway is what left cira-xqpi with a blank picker, a dead scrubber and
+	// `product_steps?product_id=comp_ref` 404ing in a loop on v0.12.0, with
+	// no overlay on the map at all.
+	const XQPI_VOCAB = {
+		radars: ['FLOW'],
+		composites: ['composite_ref'],
+		moments: ['Reflectivity', 'Velocity']
+	};
+
+	reset();
+	p = loadPrefs(XQPI_VOCAB);
+	check('a default outside the vocabulary is not returned',
+	      p.composite !== DEFAULT_PREFS.composite, p.composite);
+	check('...and what comes back is in the vocabulary',
+	      XQPI_VOCAB.composites.includes(p.composite), p.composite);
+
+	reset();
+	savePrefs({ ...DEFAULT_PREFS, composite: 'comp_ref' });
+	p = loadPrefs(XQPI_VOCAB);
+	check('a stored id from another profile is rejected',
+	      p.composite === 'composite_ref', p.composite);
+
+	reset();
+	savePrefs({ ...DEFAULT_PREFS, composite: 'composite_ref' });
+	p = loadPrefs(XQPI_VOCAB);
+	check('...while a valid one for this profile survives',
+	      p.composite === 'composite_ref', p.composite);
+
+	reset();
+	p = loadPrefs(VOCAB);
+	check('a vocabulary containing the default still returns it',
+	      p.composite === DEFAULT_PREFS.composite, p.composite);
+
+	reset();
+	p = loadPrefs({ radars: [], composites: [], moments: [] });
+	check('an empty vocabulary falls back to the default rather than nothing',
+	      p.composite === DEFAULT_PREFS.composite, String(p.composite));
+
+	// Reset takes the vocabulary too. Without it one click on RESET hands
+	// AQPI's defaults back and undoes the correction the caller just made.
+	reset();
+	savePrefs({ ...DEFAULT_PREFS, composite: 'composite_ref' });
+	after = clearPrefs(XQPI_VOCAB);
+	check('reset respects the vocabulary rather than reimposing the default',
+	      after.composite === 'composite_ref', after.composite);
+	after = clearPrefs(VOCAB);
+	check('...and still returns the default where that is legal',
+	      after.composite === DEFAULT_PREFS.composite, after.composite);
+	after = clearPrefs();
+	check('...and with no vocabulary is unchanged',
+	      after.composite === DEFAULT_PREFS.composite, after.composite);
+
 	console.log(failures.length
 		? `\n${failures.length} FAILED: ${failures.join(', ')}`
 		: '\nall map-prefs assertions passed');
