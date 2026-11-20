@@ -434,8 +434,8 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
     we have genuinely never seen.
 
     Returns (body, content_type, provenance) where provenance is one of
-    lru | disk | upstream, surfaced as the x-sentinel-cache header so it is
-    obvious in devtools which frames actually cost radarca anything.
+    lru | disk | mount | upstream, surfaced as the x-sentinel-cache header.
+    A frame that cost radarca something therefore says so in devtools.
     """
     cached = _IMAGE_CACHE.get(source)
     if cached is not None:
@@ -475,7 +475,11 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
         _INFLIGHT[source] = task
         task.add_done_callback(lambda t, k=source: _INFLIGHT.pop(k, None))
     body, ct = await _asyncio.shield(task)
-    return body, ct, "upstream"
+    # Name the origin the bytes came from rather than the tier's position.
+    # "upstream" meant radarca when this was written and now usually means a
+    # local read, which made x-sentinel-cache misleading in devtools at the
+    # moment it became the most useful thing in that header.
+    return body, ct, "mount" if fetcher is not None else "upstream"
 
 
 async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,

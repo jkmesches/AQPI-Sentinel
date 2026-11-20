@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..archive import save_image as _archive_save
-from ..config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, l4_profile
+from ..config import (L4_MOMENT, L4_MOSAIC_TARGETS,  # noqa: TID252  file convention
+                      L4_XBAND_TARGETS, PRODUCTS, RADAR_FOLDER, SETTINGS,
+                      image_path, l4_profile)
+from .. import fs_products as _fs  # noqa: TID252  file convention
+from .transports import CheckContext
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
@@ -107,26 +111,89 @@ class Layer4ImageCheck(Check):
             ]
 
     # ------------------------------------------------------------------
-    async def _fetch_image(self, ctx) -> tuple[bytes, str] | tuple[None, str]:
-        """Return (png_bytes, source_label) or (None, error_message)."""
+    async def _fs_radar_image(self) -> tuple[bytes, str] | tuple[None, str]:
+        """The newest rendered frame for this radar, off the mount."""
+        frames = await _fs.list_moment_frames(self.identifier, L4_MOMENT)
+        if not frames:
+            return None, f"no {L4_MOMENT} frames in the window"
+        ts, name = frames[-1]
+        fr = await _fs.read_moment_image(self.identifier, L4_MOMENT, name, ts)
+        if fr.status_code != 200:
+            return None, f"frame unreadable on the mount (HTTP {fr.status_code})"
+        return fr.content, name
+
+    async def _fs_product_image(self) -> tuple[bytes, str] | tuple[None, str]:
+        """The frame nearest now for this product, off the mount."""
+        steps = await _fs.read_steps(self.identifier)
+        if not steps:
+            return None, "no steps in the published manifest"
+        target_step = _step_closest_to_now(steps)
+        if target_step is None:
+            return None, "no parseable step timestamps"
+        file_path = image_path(self.identifier, target_step["imageName"])
+        ir = await _fs.read_image(file_path)
+        if ir.status_code != 200:
+            return None, f"frame unreadable on the mount (HTTP {ir.status_code})"
+        return ir.content, file_path
+
+    async def _fs_image(self) -> tuple[bytes, str] | tuple[None, str]:
+        """The newest frame off the mount, for a deployment that has one.
+
+        LB1 answers whether a file arrived and never opens it, so a producer
+        writing truncated or empty PNGs stayed green there. cira-xqpi showed
+        that live: requests for the newest composite frame returned 502 from
+        the PNG signature check while LB1 called the product healthy, because
+        no check on that deployment read a frame's bytes at all.
+        """
         if self.kind == "xband":
-            r = await ctx.http.get(
-                f"{SETTINGS.base}/api/xbandRadarImages/",
-                params={"radarFolder": self.folder, "productPrefix": "CorrReflectivity"},
-            )
-            if r.status_code != 200:
-                return None, f"xbandRadarImages HTTP {r.status_code}"
-            doc = r.json()
-            imgs = doc.get("images") or []
-            if not imgs:
-                return None, "no images in 1h window"
-            latest_file = imgs[-1]
-            ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData",
-                                    params={"file": latest_file})
-            if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/png"):
-                return None, f"imageData HTTP {ir.status_code}"
-            return ir.content, latest_file
-        # mosaic
+            return await self._fs_radar_image()
+        return await self._fs_product_image()
+
+    async def _fetch_image(self, ctx: CheckContext,
+                           ) -> tuple[bytes, str] | tuple[None, str]:
+        """Return (png_bytes, source_label) or (None, error_message).
+
+        Prefers the mount, the same rule the serving path uses, so this check
+        inspects the bytes an operator will actually be shown. A mount that
+        fails is reported rather than quietly retried against radarca, since
+        the point of running here is to notice when the tree is wrong.
+        """
+        if _fs.available():
+            try:
+                return await self._fs_image()
+            except (OSError, TimeoutError, KeyError, ValueError) as e:
+                return None, f"mount read failed: {e}"
+        return await self._http_image(ctx)
+
+    async def _http_image(self, ctx: CheckContext,
+                          ) -> tuple[bytes, str] | tuple[None, str]:
+        """The newest frame from radarca, for a deployment with no mount."""
+        if self.kind == "xband":
+            return await self._http_radar_image(ctx)
+        return await self._http_product_image(ctx)
+
+    async def _http_radar_image(self, ctx: CheckContext,
+                                ) -> tuple[bytes, str] | tuple[None, str]:
+        """The newest radar frame from radarca's xband endpoint."""
+        r = await ctx.http.get(
+            f"{SETTINGS.base}/api/xbandRadarImages/",
+            params={"radarFolder": self.folder, "productPrefix": "CorrReflectivity"},
+        )
+        if r.status_code != 200:
+            return None, f"xbandRadarImages HTTP {r.status_code}"
+        imgs = r.json().get("images") or []
+        if not imgs:
+            return None, "no images in 1h window"
+        latest_file = imgs[-1]
+        ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData",
+                                params={"file": latest_file})
+        if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/png"):
+            return None, f"imageData HTTP {ir.status_code}"
+        return ir.content, latest_file
+
+    async def _http_product_image(self, ctx: CheckContext,
+                                  ) -> tuple[bytes, str] | tuple[None, str]:
+        """The frame nearest now for this product, from radarca."""
         cfg = PRODUCTS[self.identifier]
         r = await ctx.http.get(
             f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
@@ -314,8 +381,8 @@ class Layer4ImageCheck(Check):
 # shares the X-band fetch endpoint (/api/xbandRadarImages/), but its L4
 # profile skips the polar range-ring detector (see config.L4_PROFILES).
 # --------------------------------------------------------------------------
-for r in ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY", "CBAND"):
+for r in L4_XBAND_TARGETS:
     register(Layer4ImageCheck(kind="xband", identifier=r))
 
-for p in ("comp_ref", "comp_now", "water_depth"):
+for p in L4_MOSAIC_TARGETS:
     register(Layer4ImageCheck(kind="mosaic", identifier=p))

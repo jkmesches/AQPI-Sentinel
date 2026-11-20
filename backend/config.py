@@ -1054,6 +1054,24 @@ RADAR_PLOTS_TS_RE: str = r"\d{8}-\d{4}"
 RADAR_PLOTS_TS_FMT: str = "%Y%m%d-%H%M"
 
 # ---------------------------------------------------------------------------
+# Layer 4 image QC targets
+# ---------------------------------------------------------------------------
+#
+# Which radars and products get a frame opened and inspected each cycle.
+# Declared here rather than written into layer4_image, because the ids differ
+# per profile and the list was AQPI's six radars and three products inline.
+#
+# The three mosaic entries are the products that render real imagery rather
+# than a placeholder. CBAND rides the xband kind because it shared radarca's
+# xband endpoint, and its L4 profile skips the polar range-ring detector.
+L4_XBAND_TARGETS: tuple[str, ...] = ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY", "CBAND")
+L4_MOSAIC_TARGETS: tuple[str, ...] = ("comp_ref", "comp_now", "water_depth")
+
+# The moment L4 inspects on a radar. Reflectivity is the one every radar in
+# both networks publishes, and the one the map opens on.
+L4_MOMENT: str = "Reflectivity"
+
+# ---------------------------------------------------------------------------
 # Composite INPUT staging (`recentfiles`)
 # ---------------------------------------------------------------------------
 #
@@ -1259,7 +1277,15 @@ if SETTINGS.profile == "xqpi":
     RADAR_PLOTS_TS_FMT = _xqpi.RADAR_PLOTS_TS_FMT
     MOMENT_TO_PREFIX_DEFAULT = _xqpi.MOMENT_TO_PREFIX
     X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)
+    L4_XBAND_TARGETS = _xqpi.L4_XBAND_TARGETS
+    L4_MOSAIC_TARGETS = _xqpi.L4_MOSAIC_TARGETS
     HAS_RADARCA = False
+# L4 reads frames off the mount now, so it no longer needs an HTTP origin.
+# Without a mount it still does, and the gate in registry.register stands.
+if SETTINGS.backend_root:
+    RADARCA_ONLY_MODULES = tuple(
+        m for m in RADARCA_ONLY_MODULES if m != "layer4_image")
+
 if SETTINGS.profile not in ("aqpi", "xqpi"):
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
     # monitors the wrong radar network, which is worse than not starting.

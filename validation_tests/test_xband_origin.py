@@ -112,6 +112,34 @@ def test_unmounted() -> None:
           bool(frames) and frames[0][0].tzinfo is not None)
 
 
+def test_l4_origin(root: str, day: datetime) -> None:
+    """L4 opens the frame the map would show, off the mount where there is one.
+
+    LB1 stats a file and never opens it, so a producer writing truncated PNGs
+    stayed green. This check is what reads the bytes, which only helps if it
+    reads the same ones the serving path hands out.
+    """
+    upstream = load_upstream(root)
+    build_tree(root, day)
+    from backend.checks.layer4_image import Layer4ImageCheck
+    from backend.registry import CHECKS
+
+    check("L4 registers on a mounted deployment",
+          any(k.startswith("layer4.") for k in CHECKS),
+          str(len([k for k in CHECKS if k.startswith("layer4.")])))
+
+    chk = Layer4ImageCheck(kind="xband", identifier="XEBY")
+    body, label = asyncio.run(chk._fetch_image(None))
+    check("L4 reads a radar frame without a context",
+          body is not None and label.startswith("ebay_"), str(label))
+    check("...and the bytes are a PNG rather than an error string",
+          bool(body) and body.startswith(b"\x89PNG"),
+          repr(body[:8]) if body else "none")
+    # `ctx` stays None on purpose: reaching radarca would raise on it, so a
+    # clean read proves nothing touched the HTTP path.
+    del upstream
+
+
 def main() -> int:
     # Near now, because the listing keeps only the last hour. A fixed hour
     # would make this test pass or fail depending on the time of day.
@@ -121,6 +149,9 @@ def main() -> int:
         test_mounted(root, day)
     print("--- a deployment that does not (aqpi.local.shirejoe.com) ---")
     test_unmounted()
+    print("--- layer 4 image QC ---")
+    with tempfile.TemporaryDirectory() as root:
+        test_l4_origin(root, day)
     print(f"\n{len(FAILURES)} FAILED: {', '.join(FAILURES)}" if FAILURES
           else "\nall xband-origin assertions passed")
     return 1 if FAILURES else 0

@@ -356,6 +356,17 @@ RADAR_PLOTS_TS_FMT = "%Y%m%d-%H%M%S"
 # so adding a moment to MOMENTS above needs no second edit here.
 MOMENT_TO_PREFIX = {m: m for m in MOMENTS}
 
+# Layer 4 image QC targets. FLOW for the radar frames and all four published
+# products, because one producer writes them all and the fault this catches
+# is a truncated or empty write rather than anything product-specific.
+#
+# min_png_bytes is already 2000 on every entry above, set from the smallest
+# legitimate frame rather than guessed, so the floor these checks apply is
+# the measured one.
+L4_XBAND_TARGETS: tuple[str, ...] = ("FLOW",)
+L4_MOSAIC_TARGETS: tuple[str, ...] = (
+    "composite_ref", "qpe_15min", "qpe_1hr", "radar_precip_rate")
+
 # Raw volumes arrive both compressed and not.
 RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")   # [V] both extensions seen in flow/
 
