@@ -28,6 +28,26 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-20
+
+The scrubber came back with two days on it.
+
+### Fixed
+
+- **A moment listing is bounded to a recent window.** [0.13.0] handed the map
+  everything on disk. The published tree keeps whole days where RadarCA
+  served a rolling hour, so `radar_steps` went from 18 steps to 872 on
+  cira-aqpi and 1032 on cira-xqpi, spanning 44 hours instead of 51 minutes.
+
+  The timeline stretched across two days, playback at the 900 ms dwell took
+  13 minutes rather than 16 seconds, and the frontend prefetches a NEXRAD
+  frame per step, so the step count multiplied work in the browser.
+
+  The default is now the last hour. That is what RadarCA served, and what
+  the map was built around. The two-day directory scan stays, because it is about
+  reaching yesterday's files just after 00:00 UTC rather than about how many
+  frames to return.
+
 ## [0.13.0] - 2026-11-20
 
 Sentinel stops asking RadarCA for imagery it can read off the mount, and
