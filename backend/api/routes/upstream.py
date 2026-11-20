@@ -618,7 +618,7 @@ async def radar_steps(radar: str, request: Request,
     _store = getattr(request.app.state, "store", None)
     frames = await _xband_frames(radar, moment, ctx,
                                  _store.pool if _store else None)
-    steps = []
+    steps: list[dict[str, object]] = []
     for ts, fname in frames:
         steps.append({
             "i":         len(steps),

@@ -24,6 +24,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import ModuleType
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -36,7 +37,7 @@ def check(label: str, cond: bool, detail: str = "") -> None:
         FAILURES.append(label)
 
 
-def load_upstream(root: str | None):
+def load_upstream(root: str | None) -> ModuleType:
     """Import the upstream route module fresh, with or without a mount.
 
     Args:
@@ -77,11 +78,13 @@ def test_mounted(root: str, day: datetime) -> None:
     build_tree(root, day)
     called: list[str] = []
 
-    async def never(*a: object, **k: object) -> list:
+    async def never(*a: object, **k: object) -> list[str]:
         called.append("radarca")
         return []
 
-    upstream._xband_listing_cached = never
+    # Swapping a private module attribute is the point of this test: it is
+    # how we observe whether the radarca path was taken at all.
+    upstream._xband_listing_cached = never  # type: ignore[attr-defined]
     frames = asyncio.run(upstream._xband_frames("XEBY", "Reflectivity", None, None))
     check("mounted: frames come off the tree", len(frames) == 2, str(len(frames)))
     check("mounted: radarca is not called", not called, ", ".join(called))
@@ -96,11 +99,11 @@ def test_unmounted() -> None:
     called: list[str] = []
 
     async def radarca(_ctx: object, folder: str, prefix: str,
-                      _pool: object = None) -> list:
+                      _pool: object = None) -> list[str]:
         called.append(f"{folder}/{prefix}")
         return ["xband_chivo/ebay/ebay_CorrReflectivity_20261120-1200.png"]
 
-    upstream._xband_listing_cached = radarca
+    upstream._xband_listing_cached = radarca  # type: ignore[attr-defined]
     frames = asyncio.run(upstream._xband_frames("XEBY", "Reflectivity", None, None))
     check("unmounted: radarca is asked", called == ["ebay/CorrReflectivity"],
           ", ".join(called) or "not called")
