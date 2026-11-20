@@ -10,8 +10,8 @@ and `docs/radarca-public-characterization.md`.
 
 ## 1. Decisions
 
-Joseph settled these before the plan was written, so the sections below build
-on them rather than re-opening them.
+Joseph settled these before the plan was written. The sections below build on
+them rather than re-opening them.
 
 | Decision | Choice |
 |---|---|
@@ -66,27 +66,27 @@ else:
 
 Radarca never paints a pin on a deployment that reads the filesystem. A
 deployment with no backend stage anywhere keeps painting from L2, because
-graying out every pin on the test deployment would answer a different question. The hover
-card lists every reading with the `the main archive`/`RC`/`TR` source tags the dashboard rail
-already uses and names which stage painted the pin, so a divergence stays
-findable without a new map symbol.
+graying out the pins on the test deployment would answer a different question. The hover
+card lists both readings with the `the main archive`/`RC`/`TR` source tags the dashboard rail
+already uses and names which stage painted the pin. A divergence therefore
+stays findable without a new map symbol.
 
 The LB3 fallback is there for the three NEXRADs. KBBX, KDAX and KMUX are drawn
 on the AQPI deployment map and carry `layer3.composite.*` and `layer3.input.*` rows
 with no LB2 row at all, because a NEXRAD reaches the composite by a path with
 no arrival check. Composite input is therefore the only thing Sentinel observes
-about them, which makes it their arrival reading rather than a second kind of
+about them. Treat it as their arrival reading rather than as a second kind of
 fault. For the five X-bands and CBAND, where a real LB2 row exists, arrival
 still wins, and a composite fault stays off the pin.
 
-The dashboard's collapsed radar rows take the same verdict, so a pin and a row
-header cannot disagree about one radar.
+The dashboard's collapsed radar rows take the same verdict. A pin and a row
+header therefore cannot disagree about one radar.
 
 That consistency costs something, and it needs a decision inside slice 2. A
-`layer3.composite.<radar>` failure stops coloring the collapsed row, so a
-radar that is arriving fine but has dropped out of the composite reads as
+`layer3.composite.<radar>` failure stops coloring the collapsed row. A radar
+that is arriving fine but has dropped out of the composite then reads as
 healthy until the row is expanded. The composite check is about the composite
-product, so its natural home is the Products rail rather than the radar's own
+product, and its natural home is the Products rail rather than the radar's own
 row. Either it moves there or the radar row carries a second, quieter mark.
 
 ## 4. Module Layout
@@ -113,7 +113,7 @@ lib/map/
     invert.ts           nearest-ramp lookup with a tolerance
 ```
 
-Each layer declares one shape, so adding a layer becomes a data change.
+Each layer declares one shape. Adding a layer then becomes a data change.
 
 ```ts
 interface LayerModule {
@@ -128,25 +128,25 @@ interface LayerModule {
 ```
 
 The barrier that v0.12.0 added stays as it is. Three participants written by
-hand become whatever the registry reports, so a new layer joins atomic frame
-swaps without wiring of its own.
+hand become whatever the registry reports. A new layer therefore joins atomic
+frame swaps without wiring of its own.
 
 ## 5. Ramps and the Legend
 
 The legend and the readout both need the mapping from color to value, and the
 value half is the hard part. Sampling RadarCA's colorbar PNGs gives the colors
-exactly. The numbers beside them are rendered text, so they get transcribed by
-hand once, checked in with the source URL and the date, and reviewed.
+exactly. The numbers beside them are rendered text. They get transcribed by hand once,
+checked in with the source URL and the date, and reviewed.
 
 A ramp that is wrong produces a legend that lies and a readout that lies
-confidently, so each one is measured before it ships. The check samples every
-distinct color in a set of real frames for that product and reports what
+confidently. Each one is therefore measured before it ships. The check samples
+the distinct colors in a set of real frames for that product and reports what
 fraction maps to a ramp entry within tolerance. Full coverage means the ramp
 is right. Anything short of that means the ramp is wrong or incomplete, and
 the readout stays off for that product until it is fixed.
 
-The legend renders as themed SVG rather than a proxied PNG, so it reads in
-both themes, scales on a phone, and can carry the selected unit.
+The legend renders as themed SVG rather than a proxied PNG. It therefore reads
+in both themes, scales on a phone, and can carry the selected unit.
 
 ## 6. Cursor Readout
 
@@ -176,7 +176,7 @@ subtree, and a display toggle must not move them.
 The URL carries product, frame timestamp, active radars, moment, overlays,
 pane layout and camera. URL parameters win over stored prefs when present, and
 prefs fill in the rest. Updates go through `replaceState`, debounced on a
-settled change, so scrubbing does not fill the back button.
+settled change. Scrubbing therefore does not fill the back button.
 
 Playback position encodes as a timestamp and never as a step index. Indices
 shift as the window rolls, which is the same class of bug as the step list
@@ -217,7 +217,7 @@ read directly over `the access helper` and then in a real browser under `the acc
 --split`. Every layer of the XQPI deployment map is dead, and each one has its own
 cause.
 
-The composite never gets selected, so no product overlay loads at all. The
+The composite never gets selected, and no product overlay loads at all. The
 picker renders blank, the scrubber reads "pick a composite to scrub", and the
 browser run caught four 404s for `product_steps?product_id=comp_ref` in twenty
 seconds. `comp_ref` is AQPI's id, and a stale vocabulary and a bad ordering
@@ -248,10 +248,10 @@ Two pieces of AQPI geography sit hardcoded in the map, and both break XQPI.
 NEXRAD is pinned to `EXTENT_LARGE`, the Northern California box, at three
 places in MapView: the WMS `BBOX`, and the image source coordinates in both
 `refreshNexrad` and `prepareNexrad`. XQPI's domain runs -119.564 to -117.0 and
-33.288 to 35.027, so the two boxes do not touch. `EXTENT_LARGE` has its south
+33.288 to 35.027. The two boxes do not touch. `EXTENT_LARGE` has its south
 edge at 36.5N against XQPI's north edge at 35.027N. Turning NEXRAD on at
 the XQPI deployment therefore fetches a mosaic over Sacramento and paints it 250 km
-off-screen, so the toggle reads as doing nothing at all.
+off-screen. The toggle reads as doing nothing at all.
 
 On AQPI, `EXTENT_LARGE` is already the `comp_ref` extent. Deriving the NEXRAD
 box from the profile's own composite extents reproduces AQPI's behavior by
@@ -260,10 +260,10 @@ construction and fixes XQPI at the same time, and `/api/version` carries
 
 The request size does not need the same treatment, which corrects an earlier
 reading of this code. MapLibre places the returned PNG by its four corner
-coordinates, so `WIDTH: 1024, HEIGHT: 1100` sets the resolution the mosaic is
-rendered at and never its position. A box of a different aspect loses detail
-along one axis rather than landing in the wrong place, which makes the pixel
-size a quality question to measure separately rather than part of this fix.
+coordinates. `WIDTH: 1024, HEIGHT: 1100` therefore sets the resolution the
+mosaic is rendered at rather than its position. A box of a different aspect
+loses detail along one axis rather than landing in the wrong place. The pixel
+size is thus a quality question to measure on its own, outside this fix.
 
 The moment vocabulary is the same class of problem with four copies of the
 key. MapView's `MOMENTS` const, `config.MOMENT_TO_PREFIX_DEFAULT`,
@@ -277,7 +277,7 @@ The live effect is that FLOW's per-radar overlay never paints anything.
 to `CorrReflectivity`, which is AQPI's, and answers `n: 0` with an empty step
 list. `xband_scan.png` answers 404 `{"detail":"no scans in window"}` for all
 five moments. FLOW is still selectable in the radar list with its moment tabs
-live, so the controls work and the overlay stays empty. The vocabulary should
+live. The controls respond and the overlay stays empty. The vocabulary should
 reach the frontend over `/api/version`, the way product labels already do.
 
 The moment problem is larger than a vocabulary mismatch. XQPI has no xband
@@ -285,7 +285,7 @@ origin at all: `xband_scan.png` reaches radarca's Django app, `fs_products`
 exposes only `read_steps` and `read_image` for product manifests and frames,
 and neither has a moment listing. FLOW's moment imagery does exist on the
 tree, at 697x693 and 3,920 to 5,971 bytes a frame per the profile's own
-measurements, with nothing routed to it. So fixing the spelling would leave
+measurements, with no route to it. Fixing the spelling would therefore leave
 the tabs just as empty. Either the controls are hidden on a profile with no
 xband origin, the way the tilt picker already keys off `hasRadarca`, or a
 filesystem-backed moment route gets built, which is a feature rather than a
@@ -294,8 +294,8 @@ patch.
 One more endpoint ignores the profile. `/api/upstream/stream_gauges` on
 the XQPI deployment returns 468 Northern California sites, the first of them at 38.96N
 119.85W, roughly 300 km from Pasadena. Nothing renders them today because
-`map_overlays` is `burn_scars` alone there and the toggle stays hidden, so this
-is latent rather than live. The endpoint should answer per profile regardless.
+`map_overlays` is `burn_scars` alone there and the toggle stays hidden. This
+gap is latent rather than live. The endpoint should answer per profile regardless.
 
 Two smaller pieces of AQPI vocabulary show on the XQPI page. The map panel's
 header is hardcoded to `count="6 radars · 3 NEXRAD"` in `routes/+page.svelte`
@@ -333,8 +333,8 @@ One commit per slice, in this order.
 10. Keyboard, time axis, playback speed, per-layer opacity.
 11. Measure tool, export, place search, responsive pass.
 
-Slice 3 is the risky one, and it comes before the features, so they land in
-the new structure rather than being ported into it afterward.
+Slice 3 is the risky one, and it comes before the features. They land in the
+new structure rather than being ported into it afterward.
 
 ## 14. Verification
 
@@ -370,8 +370,8 @@ CBAND is safe, measured rather than assumed. `/api/checks` on the AQPI deploymen
 The three NEXRADs drove the LB3 fallback in section 3. KBBX, KDAX and KMUX are
 drawn on the AQPI deployment map with 100 km range rings, and their only readings are
 LB3 (`layer3.composite.*` and `layer3.input.*`, all six passing right now).
-None of the three has an L2 or an LB2 row, so an LB2-only rule with no fallback
-would have grayed out a third of the markers on the production map.
+None of the three has an L2 or an LB2 row. An LB2-only rule with no fallback
+would therefore have grayed out a third of the markers on the production map.
 
 Composite-participation faults losing their place in the radar rail, which
 slice 2 has to answer rather than inherit.
