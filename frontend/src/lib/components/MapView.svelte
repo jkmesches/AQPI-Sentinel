@@ -14,6 +14,11 @@
 	} from '$lib/radarStatus';
 	import { isAlerting } from '$lib/grouping';
 	import { diag } from '$lib/diag';
+	import { nexradImageUrl, unionExtent } from '$lib/map/nexrad';
+	import {
+		burnScarAge, burnScarFilter, newestBurnScar,
+		BURN_SCAR_SOURCE, BURN_SCAR_FILL, BURN_SCAR_LINE
+	} from '$lib/map/burnScars';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
@@ -223,19 +228,6 @@
 	// data arrives, and the panel hides the line rather than showing a date
 	// it does not have.
 	let burnScarThrough = $state('');
-
-	/** Format the newest ALARM_DATE in a collection as "Mon YYYY". */
-	function newestBurnScar(data: GeoJSON.FeatureCollection): string {
-		let newest = 0;
-		for (const f of data.features) {
-			const alarm = f.properties?.['ALARM_DATE'];
-			if (typeof alarm === 'number' && alarm > newest) newest = alarm;
-		}
-		if (newest <= 0) return '';
-		return new Date(newest).toLocaleDateString('en-US', {
-			month: 'short', year: 'numeric', timeZone: 'UTC'
-		});
-	}
 
 	/**
 	 * Fetch this deployment's burn-scar perimeters.
@@ -540,63 +532,12 @@
 	const STYLE_DARK = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
 	const styleUrl = () => (theme.resolved === 'light' ? STYLE_LIGHT : STYLE_DARK);
-	// Iowa Mesonet WMS-T endpoint — single-image GetMap requests are smoother
-	// than tile fetches when scrubbing (no per-tile blank-out flicker).
-	const NEXRAD_WMS = 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q-t.cgi';
-
-	function lon2x(lon: number): number {
-		return (lon * 20037508.34) / 180;
-	}
-	function lat2y(lat: number): number {
-		const r = (Math.log(Math.tan((90 + lat) * Math.PI / 360)) * 20037508.34) / Math.PI;
-		return r;
-	}
-
-	function nexradImageUrl(timeIso: string | null): string {
-		const e = nexradExtent;
-		const bbox = [lon2x(e.west), lat2y(e.south), lon2x(e.east), lat2y(e.north)].join(',');
-		const params = new URLSearchParams({
-			SERVICE: 'WMS',
-			VERSION: '1.1.1',
-			REQUEST: 'GetMap',
-			LAYERS: 'nexrad-n0q-wmst',
-			STYLES: '',
-			FORMAT: 'image/png',
-			TRANSPARENT: 'true',
-			SRS: 'EPSG:3857',
-			WIDTH: '1024',
-			HEIGHT: '1100',
-			BBOX: bbox
-		});
-		// TIME is always sent, never omitted. This is the WMS-T endpoint
-		// (n0q-t.cgi), and a GetMap with no TIME does not fall back to the
-		// newest slice: it answers 200 with a 5 KB near-empty PNG. Measured
-		// against the service, same bbox and size: no TIME paints 0.05% of
-		// its pixels, while every 5-minute mark from the current one back to
-		// 40 minutes paints 7.7% to 13.8% and returns 67-111 KB. So the live
-		// view, which is the default and the one an operator compares
-		// against, showed an empty layer, and scrubbing back one step made it
-		// appear. That reads as "NEXRAD sees nothing here", which is the one
-		// thing a ground-truth layer must never say wrongly.
-		params.set('TIME', timeIso ?? nexradLatestIso());
-		return `${NEXRAD_WMS}?${params.toString()}`;
-	}
-
-	/**
-	 * The newest NEXRAD slice, as the service indexes them.
-	 *
-	 * The mosaic is published on 5-minute marks, and the current mark is
-	 * already served: measured at 23:15Z, a request for 23:15Z returned the
-	 * same 108,357 bytes as the non-time endpoint's latest. So no lag is
-	 * subtracted here. Snapping also keeps the URL stable for five minutes,
-	 * which lets the blob cache and the browser cache hold the live frame.
-	 *
-	 * @returns An ISO 8601 UTC timestamp on a 5-minute boundary.
-	 */
-	function nexradLatestIso(): string {
-		const ms = 5 * 60_000;
-		return `${new Date(Math.floor(Date.now() / ms) * ms).toISOString().slice(0, 19)}Z`;
-	}
+	// The projection, the 5-minute snap and the GetMap builder live in
+	// $lib/map/nexrad, where a runner can reach them. Both the TIME rule and
+	// the Mercator latitude term look right while being wrong, and neither
+	// shows in a screenshot.
+	const nexradUrlFor = (timeIso: string | null) =>
+		nexradImageUrl(nexradExtent, timeIso);
 
 	const EXTENT_LARGE = { west: -124.005, east: -121.195, south: 36.5, north: 39.505 };
 	const EXTENT_BAY = { west: -122.6427, east: -121.8509, south: 37.33298, north: 38.34444 };
@@ -637,16 +578,9 @@
 	 * is taken because a profile may publish several products over different
 	 * footprints, and the mosaic should cover all of them.
 	 */
-	const nexradExtent = $derived.by(() => {
-		const boxes = Object.values(compExtent ?? {});
-		if (boxes.length === 0) return EXTENT_LARGE;
-		return {
-			west:  Math.min(...boxes.map((b) => b.west)),
-			east:  Math.max(...boxes.map((b) => b.east)),
-			south: Math.min(...boxes.map((b) => b.south)),
-			north: Math.max(...boxes.map((b) => b.north))
-		};
-	});
+	const nexradExtent = $derived(
+		unionExtent(Object.values(compExtent ?? {}), EXTENT_LARGE)
+	);
 
 	function radarExtent(r: RadarMeta) {
 		const km = r.range_m / 1000;
@@ -1316,7 +1250,7 @@
 		const e = nexradExtent;
 		map.addSource('nexrad', {
 			type: 'image',
-			url: nexradImageUrl(nexradTimeIso),
+			url: nexradUrlFor(nexradTimeIso),
 			coordinates: [
 				[e.west, e.north],
 				[e.east, e.north],
@@ -1355,7 +1289,7 @@
 			const urls = new Set<string>();
 			for (const s of steps) {
 				const tsForStep = (steps.length > 0 && s === steps[steps.length - 1]) ? null : s.ts;
-				urls.add(nexradImageUrl(tsForStep));
+				urls.add(nexradUrlFor(tsForStep));
 			}
 			// Cap concurrency to 3 — Iowa Mesonet has been known to throttle
 			// faster than that on a cold cache.
@@ -1397,7 +1331,7 @@
 		const src = map.getSource('nexrad') as maplibregl.ImageSource | undefined;
 		if (!src || typeof src.updateImage !== 'function') return null;
 		const e = nexradExtent;
-		const url = nexradImageUrl(nexradTimeIso);
+		const url = nexradUrlFor(nexradTimeIso);
 		const token = ++nexradFetchToken;
 		let blobUrl = nexradBlobs.get(url);
 		if (!blobUrl) {
@@ -2440,32 +2374,21 @@
 	// ignition date in epoch milliseconds; YEAR_ alone would bucket a
 	// January fire with the December one eleven months later, which is the
 	// difference between inside and outside the debris-flow window.
-	const BURN_SCAR_SOURCE = 'burn-scars';
-	const BURN_SCAR_FILL = 'burn-scar-fill';
-	const BURN_SCAR_LINE = 'burn-scar-line';
-	const YEAR_MS = 365.25 * 24 * 3600 * 1000;
-
-	/**
-	 * Years since ignition, as a style expression.
-	 *
-	 * `Date.now()` is read when the layer is built, so a tab left open for
-	 * days drifts. Irrelevant against a one-to-five-year scale, and the
-	 * alternative is re-evaluating every feature on a timer.
-	 */
-	function burnScarAge(): maplibregl.ExpressionSpecification {
-		return ['/', ['-', Date.now(), ['get', 'ALARM_DATE']], YEAR_MS];
-	}
-
-	/** Features inside the slider's window, skipping any with no date. */
-	function burnScarFilter(): maplibregl.FilterSpecification {
-		return ['all', ['has', 'ALARM_DATE'], ['<=', burnScarAge(), burnScarYears]];
-	}
+	// The ids, the age expression and the window filter live in
+	// $lib/map/burnScars. The filter is evaluated by the style and never by
+	// code a test can step through, and a feature with no ALARM_DATE draws
+	// at every slider position unless the `has` guard is there.
+	//
+	// `Date.now()` is read when the layer is built, so a tab left open for
+	// days drifts. Irrelevant against a one-to-five-year scale, and the
+	// alternative is re-evaluating every feature on a timer.
+	const scarFilter = () => burnScarFilter(burnScarYears);
 
 	/** Push a new slider value onto the live layers without refetching. */
 	function applyBurnScarFilter() {
 		if (!mapAlive() || !map || !styleReady) return;
 		for (const id of [BURN_SCAR_FILL, BURN_SCAR_LINE]) {
-			if (map.getLayer(id)) map.setFilter(id, burnScarFilter());
+			if (map.getLayer(id)) map.setFilter(id, scarFilter());
 		}
 	}
 
@@ -2497,7 +2420,7 @@
 		map.addSource(BURN_SCAR_SOURCE, { type: 'geojson', data });
 
 		const age = burnScarAge();
-		const filter = burnScarFilter();
+		const filter = scarFilter();
 		// Fill stays faint because these overlap heavily: 392 perimeters in
 		// the XQPI box, many nested inside a larger fire's footprint. At the
 		// opacity an isolated polygon wants, a stack of four reads as solid
