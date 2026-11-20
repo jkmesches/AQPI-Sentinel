@@ -212,6 +212,14 @@ is the one thing the split would otherwise take away.
 
 ## 12. Profile Geography
 
+Everything in this section shipped on 2026-11-20, across v0.12.1 through
+v0.14.1, and it is kept as the record of what was wrong rather than as work
+remaining. The composite picker and the NEXRAD extent went out in v0.12.1,
+the Stadia domain was registered the same afternoon, and the moment
+vocabulary landed in v0.13.0 alongside serving imagery off the published
+tree. Only the `stream_gauges` profile gap below is still open, and it stays
+latent while `map_overlays` hides the toggle.
+
 Measured against both CSU deployments on 2026-11-20, each running v0.12.0,
 read directly over `the access helper` and then in a real browser under `the access helper
 --split`. Every layer of the XQPI deployment map is dead, and each one has its own
@@ -379,6 +387,20 @@ slice 2 has to answer rather than inherit.
 Compare panes doubling image fetches. The backend heap plateaus around 1.5 GiB
 on the test deployment today and `ops/docker-compose.prod.yml` sets no memory limit on
 any service, so the limit should land before panes do.
+
+`layer4.xband.FLOW` has no `L4_PROFILES` entry and warned on its first run,
+at 0.089% coverage with speckle and frozen both tripping. FLOW's frames are
+697x693 where AQPI's X-bands are larger, and the profile already warns
+against reusing thresholds across that gap. One sample cannot separate a
+calibration gap from a real condition, so it is being watched rather than
+tuned. Calibrating it honestly means sampling across quiet and active
+weather.
+
+the XQPI deployment's newest composite frame is unreadable on arrival, intermittently.
+Three consecutive frames failed the PNG signature check on 2026-11-20 while
+frames a few minutes older served 98-104 KB. The producer writes the file
+before its bytes land. L4 image QC now runs there and is what would report
+it; before v0.14.0 nothing on that deployment opened a frame at all.
 
 Anything wrong with the map on the XQPI deployment beyond the three items in section 12.
 All three were reproduced directly over `the access helper`, which reaches both CSU
