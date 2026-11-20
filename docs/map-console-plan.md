@@ -1,0 +1,388 @@
+# Map Console Plan
+
+Target release: v0.13.0. This plan splits the Live page into a status dashboard
+and a radar console, then builds the console past parity with both RadarCA and
+the current map.
+
+Written 2026-11-20, after reading `frontend/src/lib/components/MapView.svelte`
+(3,201 lines), `routes/+page.svelte`, `lib/radarStatus.ts`, `lib/mapPrefs.ts`
+and `docs/radarca-public-characterization.md`.
+
+## 1. Decisions
+
+Joseph settled these before the plan was written, so the sections below build
+on them rather than re-opening them.
+
+| Decision | Choice |
+|---|---|
+| Routing | `/` is the Dashboard, `/map` is the console |
+| Scope | Legend, cursor readout, permalinks, unit toggles, compare panes |
+| Structure | Decompose MapView behind a layer registry |
+| Mobile | Console responsive to phone width, `/m/` keeps MobileStatusMap |
+| Readout | Ramp bin only, blank when the pixel is off-ramp |
+| Compare | Any pair of selections, shared timeline, locked cameras |
+| Dashboard | Superset of today's rails, relaid out for full width |
+| Radar pins | LB2 paints, unknown when LB2 is absent or errored |
+| Version | 0.13.0 |
+
+## 2. Parity Gaps
+
+We carry all four of RadarCA's product families, 13 products against their 15.
+Four things it has that we do not:
+
+1. A colorbar per product and unit. We paint values with no scale at all, so
+   an operator can see where the rain is and not how much.
+2. Unit toggles for in/mm and F/°C. `backend/config.py` pins one unit per
+   product today (`in`, `dBZ`, `ft`, `F`).
+3. Two synchronized viewports when you pick Individual Radar.
+4. A flowlines layer, the 26 MB NHD stream network. Out of scope here, because
+   our watersheds file is already heavy and nothing has asked for it.
+
+Everything else runs ahead already. Dark and light theming, NEXRAD WMS-T,
+terrain with 3D pitch, burn scars with an age window, hydrographs in the
+popup, tilt elevations, five moments, simultaneous multi-radar overlay,
+blank-frame skipping, atomic frame swaps, health-colored radar markers,
+staleness banners sourced from L1 verdicts, and persisted prefs.
+
+One console feature is impossible rather than unscheduled. A vertical
+cross-section needs raw volume data and upstream publishes plan-view PNGs, so
+it is not on any list.
+
+## 3. Radar Status Precedence
+
+`lib/radarStatus.ts` takes `worstOf` across L2, LB2 and LB3 today, which lets
+radarca's opinion paint a pin red while the files are landing on disk
+normally. The new rule prefers the filesystem.
+
+```
+if the deployment registers any backend check (LB2 or LB3):
+    pin = the target's LB2 reading                 # arrival, preferred
+    pin = the target's worst LB3 reading           # when no LB2 row exists
+    pin = NO_READING                               # when neither exists,
+                                                   # or the chosen row is error
+else:
+    pin = worst of the target's L2 readings        # today's behavior
+```
+
+Radarca never paints a pin on a deployment that reads the filesystem. A
+deployment with no backend stage anywhere keeps painting from L2, because
+graying out every pin on shirejoe would answer a different question. The hover
+card lists every reading with the `K2`/`RC`/`TR` source tags the dashboard rail
+already uses and names which stage painted the pin, so a divergence stays
+findable without a new map symbol.
+
+The LB3 fallback is there for the three NEXRADs. KBBX, KDAX and KMUX are drawn
+on the cira-aqpi map and carry `layer3.composite.*` and `layer3.input.*` rows
+with no LB2 row at all, because a NEXRAD reaches the composite by a path with
+no arrival check. Composite input is therefore the only thing Sentinel observes
+about them, which makes it their arrival reading rather than a second kind of
+fault. For the five X-bands and CBAND, where a real LB2 row exists, arrival
+still wins, and a composite fault stays off the pin.
+
+The dashboard's collapsed radar rows take the same verdict, so a pin and a row
+header cannot disagree about one radar.
+
+That consistency costs something, and it needs a decision inside slice 2. A
+`layer3.composite.<radar>` failure stops coloring the collapsed row, so a
+radar that is arriving fine but has dropped out of the composite reads as
+healthy until the row is expanded. The composite check is about the composite
+product, so its natural home is the Products rail rather than the radar's own
+row. Either it moves there or the radar row carries a second, quieter mark.
+
+## 4. Module Layout
+
+MapView holds map lifecycle, eight layer families, playback, prefs, the gauge
+chart generator and the whole control panel in one file. The project's own
+testing convention wants logic in `$lib/*.ts` where a `.mjs` runner can reach
+it, which is the second reason to decompose.
+
+```
+lib/map/
+  core.svelte.ts        map lifecycle, style swap, resize, death detection
+  playback.svelte.ts    step list, play loop, frame barrier, activity skipping
+  panes.svelte.ts       compare pane state, camera lock
+  permalink.ts          URL codec, precedence against mapPrefs
+  units.ts              per-product unit vocabulary, labels, conversion
+  readout.ts            offscreen sampling, pixel to ramp bin
+  layers/
+    registry.ts         the LayerModule interface and the registry
+    composite.ts  nexrad.ts  radars.ts  tilt.ts
+    watersheds.ts reservoirs.ts streamGauges.ts burnScars.ts terrain.ts
+  ramps/
+    data/*.json         color to value bins, transcribed and dated
+    invert.ts           nearest-ramp lookup with a tolerance
+```
+
+Each layer declares one shape, so adding a layer becomes a data change.
+
+```ts
+interface LayerModule {
+	id: string;
+	prefsKey?: keyof MapPrefs;
+	ensure(m: maplibregl.Map, ctx: LayerCtx): void;
+	refresh(m: maplibregl.Map, ctx: LayerCtx): void;
+	remove(m: maplibregl.Map): void;
+	/** Frame-barrier participant. Loads, then returns the paint to apply. */
+	prepare?(ctx: FrameCtx): Promise<FrameApply | null>;
+}
+```
+
+The barrier that v0.12.0 added stays as it is. Three participants written by
+hand become whatever the registry reports, so a new layer joins atomic frame
+swaps without wiring of its own.
+
+## 5. Ramps and the Legend
+
+The legend and the readout both need the mapping from color to value, and the
+value half is the hard part. Sampling RadarCA's colorbar PNGs gives the colors
+exactly. The numbers beside them are rendered text, so they get transcribed by
+hand once, checked in with the source URL and the date, and reviewed.
+
+A ramp that is wrong produces a legend that lies and a readout that lies
+confidently, so each one is measured before it ships. The check samples every
+distinct color in a set of real frames for that product and reports what
+fraction maps to a ramp entry within tolerance. Full coverage means the ramp
+is right. Anything short of that means the ramp is wrong or incomplete, and
+the readout stays off for that product until it is fixed.
+
+The legend renders as themed SVG rather than a proxied PNG, so it reads in
+both themes, scales on a phone, and can carry the selected unit.
+
+## 6. Cursor Readout
+
+Hovering the overlay reports the bin the pixel falls in, such as `35-40 dBZ`,
+and reports nothing when no ramp color sits within tolerance. Anti-aliasing at
+feature edges and PNG quantization both produce colors between bins, and the
+nearest match to one of those is a number that looks authoritative and is
+wrong. Blanking is the honest answer there.
+
+Implementation draws the current frame to an offscreen canvas once per frame
+swap, then samples on pointer move. Sampling cost stays off the hot path
+because the canvas is only redrawn when the frame changes.
+
+## 7. Units
+
+`PRODUCTS` gains a unit vocabulary per product, naming the details file and
+the image subdirectory for each unit. `product_steps` and `product_image.png`
+take an optional unit, validated against that product's own vocabulary rather
+than a global list.
+
+The L1 checks keep reading the canonical unit. Thresholds like
+`max_freshness_s` were characterized against measured cadence in one unit
+subtree, and a display toggle must not move them.
+
+## 8. Permalinks
+
+The URL carries product, frame timestamp, active radars, moment, overlays,
+pane layout and camera. URL parameters win over stored prefs when present, and
+prefs fill in the rest. Updates go through `replaceState`, debounced on a
+settled change, so scrubbing does not fill the back button.
+
+Playback position encodes as a timestamp and never as a step index. Indices
+shift as the window rolls, which is the same class of bug as the step list
+holding a product's frames after the product changed.
+
+## 9. Compare Panes
+
+Each pane owns its product, radars, moment and overlays. Both panes read the
+same step list at the same index, and their cameras are locked together, so
+the only difference on screen is the thing being compared.
+
+The frame barrier covers both panes together. A pane that paints while the
+other is still loading would make the comparison itself wrong, which is worse
+than a slow frame. Image fetches share the backend LRU, because it keys on the
+logical source string rather than on which pane asked.
+
+## 10. Console Controls
+
+Keyboard control for play, step, jump to live and product switching. A time
+axis that shows its gaps instead of a bare step slider, which the per-step
+activity fractions already make possible. Playback speed. Per-layer opacity in
+place of one global slider. A measure tool for distance and bearing. Export
+with the legend and the timestamp burned in, since a screenshot without either
+is unreadable in a thread. Place search. A panel that collapses properly at
+phone width, where 280px fixed is most of the screen.
+
+## 11. Dashboard
+
+The Site, Radars, Products and Alarms rails all stay, with nothing dropped.
+The layout changes because the center six columns the map used to hold are now
+free. A small locator map keeps the answer to where a failing radar is, which
+is the one thing the split would otherwise take away.
+
+## 12. Profile Geography
+
+Measured against both CSU deployments on 2026-11-20, each running v0.12.0,
+read directly over `csu-run` and then in a real browser under `csu-run
+--split`. Every layer of the cira-xqpi map is dead, and each one has its own
+cause.
+
+The composite never gets selected, so no product overlay loads at all. The
+picker renders blank, the scrubber reads "pick a composite to scrub", and the
+browser run caught four 404s for `product_steps?product_id=comp_ref` in twenty
+seconds. `comp_ref` is AQPI's id, and a stale vocabulary and a bad ordering
+combine to keep it selected.
+`prefsVocabulary()` builds its composite vocabulary from MapView's own
+`COMP_EXTENT` table rather than from the profile's `compExtent`, so `comp_ref`
+validates as legal on a deployment that cannot place it. Then `onMount` runs
+`if (!placeable(composite)) composite = firstPlaceable()` and follows it with
+`applyPrefs(restored)`, which assigns `composite` straight from the restored
+blob and overwrites the correction. Fixing the vocabulary alone would not help,
+because `pick()` returns `DEFAULT_PREFS.composite` without checking that
+default against the vocabulary, and that default is `comp_ref`. The correction
+has to move below `applyPrefs`, which is where the overlay drops already sit
+for the same reason, under a comment that explains the ordering trap.
+
+The cira-xqpi basemap is blank, and nothing in Sentinel causes it.
+`cira-xqpi.engr.colostate.edu` is not an authorized domain at Stadia, so
+vector tiles come back 401 while the style JSON and the glyph ranges both come
+back 200. Nine tile requests across zoom 7, 9 and 10 were refused nine times,
+and the same nine requests sent as `cira-aqpi.engr.colostate.edu` all
+returned 200. The map therefore loads, applies the style, and draws radar
+overlays, markers and range rings over an empty background. No roads, no
+coastline and no labels appear. The fix is registering the domain at
+client.stadiamaps.com under Properties, Authorized Domains.
+
+Two pieces of AQPI geography sit hardcoded in the map, and both break XQPI.
+
+NEXRAD is pinned to `EXTENT_LARGE`, the Northern California box, at three
+places in MapView: the WMS `BBOX`, and the image source coordinates in both
+`refreshNexrad` and `prepareNexrad`. XQPI's domain runs -119.564 to -117.0 and
+33.288 to 35.027, so the two boxes do not touch. `EXTENT_LARGE` has its south
+edge at 36.5N against XQPI's north edge at 35.027N. Turning NEXRAD on at
+cira-xqpi therefore fetches a mosaic over Sacramento and paints it 250 km
+off-screen, so the toggle reads as doing nothing at all.
+
+On AQPI, `EXTENT_LARGE` is already the `comp_ref` extent. Deriving the NEXRAD
+box from the profile's own composite extents reproduces AQPI's behavior by
+construction and fixes XQPI at the same time, and `/api/version` carries
+`comp_extent` already.
+
+The request size does not need the same treatment, which corrects an earlier
+reading of this code. MapLibre places the returned PNG by its four corner
+coordinates, so `WIDTH: 1024, HEIGHT: 1100` sets the resolution the mosaic is
+rendered at and never its position. A box of a different aspect loses detail
+along one axis rather than landing in the wrong place, which makes the pixel
+size a quality question to measure separately rather than part of this fix.
+
+The moment vocabulary is the same class of problem with four copies of the
+key. MapView's `MOMENTS` const, `config.MOMENT_TO_PREFIX_DEFAULT`,
+`prewarm.ALL_MOMENTS` and `layer2_radar.EXPECTED_ABSENT_MOMENTS` all spell
+AQPI's five moments. `profiles/xqpi.py` declares its own four at line 181,
+spelling `DifferentialReflectivity` and `DifferentialPhase` without spaces,
+and nothing in `config.py` reads that tuple.
+
+The live effect is that FLOW's per-radar overlay never paints anything.
+`radar_steps?radar=FLOW&moment=Reflectivity` on cira-xqpi resolves the prefix
+to `CorrReflectivity`, which is AQPI's, and answers `n: 0` with an empty step
+list. `xband_scan.png` answers 404 `{"detail":"no scans in window"}` for all
+five moments. FLOW is still selectable in the radar list with its moment tabs
+live, so the controls work and the overlay stays empty. The vocabulary should
+reach the frontend over `/api/version`, the way product labels already do.
+
+The moment problem is larger than a vocabulary mismatch. XQPI has no xband
+origin at all: `xband_scan.png` reaches radarca's Django app, `fs_products`
+exposes only `read_steps` and `read_image` for product manifests and frames,
+and neither has a moment listing. FLOW's moment imagery does exist on the
+tree, at 697x693 and 3,920 to 5,971 bytes a frame per the profile's own
+measurements, with nothing routed to it. So fixing the spelling would leave
+the tabs just as empty. Either the controls are hidden on a profile with no
+xband origin, the way the tilt picker already keys off `hasRadarca`, or a
+filesystem-backed moment route gets built, which is a feature rather than a
+patch.
+
+One more endpoint ignores the profile. `/api/upstream/stream_gauges` on
+cira-xqpi returns 468 Northern California sites, the first of them at 38.96N
+119.85W, roughly 300 km from Pasadena. Nothing renders them today because
+`map_overlays` is `burn_scars` alone there and the toggle stays hidden, so this
+is latent rather than live. The endpoint should answer per profile regardless.
+
+Two smaller pieces of AQPI vocabulary show on the XQPI page. The map panel's
+header is hardcoded to `count="6 radars · 3 NEXRAD"` in `routes/+page.svelte`
+on a deployment with one radar, and the moment tabs offer AQPI's five where
+FLOW publishes four under different names. The Products rail also renders
+Atmospheric Forecast, CoSMoS Data and National Water Model as empty groups
+marked "not exposed upstream", which is AQPI's taxonomy on a page that has
+none of those families.
+
+The parts that do work on cira-xqpi, checked the same way: the backend itself
+(`product_image.png` for `composite_ref` step 30 returns an 87 KB PNG), the
+home view at Pasadena zoom 9.5, the product labels, the status rails, and the
+picker's `placeable` filter. The three QPE products each publish 31 steps
+while having no entry in `comp_extent`, and the picker correctly leaves all
+three out rather than placing them with another product's geometry.
+
+## 13. Slices
+
+One commit per slice, in this order.
+
+1. Route split. `/` to Dashboard, `/map` to console, nav and redirects, the
+   dashboard relaid out with its locator map. No change to map behavior.
+2. Radar status precedence, with the LB3 visibility question resolved. New
+   cases in `validation_tests/js/test_radar_status.mjs`.
+3. MapView decomposition. Behavior-preserving, no new features.
+4. Profile geography. NEXRAD extent and moment vocabulary both sourced from
+   the profile. Placed here so the NEXRAD fix lands in `layers/nexrad.ts`
+   once rather than being written twice. Pull it ahead of slice 3 if
+   cira-xqpi needs it before the rest of the release ships.
+5. Ramps and legend, including the coverage measurement.
+6. Cursor readout.
+7. Units, backend and frontend together.
+8. Permalinks.
+9. Compare panes.
+10. Keyboard, time axis, playback speed, per-layer opacity.
+11. Measure tool, export, place search, responsive pass.
+
+Slice 3 is the risky one, and it comes before the features, so they land in
+the new structure rather than being ported into it afterward.
+
+## 14. Verification
+
+Each slice runs `svelte-check` and `code-check` on what it touched. The pure
+modules get `.mjs` runners in the existing style, which esbuild-bundles the
+real module and asserts against it.
+
+Slice 3 needs more than that, because a behavior-preserving refactor is where
+regressions hide. A Playwright baseline captured before it records layer
+presence, frame-swap atomicity, prefs round-trip and playback cadence, then
+replays after. The v0.12.0 repaint sampling already measures the last of
+those.
+
+The LB2 change cannot be seen working on shirejoe, whose catalog is L0, L1,
+L2, L3 and L4-T1T2 with no backend tier at all. It gets unit tests here plus a
+direct check against cira-aqpi, which carries LB2 for all five X-bands and
+CBAND, and cira-xqpi, whose catalog is L0, LB1, LB2 and LB3 with no L2 at all.
+Those two cover both sides of the precedence rule.
+
+## 15. Risks and Open Items
+
+The decomposition regressing the frame barrier or prefs restore. Both have
+cost real debugging time before. The slice 3 baseline exists to catch a
+repeat.
+
+Ramp values transcribed wrong, which the coverage check is designed to catch
+before the readout ships.
+
+CBAND is safe, measured rather than assumed. `/api/checks` on cira-aqpi lists
+`layer2.backend.CBAND` in LB2 with source tag `TR`, currently passing, so
+`SENTINEL_SSCB_ROOT` is set and CBAND keeps its color under the new rule.
+
+The three NEXRADs drove the LB3 fallback in section 3. KBBX, KDAX and KMUX are
+drawn on the cira-aqpi map with 100 km range rings, and their only readings are
+LB3 (`layer3.composite.*` and `layer3.input.*`, all six passing right now).
+None of the three has an L2 or an LB2 row, so an LB2-only rule with no fallback
+would have grayed out a third of the markers on the production map.
+
+Composite-participation faults losing their place in the radar rail, which
+slice 2 has to answer rather than inherit.
+
+Compare panes doubling image fetches. The backend heap plateaus around 1.5 GiB
+on shirejoe today and `ops/docker-compose.prod.yml` sets no memory limit on
+any service, so the limit should land before panes do.
+
+Anything wrong with the map on cira-xqpi beyond the three items in section 12.
+All three were reproduced directly over `csu-run`, which reaches both CSU
+deployments from this machine, and the browser-level symptoms have not been
+checked yet. A browser test needs `csu-run --split`, because the plain
+namespace routes only CSU networks and the basemap tiles come from a public
+CDN that would fail there for the wrong reason.
