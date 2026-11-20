@@ -28,6 +28,32 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-20
+
+Image QC went quiet on both CSU deployments instead of growing.
+
+### Fixed
+
+- **`layer4_image` is imported on every profile.** [0.14.0] silently dropped
+  all 9 image-QC checks on the AQPI deployment and registered none of the 5 new ones on
+  the XQPI deployment. Both went from 84 and 15 checks to 75 and 10, with no error
+  anywhere.
+
+  `checks/__init__.py` imports `_ALWAYS` plus `RADARCA_ONLY_MODULES`. Taking
+  `layer4_image` out of the second list, so it could run without a display
+  tier, put it in neither, and its own docstring says what happens then: a
+  module in neither is never imported. The import list has room for one
+  answer and this module now has two possible sources.
+
+  It joins `_ALWAYS` and gates its own registration on having a source, the
+  pattern `layer0_network` already uses for its RadarCA-only probe. A
+  deployment with neither a mount nor an origin gets no image QC, which is
+  honest rather than a check failing forever.
+
+  `validation_tests/test_profiles.py` exists to catch this and was not run.
+  It also carried the old truth that xqpi registers no L4, which was right
+  until [0.14.0] and is updated rather than worked around.
+
 ## [0.14.0] - 2026-11-20
 
 Something finally opens a product frame on the deployment where nothing did.
