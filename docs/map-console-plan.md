@@ -393,9 +393,18 @@ measurement changed its design three times.
 | `watershed-line` landing either side of `burn-scar-line` | Capture each state twice and record the order as unstable, which `compare.py` reports as a warning |
 | The tilt overlay's corners moving about 60 m between scans | Name `sources.tilt-overlay.coordinates` as upstream's, since `/api/upstream/tilt_steps` reports the scan's own `center` and `range_km` |
 
-Two consecutive captures of unchanged code now agree on all 28 states. That
-number is the baseline's own noise floor, and anything the decomposition
-moves shows against it.
+Two consecutive captures of unchanged code agree on all 28 states
+structurally, which is the baseline's noise floor. Anything the
+decomposition moves shows against it.
+
+The layer-order race survives readiness gating and still surfaces, as an
+order-only warning on `26-overlays-all` or `06-composite-fcst`. It appeared
+on two of the four comparisons run since the gating landed, which is too few
+to put a rate on. The capture marks the state unstable and the
+comparison keeps its exit status at 0, so a run reporting one has passed. The
+race itself belongs to the overlays loading independently, and the layer
+registry in slice 3 should end it by declaring an order rather than letting
+fetch completion decide.
 
 The LB2 change cannot be seen working on the test deployment, whose catalog is L0, L1,
 L2, L3 and L4-T1T2 with no backend tier at all. It gets unit tests here plus a

@@ -19,6 +19,9 @@
 		burnScarAge, burnScarFilter, newestBurnScar,
 		BURN_SCAR_SOURCE, BURN_SCAR_FILL, BURN_SCAR_LINE
 	} from '$lib/map/burnScars';
+	import { gaugeChartSvg, gaugeSummaryHtml } from '$lib/map/gaugeChart';
+	import { selectionBounds, toggleId, uniqueIds } from '$lib/map/selection';
+	import { radarExtent, radarPointsGeo, radarRangesGeo } from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
@@ -582,13 +585,6 @@
 		unionExtent(Object.values(compExtent ?? {}), EXTENT_LARGE)
 	);
 
-	function radarExtent(r: RadarMeta) {
-		const km = r.range_m / 1000;
-		const dLat = km / 111;
-		const dLon = km / (111 * Math.cos((r.lat * Math.PI) / 180));
-		return { west: r.lon - dLon, east: r.lon + dLon, south: r.lat - dLat, north: r.lat + dLat };
-	}
-
 	// Theme-keyed status colors. MapLibre paint expressions can't read CSS
 	// custom properties, so we keep two parallel tables and pick the right
 	// one based on theme.resolved. Keep these in sync with app.css's status
@@ -725,53 +721,25 @@
 		radarHoverPopup = null;
 	}
 
-	function pointsGeo() {
-		return {
-			type: 'FeatureCollection' as const,
-			features: radars.map((r) => {
-				const status = radarStatusOf(radarStatus, r.id);
-				const active = isActive(r.id);
-				return {
-					type: 'Feature' as const,
-					geometry: { type: 'Point' as const, coordinates: [r.lon, r.lat] },
-					properties: {
-						id: r.id,
-						name: r.name,
-						kind: r.kind,
-						status,
-						active,
-						// Legacy single color (still used by range-fill/range-stroke).
-						color:        verdictColor(status),
-						// Split: dot = worst-case verdict, halo = staleness mode.
-						center_color: radarCenterColor(status),
-						halo_color:   radarHaloColor(status),
-						clickable: r.kind === 'xband' || r.kind === 'cband'
-					}
-				};
-			})
-		};
-	}
+	// Markers and rings come from $lib/radarGeo, which the dashboard locator
+	// has used since it was written. This file kept its own copy of the same
+	// geometry, including a second `radarExtent`, and the module's own
+	// docstring named that as the duplication to end here.
+	//
+	// The colors stay on this side. The locator resolves theme differently
+	// and neither surface should adopt the other's palette, which is why the
+	// module takes a paintFor callback rather than a table.
+	const radarPaint = (status: string) => ({
+		// The legacy single color, still read by range-fill and range-stroke.
+		verdict: verdictColor(status),
+		// Split: the dot carries the worst-case verdict, the halo staleness.
+		center: radarCenterColor(status),
+		halo: radarHaloColor(status)
+	});
+	const statusForRadar = (id: string) => radarStatusOf(radarStatus, id);
 
-	function rangesGeo() {
-		const features = radars.map((r) => {
-			const km = r.range_m / 1000;
-			const dLat = km / 111;
-			const dLon = km / (111 * Math.cos((r.lat * Math.PI) / 180));
-			const coords: number[][] = [];
-			const N = 64;
-			for (let i = 0; i <= N; i++) {
-				const a = (i / N) * 2 * Math.PI;
-				coords.push([r.lon + dLon * Math.cos(a), r.lat + dLat * Math.sin(a)]);
-			}
-			const status = radarStatusOf(radarStatus, r.id);
-			return {
-				type: 'Feature' as const,
-				geometry: { type: 'Polygon' as const, coordinates: [coords] },
-				properties: { id: r.id, color: verdictColor(status), active: isActive(r.id) }
-			};
-		});
-		return { type: 'FeatureCollection' as const, features };
-	}
+	const pointsGeo = () => radarPointsGeo(radars, statusForRadar, radarPaint, isActive);
+	const rangesGeo = () => radarRangesGeo(radars, statusForRadar, radarPaint, isActive);
 
 	function syncBaseSources() {
 		if (!map?.getSource('radars')) return;
@@ -1719,26 +1687,19 @@
 	// so the operator doesn't have to scroll to find them.
 	function fitToActiveRadars(opts: { animate?: boolean } = {}) {
 		if (!map || !styleReady) return;
-		const ids = new Set(activeRadars);
-		const rs = radars.filter((r) => ids.has(r.id));
-		if (rs.length === 0) return;
-		let west = +Infinity, east = -Infinity, south = +Infinity, north = -Infinity;
-		for (const r of rs) {
-			const e = radarExtent(r);
-			if (e.west  < west)  west  = e.west;
-			if (e.east  > east)  east  = e.east;
-			if (e.south < south) south = e.south;
-			if (e.north > north) north = e.north;
-		}
-		if (!isFinite(west)) return;
+		const b = selectionBounds(radars, activeRadars);
+		// Null means nothing is selected, and the camera is left where the
+		// reader put it. $lib/map/selection holds the fold, because an empty
+		// one returns an inverted box and fitBounds obeys it.
+		if (!b) return;
 		map.fitBounds(
-			[[west, south], [east, north]],
+			[[b.west, b.south], [b.east, b.north]],
 			{ padding: 60, duration: opts.animate === false ? 0 : 600, maxZoom: 10 }
 		);
 	}
 
 	function setSelection(ids: string[]) {
-		activeRadars = [...new Set(ids)];     // dedupe, fresh array reference
+		activeRadars = uniqueIds(ids);
 		// belt-and-suspenders: call the map updates directly so we don't rely
 		// solely on $effect tracking through the array reassignment.
 		syncBaseSources();
@@ -1749,9 +1710,7 @@
 		if (activeRadars.length > 0) fitToActiveRadars();
 	}
 	function toggleRadar(id: string) {
-		activeRadars = activeRadars.includes(id)
-			? activeRadars.filter((x) => x !== id)
-			: [...activeRadars, id];
+		activeRadars = toggleId(activeRadars, id);
 		syncBaseSources();
 		refreshRadarOverlays();
 	}
@@ -2002,156 +1961,11 @@
 			return null;
 		}
 	}
-	function gaugeSummaryHtml(j: GaugeFetch | null): string {
-		if (!j || !j.headers || j.headers.length <= 1) {
-			return '<span class="gauge-muted">no data</span>';
-		}
-		// First column is COMID echo; skip it. Show a compact key:value
-		// list of the remaining columns. Numerical values rounded to 2dp
-		// for readability.
-		const pairs: string[] = [];
-		const hdrs = j.headers.slice(1);
-		const vals = (j.values ?? []).slice(1);
-		for (let i = 0; i < hdrs.length && i < vals.length; i++) {
-			const v = vals[i];
-			const rendered = typeof v === 'number' ? v.toFixed(2) : String(v);
-			pairs.push(`<span class="gauge-muted">${hdrs[i]}:</span> ${rendered}`);
-		}
-		return pairs.join('  ·  ');
-	}
+	// The hydrograph and the popup's number formatting live in
+	// $lib/map/gaugeChart. It builds markup rather than mounting a
+	// component, because the popup belongs to MapLibre and may be torn
+	// down at any moment, and the geometry is testable on its own.
 
-	const GC_W = 288, GC_H = 92;          // fits a 320px popup with its padding
-	const GC_PAD_L = 34, GC_PAD_R = 4, GC_PAD_T = 6, GC_PAD_B = 14;
-
-	/** Escape text bound for an SVG attribute or text node. */
-	function svgEsc(s: string): string {
-		return s.replace(/[&<>"]/g, (c) =>
-			({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
-	}
-
-	/** Render a value with enough significant figures to be readable. */
-	function gaugeNum(v: number): string {
-		if (v === 0) return '0';
-		const a = Math.abs(v);
-		if (a >= 100) return v.toFixed(0);
-		if (a >= 1) return v.toFixed(2);
-		if (a >= 0.01) return v.toFixed(3);
-		return v.toExponential(1);
-	}
-
-	/**
-	 * Draw observed and forecast flow as one hydrograph.
-	 *
-	 * One y axis, because both series are the same measure, and it starts at
-	 * zero because flow has a true zero. Forecast is dashed as well as
-	 * differently colored, so the two are told apart without relying on hue.
-	 * A dotted rule marks now, which is the only thing separating the measured
-	 * part of the line from the predicted part.
-	 *
-	 * No unit is printed. The upstream publishes bare numbers and documents no
-	 * unit for them, and a guessed one on a chart about flooding is worse than
-	 * none.
-	 *
-	 * @param obs Observed points, oldest first.
-	 * @param fcst Forecast points, oldest first.
-	 * @returns SVG markup, or an empty string when there is nothing to draw.
-	 */
-	function gaugeChartSvg(obs: GaugePoint[], fcst: GaugePoint[]): string {
-		const all = [...obs, ...fcst];
-		if (all.length < 2) return '';
-		const t0 = Math.min(...all.map((p) => p.t));
-		const t1 = Math.max(...all.map((p) => p.t));
-		const vmax = Math.max(...all.map((p) => p.v));
-		if (!(t1 > t0)) return '';
-		// A flat-zero series still deserves a readable axis rather than a
-		// divide-by-zero, so give it a nominal top.
-		const top = vmax > 0 ? vmax * 1.08 : 1;
-		const x = (t: number) =>
-			GC_PAD_L + ((t - t0) / (t1 - t0)) * (GC_W - GC_PAD_L - GC_PAD_R);
-		const y = (v: number) =>
-			GC_H - GC_PAD_B - (v / top) * (GC_H - GC_PAD_T - GC_PAD_B);
-		const path = (pts: GaugePoint[]) =>
-			pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`)
-				.join(' ');
-		// Day of month as well as hour: the window spans two to three days,
-		// so a bare hour would not say which one.
-		const hhmm = (t: number) => {
-			const d = new Date(t);
-			return `${String(d.getUTCDate()).padStart(2, '0')} `
-				+ `${String(d.getUTCHours()).padStart(2, '0')}`
-				+ `${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
-		};
-		const now = Date.now();
-		const nowRule = now > t0 && now < t1
-			? `<line class="gc-now" x1="${x(now).toFixed(1)}" y1="${GC_PAD_T}" `
-			  + `x2="${x(now).toFixed(1)}" y2="${GC_H - GC_PAD_B}"></line>`
-			: '';
-		// Mark a hole between the two series rather than leaving blank plot
-		// area, which reads as a broken chart. Normally they overlap and
-		// nothing is drawn here: see gapNote.
-		const gapStart = obs.length ? obs[obs.length - 1].t : 0;
-		const gapEnd = fcst.length ? fcst[0].t : 0;
-		const gapBand = gapStart && gapEnd && gapEnd - gapStart > 1.5 * 3_600_000
-			? `<rect class="gc-gap" x="${x(gapStart).toFixed(1)}" y="${GC_PAD_T}"`
-			  + ` width="${(x(gapEnd) - x(gapStart)).toFixed(1)}"`
-			  + ` height="${GC_H - GC_PAD_T - GC_PAD_B}"></rect>`
-			  + `<text class="gc-gaplabel" x="${((x(gapStart) + x(gapEnd)) / 2).toFixed(1)}"`
-			  + ` y="${(GC_H - GC_PAD_B) / 2 + 3}" text-anchor="middle">no data</text>`
-			: '';
-		// Native tooltips over invisible targets: a hover layer that needs no
-		// script inside a popup MapLibre owns and may tear down at any moment.
-		const hits = all.map((p) => {
-			const kind = obs.includes(p) ? 'observed' : 'forecast';
-			return `<rect class="gc-hit" x="${(x(p.t) - 4).toFixed(1)}" y="${GC_PAD_T}"`
-				+ ` width="8" height="${GC_H - GC_PAD_T - GC_PAD_B}">`
-				+ `<title>${svgEsc(hhmm(p.t))} ${kind} ${svgEsc(gaugeNum(p.v))}</title></rect>`;
-		}).join('');
-		return `
-			<svg class="gauge-chart" viewBox="0 0 ${GC_W} ${GC_H}" role="img"
-			     aria-label="observed and forecast flow, ${svgEsc(hhmm(t0))} to ${svgEsc(hhmm(t1))}">
-				<line class="gc-axis" x1="${GC_PAD_L}" y1="${GC_H - GC_PAD_B}"
-				      x2="${GC_W - GC_PAD_R}" y2="${GC_H - GC_PAD_B}"></line>
-				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_PAD_T + 7}"
-				      text-anchor="end">${svgEsc(gaugeNum(top))}</text>
-				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_H - GC_PAD_B}"
-				      text-anchor="end">0</text>
-				<text class="gc-tick" x="${GC_PAD_L}" y="${GC_H - 3}">${svgEsc(hhmm(t0))}</text>
-				<text class="gc-tick" x="${GC_W - GC_PAD_R}" y="${GC_H - 3}"
-				      text-anchor="end">${svgEsc(hhmm(t1))}</text>
-				${gapBand}
-				${nowRule}
-				${obs.length > 1 ? `<path class="gc-obs" d="${path(obs)}"></path>` : ''}
-				${fcst.length > 1 ? `<path class="gc-fcst" d="${path(fcst)}"></path>` : ''}
-				${hits}
-			</svg>
-			<div class="gauge-legend">
-				<span><i class="gl-obs"></i>observed</span>
-				<span><i class="gl-fcst"></i>forecast</span>
-			</div>
-			${gapNote(obs, fcst)}`;
-	}
-
-	/**
-	 * Say how long the observed trace has been missing, when it has.
-	 *
-	 * The two series normally overlap by an hour or two, because observed
-	 * runs to the current hour and the forecast starts a little before it. A
-	 * hole therefore means the upstream is behind on observations for this
-	 * site rather than that the chart is drawn wrong, and that is worth
-	 * stating on a chart someone reads for a rising creek.
-	 *
-	 * @param obs Observed points, oldest first.
-	 * @param fcst Forecast points, oldest first.
-	 * @returns A muted note, or an empty string when the series meet.
-	 */
-	function gapNote(obs: GaugePoint[], fcst: GaugePoint[]): string {
-		if (obs.length === 0 || fcst.length === 0) return '';
-		const gapH = (fcst[0].t - obs[obs.length - 1].t) / 3_600_000;
-		if (gapH < 1.5) return '';
-		return `<div class="gauge-muted" style="margin-top:3px">`
-			+ `no observations for ${Math.round(gapH)} h before the forecast`
-			+ ` starts</div>`;
-	}
 	async function onStreamGaugeClick(e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) {
 		if (!e.features || e.features.length === 0 || !map) return;
 		const f = e.features[0];
