@@ -28,6 +28,63 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-20
+
+Two map layers were carrying AQPI's geography onto a deployment that is
+375 km away from it. On cira-xqpi one of them produced no overlay at all and
+the other produced a toggle that appeared to do nothing.
+
+Both were found by reading that deployment directly rather than by reasoning
+about the code, and the second corrects a claim made while planning this
+work. The pixel dimensions of a NEXRAD request set the resolution it renders
+at. Where it lands comes from its corner coordinates.
+
+### Fixed
+
+- **The composite picker selects a product the deployment actually
+  publishes.** On cira-xqpi the map opened with no overlay, a blank picker
+  and a scrubber reading "pick a composite to scrub", while
+  `product_steps?product_id=comp_ref` returned 404 four times in the first
+  twenty seconds. `comp_ref` is AQPI's id; XQPI publishes `composite_ref`.
+
+  The vocabulary was never consulted on three load paths, the fallback was
+  never validated against it, the vocabulary itself described AQPI, and the
+  correction ran too early to survive. `loadPrefs()` returned `DEFAULT_PREFS`
+  straight from three early exits, on a first visit, on corrupt JSON and
+  when storage throws, without consulting the vocabulary it was handed, and
+  the first-visit path is the common one rather than an edge case.
+  `pick()` returned its fallback unchecked, so even a correct vocabulary
+  could not reject the value. `prefsVocabulary()` built its composite list
+  from the map's own `COMP_EXTENT` table, which describes AQPI everywhere.
+  And the correction in `onMount` ran before `applyPrefs`, which assigns the
+  composite straight from the restored blob and handed the value back. The
+  loader also fired once with the module default before the site payload
+  arrived, which cost a 404 on every XQPI page load.
+
+  Verified by running the frontend against both CSU deployments' real
+  backends through a local proxy, with nothing deployed. cira-xqpi selects
+  `composite_ref` with a populated 31-step scrubber and no 404s, and
+  cira-aqpi is unchanged with reflectivity painted and 31/31 steps.
+
+- **The NEXRAD mosaic is requested over the deployment's own box.** All three
+  places that need a box took `EXTENT_LARGE`, which is Northern California,
+  so XQPI fetched a mosaic over Sacramento and placed it 250 km off screen.
+  The two boxes do not even touch, since `EXTENT_LARGE` bottoms out at 36.5N
+  against XQPI's northern edge at 35.027N.
+
+  The box now comes from the profile's own composite extents rather than from
+  a second piece of configuration. On AQPI that changes nothing twice over,
+  because `/api/version` sends `comp_extent` as null there and the constant
+  it falls back to already holds the `comp_ref` box. Measured against the
+  live service at three 5-minute marks: XQPI's box returns 14,252 to 16,946
+  bytes painting 1.00% to 1.34% of its pixels, against the 0.05% a no-data
+  response paints, and AQPI's paints 5.14% to 10.92%, in line with the 7.7%
+  to 13.8% characterized in [0.11.0].
+
+  `WIDTH` and `HEIGHT` are deliberately untouched. MapLibre places the PNG by
+  its four corner coordinates, so they set the resolution the mosaic renders
+  at and never where it lands.
+
 ## [0.12.0] - 2026-11-17
 
 Playback stops reassembling itself in front of you, and the map stops
