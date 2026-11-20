@@ -52,6 +52,62 @@ export interface Alarm {
 	ack?: AlarmAck | null;
 }
 
+/** One (check, metric) series and the samples it returned. */
+export type MetricSeries = Record<string, { ts: string; value: number }[]>;
+
+/**
+ * Most series `metrics_recent` accepts in one request.
+ *
+ * Mirrors `_MAX_SERIES` in backend/api/routes/checks.py, which raises 400
+ * above it. Measured against cira-aqpi: 64 series returns 200 and 65 returns
+ * 400. Keep the two in step, and lower this one first if the cap ever drops.
+ */
+export const METRICS_SERIES_MAX = 64;
+
+/**
+ * Split a series list into requests the endpoint will accept.
+ *
+ * The sparkline refresh sent every series in one request, which is fine until
+ * a deployment registers more checks than the cap. cira-aqpi has 84 against a
+ * cap of 64, so every poll returned 400 and no sample reached the browser
+ * after the initial seed. The two smaller deployments sit under the cap at 45
+ * and 10, so only production was ever large enough to cross it.
+ *
+ * @param keys `check_id|metric` strings, in any order.
+ * @param size Largest batch to emit. Must be at least 1.
+ * @returns Batches covering every key once, in the original order.
+ * @raises RangeError If `size` is below 1, which would loop forever.
+ */
+export function chunkSeries(keys: string[], size = METRICS_SERIES_MAX): string[][] {
+	if (!Number.isInteger(size) || size < 1) {
+		throw new RangeError(`chunkSeries size must be a positive integer, got ${size}`);
+	}
+	const out: string[][] = [];
+	for (let i = 0; i < keys.length; i += size) out.push(keys.slice(i, i + size));
+	return out;
+}
+
+/**
+ * Fold per-batch responses into one map.
+ *
+ * A key appearing in more than one batch keeps the samples from both, because
+ * dropping either would punch a hole in a trace. Callers de-dupe by timestamp
+ * already, so repeats here are harmless.
+ *
+ * @param parts Responses in batch order.
+ * @returns One map over every key any batch returned.
+ */
+export function mergeSeries(parts: MetricSeries[]): MetricSeries {
+	const out: MetricSeries = {};
+	for (const part of parts) {
+		for (const [k, pts] of Object.entries(part ?? {})) {
+			if (!pts?.length) continue;
+			out[k] = out[k] ? [...out[k], ...pts] : [...pts];
+		}
+	}
+	return out;
+}
+
 async function get<T>(path: string, timeoutMs = 8000): Promise<T> {
 	const ctl = new AbortController();
 	const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -128,12 +184,22 @@ export const api = {
 	// Used by the sparkline refresh on every poll tick — see
 	// SentinelState.refreshSparklinesIncremental for why polling is required
 	// rather than relying on the WebSocket.
-	metricsRecent: (series: string[], since?: string, limit = 40) =>
-		get<Record<string, { ts: string; value: number }[]>>(
-			`/api/checks/-/metrics_recent?series=${encodeURIComponent(series.join(','))}` +
-			(since ? `&since=${encodeURIComponent(since)}` : '') +
-			`&limit=${limit}`
-		),
+	// Batched, because the endpoint caps a single request at METRICS_SERIES_MAX
+	// and a deployment can register more checks than that. Batches run
+	// concurrently: they are independent reads and a sequential loop would put
+	// the whole poll behind the slowest one.
+	metricsRecent: async (series: string[], since?: string, limit = 40) => {
+		const parts = await Promise.all(
+			chunkSeries(series).map((batch) =>
+				get<MetricSeries>(
+					`/api/checks/-/metrics_recent?series=${encodeURIComponent(batch.join(','))}` +
+					(since ? `&since=${encodeURIComponent(since)}` : '') +
+					`&limit=${limit}`
+				)
+			)
+		);
+		return mergeSeries(parts);
+	},
 	alarms:        (status = 'open')  => get<Alarm[]>(`/api/alarms?status=${status}&limit=200`),
 	alarm:         (id: number)       => get<Alarm & { ack: { acked_by: string; acked_at: string; note: string } | null; notifications: unknown[] }>(`/api/alarms/${id}`),
 	ack:           (id: number, body: { note?: string } = {}) =>
