@@ -550,7 +550,7 @@
 	}
 
 	function nexradImageUrl(timeIso: string | null): string {
-		const e = EXTENT_LARGE;
+		const e = nexradExtent;
 		const bbox = [lon2x(e.west), lat2y(e.south), lon2x(e.east), lat2y(e.north)].join(',');
 		const params = new URLSearchParams({
 			SERVICE: 'WMS',
@@ -617,6 +617,33 @@
 		max_water_depth:       EXTENT_BAY,
 		max_water_level:       EXTENT_BAY
 	};
+
+	/**
+	 * The box the NEXRAD mosaic is requested and placed over.
+	 *
+	 * This was EXTENT_LARGE on every deployment, which is Northern
+	 * California. XQPI's domain is -119.564..-117.0, 33.288..35.027, so the
+	 * two boxes do not even touch: EXTENT_LARGE bottoms out at 36.5N against
+	 * XQPI's 35.027N. Turning NEXRAD on at the XQPI deployment fetched a mosaic over
+	 * Sacramento and placed it 250 km off screen, which reads as a toggle
+	 * that does nothing.
+	 *
+	 * Derived from the profile's own composite boxes rather than configured
+	 * separately. On AQPI, EXTENT_LARGE already IS the comp_ref box, so this
+	 * reproduces the Northern California request by construction. The union
+	 * is taken because a profile may publish several products over different
+	 * footprints, and the mosaic should cover all of them.
+	 */
+	const nexradExtent = $derived.by(() => {
+		const boxes = Object.values(compExtent ?? {});
+		if (boxes.length === 0) return EXTENT_LARGE;
+		return {
+			west:  Math.min(...boxes.map((b) => b.west)),
+			east:  Math.max(...boxes.map((b) => b.east)),
+			south: Math.min(...boxes.map((b) => b.south)),
+			north: Math.max(...boxes.map((b) => b.north))
+		};
+	});
 
 	function radarExtent(r: RadarMeta) {
 		const km = r.range_m / 1000;
@@ -1241,7 +1268,7 @@
 		if (map.getLayer('nexrad-layer')) map.removeLayer('nexrad-layer');
 		if (map.getSource('nexrad')) map.removeSource('nexrad');
 		if (!nexradEnabled) return;
-		const e = EXTENT_LARGE;
+		const e = nexradExtent;
 		map.addSource('nexrad', {
 			type: 'image',
 			url: nexradImageUrl(nexradTimeIso),
@@ -1324,7 +1351,7 @@
 		if (!map || !nexradEnabled) return null;
 		const src = map.getSource('nexrad') as maplibregl.ImageSource | undefined;
 		if (!src || typeof src.updateImage !== 'function') return null;
-		const e = EXTENT_LARGE;
+		const e = nexradExtent;
 		const url = nexradImageUrl(nexradTimeIso);
 		const token = ++nexradFetchToken;
 		let blobUrl = nexradBlobs.get(url);
