@@ -9,7 +9,9 @@
 	import TimeControls from '$lib/components/TimeControls.svelte';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
-	import { radarStatusByTarget, radarStatusOf } from '$lib/radarStatus';
+	import {
+		radarStatusByTarget, radarStatusOf, radarVerdicts, radarStageReadings
+	} from '$lib/radarStatus';
 	import { isAlerting } from '$lib/grouping';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
@@ -696,10 +698,11 @@
 		};
 	});
 
-	// Worst reading per radar, across every stage that observes one — L2 (what
-	// radarca declares), LB2 (volumes landing on disk), LB3 (still in the
-	// composite). See $lib/radarStatus for why this cannot read L2 alone: on
-	// XQPI that stage is empty, because nothing serves FLOW over HTTP.
+	// One verdict per radar. Where the deployment reads the filesystem, LB2
+	// (volumes landing on disk) decides and LB3 (composite input) covers the
+	// radars LB2 cannot see; radarca paints only where there is no backend row
+	// at all. $lib/radarStatus holds the rule and the reasons.
+	const radarVerdictMap = $derived(radarVerdicts(sentinel.rollup?.stages));
 	const radarStatus = $derived(radarStatusByTarget(sentinel.rollup?.stages));
 
 	const selectableRadars = $derived(
@@ -710,6 +713,31 @@
 	// Created on mouseenter, removed on mouseleave. closeButton off since
 	// it's transient. Reuses the theme-aware .maplibregl-popup-content CSS.
 	let radarHoverPopup: maplibregl.Popup | null = null;
+
+	/**
+	 * Every stage's reading for one radar, with the pin's own row brightened.
+	 *
+	 * The pin collapses to one color, which is what a map needs and leaves the
+	 * operator a question. A radar arriving on time and missing from the
+	 * composite is green, and that reading is in the second row here.
+	 */
+	function radarStatusRowsHtml(r: RadarMeta): string {
+		const rows = radarStageReadings(sentinel.rollup?.stages, r.id);
+		if (!rows.length) {
+			return '<div class="gauge-muted">no stage reports this radar</div>';
+		}
+		const decided = radarVerdictMap[r.id]?.from ?? 'none';
+		const body = rows
+			.map((row) => {
+				const pin = row.stage === decided ? ' radar-pop-pin' : '';
+				return `<span class="radar-pop-row${pin}">`
+					+ `<i class="radar-pop-dot" style="background:${verdictColor(row.status)}"></i>`
+					+ `<span class="radar-pop-src">${row.subject}</span> ${row.status}</span>`;
+			})
+			.join('');
+		return `<div class="radar-pop-rows">${body}</div>`;
+	}
+
 	function radarHoverHtml(r: RadarMeta): string {
 		const rangeKm = Math.round(r.range_m / 1000);
 		const scans =
@@ -721,6 +749,7 @@
 		return `
 			<div class="radar-pop">
 				<div class="radar-pop-title">${r.name} · ${r.id}</div>
+				${radarStatusRowsHtml(r)}
 				${scans}
 				<div><span class="gauge-muted">range:</span> ${rangeKm} km</div>
 			</div>`;

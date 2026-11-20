@@ -459,6 +459,11 @@ COMPOSITE_RECEIPT_ALT = "PRODUCTS/Composite_QPE/radarfiles_for_comp2.txt"
 # Stating the path costs nothing and guessing its absence would be the error.
 COMPOSITE_RUN_LOG_DIR = "PRODUCTS/Composite_QPE/log_SRI"
 
+# The published product the participation check is about. AQPI calls its
+# composite `comp_ref`, this profile calls it `composite_ref`, and the id has
+# to match PRODUCTS below or the rail has nowhere to put the row.
+COMPOSITE_PRODUCT = "composite_ref"
+
 # No DROPS tree on this profile: Gen_X-band_QPE.py is AQPI's. The producer
 # check is gated on this being non-empty rather than on the profile name, so a
 # third profile states its own answer instead of inheriting one. [V]

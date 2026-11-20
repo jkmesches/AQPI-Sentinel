@@ -303,13 +303,19 @@ def create_app() -> FastAPI:
         # "AQPI Sentinel", claimed radarca as its data source on a page that
         # never contacts radarca, and listed nine Bay Area radars with no FLOW.
         # One endpoint the frontend already polls, rather than a fourth table.
-        from ..config import (COMP_EXTENT, COMP_EXTENT_PROVISIONAL, DATA_SOURCE,
+        from ..config import (COMP_EXTENT,  # noqa: TID252  file convention
+                              COMP_EXTENT_PROVISIONAL,
+                              COMPOSITE_PRODUCT, DATA_SOURCE,
                               HAS_RADARCA,
                               HOME_VIEW, MAP_OVERLAYS, PRODUCT_LABELS, PRODUCTS,
                               SETTINGS, SITE_NAME)
         return {"version": __version__, "profile": SETTINGS.profile,
                 "site_name": SITE_NAME, "data_source": DATA_SOURCE,
                 "has_radarca": HAS_RADARCA,
+                # Which product the LB3 participation rows belong to. The
+                # Products rail reports a short composite there, named with
+                # the radars it is missing, instead of reddening those radars.
+                "composite_product": COMPOSITE_PRODUCT,
                 # {center: [lon, lat], zoom} when the profile wants the map
                 # opened somewhere other than MapView's tuned Bay Area view.
                 "home_view": HOME_VIEW or None,

@@ -129,6 +129,7 @@ print("@@" + json.dumps({
     "lb1_paths": {p: _product_dir(p) for p in config.PRODUCTS},
     "lb2_paths": {r: _radar_path(r, _NOW) for r in config.RADAR_FOLDER},
     "lb2_freshness": config.LB2_FRESHNESS,
+    "composite_product": config.COMPOSITE_PRODUCT,
     "composite_expected": dict(config.COMPOSITE_EXPECTED_RADARS),
     "composite_input":    dict(config.COMPOSITE_INPUT_DIR),
     "contrib_bands": {r: __import__(
@@ -558,6 +559,19 @@ def main() -> int:
                      if c["id"].startswith("layer3.composite.")
                      and c["target"] != c["id"].rsplit(".", 1)[-1])
         check(f"{name}: participation target == radar id", not bad, "; ".join(bad))
+
+    # The target is a radar id so the dashboard can group the row under that
+    # radar, and the fault it reports belongs to the composite. The Products
+    # rail puts it on the composite's own row, which it finds by this id, and a
+    # product id the rail cannot find drops the row with no error anywhere.
+    print("\nthe participation rows name a product the rail can find:")
+    for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):
+        check(f"{name}: COMPOSITE_PRODUCT is one of its own products",
+              prof["composite_product"] in prof["products"],
+              prof["composite_product"])
+    check("the two profiles name different composites",
+          aqpi["composite_product"] != xqpi["composite_product"],
+          f"{aqpi['composite_product']} vs {xqpi['composite_product']}")
 
     print("\nsource tags stay renderable in a two-character column:")
     for name, prof in (("aqpi", aqpi), ("xqpi", xqpi)):

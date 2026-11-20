@@ -19,6 +19,12 @@
 	import { radarStatusByTarget, radarStatusOf } from '$lib/radarStatus';
 	import { radarPointsGeo, radarRangesGeo, type RadarSite, type RadarPaint } from '$lib/radarGeo';
 
+	// The panel header counts what this map drew, so the two cannot disagree.
+	// Deriving the count from the rollup instead counted radars with a reading,
+	// which on a deployment with no backend tier is six against nine pins: the
+	// three NEXRADs are drawn from /api/radars/meta and reported by no stage.
+	let { onRadars }: { onRadars?: (radars: RadarSite[]) => void } = $props();
+
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
 	const STYLE_DARK = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
 	const FALLBACK_HOME: HomeView = { center: [-122.6, 37.95], zoom: 7.2 };
@@ -120,6 +126,7 @@
 				const resp = await fetch(apiUrl('/api/radars/meta'));
 				if (!resp.ok) throw new Error(`radars/meta HTTP ${resp.status}`);
 				radars = (await resp.json()) as RadarSite[];
+				onRadars?.(radars);
 				const site = await resolveHomeView(FALLBACK_HOME, fetch, apiUrl('/api/version'));
 				if (!alive) return;
 

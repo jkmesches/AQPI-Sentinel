@@ -15,14 +15,14 @@ them rather than re-opening them.
 
 | Decision | Choice |
 |---|---|
-| Routing | `/` is the Dashboard, `/map` is the console |
+| Routing | `/` is the console, `/dashboard` is the Dashboard |
 | Scope | Legend, cursor readout, permalinks, unit toggles, compare panes |
 | Structure | Decompose MapView behind a layer registry |
 | Mobile | Console responsive to phone width, `/m/` keeps MobileStatusMap |
 | Readout | Ramp bin only, blank when the pixel is off-ramp |
 | Compare | Any pair of selections, shared timeline, locked cameras |
 | Dashboard | Superset of today's rails, relaid out for full width |
-| Radar pins | LB2 paints, unknown when LB2 is absent or errored |
+| Radar pins | LB2 paints, LB3 where LB2 has no row, unknown where neither does |
 | Version | the next minor |
 
 ## 2. Parity Gaps
@@ -55,21 +55,28 @@ radarca's opinion paint a pin red while the files are landing on disk
 normally. The new rule prefers the filesystem.
 
 ```
-if the deployment registers any backend check (LB2 or LB3):
-    pin = the target's LB2 reading                 # arrival, preferred
-    pin = the target's worst LB3 reading           # when no LB2 row exists
-    pin = NO_READING                               # when neither exists,
-                                                   # or the chosen row is error
+if the deployment has any backend row (LB2 or LB3):
+    pin = worst of the target's LB2 rows           # arrival, preferred
+    pin = worst of the target's LB3 rows           # when no LB2 row exists
+    pin = NO_READING                               # when neither exists
 else:
-    pin = worst of the target's L2 readings        # today's behavior
+    pin = worst of the target's L2 rows            # today's behavior
 ```
 
 Radarca never paints a pin on a deployment that reads the filesystem. A
-deployment with no backend stage anywhere keeps painting from L2, because
-graying out the pins on the test deployment would answer a different question. The hover
-card lists both readings with the `the main archive`/`RC`/`TR` source tags the dashboard rail
-already uses and names which stage painted the pin. A divergence therefore
-stays findable without a new map symbol.
+deployment with no backend row anywhere keeps painting from L2, because graying
+out the pins on the test deployment would answer a different question. The tier is decided
+by rows rather than by a stage key, so a present-but-empty LB2 falls back
+instead of graying the fleet.
+
+An `error` row reads through like any other status. A check that broke is not
+the same as a check that was never registered, and `skip` would claim the
+second.
+
+The hover card lists every stage that reported the radar, each labeled by what
+it observes (arrival, composite, radarca) and carrying its own status, with the
+pin's own row brightened. A divergence therefore stays findable without a new
+map symbol.
 
 The LB3 fallback is there for the three NEXRADs. KBBX, KDAX and KMUX are drawn
 on the AQPI deployment map and carry `layer3.composite.*` and `layer3.input.*` rows
@@ -82,12 +89,20 @@ still wins, and a composite fault stays off the pin.
 The dashboard's collapsed radar rows take the same verdict. A pin and a row
 header therefore cannot disagree about one radar.
 
-That consistency costs something, and it needs a decision inside slice 2. A
-`layer3.composite.<radar>` failure stops coloring the collapsed row. A radar
-that is arriving fine but has dropped out of the composite then reads as
-healthy until the row is expanded. The composite check is about the composite
-product, and its natural home is the Products rail rather than the radar's own
-row. Either it moves there or the radar row carries a second, quieter mark.
+That consistency costs something, and the cost is paid on the Products rail. A
+`layer3.composite.<radar>` failure no longer colors the collapsed radar row, so
+a radar arriving fine and missing from the composite reads as healthy there.
+The fault belongs to the composite, and it is reported on the composite's own
+row under the radar input count, named with each radar that is short and its
+status. Each rail answers one question.
+
+Which product that row belongs to is a profile's own answer, since nothing
+links a composite run log to a product id. `config.COMPOSITE_PRODUCT` declares
+it (`comp_ref` on AQPI, `composite_ref` on XQPI), import refuses a value absent
+from that profile's `PRODUCTS`, and `/api/version` carries it to the rail. A
+backend that predates the field names no product and the rail shows no input
+row, because attaching a composite's fault to a guessed product is worse than
+leaving the reading in the radar rail alone.
 
 ## 4. Module Layout
 
@@ -324,10 +339,13 @@ three out rather than placing them with another product's geometry.
 
 One commit per slice, in this order.
 
-1. Route split. `/` to Dashboard, `/map` to console, nav and redirects, the
-   dashboard relaid out with its locator map. No change to map behavior.
-2. Radar status precedence, with the LB3 visibility question resolved. New
-   cases in `validation_tests/js/test_radar_status.mjs`.
+1. Route split, shipped. `/` is the console and `/dashboard` the dashboard,
+   with its locator map. Joseph reversed the landing page mid-slice, so the
+   console is what opens. No change to map behavior.
+2. Radar status precedence, shipped. Arrival paints, composite input covers the
+   radars arrival cannot see, radarca paints only where no backend row exists,
+   and a composite shortfall is reported on the Products rail. 58 cases in
+   `validation_tests/js/test_radar_status.mjs`.
 3. MapView decomposition. Behavior-preserving, no new features.
 4. Profile geography. NEXRAD extent and moment vocabulary both sourced from
    the profile. Placed here so the NEXRAD fix lands in `layers/nexrad.ts`

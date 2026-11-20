@@ -12,6 +12,8 @@
 		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck,
 		arrivalRowOf, radarRowRank, BACKEND_FLEET_CHECK_ID } from '$lib/format';
 	import { groupByTarget, worstOf, isAlerting } from '$lib/grouping';
+	import { radarVerdicts } from '$lib/radarStatus';
+	import { getSite } from '$lib/site';
 	import GroupRow from '$lib/components/GroupRow.svelte';
 	import { api, type CheckMeta } from '$lib/api';
 	import { diag } from '$lib/diag';
@@ -39,8 +41,20 @@
 	// how an operator ends up investigating the wrong thing.
 	// Ordering lives in $lib so it is testable and so the two LB3 families stay
 	// in pipeline order rather than alphabetical — see radarRowRank.
+	//
+	// The collapsed row carries the map pin's verdict rather than the worst of
+	// the group, so one radar is not two colors on two pages. $lib/radarStatus
+	// holds that rule: arrival decides where the deployment reads the
+	// filesystem, and a composite shortfall is reported on the Products rail
+	// instead of reddening a radar whose volumes are landing on time. Expanding
+	// the row still shows every reading, which is where that detail belongs.
+	const radarVerdictMap = $derived(radarVerdicts(sentinel.rollup?.stages));
 	const radarGroups = $derived(
 		groupByTarget(radarRows.slice().sort((a, b) => radarRowRank(a) - radarRowRank(b)))
+			.map((g) => {
+				const worst = radarVerdictMap[g.target]?.status ?? g.worst;
+				return { ...g, worst, alerting: isAlerting(worst) };
+			})
 	);
 
 	// Open state. Default is "open if alerting", with explicit operator choices
@@ -61,13 +75,17 @@
 
 	// What the locator header says it is showing.
 	//
-	// This read "6 radars · 3 NEXRAD" on every deployment, written out. An
-	// XQPI instance watching one radar said the same thing. Derived from the
-	// radar rail's own groups, so the two cannot disagree, and NEXRAD is
-	// named only where there are any.
+	// This read "6 radars · 3 NEXRAD" on every deployment, written out, so an
+	// XQPI instance watching one radar said the same thing. Counting the radar
+	// rail's groups instead was wrong in the other direction: that rail holds
+	// radars with a reading, and on a deployment with no backend tier the
+	// three NEXRADs have none, so the header said 6 over nine drawn pins.
+	//
+	// The map reports what it drew, since the header describes the map.
+	let locatorRadars = $state<{ id: string; kind: string }[]>([]);
 	const locatorCount = $derived.by(() => {
-		const n = radarGroups.length;
-		const nexrad = radarGroups.filter((g) => /^K[A-Z]{3}$/.test(g.target)).length;
+		const n = locatorRadars.length;
+		const nexrad = locatorRadars.filter((r) => r.kind === 'nexrad').length;
 		const radars = `${n} radar${n === 1 ? '' : 's'}`;
 		return nexrad > 0 ? `${radars} · ${nexrad} NEXRAD` : radars;
 	});
@@ -246,6 +264,40 @@
 			.map((cat) => ({ category: cat, label: PRODUCT_CATEGORY_LABEL[cat], rows: groups[cat] }))
 			.filter((g) => g.category !== 'other' || g.rows.length > 0);
 	});
+	// Which product the participation rows belong to, straight from the
+	// backend. Empty on a backend that predates the field, and the rail then
+	// shows no input row: attaching a composite's fault to a guessed product
+	// is worse than leaving the reading in the radar rail alone.
+	let compositeProduct = $state('');
+	$effect(() => { getSite().then((s) => (compositeProduct = s.compositeProduct)); });
+
+	// What the composite's own row says about its inputs.
+	//
+	// `layer3.composite.<RADAR>` targets a radar, so it groups under that radar
+	// in the rail beside it. The fault it reports belongs to the composite: a
+	// radar arriving on time with no block in the latest run leaves the
+	// composite short, and an operator needs that named on the composite with
+	// the radars it is missing. Each rail answers one question.
+	//
+	// Null when no participation check is registered, which is every
+	// deployment without a mount.
+	const compositeInput = $derived.by(() => {
+		const rows = (sentinel.rollup?.stages?.LB3 ?? [])
+			.filter((r) => r.check_id.startsWith('layer3.composite.'));
+		if (!rows.length) return null;
+		const short = rows.filter((r) => isAlerting(r.status))
+			.slice().sort((a, b) => a.target.localeCompare(b.target));
+		return {
+			total: rows.length,
+			clean: rows.length - short.length,
+			// Each id with its own status word. A radar absent from the run and
+			// one whose contribution went stale are different faults, and the
+			// collapsed color cannot tell them apart.
+			detail: short.map((r) => `${r.target} ${r.status}`).join(', '),
+			worst: worstOf(rows.map((r) => r.status))
+		};
+	});
+
 	const l4XbandByRadar = $derived.by(() => {
 		const out: Record<string, string> = {};
 		for (const r of sentinel.rollup?.stages?.['L4-T1T2'] ?? []) {
@@ -575,7 +627,7 @@
 		<SectionHeader title="Network" count={locatorCount} right="where the radars are" />
 		<div class="min-h-[260px] flex-1">
 			{#if diag.map}
-				<StatusLocatorMap />
+				<StatusLocatorMap onRadars={(r) => (locatorRadars = r)} />
 			{:else}
 				<div class="flex h-full items-center justify-center text-[12px] text-[var(--color-muted)] uppercase tracking-[0.18em]">
 					map disabled · ?diag=no-map
@@ -638,6 +690,22 @@
 									{@render sourceCell(lone, 'RC', false, 56)}
 								{/if}
 							</li>
+							{#if compositeInput && compositeProduct && p.target === compositeProduct}
+								<!-- The composite's input shortfall, on the composite's own
+								     row. A radar arriving on time with no block in the
+								     latest run is the composite running short, so the radar
+								     rail and the map pin keep their arrival verdict and this
+								     is where the fault is named. -->
+								<li class="row-hover grid grid-cols-[1fr_auto] items-center gap-2
+								           py-1 pl-6 pr-3 text-[10.5px]"
+									title="layer3.composite.* · {compositeInput.total} expected radars">
+									<span class="num truncate {statusText(compositeInput.worst)}">
+										radar input · {compositeInput.clean}/{compositeInput.total}{
+											compositeInput.detail ? ` · ${compositeInput.detail}` : ''}
+									</span>
+									<StatusDot status={compositeInput.worst} size={7} />
+								</li>
+							{/if}
 						{/each}
 					</ul>
 				{/if}

@@ -81,6 +81,17 @@ export interface SiteMap {
 	 * the map's own picker table knows. Null keeps that table.
 	 */
 	products: Product[] | null;
+	/**
+	 * Which product the LB3 participation rows are about, e.g. "comp_ref" on
+	 * AQPI and "composite_ref" on XQPI. The Products rail reports a short
+	 * composite on that row, named with the radars it is missing, rather than
+	 * reddening radars that are arriving on time.
+	 *
+	 * Empty means the backend did not say, and the rail shows no such row. A
+	 * guess would attach a composite's fault to whatever product happened to
+	 * match, which is worse than leaving the reading on the radar rail alone.
+	 */
+	compositeProduct: string;
 	home: HomeView;
 	/** Which overlay toggles to offer. Empty means offer none. */
 	overlays: readonly Overlay[];
@@ -176,7 +187,7 @@ export async function resolveHomeView(
 	const miss: SiteMap = {
 		profile: PROFILE_UNKNOWN,
 		name: FALLBACK_NAME, dataSource: FALLBACK_SOURCE, hasRadarca: true,
-		products: null, home: fallback, overlays: ALL_OVERLAYS,
+		products: null, compositeProduct: '', home: fallback, overlays: ALL_OVERLAYS,
 		compExtent: null, compExtentProvisional: []
 	};
 	try {
@@ -212,6 +223,8 @@ export async function resolveHomeView(
 			dataSource: typeof body?.data_source === 'string' && body.data_source
 				? body.data_source : FALLBACK_SOURCE,
 			hasRadarca: body?.has_radarca !== false,
+			compositeProduct: typeof body?.composite_product === 'string'
+				? body.composite_product : '',
 			products: Array.isArray(body?.products)
 				? body.products
 						.filter((p: unknown): p is Product =>

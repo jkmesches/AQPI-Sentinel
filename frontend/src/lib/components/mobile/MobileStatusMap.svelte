@@ -175,13 +175,13 @@
 	let playing = $state(false);
 	let playTimer: ReturnType<typeof setInterval> | undefined;
 
-	// Worst reading per radar, across every stage that observes one.
+	// One verdict per radar, from the rule both maps and the dashboard share.
 	//
-	// This rule lived here, inline, and the desktop map kept an older copy that
-	// read L2 alone and defaulted to `pass` — so FLOW rendered permanently
-	// green on XQPI while this surface reported it correctly. Both now call the
-	// one implementation; see $lib/radarStatus for the reasoning this comment
-	// used to carry, including why LB3 belongs in the set.
+	// It lived here, inline, and the desktop map kept an older copy that read
+	// L2 alone and defaulted to `pass`, which rendered FLOW permanently green
+	// on XQPI while this surface reported it correctly. All three now call the
+	// one implementation; $lib/radarStatus carries the reasoning this comment
+	// used to, including why arrival decides over radarca.
 	const statusByRadar = $derived(radarStatusByTarget(sentinel.rollup?.stages));
 
 	function centerColorFor(s: string): string {
@@ -463,7 +463,7 @@
 		map?.remove();
 	});
 
-	// Re-paint radar dots when L2 status updates.
+	// Re-paint radar dots when a radar's verdict changes.
 	$effect(() => {
 		void statusByRadar;
 		if (mapAlive() && map.isStyleLoaded()) refreshRadars();

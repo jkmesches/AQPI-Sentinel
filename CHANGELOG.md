@@ -28,6 +28,70 @@ unknown`.
 
 ## [Unreleased]
 
+Slices 1 and 2 of `docs/map-console-plan.md`.
+
+### Changed
+
+- **The console is the landing page and the dashboard moved to
+  `/dashboard`.** The map held the center six columns of a twelve-column
+  grid, 786 px wide, while its layer panel alone is 280 px. The controls
+  that make it a console rather than a viewer need room that grid never
+  had, so it takes the whole viewport. The dashboard's three rails spread
+  across the width the map used to occupy, which gives the Products rail
+  enough room for full labels and both source columns at once.
+
+  The dashboard keeps a locator map, because a rail of radar ids with no
+  map leaves "where is XSCR" unanswered. It draws markers and rings and
+  nothing else: no imagery, no picker, no playback. The geometry it shares
+  with the console is now in `lib/radarGeo.ts`, pure and palette-free, with
+  27 assertions on the longitude correction that a plausible-looking ring
+  hides.
+
+- **A radar's pin shows what the filesystem says.** The rule took the worst
+  reading across every stage, so radarca could paint a pin red while the
+  volumes were landing on disk normally. Its own status endpoint runs a p90
+  of 8 to 13 s and reaches 42 s, and it is the reading to drop.
+
+  Where a deployment has any backend row, arrival (LB2) decides and radarca
+  never paints. Composite input (LB3) decides for the radars arrival cannot
+  see, which is KBBX, KDAX and KMUX on the AQPI deployment: a NEXRAD reaches the
+  composite by a path with no arrival check, so composite input is the only
+  thing Sentinel observes about them. A radar with no backend row anywhere
+  reads unknown rather than borrowing radarca's opinion.
+
+  the test deployment has no mount and keeps painting from radarca, and
+  the tier is decided by rows rather than by a stage key, so a
+  present-but-empty LB2 falls back instead of graying the fleet.
+
+  The collapsed radar rows on the dashboard take the same verdict, so a pin
+  and a row header cannot disagree about one radar. Expanding the row still
+  shows every reading. 58 assertions in
+  `validation_tests/js/test_radar_status.mjs`.
+
+### Added
+
+- **A composite shortfall is reported on the composite's own row.** With
+  arrival deciding the pin, a radar arriving on time and missing from the
+  latest composite run reads healthy, and that fault belongs to the
+  composite rather than to the radar. The Products rail now carries a radar
+  input count under the composite, with each short radar and its own status
+  named, so a radar absent from the run and one whose contribution went
+  stale stay distinguishable. Each rail answers one question.
+
+  Which product that row belongs to is a profile's own answer, since
+  nothing links a composite run log to a product id. `COMPOSITE_PRODUCT`
+  declares it, `comp_ref` on AQPI and `composite_ref` on XQPI, import
+  refuses a value absent from that profile's `PRODUCTS`, and
+  `/api/version` carries it to the rail. A backend that predates the field
+  names no product and the rail shows no input row, because attaching a
+  composite's fault to a guessed product is worse than leaving the reading
+  in the radar rail alone.
+
+- **The radar hover card lists every stage that reported the radar**, each
+  labeled by what it observes (arrival, composite, radarca) and carrying
+  its own status, with the pin's row brightened. A divergence between the
+  disk and radarca stays findable without a new map symbol.
+
 ## [0.14.1] - 2026-11-20
 
 Image QC went quiet on both CSU deployments instead of growing.

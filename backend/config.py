@@ -727,6 +727,19 @@ RAW_VOLUME_TS_RE: dict[str, str] = {
 # LB3 — Backend processing: composite participation and the DROPS producer
 # ==========================================================================
 
+# Which published product the participation checks are about.
+#
+# `layer3.composite.<RADAR>` carries a radar id as its target, so it groups
+# under that radar on the dashboard. The fault it reports is the composite's:
+# a radar arriving on time with no block in the latest run means the composite
+# ran short, and what an operator needs is the composite named with the radars
+# it is missing. The Products rail reads this to put that row in one place.
+#
+# Declared per profile rather than derived, because nothing links a run log
+# directory to a product id. The run log is one directory and each profile
+# publishes its composite under whatever id it chose.
+COMPOSITE_PRODUCT: str = "comp_ref"
+
 # === The PRIMARY source: the composite's own per-run log ===
 #
 # One file per run, ~720/day, named <target>_startproc_<when>.txt, retained
@@ -1260,6 +1273,7 @@ if SETTINGS.profile == "xqpi":
     COMPOSITE_EXPECTED_RADARS = _xqpi.COMPOSITE_EXPECTED_RADARS
     COMPOSITE_RECEIPT_ALT = _xqpi.COMPOSITE_RECEIPT_ALT
     COMPOSITE_RUN_LOG_DIR = _xqpi.COMPOSITE_RUN_LOG_DIR
+    COMPOSITE_PRODUCT = _xqpi.COMPOSITE_PRODUCT
     DROPS_TREE = _xqpi.DROPS_TREE
     COMPOSITE_INPUT_DIR = _xqpi.COMPOSITE_INPUT_DIR
     SITE_NAME = _xqpi.SITE_NAME
@@ -1284,6 +1298,15 @@ if SETTINGS.profile not in ("aqpi", "xqpi"):
     # monitors the wrong radar network, which is worse than not starting.
     raise ValueError(
         f"unknown SENTINEL_PROFILE {SETTINGS.profile!r} — expected 'aqpi' or 'xqpi'"
+    )
+
+if COMPOSITE_PRODUCT not in PRODUCTS:
+    # A product id the rail will never find, so the composite's participation
+    # row would be dropped without a word. Caught at import, where it is a
+    # config error, rather than as a quietly missing row on one rail.
+    raise ValueError(
+        f"COMPOSITE_PRODUCT {COMPOSITE_PRODUCT!r} is not in PRODUCTS for "
+        f"profile {SETTINGS.profile!r}; expected one of {sorted(PRODUCTS)}"
     )
 
 

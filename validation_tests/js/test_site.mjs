@@ -125,6 +125,7 @@ export function runTests(mod) {
     {
       const r = await run({ site_name: 'XQPI Sentinel', data_source: 'the secondary archive',
                             has_radarca: false,
+                            composite_product: 'composite_ref',
                             products: [{ id: 'composite_ref', label: 'Reflectivity' },
                                        { id: 'junk' }] });
       check('name', r.name === 'XQPI Sentinel', r.name);
@@ -133,6 +134,8 @@ export function runTests(mod) {
       check('malformed product entries are dropped',
         r.products?.length === 1 && r.products[0].id === 'composite_ref',
         JSON.stringify(r.products));
+      check('the composite product id is carried through',
+        r.compositeProduct === 'composite_ref', r.compositeProduct);
     }
     {
       const r = await run({ version: '0.6.1' });
@@ -141,6 +144,18 @@ export function runTests(mod) {
       check('...and assumes a display tier exists, as AQPI has one',
         r.hasRadarca === true);
       check('...with no product override', r.products === null);
+      // No guess at which product the composite is. The rail shows no
+      // participation row rather than attaching a fault to the wrong product.
+      check('...and names no composite product', r.compositeProduct === '',
+        JSON.stringify(r.compositeProduct));
+    }
+    {
+      // A non-string must not reach a lookup key.
+      for (const bad of [42, null, {}, ['comp_ref'], true]) {
+        const r = await run({ composite_product: bad });
+        check(`composite_product ${JSON.stringify(bad)} is refused`,
+          r.compositeProduct === '', JSON.stringify(r.compositeProduct));
+      }
     }
 
     console.log('\nunknown overlay names are dropped, not passed through:');

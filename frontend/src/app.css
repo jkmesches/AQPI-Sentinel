@@ -263,6 +263,21 @@ svg.spark path.stroke { opacity: 0.95; }
 .radar-pop { font: 11px/1.45 var(--font-mono); white-space: nowrap; }
 .radar-pop .radar-pop-title { font-weight: 600; color: var(--color-bright); margin-bottom: 2px; }
 .radar-pop .gauge-muted { color: var(--color-muted); }
+/* One row per stage that reported the radar. The pin shows one of them, and
+   that row is the bright one, so the dot beside the dimmer rows reads as a
+   reading the pin is not carrying rather than as a second pin. */
+.radar-pop .radar-pop-rows {
+	margin: 3px 0 4px; display: flex; flex-direction: column; gap: 1px;
+}
+.radar-pop .radar-pop-row {
+	display: inline-flex; align-items: center; gap: 5px; color: var(--color-faint);
+}
+.radar-pop .radar-pop-pin { color: var(--color-bright); }
+.radar-pop .radar-pop-src { color: var(--color-muted); }
+.radar-pop .radar-pop-pin .radar-pop-src { color: var(--color-default); }
+.radar-pop .radar-pop-dot {
+	flex: none; width: 6px; height: 6px; border-radius: 50%;
+}
 
 /* ===========================================================================
    MOBILE — touch-target + iOS-quirk fixes for the /m/* route tree.
