@@ -1021,6 +1021,39 @@ DROPS_SILENT_INFO_S: int = 3_600
 DROPS_TREE: str = "PRODUCTS/DROPS"
 
 # ---------------------------------------------------------------------------
+# Rendered radar moment frames
+# ---------------------------------------------------------------------------
+#
+# The PNGs the map draws per radar, on the published tree rather than behind
+# radarca. Sentinel fetched these over HTTP until now, which made the map
+# depend on an origin whose p90 on a status endpoint ran 8-13 s with
+# half-hourly episodes reaching 42 s, for bytes already sitting on a mount it
+# reads for every other check.
+#
+# Observed on cira-aqpi 2026-11-20 under SENTINEL_BACKEND_ROOT, which is
+# /backend/projects/aqpi/XBand/web-files there. All six radar folders carry
+# current frames; ebay's 19:47 frame was on disk while this was written.
+#
+# The prefixes on disk match MOMENT_TO_PREFIX_DEFAULT and its CBAND special
+# case exactly, which had never been checked against the tree before: the
+# five X-band folders publish CorrReflectivity, CorrDifferentialReflectivity,
+# FilteredPhiDP and Velocity, and sscb alone publishes PhiDP and RhoHV. So
+# the X-band RhoHV gap in EXPECTED_ABSENT_MOMENTS is a property of the tree
+# rather than of radarca's API.
+RADAR_PLOTS_TREE: str = "PRODUCTS/Chivo/plots/{folder}/%Y/%m/%d"
+
+# One frame in that directory. `{ts}` marks where the timestamp sits; the
+# rest is matched literally, so a sibling product in the same folder cannot
+# be mistaken for a frame.
+#
+# Each directory also holds one <folder>_<prefix>_colorbar.png, which is the
+# moment's legend rather than a frame. It carries no timestamp, so this
+# pattern excludes it without needing a separate rule.
+RADAR_PLOTS_NAME: str = "{folder}_{prefix}_{ts}.png"
+RADAR_PLOTS_TS_RE: str = r"\d{8}-\d{4}"
+RADAR_PLOTS_TS_FMT: str = "%Y%m%d-%H%M"
+
+# ---------------------------------------------------------------------------
 # Composite INPUT staging (`recentfiles`)
 # ---------------------------------------------------------------------------
 #
@@ -1220,6 +1253,12 @@ if SETTINGS.profile == "xqpi":
     COMP_EXTENT = _xqpi.COMP_EXTENT
     COMP_EXTENT_PROVISIONAL = _xqpi.COMP_EXTENT_PROVISIONAL
     PRODUCT_LABELS = _xqpi.PRODUCT_LABELS
+    RADAR_PLOTS_TREE = _xqpi.RADAR_PLOTS_TREE
+    RADAR_PLOTS_NAME = _xqpi.RADAR_PLOTS_NAME
+    RADAR_PLOTS_TS_RE = _xqpi.RADAR_PLOTS_TS_RE
+    RADAR_PLOTS_TS_FMT = _xqpi.RADAR_PLOTS_TS_FMT
+    MOMENT_TO_PREFIX_DEFAULT = _xqpi.MOMENT_TO_PREFIX
+    X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)
     HAS_RADARCA = False
 if SETTINGS.profile not in ("aqpi", "xqpi"):
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
