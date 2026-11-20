@@ -8,7 +8,7 @@
 # Run:    via ops/docker-compose.prod.yml
 
 # ---------- 1) build stage ----------
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
@@ -29,7 +29,7 @@ RUN npm prune --omit=dev
 
 
 # ---------- 2) runtime stage ----------
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -41,7 +41,7 @@ COPY --from=build /app/build         ./build
 COPY --from=build /app/node_modules  ./node_modules
 COPY --from=build /app/package.json  ./
 
-# Non-root. node:20-alpine ships a built-in `node` user (UID/GID 1000)
+# Non-root. node:24-alpine ships a built-in `node` user (UID/GID 1000)
 # so we reuse it rather than create our own and collide on the GID.
 RUN chown -R node:node /app
 USER node
