@@ -66,3 +66,13 @@ Sparklines
 metricsRecent
 chunkSeries
 mergeSeries
+prewarm
+imageData
+listdir
+xband_scan
+radar_steps
+MOMENT_TO_PREFIX_DEFAULT
+EXPECTED_ABSENT_MOMENTS
+ELEVATION_PUBLISHED
+SENTINEL_BACKEND_ROOT
+CorrReflectivity
