@@ -105,7 +105,8 @@
 		</div>
 
 		<nav class="flex items-center gap-1 border-l border-[var(--color-border)] pl-3">
-			<NavLink href="/" label="Live" />
+			<NavLink href="/" label="Map" />
+			<NavLink href="/dashboard" label="Dashboard" />
 			<NavLink href="/timeline" label="Timeline" />
 			<NavLink href="/history" label="History" />
 			<NavLink href="/faq" label="FAQ" />
