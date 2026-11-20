@@ -329,7 +329,32 @@ _WINDOW_FRAMES = 14
 # a freshness scan over those directories must still exclude it. The composite
 # families below contain no stray entries at all, so they need no exclusion.
 # See 16-§9.
-COLORBAR_GLOB = "*colorbar*"   # [Q] not observed directly; no check reads it yet
+COLORBAR_GLOB = "*colorbar*"   # one per moment directory, observed 2026-11-20
+
+# Where FLOW's rendered moment frames live, relative to SENTINEL_BACKEND_ROOT
+# (/backend, which is the XQPI product root).
+#
+# Shaped differently from AQPI's, so both profiles declare their own rather
+# than sharing one with substitutions. AQPI partitions by radar first and
+# carries the moment in the filename; this one partitions by date first and
+# gives each moment its own directory.
+#
+# Observed 2026-11-20: four directories under FLOW matching the MOMENTS tuple
+# above, 472 frames each for the day so far at a 150 s cadence, sizes
+# 5,829-7,711 B. Only elevation 3.5 appears, which is ELEVATION_PUBLISHED, so
+# the published-vs-swept gap recorded above holds on the tree too.
+RADAR_PLOTS_TREE = "PRODUCT_IMAGES/%Y/%m/%d/{radar}/{prefix}"
+
+# The elevation is interpolated from ELEVATION_PUBLISHED rather than written
+# out, so a change there cannot leave this pattern matching nothing.
+RADAR_PLOTS_NAME = "{radar}_{prefix}_" + str(ELEVATION_PUBLISHED) + "_{ts}.png"
+RADAR_PLOTS_TS_RE = r"\d{8}-\d{6}"
+RADAR_PLOTS_TS_FMT = "%Y%m%d-%H%M%S"
+
+# FLOW's moment directories and filenames use the moment name unchanged,
+# where AQPI renames four of its five. Identity rather than a copied table,
+# so adding a moment to MOMENTS above needs no second edit here.
+MOMENT_TO_PREFIX = {m: m for m in MOMENTS}
 
 # Raw volumes arrive both compressed and not.
 RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")   # [V] both extensions seen in flow/
