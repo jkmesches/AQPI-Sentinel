@@ -11,9 +11,15 @@
  *   no-spark     — don't render Sparkline components
  *   no-tick      — disable the 1s clock tick in the layout
  *   no-pulse     — disable status-dot transition pulse animations
+ *   probe        publish a map state snapshot, for the visual baseline
  *
- * The defaults are all-enabled. Read once at module load — refresh the
- * page to change settings.
+ * The defaults are all-enabled, and the flags are read once at module load.
+ * Refresh the page to change them.
+ *
+ * `probe` is opt-in, unlike the flags above, which turn subsystems off. It is
+ * read by validation_tests/visual, which compares the map's structure before
+ * and after a refactor. A page that published a live map handle by default
+ * would hand every visitor a lever on a surface meant to be read.
  *
  * Example:
  *   /?diag=no-ws,no-map    leave Live for 30 min — if no freeze, we know
@@ -32,6 +38,7 @@ export const diag = {
 	spark:  !off.has('no-spark'),
 	tick:   !off.has('no-tick'),
 	pulse:  !off.has('no-pulse'),
+	probe:  off.has('probe'),
 	raw,
 	anyDisabled: raw.length > 0
 };

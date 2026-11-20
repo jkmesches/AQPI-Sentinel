@@ -13,6 +13,7 @@
 		radarStatusByTarget, radarStatusOf, radarVerdicts, radarStageReadings
 	} from '$lib/radarStatus';
 	import { isAlerting } from '$lib/grouping';
+	import { diag } from '$lib/diag';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
@@ -704,6 +705,21 @@
 	// at all. $lib/radarStatus holds the rule and the reasons.
 	const radarVerdictMap = $derived(radarVerdicts(sentinel.rollup?.stages));
 	const radarStatus = $derived(radarStatusByTarget(sentinel.rollup?.stages));
+
+	// What the panel header counts as on.
+	//
+	// It counted the composite, NEXRAD and the active radars, and the six
+	// geography toggles sat under it uncounted. With every overlay on, the
+	// header read "2 on" above a list showing eight. Derived once, because
+	// the open panel and its collapsed badge each carried the expression and
+	// a count in two places is a count that will disagree with itself.
+	const layersOnCount = $derived(
+		(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0)
+		+ activeRadars.length
+		+ (watershedsOn ? 1 : 0) + (reservoirsOn ? 1 : 0)
+		+ (terrainOn ? 1 : 0) + (terrain3DOn ? 1 : 0)
+		+ (streamGaugesOn ? 1 : 0) + (burnScarsOn ? 1 : 0)
+	);
 
 	const selectableRadars = $derived(
 		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
@@ -2543,6 +2559,109 @@
 		return ang - (-45);
 	}
 
+	// ---- visual baseline probe (?diag=probe) -----------------------------
+	//
+	// Publishes what the map is actually showing, for the comparison in
+	// `validation_tests/visual`. Slice 3 of docs/map-console-plan.md moves
+	// this file's layers into modules, and what has to hold fixed is the
+	// structure: which sources exist, which layers they feed, in what order,
+	// and with what paint. A screenshot cannot see a layer inserted at the
+	// wrong `beforeId`, and the imagery under it changes every few minutes
+	// regardless, so pixels alone would be all noise and no signal.
+	//
+	// A snapshot rather than the map itself, so a harness reads this surface
+	// and cannot drive it.
+	interface ProbeWindow {
+		__sentinelProbe?: () => Record<string, unknown> | null;
+	}
+
+	/** The fixed sources this component adds. A layer on one of these is ours. */
+	const PROBE_SOURCES = [
+		'comp-overlay', 'tilt-overlay', 'nexrad', 'radars', 'ranges',
+		'stream-gauges', 'watersheds', 'reservoirs', 'terrain-dem', 'burn-scars'
+	];
+
+	/** The per-radar overlay sources, which are named from the radar id. */
+	const PROBE_RADAR_SRC = /^radar-.+-src$/;
+
+	const probeOwns = (id: string) =>
+		PROBE_SOURCES.includes(id) || PROBE_RADAR_SRC.test(id);
+
+	/**
+	 * Summarize one source, with any inline GeoJSON reduced to its shape.
+	 *
+	 * The watershed, reservoir, gauge and burn-scar sources carry their whole
+	 * FeatureCollection inline, which is 10 MB across a capture and is data
+	 * rather than structure. The feature count and the property keys answer
+	 * what a capture needs, that the layer is fed from the right fetch, and
+	 * they stay still while a gauge reading moves.
+	 */
+	function probeSource(source: unknown): unknown {
+		const s = source as { type?: string; data?: unknown };
+		if (s?.type !== 'geojson' || typeof s.data !== 'object' || s.data === null) {
+			return source;
+		}
+		const fc = s.data as { type?: string; features?: { properties?: object }[] };
+		const features = fc.features ?? [];
+		return {
+			...s,
+			data: {
+				type: fc.type,
+				featureCount: features.length,
+				propertyKeys: Object.keys(features[0]?.properties ?? {}).sort()
+			}
+		};
+	}
+
+	function probeSnapshot(): Record<string, unknown> | null {
+		if (!map) return null;
+		let style: maplibregl.StyleSpecification;
+		try {
+			style = map.getStyle();
+		} catch {
+			// Called between a style swap and its load event.
+			return null;
+		}
+		const all = style.layers ?? [];
+		const sources: Record<string, unknown> = {};
+		for (const [id, s] of Object.entries(style.sources ?? {})) {
+			if (probeOwns(id)) sources[id] = probeSource(s);
+		}
+		const layers: Record<string, unknown> = {};
+		for (const l of all) {
+			const src = (l as { source?: string }).source;
+			if (src && probeOwns(src)) layers[l.id] = l;
+		}
+		return {
+			camera: {
+				center: map.getCenter().toArray(),
+				zoom: map.getZoom(),
+				bearing: map.getBearing(),
+				pitch: map.getPitch()
+			},
+			// Every layer in paint order, ours and the basemap's alike. A
+			// layer added at the wrong `beforeId` draws under the thing it
+			// should cover, and only the order shows that.
+			layerOrder: all.map((l) => l.id),
+			sources,
+			layers,
+			terrain: style.terrain ?? null,
+			state: {
+				composite, moment: currentMoment, activeRadars: [...activeRadars],
+				nexradEnabled, overlayOpacity, tiltEl,
+				watershedsOn, reservoirsOn, terrainOn, terrain3DOn,
+				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
+				stepIdx, stepCount: steps.length, stepsFor, playing,
+				panelOpen, mapDead, prefsReady,
+				profile: siteProfile, hasRadarca
+			}
+		};
+	}
+
+	function publishProbe(): void {
+		(window as unknown as ProbeWindow).__sentinelProbe = probeSnapshot;
+	}
+
 	onMount(async () => {
 		// Toggles that need no vocabulary can be applied before the radar list
 		// arrives; radars and composite are validated once we know what exists.
@@ -2709,6 +2828,8 @@
 			}
 		};
 		document.addEventListener('visibilitychange', visHandler);
+
+		if (diag.probe) publishProbe();
 	});
 
 	let visHandler: (() => void) | undefined;
@@ -2718,6 +2839,7 @@
 		resizeObs?.disconnect();
 		map?.remove();
 		if (visHandler) document.removeEventListener('visibilitychange', visHandler);
+		if (diag.probe) delete (window as unknown as ProbeWindow).__sentinelProbe;
 	});
 
 	// Composites grouped by upstream source so a 10-item dropdown stays
@@ -2854,7 +2976,7 @@
 			</svg>
 			<span class="label tracking-[0.2em] text-[var(--color-default)]">Layers</span>
 			<span class="num text-[9.5px] text-[var(--color-faint)]">
-				{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
+				{layersOnCount} on
 			</span>
 		</button>
 	{:else}
@@ -2866,7 +2988,7 @@
 			<div class="flex items-baseline gap-2">
 				<span class="label tracking-[0.2em]">Layers</span>
 				<span class="num text-[9.5px] text-[var(--color-faint)]">
-					{(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0) + activeRadars.length} on
+					{layersOnCount} on
 				</span>
 			</div>
 			<div class="flex items-center gap-2">

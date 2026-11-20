@@ -330,7 +330,50 @@ Bisect perf issues by toggling subsystems off:
 
 The flags are read by `lib/diag.ts` and each subsystem checks `diag.X`
 before rendering / subscribing. Add a new flag by extending the
-const map in `diag.ts` — see the existing entries for the pattern.
+const map in `diag.ts`, following the existing entries.
+
+One flag turns something on rather than off:
+
+| Flag | Publishes |
+|---|---|
+| `probe` | `window.__sentinelProbe()`, a snapshot of the map's structure |
+
+---
+
+## Visual baseline
+
+`validation_tests/visual` holds the map console to its current behavior
+across a refactor. `capture.py` drives 28 `mapPrefs` states through
+`?diag=probe` and writes one JSON record per state; `compare.py` diffs two
+captures and exits non-zero on a structural change.
+
+```bash
+python validation_tests/visual/capture.py /tmp/before --shots
+# ... change the code, deploy ...
+python validation_tests/visual/capture.py /tmp/after
+python validation_tests/visual/compare.py /tmp/before /tmp/after
+```
+
+The snapshot is structure rather than pixels: the camera, every layer in
+paint order, the sources MapView adds, and the paint and layout of each layer
+on them. The imagery underneath is live, so a pixel diff is mostly noise, and
+a screenshot cannot see a layer added at the wrong `beforeId`.
+
+State comes from `localStorage` rather than from clicking, so the matrix
+survives a markup rewrite.
+
+Two things the harness handles that a first attempt will not. Several fields
+move on their own (a fresh `blob:` id per load, `Date.now()` inside the
+burn-scar paint expressions, the tilt overlay's corners, which come from the
+scan's own `center` and `range_km`), so each state is captured twice, and the
+differing keys are measured instead of guessed. Layer order between the
+vector overlays also depends on which fetch returns first, so a state whose
+own two loads disagree is recorded as unstable and an order change on it is
+reported as a warning.
+
+Capture against a deployment that has the layers you care about. Taking a
+baseline on `the test deployment` and comparing it against the AQPI deployment
+compares two profiles, not two versions of the code.
 
 ---
 

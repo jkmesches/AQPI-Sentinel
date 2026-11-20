@@ -369,10 +369,33 @@ modules get `.mjs` runners in the existing style, which esbuild-bundles the
 real module and asserts against it.
 
 Slice 3 needs more than that, because a behavior-preserving refactor is where
-regressions hide. A Playwright baseline captured before it records layer
-presence, frame-swap atomicity, prefs round-trip and playback cadence, then
-replays after. The v0.12.0 repaint sampling already measures the last of
-those.
+regressions hide. `validation_tests/visual` is the baseline, built before any
+code moved. `?diag=probe` publishes `window.__sentinelProbe()`, which reports
+the camera, every layer in paint order, the sources this component adds, the
+paint and layout of each layer on them, and the component's own control
+state. `capture.py` walks 28 prefs states through that probe and `compare.py`
+diffs two captures.
+
+Structure rather than pixels, for two reasons. The imagery under the overlays
+is live, so a pixel diff an hour apart is mostly noise. And a screenshot
+cannot see a layer inserted at the wrong `beforeId`, a paint property
+dropped, or a source that stopped being added, which are the faults a
+decomposition produces. Screenshots are written beside the JSON for a human.
+
+The harness was measured against itself before being trusted, and that
+measurement changed its design three times.
+
+| Found by running it twice | Fix |
+|---|---|
+| The forecast composite's layer landed on some runs and not others at a flat 9 s wait | Poll until the set of source and layer ids stops changing |
+| A fresh `blob:` id for the NEXRAD mosaic on every load | Scrub the object-URL id |
+| `Date.now()` baked into the burn-scar paint and filter expressions | Scrub integers in the epoch-millisecond range |
+| `watershed-line` landing either side of `burn-scar-line` | Capture each state twice and record the order as unstable, which `compare.py` reports as a warning |
+| The tilt overlay's corners moving about 60 m between scans | Name `sources.tilt-overlay.coordinates` as upstream's, since `/api/upstream/tilt_steps` reports the scan's own `center` and `range_km` |
+
+Two consecutive captures of unchanged code now agree on all 28 states. That
+number is the baseline's own noise floor, and anything the decomposition
+moves shows against it.
 
 The LB2 change cannot be seen working on the test deployment, whose catalog is L0, L1,
 L2, L3 and L4-T1T2 with no backend tier at all. It gets unit tests here plus a

@@ -229,7 +229,10 @@
 
 	{#if diag.anyDisabled}
 		<div class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[11px] num text-[var(--color-warn)]">
-			DIAG: disabled = {diag.raw.join(', ')}
+			<!-- Names the flags rather than calling them disabled: `probe`
+			     turns a snapshot ON, and a banner reading "disabled = probe"
+			     describes the opposite of what the page is doing. -->
+			DIAG: {diag.raw.join(', ')}
 			<a class="ml-3 underline" href={location.pathname}>clear</a>
 		</div>
 	{/if}

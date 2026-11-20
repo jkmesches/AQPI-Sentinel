@@ -1,0 +1,400 @@
+{
+ "counts": {
+  "layers": 61,
+  "ours": 8,
+  "sources": 5
+ },
+ "name": "13-radar-two",
+ "prefs": {
+  "activeRadars": [
+   "XEBY",
+   "XSCR"
+  ],
+  "burnScarYears": 2,
+  "burnScars": false,
+  "camera": null,
+  "composite": "comp_ref",
+  "moment": "Reflectivity",
+  "nexrad": false,
+  "opacity": 0.8,
+  "panelOpen": true,
+  "reservoirs": false,
+  "streamGauges": false,
+  "terrain": false,
+  "terrain3D": false,
+  "tiltEl": 0,
+  "v": 1,
+  "watersheds": false
+ },
+ "snapshot": {
+  "camera": {
+   "bearing": 22.0376,
+   "center": [
+    -122.6,
+    37.95
+   ],
+   "pitch": 0,
+   "zoom": 7.2
+  },
+  "layerOrder": [
+   "background",
+   "park_fill",
+   "landcover_ice_shelf",
+   "landcover_glacier",
+   "landuse_residential",
+   "landcover_wood",
+   "landcover_park",
+   "water",
+   "waterway",
+   "boundary_state",
+   "boundary_country",
+   "building",
+   "tunnel_motorway_casing",
+   "tunnel_motorway_inner",
+   "highway_path",
+   "highway_minor",
+   "highway_major_casing",
+   "highway_major_inner",
+   "highway_major_subtle",
+   "highway_motorway_casing",
+   "highway_motorway_inner",
+   "highway_motorway_subtle",
+   "railway_service",
+   "railway_service_dashline",
+   "railway",
+   "railway_dashline",
+   "aeroway_line",
+   "highway_motorway_bridge_casing",
+   "highway_motorway_bridge_inner",
+   "highway_name_other",
+   "water_name_line",
+   "water_name_nonocean",
+   "water_name_ocean",
+   "poi_gen1",
+   "poi_gen0_parks",
+   "poi_gen0_other",
+   "place_other",
+   "highway_name_major",
+   "highway_shield_other",
+   "highway_shield_us_other",
+   "highway_shield_us_interstate",
+   "place_suburb",
+   "place_village",
+   "airport_label_gen0",
+   "place_town",
+   "place_city",
+   "place_city_large",
+   "place_capital_gen1",
+   "place_capital_gen0",
+   "place_state",
+   "place_country_other",
+   "place_country_major",
+   "place-continent",
+   "radar-XEBY-layer",
+   "radar-XSCR-layer",
+   "comp-overlay-layer",
+   "range-fill",
+   "range-stroke",
+   "radar-halo",
+   "radar-point",
+   "radar-label"
+  ],
+  "layers": {
+   "comp-overlay-layer": {
+    "id": "comp-overlay-layer",
+    "paint": {
+     "raster-opacity": 0.7
+    },
+    "source": "comp-overlay",
+    "type": "raster"
+   },
+   "radar-XEBY-layer": {
+    "id": "radar-XEBY-layer",
+    "paint": {
+     "raster-opacity": 0.8
+    },
+    "source": "radar-XEBY-src",
+    "type": "raster"
+   },
+   "radar-XSCR-layer": {
+    "id": "radar-XSCR-layer",
+    "paint": {
+     "raster-opacity": 0.8
+    },
+    "source": "radar-XSCR-src",
+    "type": "raster"
+   },
+   "radar-halo": {
+    "id": "radar-halo",
+    "paint": {
+     "circle-color": [
+      "get",
+      "halo_color"
+     ],
+     "circle-opacity": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      0.32,
+      0.16
+     ],
+     "circle-radius": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      14,
+      11
+     ],
+     "circle-stroke-color": [
+      "get",
+      "halo_color"
+     ],
+     "circle-stroke-width": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      2,
+      1.4
+     ]
+    },
+    "source": "radars",
+    "type": "circle"
+   },
+   "radar-label": {
+    "id": "radar-label",
+    "layout": {
+     "text-anchor": "left",
+     "text-field": [
+      "get",
+      "id"
+     ],
+     "text-font": [
+      "Stadia Regular"
+     ],
+     "text-offset": [
+      0.9,
+      0.4
+     ],
+     "text-size": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      11,
+      10
+     ]
+    },
+    "paint": {
+     "text-color": "#1c1f1c",
+     "text-halo-color": "#ffffff",
+     "text-halo-width": 1.2
+    },
+    "source": "radars",
+    "type": "symbol"
+   },
+   "radar-point": {
+    "id": "radar-point",
+    "paint": {
+     "circle-color": [
+      "get",
+      "center_color"
+     ],
+     "circle-radius": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      5.5,
+      4
+     ],
+     "circle-stroke-color": "#ffffff",
+     "circle-stroke-width": 1
+    },
+    "source": "radars",
+    "type": "circle"
+   },
+   "range-fill": {
+    "id": "range-fill",
+    "paint": {
+     "fill-color": [
+      "get",
+      "color"
+     ],
+     "fill-opacity": 0.05
+    },
+    "source": "ranges",
+    "type": "fill"
+   },
+   "range-stroke": {
+    "id": "range-stroke",
+    "paint": {
+     "line-color": [
+      "get",
+      "color"
+     ],
+     "line-dasharray": [
+      2,
+      2
+     ],
+     "line-opacity": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      0.9,
+      0.35
+     ],
+     "line-width": [
+      "case",
+      [
+       "get",
+       "active"
+      ],
+      1.6,
+      1
+     ]
+    },
+    "source": "ranges",
+    "type": "line"
+   }
+  },
+  "sources": {
+   "comp-overlay": {
+    "coordinates": [
+     [
+      -124.005,
+      39.505
+     ],
+     [
+      -121.195,
+      39.505
+     ],
+     [
+      -121.195,
+      36.5
+     ],
+     [
+      -124.005,
+      36.5
+     ]
+    ],
+    "type": "image",
+    "url": "/api/upstream/product_image.png?product_id=comp_ref&step=30&ts=<N>"
+   },
+   "radar-XEBY-src": {
+    "coordinates": [
+     [
+      -122.5182,
+      38.176
+     ],
+     [
+      -121.6058,
+      38.176
+     ],
+     [
+      -121.6058,
+      37.4552
+     ],
+     [
+      -122.5182,
+      37.4552
+     ]
+    ],
+    "type": "image",
+    "url": "/api/upstream/xband_scan.png?radar=XEBY&moment=Reflectivity"
+   },
+   "radar-XSCR-src": {
+    "coordinates": [
+     [
+      -122.4297,
+      37.3451
+     ],
+     [
+      -121.5275,
+      37.3451
+     ],
+     [
+      -121.5275,
+      36.6243
+     ],
+     [
+      -122.4297,
+      36.6243
+     ]
+    ],
+    "type": "image",
+    "url": "/api/upstream/xband_scan.png?radar=XSCR&moment=Reflectivity"
+   },
+   "radars": {
+    "data": {
+     "featureCount": 9,
+     "propertyKeys": [
+      "active",
+      "center_color",
+      "clickable",
+      "color",
+      "halo_color",
+      "id",
+      "kind",
+      "name",
+      "status"
+     ],
+     "type": "FeatureCollection"
+    },
+    "type": "geojson"
+   },
+   "ranges": {
+    "data": {
+     "featureCount": 9,
+     "propertyKeys": [
+      "active",
+      "color",
+      "id"
+     ],
+     "type": "FeatureCollection"
+    },
+    "type": "geojson"
+   }
+  },
+  "state": {
+   "activeRadars": [
+    "XEBY",
+    "XSCR"
+   ],
+   "burnScarThrough": "",
+   "burnScarYears": 2,
+   "burnScarsOn": false,
+   "composite": "comp_ref",
+   "hasRadarca": true,
+   "mapDead": false,
+   "moment": "Reflectivity",
+   "nexradEnabled": false,
+   "overlayOpacity": 0.8,
+   "panelOpen": true,
+   "playing": false,
+   "prefsReady": true,
+   "profile": "aqpi",
+   "reservoirsOn": false,
+   "stepCount": 31,
+   "stepIdx": 30,
+   "stepsFor": "comp_ref",
+   "streamGaugesOn": false,
+   "terrain3DOn": false,
+   "terrainOn": false,
+   "tiltEl": 0,
+   "watershedsOn": false
+  },
+  "terrain": null
+ },
+ "unstableOrder": false,
+ "volatile": []
+}

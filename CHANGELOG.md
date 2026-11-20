@@ -28,7 +28,24 @@ unknown`.
 
 ## [Unreleased]
 
-Slices 1 and 2 of `docs/map-console-plan.md`.
+Slices 1 and 2 of `docs/map-console-plan.md`, plus the baseline that slice 3
+will be measured against.
+
+### Security
+
+- **The frontend image runs Node 24.** It built and ran on `node:20-alpine`,
+  and Node 20 is past end of life, so it receives no security fixes at all.
+  Both stages of `ops/Dockerfile.frontend` move to `node:24-alpine`, which is
+  24.22.3 today. It still runs as the image's built-in `node` user.
+
+  Raised by the homelab session against CVE-2026-111497, the Brotli decoder
+  out-of-bounds write. One correction to that framing, because it changes the
+  argument rather than the conclusion: the Node advisory of 2026-10-21 lists
+  22.x, 24.x and 26.x as affected and says nothing about 20.x, so whether
+  Node 20 carries that particular bug is unsettled. End of life is the reason
+  that holds on its own. Sentinel's exposure to the CVE is low either way,
+  since the only Brotli input an adapter-node server sees here is its own SSR
+  `fetch()` to our backend.
 
 ### Changed
 
@@ -91,6 +108,36 @@ Slices 1 and 2 of `docs/map-console-plan.md`.
   labeled by what it observes (arrival, composite, radarca) and carrying
   its own status, with the pin's row brightened. A divergence between the
   disk and radarca stays findable without a new map symbol.
+
+- **A visual baseline for the map console**, in `validation_tests/visual`.
+  `?diag=probe` publishes a snapshot of the map's structure (the camera,
+  every layer in paint order, the sources MapView adds, and the paint and
+  layout of each layer on them), `capture.py` drives 28 prefs states through
+  it, and `compare.py` diffs two captures. Slice 3 moves 3,277 lines of
+  MapView into modules and has to show that nothing user-visible changed,
+  and the map had no test of any kind until now.
+
+  Structure rather than pixels. The imagery under the overlays is live, so a
+  pixel diff an hour apart is mostly noise, and a screenshot cannot see a
+  layer inserted at the wrong `beforeId`.
+
+  Running it twice against unchanged code is what made it trustworthy, and
+  it found five ways to disagree with itself: a fixed wait that caught the
+  forecast composite only on some runs, a fresh `blob:` id each load,
+  `Date.now()` baked into the burn-scar paint expressions, the tilt
+  overlay's corners following the scan's own `center` and `range_km`, and
+  `watershed-line` landing on either side of `burn-scar-line`. The first
+  four are handled. The fifth is a real race in the current code, so a state
+  whose own two loads disagree is recorded as unstable and an order change
+  on it is reported as a warning.
+
+### Fixed
+
+- **The layers panel counts every layer that is on.** It counted the
+  composite, NEXRAD and the active radars, and the six geography toggles sat
+  under it uncounted, so with every overlay on the header read "2 on" above
+  a list showing eight. The expression was also duplicated in the open panel
+  and its collapsed badge. Found while reading a baseline screenshot.
 
 ## [0.14.1] - 2026-11-20
 
