@@ -92,7 +92,9 @@ def run_profile(profile: str, root: str) -> None:
     os.environ["SENTINEL_BACKEND_ROOT"] = root
     import backend.fs_products as fs
 
-    day = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    # Near now, not a fixed hour: the listing keeps only the last hour, so
+    # frames written at 12:00 would be filtered out at any other time of day.
+    day = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=10)
     radar, moment = ("XEBY", "Reflectivity") if profile == "aqpi" else ("FLOW", "Reflectivity")
     if profile == "aqpi":
         build_aqpi_tree(root, day)
@@ -130,6 +132,15 @@ def run_profile(profile: str, root: str) -> None:
         check(f"{profile}: days=0 is refused", False, "no error raised")
     except ValueError:
         check(f"{profile}: days=0 is refused", True)
+
+    # The tree holds whole days where radarca served a rolling hour. Handing
+    # the map everything on disk stretched its scrubber across two days.
+    old = asyncio.run(fs.list_moment_frames(radar, moment, window_s=60))
+    check(f"{profile}: the window drops frames older than it",
+          len(old) < len(frames), f"{len(old)} of {len(frames)}")
+    everything = asyncio.run(fs.list_moment_frames(radar, moment, window_s=0))
+    check(f"{profile}: window_s=0 keeps everything the scan found",
+          len(everything) == len(frames), f"{len(everything)} of {len(frames)}")
 
 
 def main() -> int:

@@ -42,6 +42,16 @@ FS_TIMEOUT_S = 5.0
 # an image.
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 
+# How far back a moment listing reaches by default.
+#
+# The tree keeps whole days, where radarca served a rolling hour. Returning
+# everything on disk handed the map 872 steps spanning 44 hours in place of
+# the 18 it expects, which stretches the scrubber across two days and turns
+# a 16-second playback into 13 minutes. One hour matches what the map was
+# built around; the console work can ask for more once it has a time axis
+# that can show it.
+MOMENT_WINDOW_S = 3600.0
+
 
 def available() -> bool:
     """Can this deployment read products off the filesystem at all?"""
@@ -225,22 +235,26 @@ def _list_frames_blocking(radar: str, moment: str, days: int) -> list[tuple[date
     return found
 
 
-async def list_moment_frames(radar: str, moment: str,
-                             days: int = 2) -> list[tuple[datetime, str]]:
-    """Frames for one radar and moment, oldest first.
+async def list_moment_frames(radar: str, moment: str, days: int = 2,
+                             window_s: float = MOMENT_WINDOW_S,
+                             ) -> list[tuple[datetime, str]]:
+    """Frames for one radar and moment, oldest first, within a recent window.
 
-    Two days by default rather than one, because the map's window is about an
-    hour and a request just after 00:00 UTC needs yesterday's directory. The
-    same rollover that LB2 solves with a look-back.
+    Two days are scanned rather than one, because a request just after
+    00:00 UTC needs yesterday's directory. That is the rollover LB2 solves
+    with a look-back, and it is about reaching the files rather than about
+    how many to return.
 
     Args:
         radar: Radar id as ``RADAR_FOLDER`` keys it.
         moment: Moment name in this profile's vocabulary.
         days: How many UTC days back to scan. Must be at least 1.
+        window_s: Keep frames no older than this many seconds. Zero or less
+            keeps everything the scan found.
 
     Returns:
         (timestamp, filename) pairs, oldest first. Empty when the tree has
-        nothing, which is not an error.
+        nothing in the window, which is not an error.
 
     Raises:
         ValueError: If `days` is below 1.
@@ -248,8 +262,12 @@ async def list_moment_frames(radar: str, moment: str,
     """
     if days < 1:
         raise ValueError(f"days must be at least 1, got {days}")
-    return await asyncio.wait_for(
+    frames = await asyncio.wait_for(
         asyncio.to_thread(_list_frames_blocking, radar, moment, days), FS_TIMEOUT_S)
+    if window_s <= 0:
+        return frames
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_s)
+    return [f for f in frames if f[0] >= cutoff]
 
 
 async def read_moment_image(radar: str, moment: str, name: str,
