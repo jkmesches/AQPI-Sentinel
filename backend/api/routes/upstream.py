@@ -5,29 +5,34 @@ import asyncio as _asyncio
 import json
 import datetime as _dt
 import time as _time_mod
+from collections.abc import Awaitable, Callable
 from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from ...checks.transports import CheckContext  # noqa: TID252  relative, as every import in this module
-from ...config import HAS_RADARCA, PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
+from ...config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
 from ... import fs_products as _fs
 from ...errors import humanize_error
 
 router = APIRouter(prefix="/api/upstream")
 
 
-def _product_fetcher(source: str):
-    """Fetcher for `_serve_source`, or None to use radarca's imageData.
+def _product_fetcher(source: str) -> Callable[[], Awaitable[_fs.FsResponse]] | None:
+    """Fetcher for `_serve_source`, or None when there is no mount to read.
 
-    Only the PRODUCT routes get one. xband and tilt have their own origins and
-    are untouched — xband is served by radarca's Django app and tilt by
-    radar-display, neither of which has a filesystem equivalent here.
+    Keyed on whether the tree is mounted rather than on whether radarca
+    exists. AQPI publishes the same PNGs to the main archive that radarca serves, and LB1
+    already reads that tree for freshness, so fetching them over HTTP put an
+    origin whose p90 ran 8-13 s in front of bytes sitting on local storage.
+
+    Tilt imagery still has no filesystem equivalent: radar-display renders it
+    per elevation and nothing writes those frames to a published tree.
     """
-    if HAS_RADARCA:
+    if not _fs.available():
         return None
 
-    async def _fetch():
+    async def _fetch() -> _fs.FsResponse:
         # No semaphore: these are local reads off a mount, not connections to
         # a shared origin, so the concurrency limit the radarca path needs
         # would only add latency. The 5 s timeout inside read_image is what
@@ -338,10 +343,11 @@ async def _xband_listing_cached(ctx, folder: str, prefix: str, pool=None) -> lis
 
 
 async def _pd_fetch(ctx, details_path: str, product_id: str | None = None) -> list:
-    # No display tier means no productDetail to call. Read the manifest the
-    # publisher wrote instead — same document, one hop earlier. See
-    # backend/fs_products.
-    if not HAS_RADARCA:
+    # Read the manifest the publisher wrote rather than radarca's rendering
+    # of it: the same document, one hop earlier. Keyed on the mount so a
+    # deployment without one (the test deployment) keeps calling
+    # productDetail. See backend/fs_products.
+    if _fs.available():
         if product_id is None:
             raise HTTPException(500, "filesystem manifest needs a product id")
         try:
@@ -609,18 +615,11 @@ async def radar_steps(radar: str, request: Request,
         except KeyError:
             raise HTTPException(400, f"unknown moment: {moment}")
     ctx = request.app.state.context
-    r = await ctx.http.get(
-        f"{SETTINGS.base}/api/xbandRadarImages/",
-        params={"radarFolder": folder, "productPrefix": prefix},
-    )
-    if r.status_code != 200:
-        raise HTTPException(502, "xbandRadarImages unreachable")
-    imgs = r.json().get("images") or []
+    _store = getattr(request.app.state, "store", None)
+    frames = await _xband_frames(radar, moment, ctx,
+                                 _store.pool if _store else None)
     steps = []
-    for i, fname in enumerate(imgs):
-        ts = _parse_xband_ts(fname)
-        if ts is None:
-            continue
+    for ts, fname in frames:
         steps.append({
             "i":         len(steps),
             "ts":        ts.isoformat(),
@@ -645,6 +644,77 @@ def _parse_xband_ts(filename: str):
         return d.replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+async def _xband_frames(radar: str, moment: str, ctx: CheckContext,
+                        pool: object = None) -> list[tuple[_dt.datetime, str]]:
+    """Recent frames for one radar and moment, oldest first.
+
+    Where the frames come from depends on whether this deployment mounts the
+    published tree. The profile it runs does not decide it.
+
+    With a mount, the chain is the tree and then our own archive, and radarca
+    is never asked. The bytes it served were always rendered onto that same
+    tree, so fetching them over HTTP put an origin whose p90 ran 8-13 s in
+    front of every scrub. The archive tier still earns its place because a
+    wedged NFS mount answers neither ``listdir`` nor ``open``; it held
+    95-100% of each radar's rolling window when measured on 2026-08-28, so
+    the map degrades to slightly behind rather than to dark.
+
+    Without a mount the old chain stands, archive first and radarca behind
+    it. the test deployment is that case: it runs the aqpi profile with
+    no ``SENTINEL_BACKEND_ROOT``, so there is no tree to read and radarca
+    remains its only origin.
+
+    Args:
+        radar: Radar id as ``RADAR_FOLDER`` keys it.
+        moment: Moment name in this profile's vocabulary.
+        ctx: Check context, used only on the radarca path.
+        pool: asyncpg pool for the archive tier, or None to skip it.
+
+    Returns:
+        (timestamp, logical source) pairs, oldest first. The source keeps the
+        ``xband_chivo/<folder>/<name>`` shape the archive and the caches are
+        already keyed on, so nothing stored before this change is orphaned.
+    """
+    folder = RADAR_FOLDER[radar]
+    prefix = moment_to_prefix(radar, moment)
+
+    if _fs.available():
+        try:
+            frames = await _fs.list_moment_frames(radar, moment)
+        except (OSError, TimeoutError, KeyError):
+            frames = []
+        if frames:
+            return [(ts, f"xband_chivo/{folder}/{name}") for ts, name in frames]
+        sources = await _xband_listing_local(pool, folder, prefix)
+    else:
+        sources = await _xband_listing_cached(ctx, folder, prefix, pool)
+
+    out: list[tuple[_dt.datetime, str]] = []
+    for source in sources:
+        ts = _parse_xband_ts(source)
+        if ts is not None:
+            out.append((ts, source))
+    out.sort()
+    return out
+
+
+def _xband_fs_fetcher(
+    radar: str, moment: str, ts: _dt.datetime, source: str,
+) -> Callable[[], Awaitable[_fs.FsResponse]]:
+    """Fetcher for ``_serve_source`` that reads one frame off the mount.
+
+    The timestamp comes from the listing rather than being re-parsed, because
+    the two profiles name frames at different resolutions and a parser that
+    knows only AQPI's minute form returns None for every XQPI frame.
+    """
+    name = source.rsplit("/", 1)[-1]
+
+    async def _fetch() -> _fs.FsResponse:
+        return await _fs.read_moment_image(radar, moment, name, ts)
+
+    return _fetch
 
 
 @router.get("/xband_scan.png")
@@ -673,37 +743,26 @@ async def latest_xband_scan(
         except KeyError:
             raise HTTPException(400, f"unknown moment: {moment}")
     ctx = request.app.state.context
-    # Listing memo: scrubbing a radar overlay re-requested this per frame,
-    # doubling the upstream cost of every scrub position.
     _store = getattr(request.app.state, "store", None)
-    imgs = await _xband_listing_cached(ctx, folder, prefix,
-                                       _store.pool if _store else None)
-    if not imgs:
+    frames = await _xband_frames(radar, moment, ctx,
+                                 _store.pool if _store else None)
+    if not frames:
         raise HTTPException(404, "no scans in window")
 
-    chosen = imgs[-1]
-    chosen_ts = None
+    chosen_ts, chosen = frames[-1]
     if time:
-        from datetime import datetime, timezone
         try:
-            target = datetime.fromisoformat(time.replace("Z", "+00:00"))
-        except ValueError:
-            raise HTTPException(400, f"bad time: {time}")
+            target = _dt.datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(400, f"bad time: {time}") from e
         if target.tzinfo is None:
-            target = target.replace(tzinfo=timezone.utc)
-        best = None
-        best_delta = None
-        for fname in imgs:
-            ts = _parse_xband_ts(fname)
-            if ts is None:
-                continue
-            delta = abs((ts - target).total_seconds())
-            if best is None or delta < best_delta:
-                best, best_delta, chosen_ts = fname, delta, ts
-        if best is not None:
-            chosen = best
+            target = target.replace(tzinfo=_dt.timezone.utc)
+        chosen_ts, chosen = min(
+            frames, key=lambda f: abs((f[0] - target).total_seconds()))
 
-    body, ct, prov = await _serve_source(request.app, ctx, chosen)
+    body, ct, prov = await _serve_source(
+        request.app, ctx, chosen,
+        fetcher=_xband_fs_fetcher(radar, moment, chosen_ts, chosen))
     return Response(
         content=body,
         media_type=ct or "image/png",
@@ -715,7 +774,7 @@ async def latest_xband_scan(
             "cache-control": "public, max-age=60",
             "x-sentinel-cache": prov,
             "x-scan-name": chosen,
-            "x-scan-ts": chosen_ts.isoformat() if chosen_ts else "",
+            "x-scan-ts": chosen_ts.isoformat(),
             "x-prefix": prefix,
             "x-moment": moment,
         },
