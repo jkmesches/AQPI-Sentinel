@@ -576,7 +576,6 @@ RADARCA_ONLY_MODULES: tuple[str, ...] = (
     "layer1_stream",           # 1 stream-canary check
     "layer2_radar",            # 6 per-radar checks + 1 fleet correlation
     "layer3_overlay",          # 1 Playwright overlay parity check
-    "layer4_image",            # 5 X-band + 3 mosaic image checks
 )
 
 # Published-image tree layout, relative to SETTINGS.backend_root. the main archive nests the
@@ -1280,12 +1279,6 @@ if SETTINGS.profile == "xqpi":
     L4_XBAND_TARGETS = _xqpi.L4_XBAND_TARGETS
     L4_MOSAIC_TARGETS = _xqpi.L4_MOSAIC_TARGETS
     HAS_RADARCA = False
-# L4 reads frames off the mount now, so it no longer needs an HTTP origin.
-# Without a mount it still does, and the gate in registry.register stands.
-if SETTINGS.backend_root:
-    RADARCA_ONLY_MODULES = tuple(
-        m for m in RADARCA_ONLY_MODULES if m != "layer4_image")
-
 if SETTINGS.profile not in ("aqpi", "xqpi"):
     # Fail loudly. A typo here would otherwise start a Sentinel that silently
     # monitors the wrong radar network, which is worse than not starting.

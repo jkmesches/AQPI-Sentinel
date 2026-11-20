@@ -18,9 +18,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..archive import save_image as _archive_save
-from ..config import (L4_MOMENT, L4_MOSAIC_TARGETS,  # noqa: TID252  file convention
-                      L4_XBAND_TARGETS, PRODUCTS, RADAR_FOLDER, SETTINGS,
-                      image_path, l4_profile)
+from ..config import (HAS_RADARCA, L4_MOMENT,  # noqa: TID252  file convention
+                      L4_MOSAIC_TARGETS, L4_XBAND_TARGETS, PRODUCTS,
+                      RADAR_FOLDER, SETTINGS, image_path, l4_profile)
 from .. import fs_products as _fs  # noqa: TID252  file convention
 from .transports import CheckContext
 from .. import thresholds as _thresholds
@@ -381,8 +381,14 @@ class Layer4ImageCheck(Check):
 # shares the X-band fetch endpoint (/api/xbandRadarImages/), but its L4
 # profile skips the polar range-ring detector (see config.L4_PROFILES).
 # --------------------------------------------------------------------------
-for r in L4_XBAND_TARGETS:
-    register(Layer4ImageCheck(kind="xband", identifier=r))
+# Gated here rather than by the module list, because this module now has two
+# possible sources and the list has room for one answer. Opening a frame needs
+# either a mount to read or an origin to ask; a deployment with neither gets
+# no image QC, which is the honest result rather than a check that fails
+# forever.
+if _fs.available() or HAS_RADARCA:
+    for r in L4_XBAND_TARGETS:
+        register(Layer4ImageCheck(kind="xband", identifier=r))
 
-for p in L4_MOSAIC_TARGETS:
-    register(Layer4ImageCheck(kind="mosaic", identifier=p))
+    for p in L4_MOSAIC_TARGETS:
+        register(Layer4ImageCheck(kind="mosaic", identifier=p))

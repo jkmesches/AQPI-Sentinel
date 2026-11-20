@@ -58,7 +58,11 @@ UNIVERSAL_L0 = {
 
 # Stages derived from scraping radarca. A check on one of these under a profile
 # with no display tier is a permanent failure by construction.
-RADARCA_STAGES = {"L0", "L1", "L2", "L3", "L3B", "L4-T1T2"}
+#
+# L4-T1T2 left this set in v0.14.0. Image QC reads frames off the published
+# tree now, so it has a source on a profile with no display tier, and xqpi is
+# expected to carry it rather than expected not to.
+RADARCA_STAGES = {"L0", "L1", "L2", "L3", "L3B"}
 
 # Deterministic, nonexistent mounts: enough to register the LB checks and to
 # resolve their paths, without depending on a share being mounted. The paths are
@@ -215,6 +219,12 @@ def main() -> int:
         # observable here. The DROPS producer check is NOT expected: that tree
         # is Gen_X-band_QPE.py's output and the profile sets DROPS_TREE = "".
         | {f"layer3.composite.{r}" for r in xqpi["radars"]}
+        # L4 image QC, which opens a frame's bytes rather than stating a
+        # file. It is the only check on this profile that would notice a
+        # producer writing truncated PNGs, which LB1 reports as healthy
+        # because it never opens one.
+        | {f"layer4.mosaic.{p}" for p in xqpi["products"]}
+        | {f"layer4.xband.{r}" for r in xqpi["radars"]}
     )
     print("\nthe xqpi registry is exactly what the profile can observe:")
     extra = sorted(x_ids - expected)
