@@ -1,6 +1,6 @@
 # Map Console Plan
 
-Target release: v0.14.0. This plan splits the Live page into a status dashboard
+Target release: the next minor. This plan splits the Live page into a status dashboard
 and a radar console, then builds the console past parity with both RadarCA and
 the current map.
 
@@ -23,7 +23,7 @@ them rather than re-opening them.
 | Compare | Any pair of selections, shared timeline, locked cameras |
 | Dashboard | Superset of today's rails, relaid out for full width |
 | Radar pins | LB2 paints, unknown when LB2 is absent or errored |
-| Version | 0.14.0 |
+| Version | the next minor |
 
 ## 2. Parity Gaps
 
