@@ -28,8 +28,11 @@ unknown`.
 
 ## [Unreleased]
 
-Slices 1 and 2 of `docs/map-console-plan.md`, plus the baseline that slice 3
-will be measured against.
+All eleven slices of `docs/map-console-plan.md`. The Live page becomes a map
+console with measured color ramps, a cursor readout, unit switching, links
+that reproduce a view, two panes locked to each other, keyboard control and
+a measure tool, and its 3,399-line component is decomposed behind a
+28-state structural baseline.
 
 ### Security
 
@@ -48,6 +51,25 @@ will be measured against.
   `fetch()` to our backend.
 
 ### Changed
+
+- **MapView is decomposed into tested modules behind a structural
+  baseline.** The component held 3,399 lines and no test of any kind,
+  because its logic lived inside a `.svelte` file where no `.mjs` runner
+  could reach it. The pure parts came out first (NEXRAD and burn-scar
+  geometry, the gauge chart, radar selection, the frame sources and
+  playback), the overlays went onto a layer registry that gives each one an
+  id, its layers, its sources and its build and prepare steps, and the
+  component ended at 2,929 lines with several hundred assertions on code
+  that previously had none.
+
+  Each step had to show that nothing user-visible changed, which a
+  component with no tests cannot do by argument. `validation_tests/visual/
+  capture.py` walks 28 preference states through a `?diag=probe` snapshot
+  of the camera, every layer in paint order, its source and its paint
+  properties, and `compare.py` diffs two captures. Every refactoring step
+  is identical to its predecessor across all 28 states. The one step that
+  changed behavior on purpose, the vector overlay paint order, replaces the
+  committed baseline in its own commit.
 
 - **The console is the landing page and the dashboard moved to
   `/dashboard`.** The map held the center six columns of a twelve-column
@@ -86,6 +108,66 @@ will be measured against.
   `validation_tests/js/test_radar_status.mjs`.
 
 ### Added
+
+- **The color ramps are measured from the producers' own colorbars.** A
+  legend and a cursor readout both rest on knowing which value each painted
+  color stands for, and the plan assumed those tables would be transcribed
+  from radarca's site. The authoritative ones were already on the mount, one
+  `<prefix>_colorbar.png` per moment, and they are read rather than copied.
+  The map draws the legend as themed SVG rather than as a proxied PNG, which
+  reads in both themes, scales at phone width and can carry a converted
+  unit. It appears for a radar and moment whose ramp was measured, and stays
+  away where no measurement exists.
+
+- **Hovering a radar overlay reports the value under the pointer.** A
+  discrete ramp gives the band and a gradient gives a single value. It
+  reports nothing over empty sky, over the map background and over any color
+  no stop sits within tolerance of, which is what the ramp measurement was
+  for: a guess there would put a number on a pixel that means nothing.
+
+- **Six products offer their second unit.** Those products publish it as its
+  own subtree, `details_<unit>.json` beside the canonical manifest and
+  `images/<unit>/` beside the canonical frames, and the map can ask for
+  either. A unit's manifest lists its own frames at its own times.
+  Therefore the step list is fetched per unit, and a unit whose frames have
+  stopped is marked stale rather than shown as current.
+
+- **The address bar carries the view.** A link holds the product, the
+  frame's time, the active radars, the moment, the unit, the overlay toggles
+  and the camera, and reading one back reproduces what the sender saw. A
+  link opened in a browser that has never seen this console comes up on the
+  same frame of the same product with the same radars and overlays.
+
+- **Two panes can be compared, locked in time and view.** Each pane owns its
+  product, radars, moment, unit and overlays, while the camera and the frame
+  time are shared, which leaves the thing being compared as the only
+  difference on screen. A pane whose product publishes no frame at the shared time lands
+  on the nearest frame it has and says how far that is, "8m behind" beside
+  the product name, because two panes an hour apart are as convincing as two
+  a minute apart. The frame barrier spans both panes: each hands the page
+  the swaps its own barrier produced and neither paints a new minute while
+  the other is loading. The wait is 400 ms, measured from the stagger
+  between step-driven arrivals rather than chosen.
+
+- **The console takes the keyboard.** Arrows step time, shifted arrows pan,
+  space plays. The bindings are owned per control kind, which leaves a
+  focused slider its arrows and a focused button its space. The time
+  strip places each frame at its own time and draws the gaps as gaps, since
+  an evenly spaced strip said the record was continuous when it was not.
+  Playback runs at 0.5x, 1x, 2x or 4x, and the composite, the radars and
+  NEXRAD each take their own opacity.
+
+- **A measure tool, a PNG export, and a place search.** Distances are
+  great-circle, because a planar measurement on Web Mercator coordinates is
+  long by the secant of the latitude, 27% at 38 degrees north, and bearings
+  are true with every label saying so. The export burns the caption and the
+  color bar into the pixels, so a frame pasted into a thread carries its
+  time and its scale. The search runs on this deployment's own datasets, the
+  radars, the reservoir file and the HUC-8 watersheds, with no outside
+  geocoder, because the CSU namespace has no public internet route and a
+  search that works on a laptop and fails on the operators' machine is worse
+  than none. Below 560 px the layer panel starts closed, below 720 px the
+  time axis takes its own row, and below 900 px the comparison panes stack.
 
 - **A composite shortfall is reported on the composite's own row.** With
   arrival deciding the pin, a radar arriving on time and missing from the
@@ -132,6 +214,37 @@ will be measured against.
   on it is reported as a warning.
 
 ### Fixed
+
+- **The moment vocabulary comes from the profile.** Three of the five
+  moment buttons on the XQPI deployment answered 400, because the console
+  carried AQPI's five labels as a TypeScript constant and XQPI spells two
+  of them without the space. A deployment's own profile now supplies them.
+
+- **Backend freshness counts only published frames.** The LB1 scan took the
+  newest modification time in the directory, including the `.tmp` file a
+  publisher writes while a frame is landing, so freshness could be measured
+  from a burst rather than from the newest readable frame. The denylist of
+  suffixes becomes a positive filter on image extensions, and the count of
+  what it skipped is reported as a metric.
+
+- **Playback keeps moving when every frame is blank.** It parked on one
+  frame whenever every frame in the list was quiet and the list was no
+  shorter than the skip bound plus one. The control still read as playing
+  while the time axis stood still. Seven tilt frames on a clear day are
+  exactly that shape, since the bound is six.
+
+- **A link's camera survives being opened.** `applyLink` runs during mount,
+  ahead of the map's constructor, because the product and radar ids it sets
+  have to be corrected against what the deployment publishes first, and the
+  camera branch quietly did nothing when there was no map to jump. A link
+  opened in a fresh browser restored the product, the radars and the
+  overlays and then showed them at the default view.
+
+- **A follower pane loads the frames it moves to.** In compare mode
+  `followTime` moved the pane's step index and nothing else, so its
+  scrubber tracked the primary while its imagery stayed on whatever it had
+  last fetched. The panes read as locked and were showing different
+  minutes.
 
 - **The layers panel counts every layer that is on.** It counted the
   composite, NEXRAD and the active radars, and the six geography toggles sat
