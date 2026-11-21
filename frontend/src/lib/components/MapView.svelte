@@ -8,6 +8,9 @@
 	import { rampFor } from '$lib/map/ramps/registry';
 	import { unitChoices, defaultUnit, unitNote,
 	         resolveUnit } from '$lib/map/units';
+	import { decodeLink, encodeLink, hasAny, stepForTime,
+	         linkOverlayNames, mergeQuery, STEP_TOLERANCE_MS,
+	         type Camera as LinkCamera } from '$lib/map/permalink';
 	import { invert } from '$lib/map/ramps/invert';
 	import { overlayFraction, overlayPixel,
 	         readoutText } from '$lib/map/readout';
@@ -1132,6 +1135,14 @@
 	function setSteps(next: Step[], forProduct: string): void {
 		steps = next;
 		stepsFor = forProduct;
+		// A link asked for a time, not a step. Matched once, against the
+		// first list that arrives, and then forgotten, so a later refresh
+		// does not drag the reader back to where the link pointed.
+		if (_linkTs !== null) {
+			const at = stepForTime(next, _linkTs, STEP_TOLERANCE_MS);
+			_linkTs = null;
+			if (at !== null) stepIdx = at;
+		}
 	}
 
 	let activityToken = 0;
@@ -1752,6 +1763,145 @@
 		readoutFrame = sampler.draw(img) ? { extent: e, radar: id } : null;
 	}
 
+	/**
+	 * How long a change settles before the address bar is rewritten.
+	 *
+	 * Long enough that dragging the map writes once at the end rather than
+	 * on every frame of the drag, and short enough that a link copied
+	 * straight after a click is the view on screen. A drag emits a move
+	 * event per rendered frame, so an unthrottled write would call
+	 * replaceState around 60 times a second.
+	 */
+	const LINK_DEBOUNCE_MS = 400;
+
+	/** What a link may name on this deployment, for validating one. */
+	function linkVocabulary() {
+		const units: Record<string, string[]> = {};
+		for (const [pid, entry] of Object.entries(productUnits ?? {})) {
+			units[pid] = [...entry.units];
+		}
+		return {
+			products: Object.keys(compExtent ?? COMP_EXTENT),
+			radars: radars.map((r) => r.id),
+			moments: MOMENTS.map((m) => m.key),
+			// The console's toggles, gated by what this profile supplies,
+			// rather than ALL_OVERLAYS, which names only the four data
+			// overlays and spells them with underscores.
+			overlays: linkOverlayNames(overlays),
+			units
+		};
+	}
+
+	/** Which overlay toggles are on, as a link names them. */
+	function overlayNames(): string[] {
+		const on: string[] = [];
+		if (watershedsOn) on.push('watersheds');
+		if (reservoirsOn) on.push('reservoirs');
+		if (terrainOn) on.push('terrain');
+		if (terrain3DOn) on.push('terrain-3d');
+		if (streamGaugesOn) on.push('stream-gauges');
+		if (burnScarsOn) on.push('burn-scars');
+		if (nexradEnabled) on.push('nexrad');
+		return on;
+	}
+
+	/**
+	 * Turn a link's overlay list into the toggles.
+	 *
+	 * Every toggle is set, including the ones the link leaves out, because
+	 * a link describes a whole view. Setting only what it names would leave
+	 * the reader's own overlays on top of the sender's.
+	 *
+	 * @param names What the link listed.
+	 */
+	function applyOverlayNames(names: readonly string[]): void {
+		const has = (n: string) => names.includes(n);
+		watershedsOn = has('watersheds');
+		reservoirsOn = has('reservoirs');
+		terrainOn = has('terrain');
+		terrain3DOn = has('terrain-3d');
+		streamGaugesOn = has('stream-gauges');
+		burnScarsOn = has('burn-scars');
+		nexradEnabled = has('nexrad');
+	}
+
+	/** Read the current URL and apply whatever this deployment recognizes. */
+	function applyLink(): void {
+		if (typeof window === 'undefined') return;
+		const link = decodeLink(window.location.search, linkVocabulary());
+		if (!hasAny(link)) return;
+		if (link.product) composite = link.product as Composite;
+		if (link.moment) currentMoment = link.moment;
+		if (link.radars.length > 0) activeRadars = [...link.radars];
+		// The unit is resolved against the product the link just set, not
+		// against whatever was selected a moment ago.
+		currentUnit = resolveUnit(
+			unitChoices(productUnits, composite), link.unit);
+		// An overlay list is applied whole, even an empty one, since the
+		// link said which overlays the view had.
+		const raw = new URLSearchParams(window.location.search);
+		if (raw.has('o')) applyOverlayNames(link.overlays);
+		if (link.camera && map) {
+			map.jumpTo({
+				center: [link.camera.lon, link.camera.lat],
+				zoom: link.camera.zoom,
+				bearing: link.camera.bearing,
+				pitch: link.camera.pitch
+			});
+		}
+		_linkTs = link.ts;
+	}
+
+	// The frame a link asked for, held until the step list arrives. The
+	// position travels as a time, so it is matched against the steps rather
+	// than used as an index: indices shift as the window rolls, and an hour
+	// later the 30th step is a different minute.
+	let _linkTs: string | null = null;
+
+	/** The camera, for a link. Null before the map exists. */
+	function linkCamera(): LinkCamera | null {
+		if (!map) return null;
+		const c = map.getCenter();
+		return {
+			lon: c.lng, lat: c.lat, zoom: map.getZoom(),
+			bearing: map.getBearing(), pitch: map.getPitch()
+		};
+	}
+
+	let _lastLink = '';
+
+	/**
+	 * Write the view into the address bar.
+	 *
+	 * `replaceState` rather than `pushState`, so scrubbing a 31-step loop
+	 * does not leave 31 entries in the back button. Skipped when the string
+	 * would not change, which it does not during a play loop that stays on
+	 * one frame.
+	 */
+	function writeLink(): void {
+		if (typeof window === 'undefined' || !prefsReady) return;
+		const q = encodeLink({
+			product: composite === 'none' ? null : composite,
+			ts: steps[stepIdx]?.ts ?? null,
+			radars: [...activeRadars],
+			moment: currentMoment,
+			unit: currentUnit,
+			overlays: overlayNames(),
+			camera: linkCamera()
+		});
+		if (q === _lastLink) return;
+		_lastLink = q;
+		// Merged, not replaced. `?diag=probe` turns on the structural
+		// probe the visual baseline reads, and rebuilding the query from
+		// the link alone drops it the moment the first view settles.
+		const merged = mergeQuery(window.location.search, q);
+		history.replaceState(null, '',
+			merged ? `${window.location.pathname}?${merged}`
+				: window.location.pathname);
+	}
+
+	const writeLinkSoon = debounce(writeLink, LINK_DEBOUNCE_MS);
+
 	let _radarSyncToken = 0;
 
 	/**
@@ -1834,6 +1984,17 @@
 		void radarStatus;
 		syncBaseSources();
 	});
+	// The address bar follows the view. Debounced, so a drag writes once.
+	$effect(() => {
+		void composite; void currentUnit; void currentMoment;
+		void activeRadars; void stepIdx; void steps;
+		void watershedsOn; void reservoirsOn; void terrainOn;
+		void terrain3DOn; void streamGaugesOn; void burnScarsOn;
+		void nexradEnabled;
+		if (!prefsReady) return;
+		writeLinkSoon();
+	});
+
 	$effect(() => {
 		void composite;
 		void currentUnit;               // a unit has its own manifest
@@ -2418,6 +2579,11 @@
 		// product rather than handing a stale id to MapLibre.
 		const restored = loadPrefs(prefsVocabulary());
 		applyPrefs(restored);
+		// A link wins over stored prefs where it says anything, and leaves
+		// the rest alone. Applied after applyPrefs for the same reason the
+		// composite correction below is: applyPrefs assigns straight from
+		// the restored blob, so anything set before it is handed back.
+		applyLink();
 		// A composite this deployment cannot place would otherwise stay
 		// selected and render nothing with no explanation.
 		//
@@ -2548,6 +2714,11 @@
 			// A drag moves the world under a still cursor, so the value
 			// changes with no pointer event to report it.
 			map.on('move', () => { readoutValue = null; readoutAt = null; });
+			// The camera is MapLibre's, not $state, so the address bar
+			// cannot follow it from an effect. moveend fires once when a
+			// drag or zoom settles, which is exactly when a link should
+			// be rewritten.
+			map.on('moveend', () => { writeLinkSoon(); });
 		});
 
 		scanRefresh = setInterval(pokeOverlays, 120_000);
@@ -2661,8 +2832,21 @@
 	     then tell a clear sky from a broken sampler, which otherwise look
 	     identical: on a quiet day an X-band frame is 0.3% opaque and a grid
 	     of hover points lands on nothing. -->
+	<!-- data-view carries what a link should be able to reproduce, so
+	     validation_tests/visual/shoot_permalink.py can compare the console
+	     a link came from against the one it reopened. Reading it off the
+	     panel instead meant scraping checkbox rows, which returned an
+	     empty list and made the comparison pass by comparing nothing to
+	     nothing. -->
 	<div
 		class="relative flex-1"
+		data-view={JSON.stringify({
+			product: composite,
+			moment: currentMoment,
+			unit: currentUnit,
+			radars: [...activeRadars].sort(),
+			overlays: overlayNames().sort()
+		})}
 		data-readout-frame={readoutFrame && sampler.size
 			? `${readoutFrame.radar} ${sampler.size.width}x${sampler.size.height}`
 			: undefined}
