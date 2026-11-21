@@ -15,7 +15,7 @@
 import type { CustomLayerInterface, Map as MlMap } from 'maplibre-gl';
 import { MercatorCoordinate } from 'maplibre-gl';
 import {
-	isDrawable, sheetVertices, type Corners
+	beamVertices, isDrawable, sheetVertices, type Beam, type Corners
 } from './elevatedRaster';
 
 /** What the sheet needs to draw itself. */
@@ -45,6 +45,15 @@ export interface SheetSpec {
 	opacity: number;
 	/** How high the sheet sits, in meters. */
 	altitudeM: number;
+	/**
+	 * The radar whose beam this surface follows, for a single tilt.
+	 *
+	 * Present for a tilt image, which sweeps a cone whose height grows
+	 * with range, so the surface curves instead of lying flat. Absent
+	 * for a composite, which mixes tilts and ranges and has no beam of
+	 * its own to follow; that one gets the nominal sheet.
+	 */
+	beam?: Beam | null;
 }
 
 const VERTEX_SRC = `
@@ -260,12 +269,15 @@ export class ElevatedSheet implements CustomLayerInterface {
 		const matrix = matrixOf(args);
 		if (!matrix) return;
 
-		const verts = sheetVertices(
-			this.spec.corners, this.spec.altitudeM,
-			(lng, lat, alt) => {
-				const m = MercatorCoordinate.fromLngLat({ lng, lat }, alt);
-				return [m.x, m.y, m.z];
-			});
+		const project = (lng: number, lat: number, alt: number):
+			[number, number, number] => {
+			const m = MercatorCoordinate.fromLngLat({ lng, lat }, alt);
+			return [m.x, m.y, m.z];
+		};
+		const verts = this.spec.beam
+			? beamVertices(this.spec.corners, this.spec.beam, project)
+			: sheetVertices(this.spec.corners, this.spec.altitudeM, project);
+		const count = verts.length / 5;
 
 		gl.useProgram(this.program);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
@@ -288,7 +300,7 @@ export class ElevatedSheet implements CustomLayerInterface {
 		// different altitudes both draw and blend.
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
-		gl.drawArrays(gl.TRIANGLES, 0, 6);
+		gl.drawArrays(gl.TRIANGLES, 0, count);
 		gl.depthMask(true);
 	}
 }

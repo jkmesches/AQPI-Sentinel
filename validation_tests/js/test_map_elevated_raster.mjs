@@ -161,6 +161,104 @@ export function runTests(mod) {
       clearance(-100, 0) === MIN_ALTITUDE_M);
   }
 
+  console.log('\na tilt is placed by its beam, not by one altitude:');
+  {
+    const { beamHeight, groundDistance, beamVertices,
+      EFFECTIVE_EARTH_RADIUS_M, BEAM_DIVISIONS } = mod;
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+    // The 4/3 earth model. A beam refracts downward in a standard
+    // atmosphere, so it climbs more slowly than a straight ray; every
+    // radar text and the publisher's own range rings assume this.
+    check('the effective earth radius is 4/3 of the real one',
+      near(EFFECTIVE_EARTH_RADIUS_M, (4 / 3) * 6371000, 1),
+      String(Math.round(EFFECTIVE_EARTH_RADIUS_M)));
+
+    check('at the radar the beam is at the radar',
+      beamHeight(0, 1.5, 300) === 300);
+    // Worked by hand: 50 km at 0.5 degrees rises 436.3 m and the earth
+    // falls 147.2 m beneath it.
+    check('50 km at 0.5 deg is 583 m above the site',
+      near(beamHeight(50000, 0.5, 0), 583.5, 1),
+      beamHeight(50000, 0.5, 0).toFixed(1));
+    check('50 km at 1.0 deg is 1020 m',
+      near(beamHeight(50000, 1.0, 0), 1019.9, 1),
+      beamHeight(50000, 1.0, 0).toFixed(1));
+    // Dropping the curvature term would put the edge of a scan a
+    // quarter too low, which is the error this model exists to avoid.
+    check('curvature alone lifts a flat ray 589 m over 100 km',
+      near(beamHeight(100000, 0, 0), 588.6, 1),
+      beamHeight(100000, 0, 0).toFixed(1));
+    check('the site height is added, not replaced',
+      near(beamHeight(50000, 0.5, 300) - beamHeight(50000, 0.5, 0), 300, 0.01));
+    check('the beam climbs with range',
+      beamHeight(60000, 1, 0) > beamHeight(30000, 1, 0));
+    check('a higher tilt is a higher beam',
+      beamHeight(50000, 2, 0) > beamHeight(50000, 1, 0));
+    check('a negative range falls back to the site',
+      beamHeight(-1, 1, 250) === 250);
+    check('NaN range falls back to the site',
+      beamHeight(NaN, 1, 250) === 250);
+    check('NaN tilt falls back to the site',
+      beamHeight(50000, NaN, 250) === 250);
+
+    // One degree of latitude is about 111 km, which is the check that
+    // says the distance is in meters and over the globe.
+    check('a degree of latitude is about 111 km',
+      near(groundDistance(-122, 37, -122, 38), 111195, 500),
+      Math.round(groundDistance(-122, 37, -122, 38)));
+    check('zero distance to itself', groundDistance(-122, 37, -122, 37) === 0);
+    check('it is symmetric',
+      groundDistance(-122, 37, -121, 38) === groundDistance(-121, 38, -122, 37));
+
+    const beam = { lng: -122, lat: 38, elevationDeg: 1, siteM: 100 };
+    const raw = beamVertices(SQUARE, beam, flat, 4);
+    const pts = [];
+    for (let i = 0; i < raw.length; i += 5) {
+      pts.push({ x: raw[i], y: raw[i + 1], z: raw[i + 2],
+                 u: raw[i + 3], v: raw[i + 4] });
+    }
+    check('4 divisions give 16 cells of two triangles',
+      pts.length === 4 * 4 * 6, String(pts.length));
+    check('the surface is not flat',
+      new Set(pts.map((p) => Math.round(p.z))).size > 1,
+      String(new Set(pts.map((p) => Math.round(p.z))).size));
+    // A sheet would have every vertex at one height, which is the
+    // thing this replaces and is wrong everywhere but one range.
+    check('every vertex is at or above the site',
+      pts.every((p) => p.z >= beam.siteM - 0.001));
+    check('the far corner is higher than the near one',
+      Math.max(...pts.map((p) => p.z)) > Math.min(...pts.map((p) => p.z)) + 100,
+      `${Math.round(Math.min(...pts.map((p) => p.z)))} to ` +
+      `${Math.round(Math.max(...pts.map((p) => p.z)))}`);
+    check('it still covers the extent',
+      near(Math.min(...pts.map((p) => p.x)), -123, 1e-9)
+      && near(Math.max(...pts.map((p) => p.x)), -121, 1e-9)
+      && near(Math.min(...pts.map((p) => p.y)), 37, 1e-9)
+      && near(Math.max(...pts.map((p) => p.y)), 39, 1e-9));
+    check('the texture still spans 0 to 1',
+      Math.min(...pts.map((p) => p.u)) === 0
+      && Math.max(...pts.map((p) => p.u)) === 1
+      && Math.min(...pts.map((p) => p.v)) === 0
+      && Math.max(...pts.map((p) => p.v)) === 1);
+    // The height has to follow the ground position, or the surface is
+    // a cone around the wrong place and the imagery tilts the wrong way.
+    for (const p of pts.slice(0, 40)) {
+      const d = groundDistance(beam.lng, beam.lat, p.x, p.y);
+      if (!near(p.z, beamHeight(d, beam.elevationDeg, beam.siteM), 0.001)) {
+        check('every vertex sits at its own beam height', false,
+          `${p.x},${p.y} at ${p.z}`);
+        break;
+      }
+    }
+    check('every vertex sits at its own beam height', true);
+    check('the default division count is usable',
+      BEAM_DIVISIONS >= 8 && BEAM_DIVISIONS <= 64, String(BEAM_DIVISIONS));
+    check('divisions are clamped to something drawable',
+      beamVertices(SQUARE, beam, flat, 0).length === 6 * 5
+      && beamVertices(SQUARE, beam, flat, 1e6).length === 128 * 128 * 6 * 5);
+  }
+
   console.log(failures.length === 0
     ? '\nall elevated-raster assertions passed'
     : `\n${failures.length} failed: ${failures.join(', ')}`);

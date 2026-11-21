@@ -40,7 +40,7 @@
 	import { ElevatedSheet } from '$lib/map/layers/elevatedLayer';
 	import {
 		DEFAULT_ALTITUDE_M, MAX_ALTITUDE_M, MIN_ALTITUDE_M, clampAltitude,
-		type Corners
+		type Beam, type Corners
 	} from '$lib/map/layers/elevatedRaster';
 	import {
 		addPin, nextPinId, pinLabel, removePin, type Pin
@@ -2325,6 +2325,10 @@
 	// loadComposite so a scrub/play tick doesn't re-fetch metadata.
 	let _tiltToken = 0;
 	let _tiltGeo: { lon: number; lat: number; range_km: number } | null = null;
+	/** What the tilt overlay is currently showing, for the beam surface. */
+	let _tiltShown = $state<{
+		url: string; extent: Extent; lng: number; lat: number;
+	} | null>(null);
 	// Frame number radar-display should serve for the current step. Tilt
 	// steps stash their frame index in `imageName` (frame 0 = newest).
 	function currentTiltFrame(): number {
@@ -2372,6 +2376,16 @@
 		});
 		const ok = await preloadImage(url, isCurrent);
 		if (!ok || !isCurrent()) return;
+		// Held so the beam surface can draw this same frame at its own
+		// heights when the mesh is on. The angle is the radar's, not
+		// the folder index the URL carries.
+		_tiltShown = {
+			url,
+			extent: { west: lon - dLon, east: lon + dLon,
+				south: lat - dLat, north: lat + dLat },
+			lng: lon,
+			lat
+		};
 		const src = map.getSource('tilt-overlay') as maplibregl.ImageSource | undefined;
 		if (src && typeof src.updateImage === 'function') {
 			src.updateImage({ url, coordinates: coords });
@@ -3352,18 +3366,37 @@
 
 	/** How high the sheets sit. Nominal, and the reader can move it. */
 	let sheetAltitudeM = $state(DEFAULT_ALTITUDE_M);
+
+	/**
+	 * The engaged tilt's actual angle, in degrees.
+	 *
+	 * `tiltEl` is the radar-display elevation folder, counting from 1,
+	 * and the angles live on the radar. Using the folder number as an
+	 * angle would put a 0.5 degree sweep at 1 degree and climb the
+	 * whole surface by half a kilometer at 50 km.
+	 */
+	const tiltAngleDeg = $derived.by(() => {
+		const angles = tiltRadarMeta?.elevations ?? null;
+		if (!angles || tiltEl < 1 || tiltEl > angles.length) return null;
+		const a = angles[tiltEl - 1];
+		return Number.isFinite(a) ? a : null;
+	});
 	/** One sheet per overlay that is drawn in the air. */
 	const sheets = new Map<string, ElevatedSheet>();
 
+	/** What one overlay needs to be drawn in the air. */
+	interface SheetDraw {
+		id: string;
+		corners: Corners;
+		image: TexImageSource | string;
+		version: string;
+		opacity: number;
+		beam?: Beam | null;
+	}
+
 	/** The overlays that would otherwise be draped onto the mesh. */
-	function sheetSpecs(): {
-		id: string; corners: Corners; image: TexImageSource | string;
-		version: string; opacity: number;
-	}[] {
-		const out: {
-			id: string; corners: Corners; image: TexImageSource | string;
-			version: string; opacity: number;
-		}[] = [];
+	function sheetSpecs(): SheetDraw[] {
+		const out: SheetDraw[] = [];
 		const ring = (e: Extent): Corners => [
 			{ lng: e.west, lat: e.north },
 			{ lng: e.east, lat: e.north },
@@ -3382,6 +3415,28 @@
 				version: `${compFrame.product}|${paintedTs ?? ''}`,
 				opacity: layerOpacity.composite
 			});
+		}
+		// A single tilt sweeps a cone, so its surface follows the beam
+		// rather than lying at one height. The radar's own ground
+		// elevation comes from the same mesh the terrain is drawn from,
+		// so the beam starts where the dish does.
+		if (tiltEngaged && _tiltShown && tiltAngleDeg !== null) {
+			const siteM = map?.queryTerrainElevation(
+				{ lng: _tiltShown.lng, lat: _tiltShown.lat }) ?? 0;
+			out.push({
+				id: 'sheet-tilt',
+				corners: ring(_tiltShown.extent),
+				image: _tiltShown.url,
+				version: _tiltShown.url,
+				opacity: overlayOpacity,
+				beam: {
+					lng: _tiltShown.lng,
+					lat: _tiltShown.lat,
+					elevationDeg: tiltAngleDeg,
+					siteM
+				}
+			});
+			return out;
 		}
 		for (const id of activeRadars) {
 			const r = radars.find((x) => x.id === id);
@@ -3424,13 +3479,17 @@
 			}
 			const sheet = new ElevatedSheet(full);
 			sheets.set(spec.id, sheet);
-			map.addLayer(sheet);
+			// Under the markers, like the draped layers it replaces. A
+			// custom layer added plainly goes on top of the whole style,
+			// and the sheet then covered the radar pins it is supposed
+			// to be imagery from.
+			addOverlayBelowMarkers(map, sheet);
 		}
 		// The draped copies are hidden rather than removed, so turning
 		// the mesh off brings them straight back without refetching a
 		// frame the browser already has.
 		const drapedOff = terrain3DOn;
-		for (const layer of ['comp-overlay-layer',
+		for (const layer of ['comp-overlay-layer', 'tilt-overlay-layer',
 			...activeRadars.map((id) => radarLayerId(id))]) {
 			if (!map.getLayer(layer)) continue;
 			map.setLayoutProperty(layer, 'visibility',
@@ -3441,6 +3500,7 @@
 	$effect(() => {
 		void terrain3DOn; void composite; void paintedTs; void activeRadars;
 		void layerOpacity; void sheetAltitudeM; void styleReady;
+		void _tiltShown; void tiltEngaged; void tiltAngleDeg;
 		refreshSheets();
 	});
 
@@ -4687,6 +4747,17 @@
 			>
 				Nominal height. The imagery floats rather than draping, because a
 				composite is measured aloft; it has no single altitude of its own.
+			</p>
+		{/if}
+		{#if terrain3DOn && tiltEngaged && tiltAngleDeg !== null}
+			<!-- A single tilt has a real surface, so it is drawn on it and
+			     the nominal sheet does not apply to it. -->
+			<p
+				data-beam-note
+				class="num border-t border-[var(--color-border)] px-3 py-1.5 text-[9px] leading-tight text-[var(--color-ok)]"
+			>
+				{tiltAngleDeg}° sweep drawn on its own beam, 4/3 earth, from the
+				radar's ground height.
 			</p>
 		{/if}
 		{#if hasOverlay('stream_gauges')}
