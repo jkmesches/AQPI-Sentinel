@@ -15,7 +15,8 @@ const build = (name) => {
   const out = join(dir, `${name}.mjs`);
   execFileSync(join(root, 'frontend/node_modules/.bin/esbuild'),
     [join(root, 'frontend/src/lib/map/layers', `${name}.ts`),
-     '--bundle', '--format=esm', `--outfile=${out}`],
+     '--bundle', '--format=esm',
+     `--alias:$lib=${join(root, 'frontend/src/lib')}`, `--outfile=${out}`],
     { stdio: 'inherit' });
   return out;
 };
@@ -23,5 +24,7 @@ const build = (name) => {
 const reg = await import(build('registry'));
 const geo = await import(build('geography'));
 const terr = await import(build('terrain'));
+const scars = await import(build('burnScars'));
+const gauges = await import(build('streamGauges'));
 const { runTests } = await import('./test_map_registry.mjs');
-process.exit(await runTests(reg, geo, terr));
+process.exit(await runTests(reg, geo, terr, scars, gauges));

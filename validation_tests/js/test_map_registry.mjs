@@ -13,7 +13,7 @@
 // beforeId, none of which the structural capture can see from outside and
 // none of which a screenshot shows at all.
 
-export function runTests(reg, geo, terr) {
+export function runTests(reg, geo, terr, scars, gauges) {
   const { applyLayer, applyLayers, clearLayer } = reg;
   const { watershedsLayer, reservoirsLayer, WATERSHEDS_URL, RESERVOIRS_URL } = geo;
   const { terrainLayer, TERRAIN_SOURCE, HILLSHADE_LAYER, HILLSHADE_BELOW,
@@ -289,6 +289,222 @@ export function runTests(reg, geo, terr) {
       const empty = fakeMap();
       clearLayer(empty, watershedsLayer);
       check('clearing nothing does nothing', empty.log.length === 0);
+    }
+
+    console.log('\nburn scars draw nothing without a profile:');
+    {
+      // One region's perimeters on another region's map look exactly as
+      // authoritative as the right ones, so an unnamed deployment draws
+      // nothing rather than guessing.
+      const map = fakeMap();
+      const asked = [];
+      const mod = scars.burnScarsLayer({
+        profile: '', years: () => 2,
+        fetcher: async (u) => { asked.push(u); return { ok: true, json: async () => FC }; }
+      });
+      const out = await applyLayer(mod, ctx(map));
+      check('nothing was fetched', asked.length === 0, asked.join(','));
+      check('no error either', !out.error, String(out.error));
+      // An empty collection still builds a source, so a profile that
+      // arrives later rebuilds without a special case.
+      check('the layers are empty rather than absent',
+        !!map.getLayer(scars.BURN_SCAR_FILL ?? 'burn-scar-fill')
+        || map.log.length === 0, map.log.join(' | '));
+    }
+
+    console.log('\nthe perimeter file is named for the profile:');
+    {
+      check('aqpi', scars.burnScarUrl('aqpi') === '/data/burn-scars-aqpi.json',
+        scars.burnScarUrl('aqpi'));
+      check('xqpi', scars.burnScarUrl('xqpi') === '/data/burn-scars-xqpi.json');
+      const notJson = await scars.loadBurnScars('aqpi',
+        async () => ({ ok: true, json: async () => ({ type: 'Nope' }) }));
+      check('a document that is not a FeatureCollection draws nothing',
+        notJson.features.length === 0, JSON.stringify(notJson).slice(0, 40));
+      const missing = await scars.loadBurnScars('aqpi',
+        async () => ({ ok: false, status: 404, json: async () => ({}) }));
+      check('a missing file draws nothing', missing.features.length === 0);
+      const thrown = await scars.loadBurnScars('aqpi', async () => {
+        throw new Error('offline');
+      });
+      check('a thrown fetch draws nothing', thrown.features.length === 0);
+      const good = await scars.loadBurnScars('aqpi',
+        async () => ({ ok: true, json: async () => FC }));
+      check('a good file comes through', good.features.length === 1);
+    }
+
+    console.log('\nthe burn-scar window follows the slider:');
+    {
+      const map = fakeMap();
+      let years = 2;
+      const mod = scars.burnScarsLayer({
+        profile: 'aqpi', years: () => years,
+        fetcher: async () => ({ ok: true, json: async () => FC })
+      });
+      await applyLayer(mod, ctx(map));
+      const narrow = map.getLayer('burn-scar-fill').filter;
+      years = 30;
+      await applyLayer(mod, ctx(map));
+      const wide = map.getLayer('burn-scar-fill').filter;
+      check('the filter follows the current value',
+        narrow[2][2] === 2 && wide[2][2] === 30,
+        `${narrow[2][2]} then ${wide[2][2]}`);
+      check('both keep the undated guard',
+        narrow[1][0] === 'has' && wide[1][0] === 'has');
+      check('the line layer carries the same filter',
+        JSON.stringify(map.getLayer('burn-scar-line').filter) === JSON.stringify(wide));
+    }
+
+    console.log('\nthe newest perimeter is reported once:');
+    {
+      const map = fakeMap();
+      const seen = [];
+      const mod = scars.burnScarsLayer({
+        profile: 'aqpi', years: () => 2,
+        onLoaded: (through) => seen.push(through),
+        fetcher: async () => ({
+          ok: true,
+          json: async () => ({
+            type: 'FeatureCollection',
+            features: [{ properties: { ALARM_DATE: Date.UTC(2025, 11, 14) } }]
+          })
+        })
+      });
+      await applyLayer(mod, ctx(map));
+      await applyLayer(mod, ctx(map));
+      check('reported on the first build', seen[0] === 'Dec 2025', seen[0]);
+      check('...and not again from cache', seen.length === 1, String(seen.length));
+    }
+
+    console.log('\nstream gauges separate the real-time sites:');
+    {
+      const map = fakeMap();
+      const sites = {
+        sites: [
+          { comid: '1', lat: 37, lon: -122, status: 'R' },
+          { comid: '2', lat: 38, lon: -121, status: 'B' }
+        ]
+      };
+      const mod = gauges.streamGaugesLayer(
+        async () => ({ ok: true, json: async () => sites }));
+      await applyLayer(mod, ctx(map));
+      const paint = map.getLayer(gauges.GAUGE_LAYER).paint;
+      check('the radius is a case on status',
+        paint['circle-radius'][0] === 'case', paint['circle-radius'][0]);
+      check('...with the real-time sites larger',
+        paint['circle-radius'][2] > paint['circle-radius'][3],
+        `${paint['circle-radius'][2]} vs ${paint['circle-radius'][3]}`);
+      check('...and more opaque',
+        paint['circle-opacity'][2] > paint['circle-opacity'][3]);
+      check('...and more heavily stroked',
+        paint['circle-stroke-width'][2] > paint['circle-stroke-width'][3]);
+      check('the test is the R status',
+        JSON.stringify(paint['circle-radius'][1]) === '["==",["get","status"],"R"]',
+        JSON.stringify(paint['circle-radius'][1]));
+    }
+
+    console.log('\nonly comid and status reach the features:');
+    {
+      const geo = gauges.gaugesToGeo([
+        { comid: '948020', lat: 37.5, lon: -122.3, status: 'R' }
+      ]);
+      check('one feature per site', geo.features.length === 1);
+      check('the coordinates are lon then lat',
+        geo.features[0].geometry.coordinates.join(',') === '-122.3,37.5',
+        geo.features[0].geometry.coordinates.join(','));
+      check('only the two fields the map reads',
+        Object.keys(geo.features[0].properties).sort().join(',') === 'comid,status',
+        Object.keys(geo.features[0].properties).join(','));
+      check('an empty list is still a collection',
+        gauges.gaugesToGeo([]).type === 'FeatureCollection');
+    }
+
+    console.log('\nan unreachable gauge upstream is an error, not a blank layer:');
+    {
+      const map = fakeMap();
+      const mod = gauges.streamGaugesLayer(
+        async () => ({ ok: false, status: 502, json: async () => ({}) }));
+      const out = await applyLayer(mod, ctx(map));
+      check('the error names the status', /HTTP 502/.test(out.error), out.error);
+      check('nothing was added', !map.getLayer(gauges.GAUGE_LAYER));
+      // The toggle stays on, so the next pass tries again.
+      check('and the module is still usable', out.built === false);
+    }
+
+    console.log('\nthe frame barrier fires every apply together:');
+    {
+      const { prepareFrame } = reg;
+      const painted = [];
+      const mod = (id, n, delay = 0) => ({
+        id, layers: [], sources: [], build: async () => {},
+        prepare: async () => {
+          if (delay) await new Promise((r) => setTimeout(r, delay));
+          return Array.from({ length: n }, (_, i) => () => painted.push(`${id}${i}`));
+        }
+      });
+      const fctx = { map: fakeMap(), alive: () => true };
+      const r1 = await prepareFrame([mod('a', 1), mod('b', 3)], fctx, 1000);
+      check('one apply per overlay the modules own',
+        r1.applies.length === 4, String(r1.applies.length));
+      check('nothing painted before they are fired', painted.length === 0);
+      r1.applies.forEach((f) => f());
+      check('...and all of them paint when fired',
+        painted.join(',') === 'a0,b0,b1,b2', painted.join(','));
+      check('not late', r1.late === false);
+      check('no errors', Object.keys(r1.errors).length === 0);
+    }
+
+    console.log('\na module with nothing to swap is skipped:');
+    {
+      const { prepareFrame } = reg;
+      const fctx = { map: fakeMap(), alive: () => true };
+      const plain = { id: 'plain', layers: [], sources: [], build: async () => {} };
+      const r = await prepareFrame([plain], fctx, 1000);
+      check('no prepare means no participation', r.applies.length === 0);
+      check('and no error', Object.keys(r.errors).length === 0);
+    }
+
+    console.log('\none slow participant does not hold the frame:');
+    {
+      const { prepareFrame } = reg;
+      const fctx = { map: fakeMap(), alive: () => true };
+      const slow = {
+        id: 'slow', layers: [], sources: [], build: async () => {},
+        prepare: async () => {
+          await new Promise((r) => setTimeout(r, 400));
+          return [() => {}];
+        }
+      };
+      const started = Date.now();
+      const r = await prepareFrame([slow], fctx, 60);
+      check('the deadline wins', r.late === true);
+      // Past the deadline the caller keeps the frame it has, rather than
+      // painting a partial one.
+      check('...and nothing is handed back to paint', r.applies.length === 0);
+      check('...without waiting for the slow one', Date.now() - started < 300,
+        `${Date.now() - started}ms`);
+    }
+
+    console.log('\na failed participant is named, and the rest still paint:');
+    {
+      const { prepareFrame } = reg;
+      const fctx = { map: fakeMap(), alive: () => true };
+      const broken = {
+        id: 'composite', layers: [], sources: [], build: async () => {},
+        prepare: async () => { throw new Error('frame 404'); }
+      };
+      const fine = {
+        id: 'radars', layers: [], sources: [], build: async () => {},
+        prepare: async () => [() => {}, () => {}]
+      };
+      const r = await prepareFrame([broken, fine], fctx, 1000);
+      // The three hardcoded participants this replaces caught to null and
+      // to an empty array, so a failed load and an idle layer looked the
+      // same from outside.
+      check('the failure is named', r.errors.composite === 'frame 404',
+        JSON.stringify(r.errors));
+      check('the others still prepared', r.applies.length === 2);
+      check('not reported late', r.late === false);
     }
 
     console.log('\nthe modules declare what they own:');

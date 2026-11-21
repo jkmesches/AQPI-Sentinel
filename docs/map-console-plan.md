@@ -356,7 +356,12 @@ One commit per slice, in this order.
 7. Units, backend and frontend together.
 8. Permalinks.
 9. Compare panes.
-10. Keyboard, time axis, playback speed, per-layer opacity.
+10. Keyboard, time axis, playback speed, per-layer opacity. Also fixes the
+    blank-frame stall found in slice 3: the skip scan wraps back onto the
+    frame it started from and returns it, so playback parks whenever every
+    frame is blank and the list is no shorter than the skip bound plus one.
+    Seven tilt frames on a clear day are that shape. Asserted as it behaves
+    today in `validation_tests/js/test_map_playback.mjs`.
 11. Measure tool, export, place search, responsive pass.
 
 Slice 3 is the risky one, and it comes before the features. They land in the

@@ -22,12 +22,26 @@
 	import { gaugeChartSvg, gaugeSummaryHtml } from '$lib/map/gaugeChart';
 	import { selectionBounds, toggleId, uniqueIds } from '$lib/map/selection';
 	import { beforeIdFor } from '$lib/map/layers/stack';
-	import { applyLayers, type LayerModule } from '$lib/map/layers/registry';
+	import {
+		nextInterestingStep, remainingDwell, stepTo, FRAME_DWELL_MS
+	} from '$lib/map/playback';
+	import {
+		compositeImagePath, extentCorners, scanImagePath, tiltImagePath,
+		type ImageCorners
+	} from '$lib/map/frames';
+	import {
+		applyLayers, prepareFrame,
+		type FrameApply, type LayerModule
+	} from '$lib/map/layers/registry';
 	import { reservoirsLayer, watershedsLayer } from '$lib/map/layers/geography';
 	import {
 		ensureTerrainSource, removeTerrainSourceIfUnused, terrainLayer
 	} from '$lib/map/layers/terrain';
-	import { radarExtent, radarPointsGeo, radarRangesGeo } from '$lib/radarGeo';
+	import { burnScarsLayer } from '$lib/map/layers/burnScars';
+	import { streamGaugesLayer } from '$lib/map/layers/streamGauges';
+	import {
+		radarExtent, radarPointsGeo, radarRangesGeo, rangeSpanDeg
+	} from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
 	         BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX } from '$lib/mapPrefs';
@@ -227,13 +241,23 @@
 	const OVERLAY_MODULES: LayerModule[] = [
 		watershedsLayer,
 		reservoirsLayer,
-		terrainLayer()
+		terrainLayer(),
+		streamGaugesLayer(),
+		burnScarsLayer({
+			// Read through a getter and a thunk, so a module built once still
+			// sees the current profile and slider value on every pass.
+			get profile() { return siteProfile; },
+			years: () => burnScarYears,
+			onLoaded: (through) => { burnScarThrough = through; }
+		})
 	];
 
 	/** Whether each overlay should be on, by module id. */
 	const overlayEnabled = (id: string) =>
-		({ watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn })[id]
-		?? false;
+		({
+			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
+			streamGauges: streamGaugesOn, burnScars: burnScarsOn
+		})[id] ?? false;
 
 	// What failed in the last pass, by module id.
 	//
@@ -267,14 +291,6 @@
 		overlayErrors = errors;
 	}
 
-	/** MapLibre's ImageSource wants exactly four corners, clockwise from the
-	 *  top-left. A plain [number, number][] loses that arity and will not
-	 *  typecheck against it. */
-	type ImageCorners = [
-		[number, number], [number, number], [number, number], [number, number]
-	];
-	let streamGaugesData: GeoJSON.FeatureCollection | null = null;
-	let burnScarsData: GeoJSON.FeatureCollection | null = null;
 	// Newest ignition in the loaded file, e.g. "Dec 2025". Empty until the
 	// data arrives, and the panel hides the line rather than showing a date
 	// it does not have.
@@ -290,43 +306,6 @@
 	 * collection on a missing file, so a deployment whose file has not been
 	 * generated draws nothing rather than throwing.
 	 */
-	async function loadBurnScars(): Promise<GeoJSON.FeatureCollection> {
-		if (burnScarsData) return burnScarsData;
-		const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-		// Empty means /api/version never said which network this is. Guessing
-		// would put one region's perimeters on another region's map, where
-		// they look exactly as authoritative as the right ones.
-		if (!siteProfile) return empty;
-		try {
-			const r = await fetch(`/data/burn-scars-${siteProfile}.json`);
-			if (!r.ok) return empty;
-			const data = (await r.json()) as GeoJSON.FeatureCollection;
-			// Checked before the cache is written, so a file that parses as
-			// JSON without being a FeatureCollection is not stored and handed
-			// to addSource on the next call.
-			if (!Array.isArray(data?.features)) return empty;
-			burnScarsData = data;
-			burnScarThrough = newestBurnScar(data);
-			return data;
-		} catch {
-			return empty;
-		}
-	}
-	async function loadStreamGauges(): Promise<GeoJSON.FeatureCollection> {
-		if (streamGaugesData) return streamGaugesData;
-		const r = await fetch('/api/upstream/stream_gauges');
-		const j = (await r.json()) as { sites: { comid: string; lat: number; lon: number; status: string }[] };
-		streamGaugesData = {
-			type: 'FeatureCollection',
-			features: j.sites.map((s) => ({
-				type: 'Feature' as const,
-				properties: { comid: s.comid, status: s.status },
-				geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] }
-			}))
-		};
-		return streamGaugesData;
-	}
-
 	// Per-radar moment chooser — applies to every active overlay.
 	type Moment = 'Reflectivity' | 'Velocity' | 'Differential Reflectivity' | 'PhiDP' | 'RhoHV';
 	let currentMoment = $state<Moment>('Reflectivity');
@@ -1027,7 +1006,6 @@
 	 * never the problem (3-4% of the intended interval, nothing dropped); the
 	 * reassembly inside each frame was.
 	 */
-	type FrameApply = () => void;
 
 	let _compositeToken = 0;
 	async function prepareComposite(): Promise<FrameApply | null> {
@@ -1064,17 +1042,11 @@
 		//
 		// _forceBuster (30s-quantized, bumped by pokeOverlays) still forces a
 		// genuine refresh of the live frame — same mechanism as xbandScanUrl.
-		const cq = new URLSearchParams({ product_id: composite, step: String(stepIdx) });
-		const cts = steps[stepIdx]?.ts;
-		if (cts) cq.set('ts', cts);
-		if (_forceBuster) cq.set('_t', String(_forceBuster));
-		const url = apiUrl(`/api/upstream/product_image.png?${cq.toString()}`);
-		const coords: ImageCorners = [
-			[e.west, e.north],
-			[e.east, e.north],
-			[e.east, e.south],
-			[e.west, e.south]
-		];
+		const url = apiUrl(compositeImagePath({
+			product: composite, step: stepIdx,
+			ts: steps[stepIdx]?.ts, buster: _forceBuster
+		}));
+		const coords = extentCorners(e);
 		// Preload first so the inflate+premultiply lands off the main path,
 		// then ask MapLibre to swap in the cached bytes.
 		const ok = await preloadImage(url, isCurrent);
@@ -1121,26 +1093,11 @@
 	// for the user but cost a full image fetch + decode round. In play mode
 	// we skip them — capped to avoid jumping past everything when the whole
 	// timeline is quiet.
-	const ACTIVITY_FLOOR = 0.005;     // <0.5% of pixels = blank
-	const MAX_SKIP_PER_TICK = 6;
-	function _nextInterestingStep(from: number): number {
-		const n = steps.length;
-		if (n === 0) return 0;
-		let i = (from + 1) % n;
-		let skipped = 0;
-		// Only skip if we *have* activity data; otherwise step linearly.
-		while (
-			skipped < MAX_SKIP_PER_TICK &&
-			activity.length === n &&
-			activity[i] !== undefined &&
-			activity[i] < ACTIVITY_FLOOR &&
-			i !== from
-		) {
-			i = (i + 1) % n;
-			skipped++;
-		}
-		return i;
-	}
+	// The skip rule lives in $lib/map/playback, where a runner reaches it.
+	// A short all-blank list parks on the current frame there, which is how
+	// it has always behaved; see the module's own note.
+	const _nextInterestingStep = (from: number) =>
+		nextInterestingStep(from, steps.length, activity);
 	/**
 	 * How long a frame stays on screen before the next one is requested.
 	 *
@@ -1155,7 +1112,6 @@
 	 * a dwell rather than a budget: the real interval is whichever is longer,
 	 * this or the time the frame took to load.
 	 */
-	const FRAME_DWELL_MS = 900;
 
 	let _playLoopId = 0;
 
@@ -1177,7 +1133,7 @@
 			stepIdx = _nextInterestingStep(stepIdx);
 			await syncAllToStep();
 			if (!playing || id !== _playLoopId) return;
-			const left = FRAME_DWELL_MS - (performance.now() - started);
+			const left = remainingDwell(started, performance.now(), FRAME_DWELL_MS);
 			if (left > 0) {
 				await new Promise<void>((resolve) => setTimeout(resolve, left));
 			}
@@ -1202,6 +1158,46 @@
 	 */
 	const FRAME_DEADLINE_MS = 8000;
 
+	// The image overlays, as frame-barrier participants.
+	//
+	// They keep their bodies here rather than moving into layer modules,
+	// because each reads a dozen pieces of this component's reactive state
+	// (the step list, the moment, the active radars, the force-buster) and
+	// passing all of it through a context would be the component wearing a
+	// different name. What came out instead is the part that is genuinely
+	// separable: the frame URLs and the image corners, in $lib/map/frames,
+	// where a runner reaches the cache rules.
+	//
+	// `layers` and `sources` are empty because these never go through
+	// applyLayers; they are rebuilt by the barrier, not by a toggle.
+	const FRAME_MODULES: LayerModule[] = [
+		{
+			id: 'composite', layers: [], sources: [],
+			build: () => Promise.resolve(),
+			prepare: async (): Promise<FrameApply[]> => {
+				const apply = await prepareComposite();
+				return apply ? [apply] : [];
+			}
+		},
+		{
+			id: 'nexrad', layers: [], sources: [],
+			build: () => Promise.resolve(),
+			prepare: async (): Promise<FrameApply[]> => {
+				const apply = await prepareNexrad();
+				return apply ? [apply] : [];
+			}
+		},
+		{
+			id: 'radars', layers: [], sources: [],
+			build: () => Promise.resolve(),
+			prepare: () => prepareRadars()
+		}
+	];
+
+	// What failed in the last frame, by participant id. Published by the
+	// probe, so a frame that stopped loading shows in the visual capture.
+	let frameErrors = $state<Record<string, string>>({});
+
 	/**
 	 * Load every layer for the current step, then swap them together.
 	 *
@@ -1224,26 +1220,30 @@
 			refreshTilt();
 			return;
 		}
+		if (!map) return;
+		const m = map;
 		const token = ++_frameToken;
-		const deadline = new Promise<'late'>((resolve) =>
-			setTimeout(() => resolve('late'), FRAME_DEADLINE_MS));
-		const frame = Promise.all([
-			prepareComposite().catch(() => null),
-			prepareNexrad().catch(() => null),
-			prepareRadars().catch((): FrameApply[] => [])
-		]);
-		const settled = await Promise.race([frame, deadline]);
-		if (token !== _frameToken || !mapAlive() || !styleReady) return;
-		if (settled !== 'late') {
-			const [comp, nex, rads] = settled;
-			for (const apply of [comp, nex, ...rads]) apply?.();
-		}
+		const alive = () => token === _frameToken && map === m && mapAlive() && styleReady;
+		// The three participants go through the registry's barrier, so a
+		// failed load is named rather than caught to null. The old shape
+		// caught composite and NEXRAD to null and the radars to an empty
+		// array, which made a frame that failed to fetch look exactly like a
+		// layer with nothing to swap.
+		const result = await prepareFrame(FRAME_MODULES, { map: m, alive }, FRAME_DEADLINE_MS);
+		if (!alive()) return;
+		for (const apply of result.applies) apply();
+		frameErrors = result.errors;
 		refreshTilt();
 	}
-	function stepFirst() { stopPlay(); stepIdx = 0; syncAllToStep(); }
-	function stepLast()  { stopPlay(); stepIdx = steps.length - 1; syncAllToStep(); }
-	function stepPrev()  { stopPlay(); stepIdx = (stepIdx - 1 + steps.length) % steps.length; syncAllToStep(); }
-	function stepNext()  { stopPlay(); stepIdx = (stepIdx + 1) % steps.length; syncAllToStep(); }
+	function stepMove(move: 'first' | 'last' | 'prev' | 'next') {
+		stopPlay();
+		stepIdx = stepTo(stepIdx, steps.length, move);
+		syncAllToStep();
+	}
+	const stepFirst = () => stepMove('first');
+	const stepLast = () => stepMove('last');
+	const stepPrev = () => stepMove('prev');
+	const stepNext = () => stepMove('next');
 	// `oninput` on the scrubber fires on every drag pixel — collapse a burst
 	// into one sync 80 ms after the user comes to rest. stepIdx still
 	// updates on every input so the visual scrubber position tracks live.
@@ -1402,11 +1402,10 @@
 		// `pokeOverlays` increments `_forceBuster` to a 30s-quantized value
 		// when it actually wants a refetch; including it as a param means
 		// multiple force-refreshes within the same 30s share a cache hit.
-		const t = nexradTimeIso;
-		const qs = new URLSearchParams({ radar: id, moment: currentMoment });
-		if (t) qs.set('time', t);
-		if (_forceBuster) qs.set('_t', String(_forceBuster));
-		return apiUrl(`/api/upstream/xband_scan.png?${qs.toString()}`);
+		return apiUrl(scanImagePath({
+			radar: id, moment: currentMoment,
+			time: nexradTimeIso, buster: _forceBuster
+		}));
 	}
 
 	// Track which radar overlays we've added so refresh doesn't have to walk
@@ -1528,18 +1527,17 @@
 		const myToken = ++_tiltToken;
 		const isCurrent = () => myToken === _tiltToken && !!map && styleReady;
 		const { lon, lat, range_km: km } = _tiltGeo;
-		const dLat = km / 111;
-		const dLon = km / (111 * Math.cos((lat * Math.PI) / 180));
-		const frame = currentTiltFrame();
-		const url = apiUrl(
-			`/api/upstream/tilt_image.png?radar=${id}&el=${tiltEl}&moment=${tiltMoment}&frame=${frame}`
-		);
-		const coords: ImageCorners = [
-			[lon - dLon, lat + dLat],
-			[lon + dLon, lat + dLat],
-			[lon + dLon, lat - dLat],
-			[lon - dLon, lat - dLat]
-		];
+		// The scan's own center and range, as /api/upstream/tilt_steps
+		// reports them, so the box follows the elevation rather than the
+		// radar's nominal range.
+		const { dLat, dLon } = rangeSpanDeg(lat, km * 1000);
+		const url = apiUrl(tiltImagePath({
+			radar: id, elevation: tiltEl, moment: tiltMoment,
+			frame: currentTiltFrame()
+		}));
+		const coords = extentCorners({
+			west: lon - dLon, east: lon + dLon, south: lat - dLat, north: lat + dLat
+		});
 		const ok = await preloadImage(url, isCurrent);
 		if (!ok || !isCurrent()) return;
 		const src = map.getSource('tilt-overlay') as maplibregl.ImageSource | undefined;
@@ -1697,6 +1695,8 @@
 		void watershedsOn;
 		void reservoirsOn;
 		void terrainOn;
+		void streamGaugesOn;
+		void burnScarsOn;
 		void applyOverlays(theme.resolved);
 	});
 	// 3D terrain mesh toggle — drapes the scene + pitches the camera.
@@ -1705,19 +1705,8 @@
 		void terrain3DOn;
 		refreshTerrain3D();
 	});
-	// Stream gauges toggle. Fetch is lazy — first time the toggle flips
-	// on, the loader hits /api/upstream/stream_gauges (cached server-side
-	// for an hour) and renders the markers.
-	$effect(() => {
-		void streamGaugesOn;
-		refreshStreamGauges(theme.resolved);
-	});
-	// Burn scars. The toggle rebuilds the layers; the age slider only pushes
-	// a new filter, so dragging it does not refetch or re-add anything.
-	$effect(() => {
-		void burnScarsOn;
-		refreshBurnScars(theme.resolved);
-	});
+	// The age slider only pushes a new filter, so dragging it does not
+	// refetch or re-add anything.
 	$effect(() => {
 		void burnScarYears;
 		applyBurnScarFilter();
@@ -1907,8 +1896,6 @@
 		refreshTilt();
 		void applyOverlays(t);
 		refreshTerrain3D();
-		refreshStreamGauges(t);
-		refreshBurnScars(t);
 	}
 
 	// Stream gauges — USGS sites parsed from radarca's stream_data.csv,
@@ -1917,52 +1904,6 @@
 	//     but doesn't expose real-time data.
 	//   - R-status (real-time): brighter, larger filled circle. Click to
 	//     pull live forecast + observed streamflow into a popup.
-	async function refreshStreamGauges(t: 'light' | 'dark') {
-		if (!map || !styleReady) return;
-		// Tear down first so toggling off cleans up cleanly.
-		for (const lyr of ['stream-gauge-marker']) {
-			if (map.getLayer(lyr)) map.removeLayer(lyr);
-		}
-		if (map.getSource('stream-gauges')) map.removeSource('stream-gauges');
-		if (!streamGaugesOn) return;
-		let data: GeoJSON.FeatureCollection;
-		try {
-			data = await loadStreamGauges();
-		} catch {
-			return;  // upstream unreachable; toggle stays on, retry on next refresh
-		}
-		// Don't check isStyleLoaded() — it flickers false whenever any
-		// other source is processing tiles (e.g. watersheds GeoJSON
-		// finishing parse), which races our own additions.
-		if (!map || !styleReady || map.getSource('stream-gauges')) return;
-		map.addSource('stream-gauges', { type: 'geojson', data });
-		map.addLayer(
-			{
-				id: 'stream-gauge-marker',
-				type: 'circle',
-				source: 'stream-gauges',
-				paint: {
-					'circle-radius': ['case', ['==', ['get', 'status'], 'R'], 5.5, 3],
-					'circle-color': [
-						'case',
-						['==', ['get', 'status'], 'R'],
-						t === 'light' ? '#0a6f9b' : '#6ec2e0',
-						t === 'light' ? '#5d8aa8' : '#6e8aa0'
-					],
-					'circle-opacity': ['case', ['==', ['get', 'status'], 'R'], 0.95, 0.6],
-					'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',
-					'circle-stroke-width': ['case', ['==', ['get', 'status'], 'R'], 1.2, 0.6]
-				}
-			},
-			vectorBefore('stream-gauge-marker')
-		);
-	}
-
-	// Click handler for stream-gauge markers. Renders a MapLibre popup
-	// with the COMID + status; for R-status sites, fires the two
-	// per-COMID time-series fetches and populates the popup body in
-	// place once both land (or both fail). Both endpoints take YYYYMMDD_HH
-	// (UTC), and both answer with the 25 hours ENDING at that hour.
 	function utcHourString(d: Date): string {
 		const yyyy = d.getUTCFullYear();
 		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -2126,76 +2067,6 @@
 		}
 	}
 
-	async function refreshBurnScars(t: 'light' | 'dark') {
-		if (!map || !styleReady) return;
-		for (const lyr of [BURN_SCAR_LINE, BURN_SCAR_FILL]) {
-			if (map.getLayer(lyr)) map.removeLayer(lyr);
-		}
-		if (map.getSource(BURN_SCAR_SOURCE)) map.removeSource(BURN_SCAR_SOURCE);
-		if (!burnScarsOn) return;
-
-		const data = await loadBurnScars();
-		// === Load-bearing: re-check the world after the await ===
-		//
-		// The first fetch takes a network round trip, and three things can
-		// change under it. The user can toggle the layer back off, in which
-		// case the call that saw `burnScarsOn` false already ran and removed
-		// nothing, so returning here is the only thing that keeps the scars
-		// off a map whose panel reads OFF. The theme can swap, which would
-		// paint the layer in the palette captured before the swap. And the
-		// component can be destroyed, where `map` is still set but its style
-		// is gone, so `getSource` throws into an unhandled rejection.
-		//
-		// `mapAlive()` covers the last one; the other two need their own
-		// test, since neither is visible from the map object.
-		if (!mapAlive() || !map || !styleReady) return;
-		if (!burnScarsOn || t !== theme.resolved) return;
-		if (map.getSource(BURN_SCAR_SOURCE)) return;
-		map.addSource(BURN_SCAR_SOURCE, { type: 'geojson', data });
-
-		const age = burnScarAge();
-		const filter = scarFilter();
-		// Fill stays faint because these overlap heavily: 392 perimeters in
-		// the XQPI box, many nested inside a larger fire's footprint. At the
-		// opacity an isolated polygon wants, a stack of four reads as solid
-		// and hides the composite underneath. The outline carries the shape.
-		map.addLayer(
-			{
-				id: BURN_SCAR_FILL,
-				type: 'fill',
-				source: BURN_SCAR_SOURCE,
-				filter,
-				// Newer scars draw above older ones, so a fresh burn inside an
-				// old footprint is not buried by it.
-				layout: { 'fill-sort-key': ['-', 0, age] },
-				paint: {
-					'fill-color': ['interpolate', ['linear'], age,
-						0, t === 'light' ? '#b4310f' : '#ff7a45',
-						5, t === 'light' ? '#8a6a52' : '#9c7f66'],
-					'fill-opacity': ['interpolate', ['linear'], age, 0, 0.3, 5, 0.1]
-				}
-			},
-			vectorBefore(BURN_SCAR_FILL)
-		);
-		map.addLayer(
-			{
-				id: BURN_SCAR_LINE,
-				type: 'line',
-				source: BURN_SCAR_SOURCE,
-				filter,
-				layout: { 'line-sort-key': ['-', 0, age] },
-				paint: {
-					'line-color': ['interpolate', ['linear'], age,
-						0, t === 'light' ? '#8f2409' : '#ff8d5c',
-						5, t === 'light' ? '#7d5f49' : '#8e735c'],
-					'line-width': ['interpolate', ['linear'], age, 0, 1.5, 5, 0.9],
-					'line-opacity': ['interpolate', ['linear'], age, 0, 0.9, 5, 0.45]
-				}
-			},
-			vectorBefore(BURN_SCAR_LINE)
-		);
-	}
-
 	// Compute a default bearing so the northernmost X-band/CBAND radar sits
 	// at the top-left of the viewport and the southernmost at the bottom-
 	// right (rotated diagonal). Asked-for 2026-05-18 ("KSCW top-left, KSCR
@@ -2311,6 +2182,7 @@
 				stepIdx, stepCount: steps.length, stepsFor, playing,
 				panelOpen, mapDead, prefsReady,
 				overlayErrors: { ...overlayErrors },
+				frameErrors: { ...frameErrors },
 				profile: siteProfile, hasRadarca
 			}
 		};
