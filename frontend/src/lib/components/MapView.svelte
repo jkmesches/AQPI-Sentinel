@@ -22,6 +22,11 @@
 	import { gaugeChartSvg, gaugeSummaryHtml } from '$lib/map/gaugeChart';
 	import { selectionBounds, toggleId, uniqueIds } from '$lib/map/selection';
 	import { beforeIdFor } from '$lib/map/layers/stack';
+	import { applyLayers, type LayerModule } from '$lib/map/layers/registry';
+	import { reservoirsLayer, watershedsLayer } from '$lib/map/layers/geography';
+	import {
+		ensureTerrainSource, removeTerrainSourceIfUnused, terrainLayer
+	} from '$lib/map/layers/terrain';
 	import { radarExtent, radarPointsGeo, radarRangesGeo } from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
@@ -213,29 +218,62 @@
 	const vectorBefore = (id: string) =>
 		beforeIdFor(id, (x) => !!map?.getLayer(x));
 
+	// The overlays that the registry owns.
+	//
+	// Watersheds and reservoirs shared one `refreshGeography`, and the
+	// watershed branch's mid-fetch bail returned out of the whole function,
+	// so a theme swap at the wrong moment left the reservoirs unbuilt until
+	// something else triggered a pass. A module each ends that.
+	const OVERLAY_MODULES: LayerModule[] = [
+		watershedsLayer,
+		reservoirsLayer,
+		terrainLayer()
+	];
+
+	/** Whether each overlay should be on, by module id. */
+	const overlayEnabled = (id: string) =>
+		({ watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn })[id]
+		?? false;
+
+	// What failed in the last pass, by module id.
+	//
+	// The registry returns errors rather than throwing them, and an error
+	// with nowhere to go is a swallowed one. The probe publishes this, so a
+	// layer that stopped building shows up in validation_tests/visual
+	// instead of as a map quietly missing an overlay.
+	let overlayErrors = $state<Record<string, string>>({});
+
+	// Invalidates an in-flight pass. A theme swap replaces the style, and a
+	// fetch that started before it must not attach to the new one.
+	let overlayPass = 0;
+
+	async function applyOverlays(t: 'light' | 'dark'): Promise<void> {
+		if (!map || !styleReady) return;
+		const m = map;
+		const pass = ++overlayPass;
+		const alive = () => pass === overlayPass && map === m && styleReady;
+		const outcomes = await applyLayers(OVERLAY_MODULES, (mod) => ({
+			map: m,
+			theme: t,
+			enabled: overlayEnabled(mod.id),
+			before: vectorBefore,
+			alive
+		}));
+		if (!alive()) return;
+		const errors: Record<string, string> = {};
+		for (const o of outcomes) {
+			if (o.error) errors[o.id] = o.error;
+		}
+		overlayErrors = errors;
+	}
+
 	/** MapLibre's ImageSource wants exactly four corners, clockwise from the
 	 *  top-left. A plain [number, number][] loses that arity and will not
 	 *  typecheck against it. */
 	type ImageCorners = [
 		[number, number], [number, number], [number, number], [number, number]
 	];
-	let watershedsData: GeoJSON.FeatureCollection | null = null;
-	let reservoirsData: GeoJSON.FeatureCollection | null = null;
 	let streamGaugesData: GeoJSON.FeatureCollection | null = null;
-	async function loadWatersheds(): Promise<GeoJSON.FeatureCollection> {
-		if (watershedsData) return watershedsData;
-		const r = await fetch('/data/watersheds-huc8-norcal.geojson');
-		const data = (await r.json()) as GeoJSON.FeatureCollection;
-		watershedsData = data;
-		return data;
-	}
-	async function loadReservoirs(): Promise<GeoJSON.FeatureCollection> {
-		if (reservoirsData) return reservoirsData;
-		const r = await fetch('/data/reservoirs-norcal.json');
-		const data = (await r.json()) as GeoJSON.FeatureCollection;
-		reservoirsData = data;
-		return data;
-	}
 	let burnScarsData: GeoJSON.FeatureCollection | null = null;
 	// Newest ignition in the loaded file, e.g. "Dec 2025". Empty until the
 	// data arrives, and the panel hides the line rather than showing a date
@@ -245,12 +283,12 @@
 	/**
 	 * Fetch this deployment's burn-scar perimeters.
 	 *
-	 * The asset is per profile, unlike the two above: the NorCal and SoCal
-	 * perimeter sets are different data clipped to different boxes. The
-	 * profile slug is validated in $lib/site before it reaches this path.
-	 * Returns an empty collection on a missing file so a deployment whose
-	 * file has not been generated draws nothing rather than throwing out of
-	 * refreshGeography and leaving the other layers unbuilt.
+	 * The asset is per profile, unlike the watershed and reservoir files in
+	 * $lib/map/layers/geography: the NorCal and SoCal perimeter sets are
+	 * different data clipped to different boxes. The profile slug is
+	 * validated in $lib/site before it reaches this path. Returns an empty
+	 * collection on a missing file, so a deployment whose file has not been
+	 * generated draws nothing rather than throwing.
 	 */
 	async function loadBurnScars(): Promise<GeoJSON.FeatureCollection> {
 		if (burnScarsData) return burnScarsData;
@@ -1658,12 +1696,8 @@
 	$effect(() => {
 		void watershedsOn;
 		void reservoirsOn;
-		refreshGeography(theme.resolved);
-	});
-	// Terrain hillshade toggle — same shape as the geography one.
-	$effect(() => {
 		void terrainOn;
-		refreshTerrain(theme.resolved);
+		void applyOverlays(theme.resolved);
 	});
 	// 3D terrain mesh toggle — drapes the scene + pitches the camera.
 	// Independent from hillshade; the underlying DEM source is shared.
@@ -1871,8 +1905,7 @@
 		refreshNexrad();
 		refreshRadarOverlays();
 		refreshTilt();
-		refreshGeography(t);
-		refreshTerrain(t);
+		void applyOverlays(t);
 		refreshTerrain3D();
 		refreshStreamGauges(t);
 		refreshBurnScars(t);
@@ -2029,55 +2062,9 @@
 	//     raster overlays draped on the mesh distort at the edges; this
 	//     is an A/B exploration knob, not a default.
 	//
-	// One source, shared. Free public tiles; no API key.
-	const DEM_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/v2/terrarium/{z}/{x}/{y}.png';
-
-	function ensureTerrainSource() {
-		if (!map) return;
-		if (map.getSource('terrain-dem')) return;
-		map.addSource('terrain-dem', {
-			type: 'raster-dem',
-			tiles: [DEM_TILE_URL],
-			encoding: 'terrarium',
-			tileSize: 256,
-			maxzoom: 15,
-			attribution: 'Terrain: AWS / Mapzen Open Data'
-		});
-	}
-
-	function removeTerrainSourceIfUnused() {
-		if (!map) return;
-		// Source can only be removed if nothing references it. Both the
-		// hillshade layer AND the 3D terrain (map.getTerrain()) hold
-		// references; bail if either is still live.
-		if (map.getLayer('hillshade-layer')) return;
-		if (map.getTerrain && map.getTerrain()) return;
-		if (map.getSource('terrain-dem')) map.removeSource('terrain-dem');
-	}
-
-	function refreshTerrain(t: 'light' | 'dark') {
-		if (!map || !styleReady) return;
-		if (map.getLayer('hillshade-layer')) map.removeLayer('hillshade-layer');
-		if (terrainOn) {
-			ensureTerrainSource();
-			map.addLayer(
-				{
-					id: 'hillshade-layer',
-					type: 'hillshade',
-					source: 'terrain-dem',
-					paint: {
-						'hillshade-exaggeration': 0.55,
-						'hillshade-shadow-color': t === 'light' ? '#3a3a3a' : '#000000',
-						'hillshade-highlight-color': t === 'light' ? '#ffffff' : '#3a3a3a',
-						'hillshade-accent-color': t === 'light' ? '#202020' : '#0a0a0a'
-					}
-				},
-				'range-fill'
-			);
-		} else {
-			removeTerrainSourceIfUnused();
-		}
-	}
+	// One source, shared. The tiles and the hillshade layer live in
+	// $lib/map/layers/terrain; the mesh stays here, beside the camera
+	// pitch it moves with.
 
 	// 3D mesh terrain — drape the whole scene over the DEM.
 	const PITCH_3D = 50;
@@ -2093,11 +2080,11 @@
 	function refreshTerrain3D() {
 		if (!map || !styleReady) return;
 		if (terrain3DOn) {
-			ensureTerrainSource();
+			ensureTerrainSource(map);
 			map.setTerrain({ source: 'terrain-dem', exaggeration: 1.2 });
 		} else {
 			map.setTerrain(null);
-			removeTerrainSourceIfUnused();
+			removeTerrainSourceIfUnused(map);
 		}
 	}
 
@@ -2111,83 +2098,6 @@
 	function toggleTerrain3D() {
 		terrain3DOn = !terrain3DOn;
 		map?.easeTo({ pitch: terrain3DOn ? PITCH_3D : 0, duration: 600 });
-	}
-
-	// Watershed outlines + reservoir markers. Inserted before the radar
-	// halo layer so radar pins always render on top — these are
-	// reference overlays, not the focus. Theme-aware colors keep them
-	// readable on both basemap styles.
-	async function refreshGeography(t: 'light' | 'dark') {
-		if (!map || !styleReady) return;
-
-		// Watersheds: remove first so toggling off cleans up.
-		if (map.getLayer('watershed-line')) map.removeLayer('watershed-line');
-		if (map.getSource('watersheds')) map.removeSource('watersheds');
-		if (watershedsOn) {
-			const data = await loadWatersheds();
-			// Guard: theme may have swapped while the fetch was in flight.
-			if (!map || !styleReady || map.getSource('watersheds')) return;
-			map.addSource('watersheds', { type: 'geojson', data });
-			map.addLayer(
-				{
-					id: 'watershed-line',
-					type: 'line',
-					source: 'watersheds',
-					paint: {
-						'line-color': t === 'light' ? '#3f6478' : '#5a8aa0',
-						'line-width': 0.7,
-						'line-opacity': 0.4
-					}
-				},
-				vectorBefore('watershed-line')
-			);
-		}
-
-		// Reservoirs: marker + label. Both removed up-front, re-added if on.
-		for (const lyr of ['reservoir-label', 'reservoir-marker']) {
-			if (map.getLayer(lyr)) map.removeLayer(lyr);
-		}
-		if (map.getSource('reservoirs')) map.removeSource('reservoirs');
-		if (reservoirsOn) {
-			const data = await loadReservoirs();
-			if (!map || !styleReady || map.getSource('reservoirs')) return;
-			map.addSource('reservoirs', { type: 'geojson', data });
-			map.addLayer(
-				{
-					id: 'reservoir-marker',
-					type: 'circle',
-					source: 'reservoirs',
-					paint: {
-						'circle-radius': 3.5,
-						'circle-color': t === 'light' ? '#1f6d8e' : '#5fa8c4',
-						'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',
-						'circle-stroke-width': 1,
-						'circle-opacity': 0.9
-					}
-				},
-				vectorBefore('reservoir-marker')
-			);
-			map.addLayer(
-				{
-					id: 'reservoir-label',
-					type: 'symbol',
-					source: 'reservoirs',
-					layout: {
-						'text-field': ['get', 'name'],
-						'text-size': 9.5,
-						'text-offset': [0.6, 0.3],
-						'text-anchor': 'left',
-						'text-font': ['Stadia Regular']
-					},
-					paint: {
-						'text-color': t === 'light' ? '#1f6d8e' : '#9bc4d2',
-						'text-halo-color': t === 'light' ? '#ffffff' : '#0c100d',
-						'text-halo-width': 1
-					}
-				},
-				vectorBefore('reservoir-label')
-			);
-		}
 	}
 
 	// Burn scars — CAL FIRE perimeters, shaded by how long ago each burned.
@@ -2400,6 +2310,7 @@
 				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
 				stepIdx, stepCount: steps.length, stepsFor, playing,
 				panelOpen, mapDead, prefsReady,
+				overlayErrors: { ...overlayErrors },
 				profile: siteProfile, hasRadarca
 			}
 		};
