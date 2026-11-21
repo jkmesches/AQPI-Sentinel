@@ -308,8 +308,9 @@ def create_app() -> FastAPI:
                               COMPOSITE_PRODUCT, DATA_SOURCE,
                               HAS_RADARCA,
                               HOME_VIEW, MAP_OVERLAYS, PRODUCT_LABELS, PRODUCTS,
-                              RADAR_FOLDER, SETTINGS, SITE_NAME, X_MOMENTS,
-                              moment_to_prefix)
+                              PRODUCT_UNIT_STATE, RADAR_FOLDER, SETTINGS,
+                              SITE_NAME, X_MOMENTS, moment_to_prefix,
+                              product_units)
         return {"version": __version__, "profile": SETTINGS.profile,
                 "site_name": SITE_NAME, "data_source": DATA_SOURCE,
                 "has_radarca": HAS_RADARCA,
@@ -342,7 +343,22 @@ def create_app() -> FastAPI:
                 # bug this project keeps finding.
                 "moment_prefixes": {
                     rid: {m: moment_to_prefix(rid, m) for m in X_MOMENTS}
-                    for rid in RADAR_FOLDER}}
+                    for rid in RADAR_FOLDER},
+                # Per product, the units it is published in, canonical
+                # first, and what the mount held for each when it was last
+                # read. Only products with a real second unit appear, so a
+                # product absent here gets no unit control at all.
+                #
+                # The state matters because three of AQPI's six stopped
+                # writing their millimeter subtree on 2026-09-30 while
+                # still writing inches every two minutes. A picker that
+                # offered both without saying so would hand the reader
+                # rainfall seven weeks old, looking exactly like this
+                # hour's.
+                "product_units": {
+                    pid: {"units": product_units(pid),
+                          "state": PRODUCT_UNIT_STATE.get(pid, {})}
+                    for pid in PRODUCTS if product_units(pid)}}
     app.include_router(version_router)
 
     app.include_router(status_routes.router)

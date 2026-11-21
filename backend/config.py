@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from dotenv import load_dotenv
 
@@ -153,23 +154,52 @@ _warn_renamed_recentfiles()
 # depend on the validation tree.
 # --------------------------------------------------------------------------
 
+# Display label to the suffix the published tree uses, in
+# details_<suffix>.json and images/<suffix>/. Read off the mount on
+# 2026-11-21.
+#
+# PRODUCT_UNIT_STATE below records which of these the deployment keeps
+# current, because three of them it does not, and a unit picker that offers
+# a subtree nobody writes any more hands the reader 51-day-old rainfall
+# looking exactly like this hour's.
+UNITS_DEPTH = {"in": "in", "mm": "mm"}
+UNITS_RATE = {"in/h": "in", "mm/h": "mm"}
+
+# What the mount actually holds per product and unit, read on 2026-11-21.
+# "live" means the subtree was written within the hour; "stale" carries the
+# date it stopped. A stale unit is still offered, since the step list it
+# returns carries its own timestamps and the console's stale banner reads
+# them, but it is recorded here so the picker can say so first.
+PRODUCT_UNIT_STATE: dict[str, dict[str, str]] = {
+    "qpe_15min":              {"in": "live", "mm": "stale:2026-09-30"},
+    "qpe_1hr":                {"in": "live", "mm": "stale:2026-09-30"},
+    "precip_rate_radar":      {"in/h": "live", "mm/h": "stale:2026-09-30"},
+    "fcst_total_precip":      {"in": "live", "mm": "live"},
+    "fcst_total_precip_cum":  {"in": "live", "mm": "live"},
+    "fcst_precip_rate":       {"in/h": "live", "mm/h": "live"},
+}
+
+
 # Per-product expectations.
 PRODUCTS = {
     "qpe_15min":              {"details": "rain15min/details_in.json",
                                "image_dir": "rain15min/images/",
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": 360, "min_png_bytes": 5_000,
-                               "unit": "in", "unit_subdir": True},
+                               "unit": "in", "unit_subdir": True,
+                               "units": UNITS_DEPTH},
     "qpe_1hr":                {"details": "rain60min/details_in.json",
                                "image_dir": "rain60min/images/",
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": 360, "min_png_bytes": 5_000,
-                               "unit": "in", "unit_subdir": True},
+                               "unit": "in", "unit_subdir": True,
+                               "units": UNITS_DEPTH},
     "precip_rate_radar":      {"details": "rainrate/details_in.json",
                                "image_dir": "rainrate/images/",
                                "cadence_s": 120, "expected_steps": 31,
                                "max_freshness_s": 360, "min_png_bytes": 5_000,
-                               "unit": "in/h", "unit_subdir": True},
+                               "unit": "in/h", "unit_subdir": True,
+                               "units": UNITS_RATE},
     "comp_ref":               {"details": "composite_ref_max/details.json",
                                "image_dir": "composite_ref_max/images/",
                                "cadence_s": 120, "expected_steps": 31,
@@ -216,17 +246,20 @@ PRODUCTS = {
                                "image_dir": "total_precip/images/",
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
-                               "unit": "in", "unit_subdir": True},
+                               "unit": "in", "unit_subdir": True,
+                               "units": UNITS_DEPTH},
     "fcst_total_precip_cum":  {"details": "total_precip_cumulative/details_in.json",
                                "image_dir": "total_precip_cumulative/images/",
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
-                               "unit": "in", "unit_subdir": True},
+                               "unit": "in", "unit_subdir": True,
+                               "units": UNITS_DEPTH},
     "fcst_precip_rate":       {"details": "precip_rate/details_in.json",
                                "image_dir": "precip_rate/images/",
                                "cadence_s": 900, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
-                               "unit": "in/h", "unit_subdir": True},
+                               "unit": "in/h", "unit_subdir": True,
+                               "units": UNITS_RATE},
     "fcst_temp":              {"details": "temperature/details_F.json",
                                "image_dir": "temperature/images/",
                                "cadence_s": 3600, "expected_steps": None,
@@ -378,6 +411,120 @@ X_MOMENTS = list(MOMENT_TO_PREFIX_DEFAULT.keys())
 # Temperature uses "F" or "Deg" (note: NOT "DEG") for its subdir.
 TEMP_UNIT_SUBDIR = {"F": "F", "DEG": "Deg"}
 
+def _product_cfg(product_id: str) -> dict[str, object]:
+    """One product's config entry, typed.
+
+    PRODUCTS is a literal whose values mypy widens to `object`, and the
+    profiles reassign it wholesale, so annotating it there would ripple
+    through every profile. The cast is confined to this one accessor
+    instead.
+
+    Args:
+        product_id: The product.
+
+    Returns:
+        Its config entry.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+    """
+    return cast("dict[str, object]", PRODUCTS[product_id])
+
+
+def _units_of(product_id: str) -> dict[str, str]:
+    """A product's unit table, narrowed from the config's loose value type.
+
+    Args:
+        product_id: The product.
+
+    Returns:
+        Display label to on-disk suffix, empty for a one-unit product.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+    """
+    raw = _product_cfg(product_id).get("units")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def product_units(product_id: str) -> list[str]:
+    """The unit labels a product can be asked for, canonical first.
+
+    Empty for a product published in one unit, which is most of them, and
+    for temperature. Temperature writes a "Deg" subtree beside its "F" one,
+    and all twelve of its frames were byte-identical to the "F" frames on
+    2026-11-21, so a toggle there would move nothing while implying it had.
+
+    Args:
+        product_id: The product.
+
+    Returns:
+        The labels, with the canonical one first, or an empty list.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+    """
+    units = _units_of(product_id)
+    if not units:
+        return []
+    canonical = str(_product_cfg(product_id)["unit"])
+    rest = [u for u in units if u != canonical]
+    return [canonical, *rest] if canonical in units else list(units)
+
+
+def unit_suffix(product_id: str, unit: str | None) -> str:
+    """The on-disk suffix for one of a product's units.
+
+    Args:
+        product_id: The product.
+        unit: The label, or None for the product's canonical unit.
+
+    Returns:
+        The suffix used in details_<suffix>.json and images/<suffix>/.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+        ValueError: If the product has no units, or does not have this one.
+    """
+    units = _units_of(product_id)
+    if not units:
+        raise ValueError(f"{product_id} is published in one unit only")
+    want = str(_product_cfg(product_id)["unit"]) if unit is None else unit
+    if want not in units:
+        raise ValueError(
+            f"{product_id} has no unit {want!r}; it has "
+            f"{', '.join(sorted(units))}")
+    return units[want]
+
+
+def manifest_rel(product_id: str, unit: str | None = None) -> str:
+    """The product's manifest path, relative to the published root.
+
+    Args:
+        product_id: The product.
+        unit: Which unit's manifest, or None for the canonical one.
+
+    Returns:
+        A relative path.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+        ValueError: If the product does not have this unit.
+    """
+    details = str(_product_cfg(product_id)["details"])
+    if unit is None or not _units_of(product_id):
+        if unit is not None:
+            # Asking for a unit a one-unit product does not have is a
+            # caller bug, not something to answer with the canonical file.
+            _ = unit_suffix(product_id, unit)
+        return details
+    suffix = unit_suffix(product_id, unit)
+    canonical = unit_suffix(product_id, None)
+    return details.replace(f"details_{canonical}.json",
+                           f"details_{suffix}.json")
+
 
 # --------------------------------------------------------------------------
 # Layer 4 image-QC profiles — per-product knobs for the heuristics.
@@ -441,15 +588,35 @@ def l4_profile(identifier: str) -> dict[str, object]:
     return {**DEFAULT_L4_PROFILE, **L4_PROFILES.get(identifier, {})}
 
 
-def image_path(product_id: str, image_name: str) -> str:
-    """Mirror the JS: unit-subdir products interpolate <images_dir>/<unit>/<name>."""
-    cfg = PRODUCTS[product_id]
+def image_path(product_id: str, image_name: str,
+               unit: str | None = None) -> str:
+    """Mirror the JS: unit-subdir products interpolate <images_dir>/<unit>/<name>.
+
+    Args:
+        product_id: The product.
+        image_name: The frame, as its manifest named it.
+        unit: Which unit's subtree, or None for the canonical one.
+
+    Returns:
+        A path relative to the published root.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+        ValueError: If the product does not have this unit.
+    """
+    cfg = _product_cfg(product_id)
+    image_dir = str(cfg["image_dir"])
     if not cfg.get("unit_subdir"):
-        return cfg["image_dir"] + image_name
-    unit = cfg["unit"]
+        if unit is not None:
+            raise ValueError(f"{product_id} is published in one unit only")
+        return image_dir + image_name
+    if unit is not None:
+        return image_dir + unit_suffix(product_id, unit) + "/" + image_name
+    canonical = str(cfg["unit"])
     if product_id == "fcst_temp":
-        return cfg["image_dir"] + TEMP_UNIT_SUBDIR.get(unit, "F") + "/" + image_name
-    return cfg["image_dir"] + unit.split("/")[0] + "/" + image_name
+        return (image_dir + TEMP_UNIT_SUBDIR.get(canonical, "F")
+                + "/" + image_name)
+    return image_dir + canonical.split("/", 1)[0] + "/" + image_name
 
 
 # ==========================================================================

@@ -267,7 +267,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=qpe_15min&step=<N>&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=qpe_15min&step=<N>&ts=<N>&unit=in"
    },
    "radars": {
     "data": {
@@ -306,10 +306,12 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "qpe_15min",
+   "frameErrors": {},
    "hasRadarca": true,
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
    "panelOpen": true,
    "playing": false,

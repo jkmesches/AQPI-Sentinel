@@ -2,10 +2,12 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { getSite, ALL_OVERLAYS, type HomeView, type Overlay,
 	         type Extent, type Product,
-	         type MomentPrefixes } from '$lib/site';
+	         type MomentPrefixes, type UnitTable } from '$lib/site';
 	import { momentChoices, momentDisplay, defaultMoment,
 	         prefixFor } from '$lib/map/moments';
 	import { rampFor } from '$lib/map/ramps/registry';
+	import { unitChoices, defaultUnit, unitNote,
+	         resolveUnit } from '$lib/map/units';
 	import { invert } from '$lib/map/ramps/invert';
 	import { overlayFraction, overlayPixel,
 	         readoutText } from '$lib/map/readout';
@@ -35,7 +37,8 @@
 		nextInterestingStep, remainingDwell, stepTo, FRAME_DWELL_MS
 	} from '$lib/map/playback';
 	import {
-		compositeImagePath, extentCorners, scanImagePath, tiltImagePath,
+		compositeImagePath, compositeStepsPath, extentCorners, scanImagePath,
+		tiltImagePath,
 		type ImageCorners
 	} from '$lib/map/frames';
 	import {
@@ -326,6 +329,32 @@
 	// until it answers, and on a backend that predates the field, in which
 	// case the picker keeps LEGACY_MOMENTS.
 	let momentPrefixes = $state<MomentPrefixes | null>(null);
+	// Product id to the units it publishes and what the mount held for
+	// each. Null until /api/version answers, and on a backend that predates
+	// the field, in which case no unit control is offered.
+	let productUnits = $state<UnitTable | null>(null);
+	// Which unit the composite is shown in. Null for a product published in
+	// one unit, which leaves the parameter off the request.
+	//
+	// Deliberately not stored in prefs. Three of the six multi-unit
+	// products have a subtree nobody has written since 2026-09-30, and a
+	// stored unit would restore one of those silently on the next visit,
+	// with the reader no longer remembering they chose it. Every load
+	// starts on the canonical unit, which is the live one and the one the
+	// L1 checks measure. Slice 8 puts it in the permalink instead, where
+	// it is visible and shared on purpose.
+	let currentUnit = $state<string | null>(null);
+	const unitOptions = $derived(unitChoices(productUnits, composite));
+	const unitWarning = $derived(unitNote(unitOptions, currentUnit));
+	// A unit belongs to one product. Carrying "mm/h" across to a product
+	// whose units are "in" and "mm" would send a label the backend answers
+	// 400 to, so the selection is re-resolved against each new product.
+	$effect(() => {
+		void composite;
+		void productUnits;
+		const resolved = resolveUnit(unitOptions, untrack(() => currentUnit));
+		if (resolved !== untrack(() => currentUnit)) currentUnit = resolved;
+	});
 	// The label the scan route takes. A string rather than a union, because
 	// the set is the deployment's: AQPI writes "Differential Reflectivity"
 	// where XQPI writes "DifferentialReflectivity", and XQPI has no RhoHV.
@@ -1026,7 +1055,12 @@
 			// describes rather than with whatever is selected when it lands.
 			const want = composite;
 			try {
-				const r = await fetch(`/api/upstream/product_steps?product_id=${want}`);
+				// The unit goes on the step list as well as on the frames.
+				// A millimeter manifest lists different frames at different
+				// times, so mixing the two picks a step by an index that
+				// means something else.
+				const wantUnit = currentUnit;
+				const r = await fetch(apiUrl(compositeStepsPath(want, wantUnit)));
 				const j = await r.json();
 				if (token !== stepsToken) return;
 				setSteps(j.steps as Step[], want);
@@ -1162,7 +1196,7 @@
 		// genuine refresh of the live frame — same mechanism as xbandScanUrl.
 		const url = apiUrl(compositeImagePath({
 			product: composite, step: stepIdx,
-			ts: steps[stepIdx]?.ts, buster: _forceBuster
+			ts: steps[stepIdx]?.ts, buster: _forceBuster, unit: currentUnit
 		}));
 		const coords = extentCorners(e);
 		// Preload first so the inflate+premultiply lands off the main path,
@@ -1802,6 +1836,7 @@
 	});
 	$effect(() => {
 		void composite;
+		void currentUnit;               // a unit has its own manifest
 		void activeRadars.length;       // crossing 0↔N flips manifest source
 		void currentMoment;
 		void nexradEnabled;             // toggling NEXRAD when nothing else is on
@@ -2374,6 +2409,8 @@
 		// deployment's moment labels. Restoring a stored "PhiDP" on XQPI
 		// would otherwise keep a label its scan route answers 400 to.
 		momentPrefixes = site.momentPrefixes;
+		productUnits = site.productUnits;
+		currentUnit = defaultUnit(unitChoices(productUnits, composite));
 		if (!MOMENTS.some((m) => m.key === currentMoment)) {
 			currentMoment = defaultMoment(MOMENTS) ?? currentMoment;
 		}
@@ -2684,6 +2721,25 @@
 			</div>
 		{/if}
 		</div>
+		<!-- Stale-unit banner. Centered with the stale-composite one and for
+		     the same reason: the hazard is reading seven-week-old rainfall
+		     as current, and a marker in the corner would not stop it. This
+		     needs its own banner because the stale-composite banner reads
+		     the backend's L1 verdict, and the L1 checks read the canonical
+		     unit by design, so they stay green while a stale alternate unit
+		     is on screen. Non-interactive. -->
+		{#if unitWarning}
+			<div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 max-w-[92%]">
+				<div data-unit-banner class="rounded-sm border border-[var(--color-warn)] bg-[var(--color-warn)]/[0.14] px-3 py-1.5 text-center shadow-xl backdrop-blur">
+					<div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
+						⚠ {currentUnit} {unitWarning}
+					</div>
+					<div class="mt-0.5 num text-[10.5px] text-[var(--color-default)]">
+						{productLabel(composite)} still publishes {unitOptions[0]?.key ?? 'its canonical unit'}. These frames are whatever was last written in {currentUnit}.
+					</div>
+				</div>
+			</div>
+		{/if}
 		<!-- Stale-composite banner. Deliberately centerd over the map rather
 		     than tucked in a corner: the failure this guards against is an
 		     operator reading a 50-day-old inundation frame as current, and a
@@ -2790,6 +2846,37 @@
 					{/each}
 				</select>
 			</div>
+			<!-- Unit, for a product published in more than one. A unit whose
+			     subtree the backend last saw stale is still offered, since
+			     the step list it returns carries its own timestamps and the
+			     stale banner reads them, but it says so on the button
+			     rather than letting the reader find out from the banner
+			     after switching. -->
+			{#if unitOptions.length > 1}
+				<div class="mt-1.5 flex items-center gap-1.5">
+					<span class="num text-[9px] uppercase tracking-wider text-[var(--color-faint)]">unit</span>
+					<div class="flex flex-1 gap-px overflow-hidden rounded-sm border border-[var(--color-border-strong)]">
+						{#each unitOptions as u (u.key)}
+							<button
+								class="num flex-1 py-0.5 text-[10px] font-medium transition-colors {currentUnit === u.key
+									? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
+									: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'}"
+								title={u.live
+									? `${u.key} — published and current`
+									: `${u.key} — ${u.since ? `not published since ${u.since}` : 'not published'}`}
+								onclick={() => { currentUnit = u.key; }}
+							>
+								{u.key}{u.live ? '' : ' ⚠'}
+							</button>
+						{/each}
+					</div>
+				</div>
+				{#if unitWarning}
+					<div data-unit-warning class="num mt-1 text-[9.5px] text-[var(--color-warn)]">
+						⚠ {currentUnit} {unitWarning}
+					</div>
+				{/if}
+			{/if}
 		</div>
 
 		<!-- NEXRAD — single row toggle -->

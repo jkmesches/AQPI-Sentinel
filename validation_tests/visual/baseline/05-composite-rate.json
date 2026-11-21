@@ -267,7 +267,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=precip_rate_radar&step=<N>&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=precip_rate_radar&step=<N>&ts=<N>&unit=in%2Fh"
    },
    "radars": {
     "data": {
@@ -306,10 +306,12 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "precip_rate_radar",
+   "frameErrors": {},
    "hasRadarca": true,
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
    "panelOpen": true,
    "playing": false,

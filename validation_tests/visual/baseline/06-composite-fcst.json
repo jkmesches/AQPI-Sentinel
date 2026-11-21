@@ -267,7 +267,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=fcst_total_precip&step=<N>&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=fcst_total_precip&step=<N>&ts=<N>&unit=in"
    },
    "radars": {
     "data": {
@@ -306,18 +306,20 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "fcst_total_precip",
+   "frameErrors": {},
    "hasRadarca": true,
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
    "panelOpen": true,
    "playing": false,
    "prefsReady": true,
    "profile": "aqpi",
    "reservoirsOn": false,
-   "stepCount": 74,
-   "stepIdx": 73,
+   "stepCount": 18,
+   "stepIdx": 17,
    "stepsFor": "fcst_total_precip",
    "streamGaugesOn": false,
    "terrain3DOn": false,

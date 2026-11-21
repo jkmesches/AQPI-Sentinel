@@ -31,7 +31,8 @@ from typing import Any
 
 from .config import (PRODUCT_IMAGES_PREFIX, PRODUCTS, RADAR_FOLDER,
                      RADAR_PLOTS_NAME, RADAR_PLOTS_TREE, RADAR_PLOTS_TS_FMT,
-                     RADAR_PLOTS_TS_RE, SETTINGS, moment_to_prefix)
+                     RADAR_PLOTS_TS_RE, SETTINGS, manifest_rel,
+                     moment_to_prefix)
 
 # Matches layer1_backend_product.FS_TIMEOUT_S. A mount that does not answer in
 # five seconds is wedged, and failing is better than holding the connection.
@@ -62,9 +63,21 @@ def _root() -> str:
     return os.path.join(SETTINGS.backend_root, *PRODUCT_IMAGES_PREFIX)
 
 
-def manifest_path(product_id: str) -> str:
-    """Absolute path to the product's published manifest."""
-    return os.path.join(_root(), PRODUCTS[product_id]["details"])
+def manifest_path(product_id: str, unit: str | None = None) -> str:
+    """Absolute path to the product's published manifest.
+
+    Args:
+        product_id: The product.
+        unit: Which unit's manifest, or None for the canonical one.
+
+    Returns:
+        An absolute path.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+        ValueError: If the product does not have this unit.
+    """
+    return os.path.join(_root(), manifest_rel(product_id, unit))
 
 
 def source_path(source: str) -> str:
@@ -124,9 +137,23 @@ def _read_image_blocking(path: str) -> FsResponse:
     return FsResponse(200, body, "image/png")
 
 
-async def read_steps(product_id: str) -> list[dict[str, Any]]:
-    """The product's step manifest, in the shape productDetail returns."""
-    path = manifest_path(product_id)
+async def read_steps(product_id: str,
+                     unit: str | None = None) -> list[dict[str, Any]]:
+    """The product's step manifest, in the shape productDetail returns.
+
+    Args:
+        product_id: The product.
+        unit: Which unit's manifest, or None for the canonical one.
+
+    Returns:
+        The steps, as the manifest lists them.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+        ValueError: If the product does not have this unit.
+        TimeoutError: If the read outlives FS_TIMEOUT_S.
+    """
+    path = manifest_path(product_id, unit)
     return await asyncio.wait_for(
         asyncio.to_thread(_read_steps_blocking, path), FS_TIMEOUT_S)
 

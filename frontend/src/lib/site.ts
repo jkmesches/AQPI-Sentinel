@@ -32,6 +32,12 @@ export type Overlay = (typeof ALL_OVERLAYS)[number];
 export type MomentPrefixes =
 	Readonly<Record<string, Readonly<Record<string, string>>>>;
 
+/** Product id to the units it publishes and what the mount held for each. */
+export type UnitTable = Readonly<Record<string, {
+	units: readonly string[];
+	state: Readonly<Record<string, string>>;
+}>>;
+
 /**
  * Profile slugs are interpolated into a static asset path, so the shape is
  * constrained here rather than trusted. Anything with a slash, a dot or a
@@ -125,6 +131,19 @@ export interface SiteMap {
 	 * own list.
 	 */
 	momentPrefixes: MomentPrefixes | null;
+	/**
+	 * Product id to the units it publishes, canonical first, and what the
+	 * mount held for each when it was last read.
+	 *
+	 * Only products with a real second unit appear. Three of AQPI's six
+	 * stopped writing their millimeter subtree on 2026-09-30 while still
+	 * writing inches every two minutes, so the state travels with the
+	 * choice: a picker that offered both without saying so would hand the
+	 * reader rainfall seven weeks old.
+	 *
+	 * Null means the backend did not say, and no unit control is offered.
+	 */
+	productUnits: UnitTable | null;
 }
 
 export interface HomeView {
@@ -171,6 +190,38 @@ function parseMomentPrefixes(v: unknown): MomentPrefixes | null {
 			if (typeof prefix === 'string' && prefix) inner[label] = prefix;
 		}
 		if (Object.keys(inner).length > 0) out[radar] = inner;
+	}
+	return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Validate the unit table, dropping whatever does not parse.
+ *
+ * A product whose entry is malformed loses its unit control rather than
+ * taking the whole table down, which matches how the extents are handled.
+ *
+ * @param v The `product_units` field, unvalidated.
+ * @returns The table, or null when nothing usable came back.
+ */
+function parseUnitTable(v: unknown): UnitTable | null {
+	if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+	const out: Record<string, {
+		units: string[]; state: Record<string, string>;
+	}> = {};
+	for (const [pid, entry] of Object.entries(v as Record<string, unknown>)) {
+		if (!entry || typeof entry !== 'object') continue;
+		const e = entry as { units?: unknown; state?: unknown };
+		if (!Array.isArray(e.units)) continue;
+		const units = e.units.filter((u): u is string => typeof u === 'string');
+		if (units.length < 2) continue;
+		const state: Record<string, string> = {};
+		if (e.state && typeof e.state === 'object' && !Array.isArray(e.state)) {
+			for (const [k, val] of
+				Object.entries(e.state as Record<string, unknown>)) {
+				if (typeof val === 'string') state[k] = val;
+			}
+		}
+		out[pid] = { units, state };
 	}
 	return Object.keys(out).length > 0 ? out : null;
 }
@@ -233,7 +284,8 @@ export async function resolveHomeView(
 		profile: PROFILE_UNKNOWN,
 		name: FALLBACK_NAME, dataSource: FALLBACK_SOURCE, hasRadarca: true,
 		products: null, compositeProduct: '', home: fallback, overlays: ALL_OVERLAYS,
-		compExtent: null, compExtentProvisional: [], momentPrefixes: null
+		compExtent: null, compExtentProvisional: [], momentPrefixes: null,
+		productUnits: null
 	};
 	try {
 		const resp = await fetcher(url);
@@ -276,7 +328,8 @@ export async function resolveHomeView(
 							!!p && typeof (p as Product).id === 'string'
 							&& typeof (p as Product).label === 'string')
 				: null,
-			momentPrefixes: parseMomentPrefixes(body?.moment_prefixes)
+			momentPrefixes: parseMomentPrefixes(body?.moment_prefixes),
+			productUnits: parseUnitTable(body?.product_units)
 		};
 	} catch {
 		return miss;

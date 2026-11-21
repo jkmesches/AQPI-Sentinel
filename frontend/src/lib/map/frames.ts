@@ -69,6 +69,12 @@ export interface CompositeFrame {
 	 * one window share a cache hit. Zero or absent leaves it off the URL.
 	 */
 	buster?: number;
+	/**
+	 * Which of the product's units to fetch, when it publishes more than
+	 * one. Absent or null leaves the parameter off, and the backend serves
+	 * the canonical unit.
+	 */
+	unit?: string | null;
 }
 
 /**
@@ -80,8 +86,30 @@ export interface CompositeFrame {
 export function compositeImagePath(f: CompositeFrame): string {
 	const q = new URLSearchParams({ product_id: f.product, step: String(f.step) });
 	if (f.ts) q.set('ts', f.ts);
+	if (f.unit) q.set('unit', f.unit);
 	if (f.buster) q.set('_t', String(f.buster));
 	return `/api/upstream/product_image.png?${q.toString()}`;
+}
+
+/**
+ * The path and query for a product's step list.
+ *
+ * The unit belongs on this call as well as on the image. A millimeter
+ * manifest lists different frames at different times from an inch one, so
+ * taking the step list from one and the frames from the other picks a step
+ * by an index that means something else.
+ *
+ * @param product The product id.
+ * @param unit Which unit, or null for the canonical one.
+ * @returns A path relative to the API origin.
+ */
+export function compositeStepsPath(
+	product: string,
+	unit: string | null = null
+): string {
+	const q = new URLSearchParams({ product_id: product });
+	if (unit) q.set('unit', unit);
+	return `/api/upstream/product_steps?${q.toString()}`;
 }
 
 /** One X-band scan frame. */

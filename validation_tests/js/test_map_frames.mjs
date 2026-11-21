@@ -15,6 +15,7 @@
 
 export function runTests(mod) {
   const {
+    compositeStepsPath,
     extentCorners, compositeImagePath, scanImagePath, tiltImagePath
   } = mod;
   const failures = [];
@@ -141,6 +142,48 @@ export function runTests(mod) {
     check('each starts at /api/upstream',
       all.every((p) => p.startsWith('/api/upstream/')), all.join(' | '));
     check('none names a host', all.every((p) => !p.includes('://')));
+  }
+
+  console.log('\nthe unit rides on both the frames and the step list:');
+  {
+    // A millimeter manifest lists different frames at different times from
+    // an inch one, so taking the step list from one and the frames from the
+    // other picks a step by an index that means something else. On AQPI the
+    // millimeter subtree also stopped updating on 2026-09-30, which makes
+    // that mismatch look like a seven-week jump rather than an error.
+    const base = { product: 'qpe_1hr', step: 3 };
+    const plain = compositeImagePath(base);
+    check('no unit leaves the parameter off', !plain.includes('unit='), plain);
+    const mm = compositeImagePath({ ...base, unit: 'mm' });
+    check('a unit is sent', mm.includes('unit=mm'), mm);
+    check('and the rest is unchanged',
+      mm.replace('&unit=mm', '') === plain, mm);
+    check('a null unit is left off',
+      !compositeImagePath({ ...base, unit: null }).includes('unit='));
+    check('an empty unit is left off',
+      !compositeImagePath({ ...base, unit: '' }).includes('unit='));
+    const rate = compositeImagePath({ ...base, unit: 'mm/h' });
+    check('a rate unit is escaped', rate.includes('unit=mm%2Fh'), rate);
+
+    const steps = compositeStepsPath('qpe_1hr', 'mm');
+    check('the step list takes the same unit', steps.includes('unit=mm'),
+      steps);
+    check('and names the same product', steps.includes('product_id=qpe_1hr'));
+    check('the step list without a unit sends none',
+      !compositeStepsPath('qpe_1hr').includes('unit='),
+      compositeStepsPath('qpe_1hr'));
+    check('the step list defaults to no unit',
+      compositeStepsPath('qpe_1hr', null) === compositeStepsPath('qpe_1hr'));
+    // The pair has to agree, which is the intended result of threading
+    // the unit through both calls.
+    for (const u of [null, 'in', 'mm', 'mm/h']) {
+      const a = new URL(compositeImagePath({ ...base, unit: u }),
+        'http://x').searchParams.get('unit');
+      const b = new URL(compositeStepsPath('qpe_1hr', u),
+        'http://x').searchParams.get('unit');
+      check(`unit ${String(u)} matches on both calls`, a === b,
+        `${a} vs ${b}`);
+    }
   }
 
   console.log(failures.length

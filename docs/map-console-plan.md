@@ -228,6 +228,32 @@ The L1 checks keep reading the canonical unit. Thresholds like
 `max_freshness_s` were characterized against measured cadence in one unit
 subtree, and a display toggle must not move them.
 
+### Stale Unit Subtrees
+
+Shipped on 2026-11-21. Six products carry a second unit, and reading the
+mount changed what the slice had to do.
+
+Three of the six stopped writing their millimeter subtree on 2026-09-30
+while still writing inches every two minutes. Those stale manifests parse,
+list a full 31 steps and look healthy, so only their timestamps give them
+away. Switching units there serves seven-week-old rainfall that is
+pixel-for-pixel as convincing as the current frames.
+
+The stale-composite banner does not catch it, which follows from the rule
+above. That banner reads the backend's L1 verdict for the product, and the
+L1 checks read the canonical unit, so they stay green while a stale
+alternate unit fills the screen. So the backend reports what the mount held
+for each unit, the unit button carries a warning sign before the unit is
+chosen, and a separate banner sits over the map after it is chosen.
+
+Temperature has no unit control. Its "Deg" subtree held frames
+byte-identical to its "F" ones, so a toggle would move nothing while
+implying it had.
+
+Slice 9's second pane inherits this. Each pane needs its own unit, and a
+pane on a stale unit needs its own banner, because a single centered
+warning cannot say which half of the screen it is about.
+
 ## 8. Permalinks
 
 The URL carries product, frame timestamp, active radars, moment, overlays,
@@ -388,14 +414,18 @@ One commit per slice, in this order.
    radars arrival cannot see, radarca paints only where no backend row exists,
    and a composite shortfall is reported on the Products rail. 58 cases in
    `validation_tests/js/test_radar_status.mjs`.
-3. MapView decomposition. Behavior-preserving, no new features.
-4. Profile geography. NEXRAD extent and moment vocabulary both sourced from
-   the profile. Placed here so the NEXRAD fix lands in `layers/nexrad.ts`
-   once rather than being written twice. Pull it ahead of slice 3 if
-   the XQPI deployment needs it before the rest of the release ships.
-5. Ramps and legend, including the coverage measurement.
-6. Cursor readout.
-7. Units, backend and frontend together.
+3. MapView decomposition, shipped 2026-11-21 across four commits.
+   Behavior-preserving: 28 of 28 captured states identical at each
+   step. MapView went from 3,399 lines to 2,929.
+4. Profile geography, shipped. NEXRAD extent on 2026-11-20 and the moment
+   vocabulary on 2026-11-21. The vocabulary half was also a live fix: the
+   console carried AQPI's five moment labels as a constant, and three of
+   the five returned 400 on the XQPI deployment.
+5. Ramps and legend, shipped 2026-11-21, including the coverage
+   measurement and what it turned up about the two reflectivity ramps.
+6. Cursor readout, shipped 2026-11-21.
+7. Units, backend and frontend together, shipped 2026-11-21, with the
+   stale-subtree warning the measurement forced.
 8. Permalinks.
 9. Compare panes.
 10. Keyboard, time axis, playback speed, per-layer opacity. Also fixes the

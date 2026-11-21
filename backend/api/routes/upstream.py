@@ -11,7 +11,9 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from ...checks.transports import CheckContext  # noqa: TID252  relative, as every import in this module
-from ...config import PRODUCTS, RADAR_FOLDER, SETTINGS, image_path, moment_to_prefix
+from ...config import (PRODUCTS,  # noqa: TID252  file convention
+                       RADAR_FOLDER, SETTINGS, image_path,
+                       manifest_rel, moment_to_prefix)
 from ... import fs_products as _fs
 from ...errors import humanize_error
 
@@ -43,23 +45,42 @@ def _product_fetcher(source: str) -> Callable[[], Awaitable[_fs.FsResponse]] | N
 
 
 @router.get("/product_latest.png")
-async def latest_product_image(product_id: str, request: Request):
+async def latest_product_image(product_id: str, request: Request,
+                               unit: str | None = None) -> Response:
     """Return the latest scan PNG for a product, by id. Used by MapView
-    to overlay composite imagery on the map."""
+    to overlay composite imagery on the map.
+
+    Args:
+        product_id: The product.
+        request: The incoming request, for the app context.
+        unit: One of this product's units, validated against that product's
+            own vocabulary. None serves the canonical one.
+
+    Returns:
+        The newest frame.
+
+    Raises:
+        HTTPException: 404 for an unknown product or an empty manifest, 400
+            for a unit this product does not publish, 502 for an upstream
+            fault.
+    """
     if product_id not in PRODUCTS:
         raise HTTPException(404, f"Unknown product: {product_id}")
-    cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
+    try:
+        details = manifest_rel(product_id, unit)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     # Step lists change at the product's own cadence (120s for the fast
     # radar composites), so re-fetching one per scrub position was pure
     # waste: this endpoint made TWO upstream calls per frame — a
     # productDetail to resolve the step plus the imageData itself — which is
     # exactly the 2.00x amplification measured on 2026-08-27.
-    steps = await _product_steps_cached(ctx, product_id, cfg["details"])
+    steps = await _product_steps_cached(ctx, product_id, details, unit)
     if not steps:
         raise HTTPException(404, "No scans available")
     latest = steps[-1]["imageName"]
-    file_path = image_path(product_id, latest)
+    file_path = image_path(product_id, latest, unit)
     try:
         body, ct, prov = await _serve_source(
             request.app, ctx, file_path, fetcher=_product_fetcher(file_path))
@@ -75,19 +96,38 @@ async def latest_product_image(product_id: str, request: Request):
 
 
 @router.get("/product_steps")
-async def product_steps(product_id: str, request: Request):
+async def product_steps(product_id: str, request: Request,
+                        unit: str | None = None) -> dict[str, object]:
     """Return the time-step manifest for a product so the frontend can drive
     play/step controls on the map. {n, current_idx, steps:[{i,ts,imageName}]}.
 
     Wraps the upstream call so transport errors surface as a clean 502 to the
     client instead of a 500 with an httpx traceback — the frontend retries
     on 5xx and a bare 500 is indistinguishable from a code bug in the logs.
+
+    Args:
+        product_id: The product.
+        request: The incoming request, for the app context.
+        unit: One of this product's units, or None for the canonical one.
+
+    Returns:
+        The step list, with its length and the newest index.
+
+    Raises:
+        HTTPException: 404 for an unknown product, 400 for a unit this
+            product does not publish, 502 for an upstream fault.
     """
     if product_id not in PRODUCTS:
         raise HTTPException(404, f"unknown product: {product_id}")
-    cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
-    raw = await _product_steps_cached(ctx, product_id, cfg["details"])
+    # Validated against this product's own vocabulary rather than a global
+    # list, since the vocabularies differ: rainfall is in or mm and the
+    # rates are in/h or mm/h.
+    try:
+        details = manifest_rel(product_id, unit)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    raw = await _product_steps_cached(ctx, product_id, details, unit)
     out = [
         {"i": i, "ts": s.get("timestamp"), "imageName": s.get("imageName"),
          "day": s.get("day"), "date": s.get("date"), "time": s.get("time")}
@@ -97,19 +137,38 @@ async def product_steps(product_id: str, request: Request):
 
 
 @router.get("/product_image.png")
-async def product_image_by_step(product_id: str, step: int, request: Request):
-    """Return the PNG for an arbitrary step (0-indexed; negative wraps from end)."""
+async def product_image_by_step(product_id: str, step: int, request: Request,
+                                unit: str | None = None) -> Response:
+    """Return the PNG for an arbitrary step (0-indexed; negative wraps from end).
+
+    Args:
+        product_id: The product.
+        step: Which step, negative counting from the newest.
+        request: The incoming request, for the app context.
+        unit: One of this product's units, or None for the canonical one.
+
+    Returns:
+        The frame.
+
+    Raises:
+        HTTPException: 404 for an unknown product or an empty manifest, 400
+            for a step out of range or a unit this product does not
+            publish, 502 for an upstream fault.
+    """
     _PROXY_HITS["product_image"] += 1
     if product_id not in PRODUCTS:
         raise HTTPException(404, f"Unknown product: {product_id}")
-    cfg = PRODUCTS[product_id]
     ctx = request.app.state.context
+    try:
+        details = manifest_rel(product_id, unit)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     # Was an inline productDetail call, duplicating _product_steps_cached and
     # costing a second upstream hit per scrubbed frame. Going through the cache
     # removes that AND is what lets this route read a filesystem manifest on a
     # profile with no HTTP origin — the inline fetch could only ever talk to
     # radarca.
-    steps = await _product_steps_cached(ctx, product_id, cfg["details"])
+    steps = await _product_steps_cached(ctx, product_id, details, unit)
     if not steps:
         raise HTTPException(404, "No scans available")
     if step < 0:
@@ -117,7 +176,7 @@ async def product_image_by_step(product_id: str, step: int, request: Request):
     if step < 0 or step >= len(steps):
         raise HTTPException(400, f"Step out of range (0..{len(steps)-1})")
     name = steps[step]["imageName"]
-    file_path = image_path(product_id, name)
+    file_path = image_path(product_id, name, unit)
     _fetch = _product_fetcher(file_path)
 
     # LRU -> local archive -> upstream. Scrubbing over frames Sentinel has
@@ -375,28 +434,65 @@ async def _pd_fetch(ctx, details_path: str, product_id: str | None = None) -> li
     return pd.json().get("steps") or []
 
 
-async def _pd_refresh_bg(ctx, product_id: str, details_path: str) -> None:
+# Strong references to the in-flight manifest refreshes. See the comment at
+# the create_task below.
+_PD_TASKS: set[_asyncio.Task[None]] = set()
+
+
+def _pd_key(product_id: str, unit: str | None) -> str:
+    """The manifest cache key.
+
+    Carries the unit, because one product publishes a manifest per unit and
+    they list different frames at different times. Keyed on the product
+    alone, a switch to millimeters would be served whatever the inches
+    manifest had cached, and the frames would be the wrong ones without
+    anything saying so.
+
+    Args:
+        product_id: The product.
+        unit: The unit label, or None for the canonical one.
+
+    Returns:
+        The key.
+    """
+    return product_id if unit is None else f"{product_id}\x00{unit}"
+
+
+async def _pd_refresh_bg(ctx: CheckContext, product_id: str,
+                         details_path: str,
+                         unit: str | None = None) -> None:
+    key = _pd_key(product_id, unit)
     try:
-        _PD_CACHE[product_id] = (_time_mod.monotonic() + _PD_TTL_S,
-                                 await _pd_fetch(ctx, details_path, product_id))
+        _PD_CACHE[key] = (_time_mod.monotonic() + _PD_TTL_S,
+                          await _pd_fetch(ctx, details_path, product_id))
     except Exception:
         pass
     finally:
-        _PD_REFRESHING.discard(product_id)
+        _PD_REFRESHING.discard(key)
 
 
-async def _product_steps_cached(ctx, product_id: str, details_path: str) -> list:
+async def _product_steps_cached(ctx: CheckContext, product_id: str,
+                                details_path: str,
+                                unit: str | None = None) -> list:
     """Stale-while-revalidate, for the same reason as _xband_listing_cached:
     switching composite must not block on a 3-8s upstream call."""
     now = _time_mod.monotonic()
-    hit = _PD_CACHE.get(product_id)
+    key = _pd_key(product_id, unit)
+    hit = _PD_CACHE.get(key)
     if hit is not None:
-        if hit[0] <= now and product_id not in _PD_REFRESHING:
-            _PD_REFRESHING.add(product_id)
-            _asyncio.create_task(_pd_refresh_bg(ctx, product_id, details_path))
+        if hit[0] <= now and key not in _PD_REFRESHING:
+            _PD_REFRESHING.add(key)
+            # Held, because asyncio keeps only a weak reference and a
+            # refresh collected mid-flight leaves the key in
+            # _PD_REFRESHING forever, so that manifest never refreshes
+            # again for the life of the process.
+            task = _asyncio.create_task(
+                _pd_refresh_bg(ctx, product_id, details_path, unit))
+            _PD_TASKS.add(task)
+            task.add_done_callback(_PD_TASKS.discard)
         return hit[1]
     steps = await _pd_fetch(ctx, details_path, product_id)
-    _PD_CACHE[product_id] = (now + _PD_TTL_S, steps)
+    _PD_CACHE[key] = (now + _PD_TTL_S, steps)
     return steps
 
 
