@@ -76,7 +76,6 @@ export interface MapPrefs {
 	opacity: number;
 	/** One opacity per raster layer. See $lib/map/opacity. */
 	layerOpacity: Opacities;
-	panelOpen: boolean;
 	watersheds: boolean;
 	reservoirs: boolean;
 	terrain: boolean;
@@ -98,7 +97,6 @@ export const DEFAULT_PREFS: MapPrefs = {
 	nexrad: false,
 	opacity: DEFAULT_OPACITIES.radars,
 	layerOpacity: { ...DEFAULT_OPACITIES },
-	panelOpen: true,
 	watersheds: false,
 	reservoirs: false,
 	terrain: false,
@@ -189,7 +187,6 @@ function migrateLegacy(): Partial<MapPrefs> {
 			if (v === 'on') (out as Record<string, unknown>)[field] = true;
 			else if (v === 'off') (out as Record<string, unknown>)[field] = false;
 		}
-		if (localStorage.getItem(LEGACY_PANEL_KEY) === 'closed') out.panelOpen = false;
 	} catch { /* storage unavailable — defaults are fine */ }
 	return out;
 }
@@ -257,7 +254,6 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 		// `obj.opacity` is the single slider older builds wrote, and it
 		// seeds the radar layer only where no per-layer value exists yet.
 		layerOpacity: normalizeOpacities(obj.layerOpacity, obj.opacity),
-		panelOpen:    bool(obj.panelOpen, DEFAULT_PREFS.panelOpen),
 		watersheds:   bool(obj.watersheds, DEFAULT_PREFS.watersheds),
 		reservoirs:   bool(obj.reservoirs, DEFAULT_PREFS.reservoirs),
 		terrain:      bool(obj.terrain, DEFAULT_PREFS.terrain),

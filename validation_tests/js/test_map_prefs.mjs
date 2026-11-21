@@ -47,14 +47,14 @@ export function runTests(mod) {
 	check('a fresh browser gets defaults', p.composite === DEFAULT_PREFS.composite && p.activeRadars.length === 0);
 
 	savePrefs({ ...DEFAULT_PREFS, composite: 'qpe_1hr', activeRadars: ['XSCV', 'CBAND'],
-	            moment: 'Velocity', nexrad: true, opacity: 0.35, terrain: true, panelOpen: false,
+	            moment: 'Velocity', nexrad: true, opacity: 0.35, terrain: true,
 	            camera: { lng: -122.4, lat: 37.8, zoom: 8.5, bearing: 12, pitch: 30 } });
 	p = loadPrefs(VOCAB);
 	check('selections survive a round trip',
 	      p.composite === 'qpe_1hr' && p.moment === 'Velocity' &&
 	      JSON.stringify(p.activeRadars) === JSON.stringify(['XSCV', 'CBAND']));
 	check('toggles and opacity survive', p.nexrad === true && p.terrain === true &&
-	      p.panelOpen === false && p.opacity === 0.35);
+	      p.opacity === 0.35);
 	check('the camera survives', p.camera && p.camera.zoom === 8.5 && p.camera.bearing === 12);
 
 	// --- 2. stale vocabulary must degrade, never break -------------------
@@ -196,7 +196,11 @@ export function runTests(mod) {
 	store.set('sentinel-layers-open', 'closed');
 	p = loadPrefs(VOCAB);
 	check('legacy toggles are migrated', p.watersheds === true && p.terrain === true);
-	check('legacy panel state is migrated', p.panelOpen === false);
+	// The panel this key described is gone, and the dock that replaced it
+	// keeps its own state under its own key. The old key is still cleared
+	// on save, so a browser does not carry it forever.
+	check('the retired panel key is not read back',
+	      !('panelOpen' in p), JSON.stringify(Object.keys(p).filter((k) => /panel/i.test(k))));
 	check('legacy keys not set stay at their default', p.reservoirs === false);
 
 	// Once a real blob exists it wins; the legacy keys must not override it.

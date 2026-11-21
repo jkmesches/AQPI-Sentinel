@@ -37,8 +37,6 @@ export interface PaneSize {
 export interface PaneControls {
 	/** Move the product selection by one, wrapping at either end. */
 	stepProduct: (step: number) => void;
-	/** Show or hide this pane's layer panel. */
-	togglePanel: () => void;
 	/** Pan by a screen offset in CSS pixels. */
 	panBy: (dx: number, dy: number) => void;
 	/** Change the zoom by a delta, clamped by the map's own limits. */
@@ -56,6 +54,14 @@ export interface PaneControls {
 	 * through to whatever else it closes rather than swallowing the key.
 	 */
 	cancelMeasure: () => boolean;
+	/** Save this pane as a PNG with its caption and color bar burned in. */
+	exportImage: () => void;
+	/** Put this pane's radars, product, layers and view back to defaults. */
+	reset: () => void;
+	/** Whether this pane is measuring, for a toolbar that shows state. */
+	measuring: () => boolean;
+	/** Whether a save is running, so a second press cannot start another. */
+	exporting: () => boolean;
 }
 
 /**

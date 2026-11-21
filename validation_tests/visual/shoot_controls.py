@@ -35,6 +35,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+VISUAL = Path(__file__).resolve().parent
+sys.path.insert(0, str(VISUAL))
+
 try:
     from playwright.async_api import Browser, Page, async_playwright
     from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -42,6 +45,8 @@ except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
+
+from capture import open_dock  # noqa: E402  sibling module, loaded by path
 
 DEFAULT_BASE = "https://the test deployment"
 
@@ -178,6 +183,7 @@ async def open_console(browser: Browser, base: str) -> Page:
         "}")
     await page.goto(f"{base}/?diag=probe", wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
+    await open_dock(page)
     return page
 
 
@@ -280,6 +286,10 @@ async def check_persistence(page: Page, base: str,
 
     await page.goto(f"{base}/?diag=probe", wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
+    # A narrow window or a stored preference can leave the dock closed
+    # after a reload. The opacities it holds are the setting, and they are
+    # what this checks.
+    await open_dock(page)
     after = await sliders(page)
     if after.get("composite") != MOVED_TO:
         problems.append(

@@ -25,6 +25,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+VISUAL = Path(__file__).resolve().parent
+sys.path.insert(0, str(VISUAL))
+
 try:
     from playwright.async_api import Browser, Page, async_playwright
     from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -32,6 +35,8 @@ except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
+
+from capture import open_dock  # noqa: E402  sibling module, loaded by path
 
 DEFAULT_BASE = "https://the test deployment"
 
@@ -121,6 +126,7 @@ async def open_console(browser: Browser, base: str) -> Page:
         " panelOpen:true}));")
     await page.goto(base, wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
+    await open_dock(page)
     return page
 
 
@@ -254,7 +260,7 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
     page = await open_console(browser, base)
 
     if await page.locator("[data-place-search]").count() != 1:
-        problems.append("there is no search box in the panel")
+        problems.append("there is no search box in the dock")
         await page.context.close()
         report["problems"] = problems
         return report

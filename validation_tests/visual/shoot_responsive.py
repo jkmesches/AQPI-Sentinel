@@ -174,12 +174,16 @@ def judge_size(name: str, m: dict[str, Any],
         problems.append(f"{name}: the map canvas is "
                         f"{m['canvasWidth']}x{m['canvasHeight']}")
         return problems
-    if m["panel"] == "open":
-        share = (m["canvasWidth"] - m["panelWidth"]) / m["canvasWidth"]
+    if m["panel"] == "open" and m["innerWidth"] > 0:
+        # The map's share of the window. The dock takes its width from the
+        # map rather than covering it, so the old form subtracted the dock
+        # from a canvas the dock had already shrunk and reported 39% of a
+        # pane that had 61% of the screen.
+        share = m["canvasWidth"] / m["innerWidth"]
         if share < MIN_MAP_SHARE:
             problems.append(
-                f"{name}: the open panel leaves {share:.0%} of the map, "
-                f"under {MIN_MAP_SHARE:.0%}")
+                f"{name}: the open dock leaves {share:.0%} of the window to "
+                f"the map, under {MIN_MAP_SHARE:.0%}")
     for control, seen in controls.items():
         if not seen:
             problems.append(
@@ -191,8 +195,8 @@ async def check_compare(page: Page, name: str, width: int,
                         problems: list[str]) -> tuple[dict[str, Any], bool]:
     """Open the comparison pane and check it fits.
 
-    Compare mode is the layout most likely to overflow, since it puts two
-    maps and two layer panels where there was one of each.
+    Two panes are the layout most likely to overflow, since they put two
+    maps and two sets of map overlays where there was one of each.
 
     Args:
         page: The loaded console.
@@ -203,15 +207,12 @@ async def check_compare(page: Page, name: str, width: int,
     Returns:
         The metrics after opening it, and whether a control was found.
     """
-    toggle = page.locator("[data-compare-toggle]")
+    # The console counts panes rather than toggling a comparison, so
+    # opening the second one is the add control. It lives on the toolbar,
+    # which is console chrome and is there at every width.
+    toggle = page.locator("[data-pane-add]")
     if await toggle.count() == 0:
-        # The control lives in the layer panel, which starts closed on a
-        # narrow screen, so open the panel from the keyboard first.
-        await page.locator("body").press("[")
-        await page.wait_for_timeout(ACTION_SETTLE_MS)
-        toggle = page.locator("[data-compare-toggle]")
-    if await toggle.count() == 0:
-        problems.append(f"{name}: no compare control to reach")
+        problems.append(f"{name}: no control to open a second pane")
         return {}, False
 
     await toggle.first.click()

@@ -14,6 +14,7 @@
 	import {
 		rampKind, legendBlocks, legendGradient, barLayout
 	} from '$lib/map/ramps/legend';
+	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
 
 	interface Props {
 		ramp: Ramp;
@@ -21,22 +22,35 @@
 		unit?: string;
 		/** Overrides the ramp's own axis label. */
 		title?: string;
+		/** The size the console draws its overlays at. */
+		scale?: number;
 	}
-	let { ramp, unit, title }: Props = $props();
+	let { ramp, unit, title, scale = DEFAULT_UI_SCALE }: Props = $props();
 
 	const uid = $props.id();
 
-	// Bar geometry, in CSS pixels. These are layout choices, so they live here
-	// rather than in the geometry module.
-	const BAR_H = 10;
-	const TICK_H = 3;
-	const LABEL_SIZE = 9.5;
-	const LABEL_BASELINE = BAR_H + TICK_H + LABEL_SIZE;
-	const SVG_H = LABEL_BASELINE + 2;
+	// Bar geometry at the default size, in CSS pixels. These are layout
+	// choices, so they live here rather than in the geometry module.
+	//
+	// Sized up on 2026-11-21 after the first version read as decoration: a
+	// 10 px band carrying 22 blocks gave each one 8 px, and four tick
+	// labels at 9.5 px in the faint color left the reader counting
+	// squares to find a value. The band is now thick enough to judge a
+	// color against the map, and the numbers are in the same ink as the
+	// rest of the console rather than in its quietest grey.
+	const BAR_H = 20;
+	const TICK_H = 4;
+	const LABEL_SIZE = 11;
 	/** Clear space between two tick labels, in characters of their own font. */
 	const LABEL_GAP_CHARS = 1;
 	/** The string the character advance is measured from. */
 	const RULER = '0123456789';
+
+	const barH = $derived(scaled(BAR_H, scale));
+	const tickH = $derived(scaled(TICK_H, scale));
+	const labelSize = $derived(scaled(LABEL_SIZE, scale));
+	const labelBaseline = $derived(barH + tickH + labelSize);
+	const svgH = $derived(labelBaseline + 2);
 
 	let barWidth = $state(0);
 	let charPx = $state(0);
@@ -57,7 +71,10 @@
 	}
 
 	$effect(() => {
-		void ruler;
+		// Re-measured when the size changes as well as when the node
+		// appears. A layout kept from the old size packs the labels of an
+		// 11 px font into a bar drawn for a 22 px one.
+		void ruler; void labelSize;
 		measureChar();
 		if (typeof document !== 'undefined' && document.fonts) {
 			void document.fonts.ready.then(measureChar);
@@ -87,11 +104,13 @@
 
 <div
 	data-legend
-	class="pointer-events-none rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 px-2 py-1.5 shadow-lg backdrop-blur"
+	class="pointer-events-none rounded border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 shadow-lg backdrop-blur"
+	style="padding: {scaled(8, scale)}px {scaled(10, scale)}px"
 >
 	<div
 		data-legend-title
-		class="num mb-1 text-[9.5px] tracking-wide text-[var(--color-faint)]"
+		class="num tracking-wide text-[var(--color-default)]"
+		style="font-size: {labelSize}px; margin-bottom: {scaled(6, scale)}px"
 	>
 		{titleText}
 	</div>
@@ -99,8 +118,8 @@
 		{#if barWidth > 0}
 			<svg
 				width={barWidth}
-				height={SVG_H}
-				viewBox="0 0 {barWidth} {SVG_H}"
+				height={svgH}
+				viewBox="0 0 {barWidth} {svgH}"
 				role="img"
 				aria-label="{titleText} color scale, {ramp.min} to {ramp.max} {unitText}"
 			>
@@ -111,7 +130,7 @@
 					class="num"
 					x="-9999"
 					y="-9999"
-					font-size={LABEL_SIZE}>{RULER}</text
+					font-size={labelSize}>{RULER}</text
 				>
 
 				{#if kind === 'continuous'}
@@ -126,16 +145,21 @@
 						x={padPx}
 						y="0"
 						width={barPx}
-						height={BAR_H}
+						height={barH}
 						fill="url(#legend-{uid})"
 					/>
 				{:else}
-					{#each blocks as b (b.lo)}
+					<!-- Keyed on where the block sits, which is unique because
+					     the blocks tile the bar. Keying on its value range
+					     threw each_key_duplicate on a segmented ramp, where
+					     ten colors report one band, and the error took the
+					     whole scale off the map. -->
+					{#each blocks as b (b.from + b.color)}
 						<rect
 							x={padPx + b.from * barPx}
 							y="0"
 							width={Math.max(0.5, (b.to - b.from) * barPx)}
-							height={BAR_H}
+							height={barH}
 							fill={b.color}
 						/>
 					{/each}
@@ -144,7 +168,7 @@
 					x={padPx + 0.25}
 					y="0.25"
 					width={barPx - 0.5}
-					height={BAR_H - 0.5}
+					height={barH - 0.5}
 					fill="none"
 					stroke="var(--color-border-strong)"
 					stroke-width="0.5"
@@ -155,19 +179,19 @@
 						Math.max(0.25, t.at * barPx))}
 					<line
 						x1={x}
-						y1={BAR_H}
+						y1={barH}
 						x2={x}
-						y2={BAR_H + TICK_H}
-						stroke="var(--color-faint)"
-						stroke-width="0.75"
+						y2={barH + tickH}
+						stroke="var(--color-muted)"
+						stroke-width="1"
 					/>
 					<text
 						class="num"
 						x={padPx + t.at * barPx}
-						y={LABEL_BASELINE}
-						font-size={LABEL_SIZE}
+						y={labelBaseline}
+						font-size={labelSize}
 						text-anchor="middle"
-						fill="var(--color-muted)">{t.label}</text
+						fill="var(--color-default)">{t.label}</text
 					>
 				{/each}
 			</svg>

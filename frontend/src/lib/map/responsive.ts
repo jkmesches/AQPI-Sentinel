@@ -73,6 +73,48 @@ export function shouldStackPanes(width: number): boolean {
 }
 
 /**
+ * The narrowest page that can hold three panes in a row.
+ *
+ * 1280 px gives each pane 426 px, which is the same floor PANE_STACK_PX
+ * sets for two: enough that a pane is more than its own panel once the
+ * panel is open. Below it the console offers two, and a reader who had
+ * three and narrowed the window drops to two rather than to three
+ * useless slivers.
+ */
+export const THIRD_PANE_PX = 1280;
+
+/** The most panes this console will open, and the fewest it will keep. */
+export const MIN_PANES = 1;
+export const MAX_PANES = 3;
+
+/**
+ * How many panes this width can carry.
+ *
+ * @param width The page width in CSS pixels.
+ * @returns 2 on a narrow page and 3 on a wide one, never less than 1.
+ */
+export function maxPanesFor(width: number): number {
+	if (!Number.isFinite(width) || width <= 0) return 2;
+	return width >= THIRD_PANE_PX ? MAX_PANES : 2;
+}
+
+/**
+ * How many panes to show, given what is open and what fits.
+ *
+ * Narrowing the window takes a pane away rather than letting three share
+ * 900 px, and widening it again does not bring one back: a pane that
+ * reappeared on a resize would reopen a map the reader had closed.
+ *
+ * @param open How many panes the reader has asked for.
+ * @param width The page width in CSS pixels.
+ * @returns The count to render.
+ */
+export function panesToShow(open: number, width: number): number {
+	const want = Math.max(MIN_PANES, Math.min(MAX_PANES, Math.trunc(open) || 1));
+	return Math.min(want, maxPanesFor(width));
+}
+
+/**
  * Whether the time strip should put its axis on its own row.
  *
  * @param width The strip's width in CSS pixels.

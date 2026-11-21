@@ -35,6 +35,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+VISUAL = Path(__file__).resolve().parent
+sys.path.insert(0, str(VISUAL))
+
 try:
     from playwright.async_api import Browser, Page, async_playwright
     from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -42,6 +45,8 @@ except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
+
+from capture import open_dock  # noqa: E402  sibling module, loaded by path
 
 DEFAULT_BASE = "https://the test deployment"
 
@@ -359,16 +364,17 @@ async def check_product_and_panel(page: Page, problems: list[str]) -> None:
                         f"check reads the wrong way round")
     await tap(page, "[")
     if (await state(page))["panel"] != "closed":
-        problems.append("[ did not close the layers panel")
+        problems.append("[ did not close the dock")
     await tap(page, "[")
     if (await state(page))["panel"] != "open":
-        problems.append("[ did not reopen the layers panel")
+        problems.append("[ did not reopen the dock")
 
     # A focused picker owns space, the arrows and the characters, since all
     # three move the selection. Space is the one to test with, because an
     # arrow in a select legitimately changes the product and so reloads the
     # step list, which makes a step-index check read the wrong way.
-    select = page.locator("[data-panel] select").first
+    await open_dock(page)
+    select = page.locator("[data-dock-slot] select").first
     if await select.count() == 0:
         problems.append("no product picker to focus for the typing guard")
         return

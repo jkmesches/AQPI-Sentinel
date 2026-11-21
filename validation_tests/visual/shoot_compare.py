@@ -40,6 +40,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+VISUAL = Path(__file__).resolve().parent
+sys.path.insert(0, str(VISUAL))
+
 try:
     from playwright.async_api import Browser, Page, Route, async_playwright
     from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -47,6 +50,8 @@ except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
+
+from capture import open_dock  # noqa: E402  sibling module, loaded by path
 
 DEFAULT_BASE = "https://the test deployment"
 
@@ -68,6 +73,20 @@ OTHER_PRODUCT = "qpe_1hr"
 # published values are rounded to five places of longitude, which is about
 # one meter, so anything above that rounding is a real drift.
 CAMERA_EPS = 2e-5
+
+# How far the panes may sit apart mid-drag. Looser than CAMERA_EPS: these
+# are MapLibre's live values rather than the rounded published ones, and
+# the follower is one jumpTo behind the pane under the cursor. A pane that
+# is tracking stays within a few hundred meters of its partner, and one
+# that waits for the release is a whole drag away, which at zoom 7 is
+# degrees.
+MID_DRAG_EPS = 0.01
+
+# How far the pane's manifest and this harness's may sit apart and still
+# be the same list a few seconds older. The composites publish every two
+# minutes, so two cadences covers a rollover between the two fetches and
+# anything beyond it is a different list.
+MANIFEST_DRIFT_S = 240
 
 # How many frames to step while watching the rendezvous. Each step
 # prepares a frame in both panes, so six gives enough releases to tell a
@@ -273,6 +292,62 @@ def expected_offset(at: str, shared: str) -> str | None:
     return f"{words} {'behind' if delta < 0 else 'ahead'}"
 
 
+async def live_cameras(page: Page) -> list[list[float] | None]:
+    """Each pane's camera as MapLibre holds it right now.
+
+    Published only under ?diag=probe. `data-view` carries the camera a
+    pane settled on, which is written at moveend, so it cannot say
+    whether the panes agree while a drag is running.
+
+    Args:
+        page: The loaded console.
+
+    Returns:
+        One [longitude, latitude, zoom] per pane in pane order, with None
+        for a pane whose probe answered nothing.
+    """
+    js = """
+      () => {
+        const panes = window.__sentinelPanes;
+        if (!panes) return [];
+        return Object.keys(panes).sort().map((k) => {
+          const s = panes[k]();
+          return s && s.camera
+            ? [s.camera.center[0], s.camera.center[1], s.camera.zoom]
+            : null;
+        });
+      }
+    """
+    got: list[list[float] | None] = await page.evaluate(js)
+    return got
+
+
+def judge_mid_drag(cams: list[list[float] | None]) -> list[str]:
+    """Check the panes agree while one of them is being dragged.
+
+    Args:
+        cams: Each pane's live camera.
+
+    Returns:
+        One message per way they disagree.
+    """
+    if len(cams) != 2:
+        return [f"{len(cams)} panes published a live camera, expected 2; "
+                f"this needs ?diag=probe"]
+    a, b = cams
+    if a is None or b is None:
+        return [f"a pane published no live camera mid-drag: {a} and {b}"]
+    names = ("longitude", "latitude", "zoom")
+    out: list[str] = []
+    for name, x, y in zip(names, a, b, strict=True):
+        if abs(x - y) > MID_DRAG_EPS:
+            out.append(
+                f"{name} is {x} in the dragged pane and {y} in the other "
+                f"while the button is down; the follower is waiting for "
+                f"the release instead of tracking")
+    return out
+
+
 async def chrome_counts(page: Page) -> dict[str, int]:
     """Count the pieces there must be exactly one of.
 
@@ -286,7 +361,7 @@ async def chrome_counts(page: Page) -> dict[str, int]:
       () => ({
         panes: document.querySelectorAll('[data-view]').length,
         strips: document.querySelectorAll('[data-time-controls]').length,
-        toggles: document.querySelectorAll('[data-compare-toggle]').length,
+        toggles: document.querySelectorAll('[data-pane-add]').length,
         labels: document.querySelectorAll('[data-pane-label]').length
       })
     """
@@ -438,35 +513,65 @@ def judge_painting(panes: list[dict[str, Any]]) -> list[str]:
     return problems
 
 
+def judge_manifest(served: list[str], fetched: list[str]) -> list[str]:
+    """Check the pane and this harness were given the same frames.
+
+    Reported against the deployment rather than against the console.
+    The pane cannot do better than the list it is handed, and saying
+    which one it got is what tells a stale upstream apart from a pane
+    that ignored the shared time.
+
+    Args:
+        served: The frame times the pane was given.
+        fetched: The frame times the API returns now.
+
+    Returns:
+        One message when the two lists are too far apart to be the same
+        manifest a few seconds older.
+    """
+    if not served or not fetched:
+        return []
+    gap = abs((datetime.fromisoformat(served[-1])
+               - datetime.fromisoformat(fetched[-1])).total_seconds())
+    if gap <= MANIFEST_DRIFT_S:
+        return []
+    return [f"pane B was served frames ending {served[-1]} and the API "
+            f"answers {fetched[-1]}, {round(gap / 60)} minutes apart; the "
+            f"deployment handed the console a stale manifest"]
+
+
 def judge_following(panes: list[dict[str, Any]],
                     follower_times: list[str]) -> list[str]:
     """Check pane B sits on the nearest frame its own product has.
 
-    The expected frame is computed from that product's manifest, so this
-    holds whatever age the two manifests are at. Equal timestamps would
-    instead test the deployment's publishing luck.
+    Held to the list the pane was served rather than to one fetched
+    here, because the two are fetched at different moments and have
+    disagreed. On 2026-11-21 a pane held frames ending eleven hours back
+    while the API answered with the current hour, and the pane was right
+    to stay where it was.
 
     Args:
         panes: Each pane's published view.
-        follower_times: Every frame time pane B's product publishes.
+        follower_times: Every frame time pane B's product publishes now.
 
     Returns:
         One message per way it failed to follow or to say so.
     """
     a, b = panes
-    want = nearest_step(follower_times, a.get("step"))
+    served = [t for t in (b.get("stepTimes") or []) if t]
+    if not served:
+        return ["pane B published no step list; this needs ?diag=probe"]
+    problems = judge_manifest(served, follower_times)
+    want = nearest_step(served, a.get("step"))
     if want is None:
-        return [
-            f"{len(follower_times)} frames in {b['product']!r}'s "
-            f"manifest have none within an hour of {a.get('step')}; "
-            f"this cannot say whether the pane followed"
-        ]
+        return [*problems,
+                f"the {len(served)} frames pane B was served have none "
+                f"within an hour of {a.get('step')}, so it was right to "
+                f"stay put; what it was served is the fault"]
     if b.get("step") != want:
-        return [
-            f"pane B is at {b.get('step')}; the nearest frame "
-            f"{b['product']!r} publishes to {a.get('step')} is {want}, "
-            f"so it did not follow"
-        ]
+        return [*problems,
+                f"pane B is at {b.get('step')}; the nearest frame in the "
+                f"list it was served is {want}, so it did not follow"]
     shared = a.get("step")
     if not shared:
         return ["pane A published no step, so there is no shared time"]
@@ -621,10 +726,13 @@ async def check_stale(page: Page, outdir: Path,
     await serve_stale_steps(page, product, cutoff)
     # The manifest is fetched once per product, so the pane has to be
     # sent away and brought back for the route to be the thing it reads.
-    selects = page.locator("select")
-    await selects.nth(1).select_option("comp_now")
+    # Through the dock, pointed at the second pane: there is one product
+    # control on the page now, and which pane it drives is the dock's tab.
+    await open_dock(page, 1)
+    picker = page.locator("[data-dock-slot] select").first
+    await picker.select_option("comp_now")
     await page.wait_for_timeout(ACTION_SETTLE_MS)
-    await selects.nth(1).select_option(product)
+    await picker.select_option(product)
     await page.wait_for_timeout(ACTION_SETTLE_MS)
 
     # Read through the same route, so this is the list the pane was
@@ -678,7 +786,7 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
     problems += judge_single(report["single"])
     await page.screenshot(path=str(outdir / "compare-off.png"))
 
-    await page.locator("[data-compare-toggle]").first.click()
+    await page.locator("[data-pane-add]").first.click()
     await page.wait_for_timeout(PANE_SETTLE_MS)
     report["counts"] = await chrome_counts(page)
 
@@ -697,10 +805,10 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
 
     # Then put the second pane on another product, so the panes differ in
     # the one thing a comparison is for.
-    selects = page.locator("select")
-    if await selects.count() >= 2:
-        await selects.nth(1).select_option(OTHER_PRODUCT)
-        await page.wait_for_timeout(ACTION_SETTLE_MS)
+    await open_dock(page, 1)
+    await page.locator("[data-dock-slot] select").first.select_option(
+        OTHER_PRODUCT)
+    await page.wait_for_timeout(ACTION_SETTLE_MS)
 
     # Drag one pane and check the other follows. This is the claim the
     # whole mode rests on: panes that drift in view are comparing two
@@ -710,6 +818,14 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
         await page.mouse.move(box["x"] + 200, box["y"] + 300)
         await page.mouse.down()
         await page.mouse.move(box["x"] + 340, box["y"] + 380, steps=10)
+        # Read both cameras while the button is still down. The follower
+        # used to wait for the release, which is not a locked pane, it is
+        # a pane that catches up, and the drag is what the reader watches.
+        # `data-view` carries the settled camera and says nothing here, so
+        # this reads each pane's live one.
+        report["mid_drag"] = await live_cameras(page)
+        problems += judge_mid_drag(report["mid_drag"])
+        await page.screenshot(path=str(outdir / "compare-mid-drag.png"))
         await page.mouse.up()
         await page.wait_for_timeout(ACTION_SETTLE_MS)
 
@@ -732,8 +848,11 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
 
     problems += await check_stale(page, outdir, report)
 
-    # And off again, which has to leave one working pane behind.
-    await page.locator("[data-compare-toggle]").first.click()
+    # And off again, which has to leave one working pane behind. The
+    # remove control, not the add one: the console counts panes, so the
+    # way back from two is down rather than a second press of the same
+    # button.
+    await page.locator("[data-pane-remove]").first.click()
     await page.wait_for_timeout(ACTION_SETTLE_MS)
     report["after"] = await chrome_counts(page)
     if report["after"]["panes"] != 1:

@@ -22,7 +22,7 @@
 	         type MomentPrefixes, type UnitTable } from '$lib/site';
 	import { momentChoices, momentDisplay, defaultMoment,
 	         prefixFor } from '$lib/map/moments';
-	import { rampFor } from '$lib/map/ramps/registry';
+	import { rampFor, rampForProduct } from '$lib/map/ramps/registry';
 	import { unitChoices, defaultUnit, unitNote,
 	         resolveUnit } from '$lib/map/units';
 	import { decodeLink, encodeLink, hasAny, stepForTime,
@@ -34,13 +34,16 @@
 	         readoutText } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
 	import MapLegend from '$lib/components/MapLegend.svelte';
+	import MapCompass from '$lib/components/MapCompass.svelte';
+	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
+	import { portal } from '$lib/map/portal';
+	import { resetCamera } from '$lib/map/compass';
 	import { barLayout, legendGradient } from '$lib/map/ramps/legend';
 	import {
 		boundsCenter, buildIndex, coordinateBounds, searchEntries, stepHit,
 		type SearchEntry
 	} from '$lib/map/search';
 	import { RESERVOIRS_URL, WATERSHEDS_URL } from '$lib/map/layers/geography';
-	import { shouldClosePanel } from '$lib/map/responsive';
 	import type { Ramp } from '$lib/map/ramps/invert';
 	import {
 		exportCaption, exportFileName, exportLayout, type Box as ExportBox
@@ -54,8 +57,6 @@
 		sharedTime?: string | null;
 		/** The camera both panes share. Written by whichever moved last. */
 		sharedCamera?: LinkCamera | null;
-		/** Turns the comparison pane on and off. */
-		onToggleCompare?: (() => void) | null;
 		/**
 		 * The time control's state, published by the primary pane so the
 		 * page can draw one strip below both. Drawn inside this pane it
@@ -76,16 +77,48 @@
 		 * their own as before.
 		 */
 		frameGate?: PaneGate | null;
+		/** Whether a click pins a value probe on this pane. */
+		probing?: boolean;
+		/**
+		 * The ground the pointer is over, shared by every pane.
+		 *
+		 * Written by the pane under the pointer and read by the others,
+		 * which draw a crosshair at the same place and report their own
+		 * product's value there. Two panes each marking their own
+		 * pointer are not comparing a point, they are two maps with a
+		 * cursor on each.
+		 */
+		sharedCursor?: { lng: number; lat: number } | null;
+		/**
+		 * How large to draw everything laid over the map.
+		 *
+		 * One number for the legend, the compass, the display bar and the
+		 * cursor readout, set once for the whole console. A reader at a
+		 * wall display and a reader on a laptop want different sizes, and
+		 * no measurement here can pick for them.
+		 */
+		uiScale?: number;
+		/**
+		 * Whether this pane's controls belong in the console's dock.
+		 *
+		 * One dock beside the panes is one column of controls however
+		 * many panes are open, so exactly one pane fills it and the
+		 * dock's own tabs say which.
+		 */
+		inDock?: boolean;
 	}
 	let {
 		pane = 0,
 		compare = false,
 		sharedTime = $bindable(null),
 		sharedCamera = $bindable(null),
-		onToggleCompare = null,
 		timeStrip = $bindable(null),
 		paneControls = $bindable(null),
-		frameGate = null
+		frameGate = null,
+		probing = false,
+		sharedCursor = $bindable(null),
+		uiScale = DEFAULT_UI_SCALE,
+		inDock = false
 	}: Props = $props();
 
 	/** Whether this pane owns the time strip, the prefs and the address bar. */
@@ -293,9 +326,6 @@
 	let layerOpacity = $state<Opacities>({ ...DEFAULT_OPACITIES });
 	const overlayOpacity = $derived(layerOpacity.radars);
 
-	// Layers panel show/hide — persisted per browser.
-	let panelOpen = $state(true);
-	const PANEL_KEY = 'sentinel-layers-open';
 
 	// Geographic reference layers — watersheds (HUC-8 outlines) + major
 	// flood-relevant reservoirs. Both off by default; persisted across
@@ -842,6 +872,12 @@
 	const sampler = new FrameSampler();
 	let readoutFrame = $state<
 		{ extent: Extent; radar: string } | null>(null);
+	// The composite's own held frame. Separate from the radar sampler
+	// rather than shared, because both can be on screen at once and the
+	// composite is the one the cursor is over nearly everywhere.
+	const compSampler = new FrameSampler();
+	let compFrame = $state<
+		{ extent: Extent; product: string; unit: string | null } | null>(null);
 	let readoutValue = $state<string | null>(null);
 	let readoutAt = $state<{ x: number; y: number } | null>(null);
 
@@ -860,37 +896,45 @@
 		lngLat: { lng: number; lat: number },
 		point: { x: number; y: number }
 	): void {
-		const frame = readoutFrame;
-		const ramp = activeRamp;
-		const size = sampler.size;
-		// A composite sits in the same raster band as the radar overlays
-		// and covers a far wider area, so where the two overlap the user is
-		// looking at the composite while the sampler holds the radar's
-		// frame. No composite has a measured ramp, so there is nothing
-		// honest to report until one does.
-		if (composite !== 'none' || !frame || !ramp || !size) {
-			readoutValue = null;
-			readoutAt = null;
-			return;
-		}
-		const f = overlayFraction(extentCorners(frame.extent),
-			lngLat.lng, lngLat.lat);
-		if (!f) {
-			readoutValue = null;
-			readoutAt = null;
-			return;
-		}
-		const px = overlayPixel(f, size.width, size.height);
-		const rgba = sampler.at(px.x, px.y);
-		if (!rgba) {
-			readoutValue = null;
-			readoutAt = null;
-			return;
-		}
-		const text = readoutText(ramp,
-			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3]));
+		const text = valueAt(lngLat);
 		readoutValue = text;
 		readoutAt = text ? point : null;
+	}
+
+	/**
+	 * What this pane's imagery says at one ground point.
+	 *
+	 * Split out of readAt so a pane can answer for a point the pointer
+	 * is not in, which is what the shared cursor asks of every pane but
+	 * the one being hovered.
+	 *
+	 * @param lngLat The ground to read.
+	 * @returns The reading, or null where nothing can be read.
+	 */
+	function valueAt(
+		lngLat: { lng: number; lat: number }
+	): string | null {
+		const frame = readoutFrame;
+		const ramp = activeRamp;
+		// Whichever layer the cursor is actually over. A composite sits in
+		// the same raster band as the radar overlays and covers far more
+		// ground, so where the two overlap the reader is looking at the
+		// composite, and it is the one to report. Before 2026-11-21 no
+		// product had a measured ramp and this reported nothing at all
+		// while one was showing, which is the view the console opens on.
+		const onComposite = composite !== 'none' && compFrame !== null;
+		const held = onComposite ? compFrame : frame;
+		const size = onComposite ? compSampler.size : sampler.size;
+		const from = onComposite ? compSampler : sampler;
+		if (!held || !ramp || !size) return null;
+		const f = overlayFraction(extentCorners(held.extent),
+			lngLat.lng, lngLat.lat);
+		if (!f) return null;
+		const px = overlayPixel(f, size.width, size.height);
+		const rgba = from.at(px.x, px.y);
+		if (!rgba) return null;
+		return readoutText(ramp,
+			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3]));
 	}
 
 	// Drop the held frame the moment it stops being the one on screen. A
@@ -913,7 +957,17 @@
 		}
 	});
 
+	// The ramp the legend draws and the readout reads through.
+	//
+	// The composite wins when one is showing, because it is painted over
+	// the radar overlays and covers far more ground, so the pixel under
+	// the cursor is almost always its own. Until 2026-11-21 no product
+	// had a measured ramp and both features simply stayed off over a
+	// composite, which is the view the console opens on.
 	const activeRamp = $derived.by(() => {
+		if (composite !== 'none') {
+			return rampForProduct(composite, currentUnit);
+		}
 		if (activeRadars.length !== 1) return null;
 		const radar = activeRadars[0];
 		const prefix = prefixFor(momentPrefixes, radar, currentMoment);
@@ -1123,7 +1177,6 @@
 		activeRadars    = [...p.activeRadars];
 		nexradEnabled   = p.nexrad;
 		layerOpacity    = normalizeOpacities(p.layerOpacity, p.opacity);
-		panelOpen       = p.panelOpen;
 		watershedsOn    = p.watersheds;
 		reservoirsOn    = p.reservoirs;
 		terrainOn       = p.terrain;
@@ -1144,7 +1197,7 @@
 		return {
 			composite, moment: currentMoment, activeRadars: [...activeRadars],
 			nexrad: nexradEnabled, opacity: overlayOpacity,
-			layerOpacity: { ...layerOpacity }, panelOpen,
+			layerOpacity: { ...layerOpacity },
 			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
 			terrain3D: terrain3DOn, streamGauges: streamGaugesOn,
 			burnScars: burnScarsOn, burnScarYears, tiltEl, playSpeed,
@@ -1160,7 +1213,7 @@
 	// restoring — without that gate, opening the page erases your settings.
 	$effect(() => {
 		void composite; void currentMoment; void activeRadars; void nexradEnabled;
-		void layerOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
+		void layerOpacity; void watershedsOn; void reservoirsOn;
 		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
 		void burnScarsOn; void burnScarYears; void playSpeed;
 		if (!prefsReady || !isPrimary) return;
@@ -1280,22 +1333,31 @@
 
 	// What the panel header counts as on.
 	//
-	// It counted the composite, NEXRAD and the active radars, and the six
-	// geography toggles sat under it uncounted. With every overlay on, the
-	// header read "2 on" above a list showing eight. Derived once, because
-	// the open panel and its collapsed badge each carried the expression and
-	// a count in two places is a count that will disagree with itself.
-	const layersOnCount = $derived(
-		(composite !== 'none' ? 1 : 0) + (nexradEnabled ? 1 : 0)
-		+ activeRadars.length
+
+	const selectableRadars = $derived(
+		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
+	);
+
+	// What the Reference control reads. The composite and the radars have
+	// controls of their own, so counting them here would report the same
+	// layer twice on one bar.
+	const referenceOnCount = $derived(
+		(nexradEnabled ? 1 : 0)
 		+ (watershedsOn ? 1 : 0) + (reservoirsOn ? 1 : 0)
 		+ (terrainOn ? 1 : 0) + (terrain3DOn ? 1 : 0)
 		+ (streamGaugesOn ? 1 : 0) + (burnScarsOn ? 1 : 0)
 	);
 
-	const selectableRadars = $derived(
-		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
+	// A, B, C. Past the third pane the letter falls back to the number,
+	// which cannot happen while MAX_PANES is 3 but would otherwise print
+	// "undefined" on a pane the day it does.
+	const paneLetter = $derived('ABC'[pane] ?? String(pane + 1));
+
+	const compositeMenuValue = $derived(
+		composite === 'none' ? 'off' : productLabel(composite)
 	);
+
+
 
 	// Hover tooltip for radar pins — name + scan elevations + range.
 	// Created on mouseenter, removed on mouseleave. closeButton off since
@@ -1679,6 +1741,12 @@
 		// then ask MapLibre to swap in the cached bytes.
 		const ok = await preloadImage(url, isCurrent);
 		if (!ok || !isCurrent()) return null;
+		// Hold the decoded frame for the readout, the way a radar frame is
+		// held. The image is already here, so this costs a draw rather
+		// than a second fetch and decode.
+		compFrame = compSampler.draw(ok)
+			? { extent: e, product: composite, unit: currentUnit }
+			: null;
 		return () => {
 			if (!map) return;
 			const src = map.getSource('comp-overlay') as maplibregl.ImageSource | undefined;
@@ -2394,6 +2462,16 @@
 	// Set from moveend rather than from every frame of a drag, so it
 	// changes once per gesture instead of sixty times a second.
 	let settledCamera = $state<LinkCamera | null>(null);
+	// Tracked on every rotate rather than at moveend, because the needle
+	// has to follow the drag that turns the map.
+	let mapBearing = $state(0);
+
+	/** Face north, from the compass. */
+	function faceNorth(): void {
+		if (!map) return;
+		const want = resetCamera(map.getBearing(), map.getPitch());
+		if (want) map.easeTo({ ...want, duration: 300 });
+	}
 
 	/** Publish this pane's frame time, so the other pane can match it. */
 	function publishTime(): void {
@@ -2425,6 +2503,43 @@
 			void syncAllToStep();
 		}
 	}
+
+	// Where to draw this pane's crosshair, in its own screen pixels, and
+	// what it reads there. A pane the pointer is in draws nothing extra,
+	// since the pointer is already the mark.
+	let followAt = $state<{ x: number; y: number } | null>(null);
+	let followValue = $state<string | null>(null);
+	/** Whether the pointer is in this pane's map. */
+	let hovering = $state(false);
+
+	/**
+	 * Mark the shared ground point on this pane and read its value.
+	 *
+	 * Runs on every pane but the one the pointer is in, so a reader
+	 * hovering one map sees the same place called out on the others with
+	 * each product's own number beside it.
+	 */
+	function followCursor(): void {
+		if (!map || !compare || !sharedCursor || hovering) {
+			followAt = null;
+			followValue = null;
+			return;
+		}
+		const at = map.project([sharedCursor.lng, sharedCursor.lat]);
+		const size = mapSize();
+		if (at.x < 0 || at.y < 0 || at.x > size.width || at.y > size.height) {
+			followAt = null;
+			followValue = null;
+			return;
+		}
+		followAt = { x: at.x, y: at.y };
+		followValue = valueAt(sharedCursor);
+	}
+
+	$effect(() => {
+		void sharedCursor; void compare; void hovering; void paintedTs;
+		followCursor();
+	});
 
 	// How far this pane's step sits from the shared time, for the label.
 	// Read from the step list rather than from the painted frame, so it
@@ -3090,6 +3205,7 @@
 	// and cannot drive it.
 	interface ProbeWindow {
 		__sentinelProbe?: () => Record<string, unknown> | null;
+		__sentinelPanes?: Record<number, () => Record<string, unknown> | null>;
 	}
 
 	/** The fixed sources this component adds. A layer on one of these is ours. */
@@ -3170,7 +3286,7 @@
 				watershedsOn, reservoirsOn, terrainOn, terrain3DOn,
 				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
 				stepIdx, stepCount: steps.length, stepsFor, playing,
-				panelOpen, mapDead, prefsReady,
+				mapDead, prefsReady,
 				overlayErrors: { ...overlayErrors },
 				frameErrors: { ...frameErrors },
 				profile: siteProfile, hasRadarca
@@ -3179,7 +3295,14 @@
 	}
 
 	function publishProbe(): void {
-		(window as unknown as ProbeWindow).__sentinelProbe = probeSnapshot;
+		const w = window as unknown as ProbeWindow;
+		// Both panes used to write the single name, so the second one
+		// buried the first and a reader asking for "the" camera got
+		// whichever pane mounted last. The keyed form answers for each,
+		// which is what a mid-drag comparison needs: `data-view` carries
+		// the settled camera and says nothing while a drag is running.
+		if (pane === 0) w.__sentinelProbe = probeSnapshot;
+		w.__sentinelPanes = { ...(w.__sentinelPanes ?? {}), [pane]: probeSnapshot };
 	}
 
 	onMount(async () => {
@@ -3223,13 +3346,6 @@
 		} catch { /* blocked storage reads as a first visit */ }
 		const restored = loadPrefs(prefsVocabulary());
 		applyPrefs(restored);
-		// On a phone the 280 px panel leaves about 110 px of map, so a
-		// console that opens it by default opens onto a sliver of weather
-		// behind a wall of checkboxes. Only on a first visit: a reader who
-		// opened it on a narrow screen meant to.
-		if (shouldClosePanel(mapDiv?.clientWidth ?? 0, seenBefore)) {
-			panelOpen = false;
-		}
 		// A link wins over stored prefs where it says anything, and leaves
 		// the rest alone. Applied after applyPrefs for the same reason the
 		// composite correction below is: applyPrefs assigns straight from
@@ -3400,11 +3516,35 @@
 			// Cursor readout. Sampling one pixel from a canvas already
 			// drawn is cheap enough to run on every move; the frame is
 			// drawn once per swap in prepareRadars.
-			map.on('mousemove', (e) => { readAt(e.lngLat, e.point); });
-			map.on('mouseout', () => { readoutValue = null; readoutAt = null; });
+			map.on('mousemove', (e) => {
+				readAt(e.lngLat, e.point);
+				// Publish the ground, not the screen point. The panes can
+				// be at different sizes, and in a stacked layout the same
+				// pixel is a different place in each.
+				sharedCursor = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+			});
+			map.on('mouseover', () => { hovering = true; });
+			map.on('mouseout', () => {
+				readoutValue = null;
+				readoutAt = null;
+				sharedCursor = null;
+				hovering = false;
+			});
 			// A drag moves the world under a still cursor, so the value
 			// changes with no pointer event to report it.
-			map.on('move', () => { readoutValue = null; readoutAt = null; });
+			//
+			// The other pane follows from here rather than from moveend,
+			// which held it still until the drag was released. Two maps
+			// that arrive at the same view by different routes are not
+			// locked, they are a before and an after, and the one being
+			// dragged is the one the reader is watching.
+			map.on('move', () => {
+				readoutValue = null;
+				readoutAt = null;
+				publishCamera();
+				mapBearing = map?.getBearing() ?? 0;
+			});
+			mapBearing = map.getBearing();
 			// The camera is MapLibre's, not $state, so the address bar
 			// cannot follow it from an effect. moveend fires once when a
 			// drag or zoom settles, which is exactly when a link should
@@ -3567,10 +3707,9 @@
 	// the pane the pointer is over, and the second pane is the one being
 	// compared against.
 	$effect(() => {
-		void keyProducts; void panelOpen; void measuring;
+		void keyProducts; void measuring;
 		paneControls = {
 			stepProduct: stepProductBy,
-			togglePanel: () => { panelOpen = !panelOpen; },
 			panBy: panByPx,
 			zoomBy: zoomByDelta,
 			size: mapSize,
@@ -3580,7 +3719,14 @@
 				if (!measuring) return false;
 				toggleMeasure();
 				return true;
-			}
+			},
+			exportImage: () => { void exportImage(); },
+			reset: resetMapSettings,
+			// Read through a function rather than captured, so the
+			// toolbar sees the state at the moment it asks instead of
+			// whatever it was when this effect last ran.
+			measuring: () => measuring,
+			exporting: () => exporting
 		};
 	});
 
@@ -3616,6 +3762,13 @@
 			// own product has to the shared time. It differs from `frame`
 			// only while a load is in flight.
 			step: steps[stepIdx]?.ts ?? null,
+			// The frames this pane was actually served, under the probe
+			// flag only. A harness fetching the manifest itself fetches it
+			// at a different moment, and on 2026-11-21 a pane held a list
+			// ending 11 hours back while the API answered with a current
+			// one. Holding the pane to a list it never saw blames it for
+			// what it was given.
+			stepTimes: diag.probe ? steps.map((s) => s.ts ?? null) : undefined,
 			// What the pane says about that difference, so a harness can
 			// check the mark is on screen and not only in the markup.
 			offset: frameOffset,
@@ -3633,26 +3786,71 @@
 		data-readout-frame={readoutFrame && sampler.size
 			? `${readoutFrame.radar} ${sampler.size.width}x${sampler.size.height}`
 			: undefined}
+		data-readout-composite={compFrame && compSampler.size
+			? `${compFrame.product} ${compSampler.size.width}x${compSampler.size.height}`
+			: undefined}
+		data-readout-ramp={activeRamp ? activeRamp.label : undefined}
 	>
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 		{#if compare}
 			<!-- Which pane this is. Two maps of the same area are otherwise
-			     indistinguishable in a screenshot or a handover. -->
+			     indistinguishable in a screenshot or a handover, and the
+			     dock drives only one of them at a time. -->
 			<div
 				data-pane-label
-				class="pointer-events-none absolute left-3 top-3 z-20 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 px-2 py-0.5 shadow-lg backdrop-blur"
+				class="num pointer-events-none absolute left-3 top-3 z-20 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 uppercase tracking-wider text-[var(--color-faint)] shadow-lg backdrop-blur"
+				style="font-size: {scaled(9.5, uiScale)}px;
+				       padding: {scaled(3, uiScale)}px {scaled(7, uiScale)}px"
 			>
-				<span class="num text-[9.5px] uppercase tracking-wider text-[var(--color-faint)]">
-					{isPrimary ? 'A' : 'B'} · {productLabel(composite)}{frameOffset ? ' ·' : ''}
-				</span>
+				{paneLetter} · {compositeMenuValue}
 				<!-- When this pane's nearest frame is not the time under the
-				     strip. Two panes an hour apart are as convincing as two a
-				     minute apart, and the strip shows one time for both. -->
+				     strip. Two panes an hour apart are as convincing as two
+				     a minute apart, and the strip shows one time for both. -->
 				{#if frameOffset}
 					<span
 						data-frame-offset
-						class="num ml-1 text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]"
+						class="ml-1 text-[var(--color-warn)]"
 					>{frameOffset}</span>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- The heading, and a way back to north. Top right, which is now
+		     its own corner: the controls that used to be docked there sit
+		     in the console's dock, beside the map. -->
+		<div class="absolute right-3 top-3 z-20">
+			<MapCompass bearing={mapBearing} scale={uiScale} onreset={faceNorth} />
+		</div>
+
+		<!-- The same ground the pointer is over, marked on every other
+		     pane with that pane's own reading. Two panes each marking
+		     their own pointer would not be comparing a point. -->
+		{#if followAt}
+			<div
+				data-cursor-follow
+				class="pointer-events-none absolute z-30"
+				style="left: {followAt.x}px; top: {followAt.y}px;"
+			>
+				<svg
+					width="28"
+					height="28"
+					viewBox="-14 -14 28 28"
+					class="-translate-x-1/2 -translate-y-1/2"
+					aria-hidden="true"
+				>
+					<line x1="-11" y1="0" x2="-4" y2="0" stroke="var(--color-bright)" stroke-width="1.25" />
+					<line x1="4" y1="0" x2="11" y2="0" stroke="var(--color-bright)" stroke-width="1.25" />
+					<line x1="0" y1="-11" x2="0" y2="-4" stroke="var(--color-bright)" stroke-width="1.25" />
+					<line x1="0" y1="4" x2="0" y2="11" stroke="var(--color-bright)" stroke-width="1.25" />
+					<circle r="1.5" fill="var(--color-bright)" />
+				</svg>
+				{#if followValue}
+					<span
+						data-cursor-follow-value
+						class="num absolute left-4 top-[-0.4rem] whitespace-nowrap rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 text-[var(--color-default)] shadow-lg backdrop-blur"
+						style="font-size: {scaled(10, uiScale)}px;
+						       padding: {scaled(2, uiScale)}px {scaled(6, uiScale)}px"
+					>{followValue}</span>
 				{/if}
 			</div>
 		{/if}
@@ -3674,10 +3872,13 @@
 		{#if readoutValue && readoutAt}
 			<div
 				data-readout
-				class="pointer-events-none absolute z-30 -translate-y-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 px-1.5 py-0.5 shadow-lg backdrop-blur"
-				style="left: {readoutAt.x + 12}px; top: {readoutAt.y - 8}px;"
+				class="pointer-events-none absolute z-30 -translate-y-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 shadow-lg backdrop-blur"
+				style="left: {readoutAt.x + 12}px; top: {readoutAt.y - 8}px;
+				       padding: {scaled(2, uiScale)}px {scaled(6, uiScale)}px"
 			>
-				<span class="num text-[10.5px] text-[var(--color-bright)]"
+				<span
+					class="num text-[var(--color-bright)]"
+					style="font-size: {scaled(10.5, uiScale)}px"
 					>{readoutValue}</span
 				>
 			</div>
@@ -3732,8 +3933,12 @@
 			     against real frames. A legend for an unmeasured ramp would
 			     name values the overlay is not painting, and would look
 			     exactly like a correct one. -->
-			<div class="w-[200px] max-w-full">
-				<MapLegend ramp={activeRamp} />
+			<!-- 280 px rather than 200. A 22-block bar at 200 gave each
+			     block 8 px and fit four numbers along the axis, which is
+			     a picture of a scale rather than one a value can be read
+			     off. max-w-full keeps it inside a narrow pane. -->
+			<div class="max-w-full" style="width: {scaled(280, uiScale)}px">
+				<MapLegend ramp={activeRamp} scale={uiScale} />
 			</div>
 		{/if}
 		{#if composite !== 'none' && compExtentProvisional.includes(composite)}
@@ -3789,116 +3994,13 @@
 			</div>
 		{/if}
 
-	<!-- LAYERS CONTROL. data-panel says which way it is, so a harness driving
-	     the `[` key reads the state rather than inferring it from which of
-	     the two shapes below is in the DOM. -->
-	{#if !panelOpen}
-		<!-- Collapsed: a single compact badge -->
-		<button
-			data-panel="closed"
-			class="pointer-events-auto absolute right-3 top-3 flex items-center gap-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 px-2 py-1 text-[10.5px] shadow-xl backdrop-blur transition-colors hover:bg-[var(--color-elevated)]"
-			onclick={() => { panelOpen = true; }}
-			title="show layers"
-		>
-			<svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor" class="text-[var(--color-muted)]">
-				<polygon points="2,2 10,2 8,5 4,5" />
-				<polygon points="3,6 9,6 7,9 5,9" />
-				<polygon points="4,10 8,10 7,11 5,11" />
-			</svg>
-			<span class="label tracking-[0.2em] text-[var(--color-default)]">Layers</span>
-			<span class="num text-[9.5px] text-[var(--color-faint)]">
-				{layersOnCount} on
-			</span>
-		</button>
-	{:else}
-	<!-- The open panel stops 3.5rem short of the bottom rather than 1.5rem.
-	     MapLibre's attribution sits bottom right with a z-index above this,
-	     so a taller panel put its last row underneath it, and the
-	     attribution has to stay readable. -->
-	<div
-		data-panel="open"
-		class="pointer-events-auto absolute right-3 top-3 flex w-[min(280px,calc(100%-1.5rem))] max-h-[calc(100%-3.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
-	>
-		<!-- Header. The title and the collapse control only: four tools
-		     beside them overflowed 280 px and pushed RESET off the edge,
-		     so the tools have their own row below. -->
-		<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5">
-			<div class="flex items-baseline gap-2">
-				<span class="label tracking-[0.2em]">Layers</span>
-				<span class="num text-[9.5px] text-[var(--color-faint)]">
-					{layersOnCount} on
-				</span>
-			</div>
-			<button
-				class="inline-flex h-4 w-4 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
-				title="hide panel"
-				aria-label="hide layers panel"
-				onclick={() => { panelOpen = false; }}
-			>
-				<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5">
-					<line x1="2.5" y1="6" x2="9.5" y2="6" />
-				</svg>
-			</button>
-		</div>
-
-		<!-- Tools. Wraps rather than overflowing, so a narrow pane in
-		     compare mode stacks them instead of hiding the last one. -->
-		<div class="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5">
-				<!-- Compare, offered by the primary pane only. The second
-				     pane turning itself off would leave the control it was
-				     turned on with nowhere to go. -->
-				{#if onToggleCompare}
-					<button
-						data-compare-toggle
-						class="border px-1.5 py-0 text-[9.5px] uppercase tracking-wider transition-colors {compare
-							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)]'
-							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]'}"
-						title={compare
-							? 'close the comparison pane'
-							: 'open a second pane, locked to this one in time and view'}
-						aria-pressed={compare}
-						onclick={() => onToggleCompare?.()}
-					>
-						compare
-					</button>
-				{/if}
-				<!-- The measure tool is per pane, since the path is drawn on
-				     one map and the panes can be showing different ground
-				     only if someone has unlocked them. -->
-				<button
-					data-measure-toggle
-					class="border px-1.5 py-0 text-[9.5px] uppercase tracking-wider transition-colors {measuring
-						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)]'
-						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]'}"
-					title={measuring
-						? 'stop measuring (Esc)'
-						: 'measure distance and bearing between points (M)'}
-					aria-pressed={measuring}
-					onclick={toggleMeasure}
-				>
-					measure
-				</button>
-				<!-- The caption and the color bar go into the pixels, so a
-				     paste into a thread still says which minute it is and
-				     what the colors mean. -->
-				<button
-					data-export
-					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)] disabled:opacity-40"
-					title="save a PNG with the timestamp and legend burned in"
-					disabled={exporting}
-					onclick={() => { void exportImage(); }}
-				>
-					{exporting ? '...' : 'export'}
-				</button>
-				<button
-					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
-					title="reset radars, products, layers and view to defaults"
-					aria-label="reset map settings"
-					onclick={resetMapSettings}
-				>
-					reset
-				</button>
-		</div>
+	<!-- THE DISPLAY CONTROLS, as the contents of the bar's menus.
+	     Each was a section of the 280 px panel that used to be docked in
+	     this pane's corner, and each is unchanged from it: the panel's
+	     own chrome is what went, not the controls inside it. Declared as
+	     snippets so the bar below can render whichever one is open, in
+	     one place, at the width of the pane rather than of a button. -->
+	{#snippet findBody()}
 
 		<!-- Place search, over this deployment's own datasets. See
 		     $lib/map/search for why there is no geocoder behind it. -->
@@ -3954,10 +4056,11 @@
 				</div>
 			{/if}
 		</div>
+	{/snippet}
 
+	{#snippet compositeBody()}
 		<!-- Composite — dropdown picker (5 products + Off) -->
 		<div class="px-3 py-2">
-			<span class="label">Composite</span>
 			<div class="mt-1 flex items-center gap-2">
 				<span
 					class="inline-block h-2 w-2 rounded-full {composite !== 'none'
@@ -4020,7 +4123,9 @@
 				{/if}
 			{/if}
 		</div>
+	{/snippet}
 
+	{#snippet referenceBody()}
 		<!-- NEXRAD — single row toggle -->
 		<button
 			class="flex items-center justify-between border-y border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
@@ -4189,15 +4294,10 @@
 		{/if}
 		<div class="border-b border-[var(--color-border)]"></div>
 		{/if}
+	{/snippet}
 
-		<!-- Radars section header with inline moment tabs -->
+	{#snippet momentBody()}
 		<div class="px-3 pt-2 pb-1">
-			<div class="flex items-baseline justify-between">
-				<span class="label">Radars</span>
-				<span class="num text-[9.5px] text-[var(--color-faint)]">
-					{activeRadars.length}/{selectableRadars.length}
-				</span>
-			</div>
 			<!-- moment tabs inline. Selected state uses filled OK-tinted
 			     background + bold text — the previous underline+color-only
 			     treatment was too subtle to read at a glance (2026-05-18). -->
@@ -4269,6 +4369,9 @@
 			{/if}
 		</div>
 
+	{/snippet}
+
+	{#snippet radarsBody()}
 		<!-- Quick filters — text links, not buttons -->
 		<div class="flex gap-3 px-3 py-1 text-[9.5px] text-[var(--color-faint)]">
 			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" onclick={selectAll}>all</button>
@@ -4344,7 +4447,9 @@
 				export failed: {exportError}
 			</div>
 		{/if}
+	{/snippet}
 
+	{#snippet opacityBody()}
 		<!-- Opacity, one row per raster layer. The three stack on the same
 		     ground, so the question is which to fade against the others.
 		     The minimum is 0 rather than the old 10, because a layer you
@@ -4398,8 +4503,54 @@
 				</div>
 			{/each}
 		</div>
-	</div>
+	{/snippet}
+
+	<!-- THE DOCK'S CONTENTS, every group expanded, in the order a reader
+	     works down them: what is being shown, then what it is made of,
+	     then what sits under it, then how hard each layer is painted.
+	     Published rather than drawn here. A dock inside the pane would be
+	     three docks at three panes and would cover the map in each of
+	     them, so the page draws one, beside the panes, and renders the
+	     snippet belonging to whichever pane the reader has selected. -->
+	{#if inDock}
+		<div
+			use:portal={'[data-dock-slot]'}
+			data-dock-pane={pane}
+			class="flex flex-col"
+			style="font-size: {scaled(11, uiScale)}px"
+		>
+			{@render dockSection('Find', findBody)}
+			{@render dockSection('Product', compositeBody)}
+			{@render dockSection('Moment', momentBody)}
+			{@render dockSection('Radars', radarsBody)}
+			{@render dockSection('Reference', referenceBody)}
+			{@render dockSection('Opacity', opacityBody, true)}
+		</div>
 	{/if}
+
+	<!-- One heading and one rule per group. The groups came from a panel
+	     where each drew its own, and three of them drew none. -->
+	{#snippet dockSection(
+		name: string, body: import('svelte').Snippet, pinned = false
+	)}
+		<!-- flex-col because the rows inside are `justify-between` buttons
+		     that were written for the panel's own flex column. In a block
+		     each shrank to its text and the ON ran into the layer's name.
+		     Pinned sections stay on screen while the rest scrolls under
+		     them: the opacity sliders are the one group a reader reaches
+		     for while looking at the map rather than at the dock. -->
+		<div
+			class="flex flex-col border-b border-[var(--color-border)] last:border-b-0 {pinned
+				? 'sticky bottom-0 z-10 border-t border-[var(--color-border-strong)] bg-[var(--color-surface)]'
+				: ''}"
+		>
+			<div
+				class="label px-3 pt-2 tracking-[0.2em] text-[var(--color-muted)]"
+				style="font-size: {scaled(9.5, uiScale)}px"
+			>{name}</div>
+			{@render body()}
+		</div>
+	{/snippet}
 	</div>
 
 </div>

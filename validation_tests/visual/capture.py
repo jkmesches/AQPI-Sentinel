@@ -382,6 +382,35 @@ async def read_probe(page: Page) -> dict[str, Json] | None:
     return result if isinstance(result, dict) else None
 
 
+async def open_dock(page: Page, pane: int = 0) -> None:
+    """Show the console's dock, pointed at one pane.
+
+    Every display control lives in the dock and is visible as soon as it
+    is open, so a harness needs this once rather than a click per control.
+    A narrow first visit starts it closed.
+
+    Args:
+        page: The loaded console page.
+        pane: Which pane the dock should drive, left to right from 0.
+
+    Raises:
+        RuntimeError: When the page has no dock, or no tab for that pane.
+    """
+    dock = page.locator("[data-panel]")
+    if await dock.count() != 1:
+        raise RuntimeError("the console has no dock")
+    if await dock.get_attribute("data-panel") == "closed":
+        await page.locator("[data-dock-toggle]").click()
+        await page.wait_for_timeout(300)
+    if pane > 0:
+        tab = page.locator(f'[data-dock-tab="{pane}"]')
+        if await tab.count() != 1:
+            raise RuntimeError(f"the dock has no tab for pane {pane}")
+        await tab.click()
+    await page.locator(f'[data-dock-slot] [data-dock-pane="{pane}"]').wait_for(
+        timeout=5_000)
+
+
 def as_ids(value: Json) -> list[str]:
     """Coerce a snapshot's `layerOrder` to a list of ids.
 
