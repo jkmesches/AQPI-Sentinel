@@ -30,8 +30,8 @@
 	         type Camera as LinkCamera } from '$lib/map/permalink';
 	import { frameOffsetLabel } from '$lib/map/timeAxis';
 	import { invert } from '$lib/map/ramps/invert';
-	import { overlayFraction, overlayPixel,
-	         readoutText } from '$lib/map/readout';
+	import { OFF_SCALE, overlayFraction, overlayPixel,
+	         readoutFor, readoutHint } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
 	import MapLegend from '$lib/components/MapLegend.svelte';
 	import MapCompass from '$lib/components/MapCompass.svelte';
@@ -889,6 +889,32 @@
 	const sampler = new FrameSampler();
 	let readoutFrame = $state<
 		{ extent: Extent; radar: string } | null>(null);
+	/**
+	 * One held frame per active radar, for reading values off several.
+	 *
+	 * `sampler` above holds whichever radar is alone on screen, which
+	 * is the common case and the cheap one. With two or more on, the
+	 * legend draws their shared scale, so the readout has to answer
+	 * across all of them or it promises a number it will not give.
+	 * One decoded frame per radar costs about 2 MB and there are at
+	 * most six.
+	 */
+	const radarSamplers = new Map<string,
+		{ sampler: FrameSampler; extent: Extent }>();
+	/** Bumped when a radar's held frame changes, so the readout reruns. */
+	let radarFramesAt = $state(0);
+	/**
+	 * Say that the held frames changed.
+	 *
+	 * The read is untracked because one caller is an effect, and `x += 1`
+	 * reads before it writes. That made the effect depend on the counter
+	 * it bumps, which is the Svelte 5 update-depth loop: the component
+	 * threw effect_update_depth_exceeded at mount and took the dock's
+	 * radar rows, the legend and the readout down with it.
+	 */
+	function bumpRadarFrames(): void {
+		radarFramesAt = untrack(() => radarFramesAt) + 1;
+	}
 	// The composite's own held frame. Separate from the radar sampler
 	// rather than shared, because both can be on screen at once and the
 	// composite is the one the cursor is over nearly everywhere.
@@ -931,26 +957,72 @@
 	function valueAt(
 		lngLat: { lng: number; lat: number }
 	): string | null {
-		const frame = readoutFrame;
 		const ramp = activeRamp;
-		// Whichever layer the cursor is actually over. A composite sits in
-		// the same raster band as the radar overlays and covers far more
-		// ground, so where the two overlap the reader is looking at the
-		// composite, and it is the one to report. Before 2026-11-21 no
-		// product had a measured ramp and this reported nothing at all
-		// while one was showing, which is the view the console opens on.
-		const onComposite = composite !== 'none' && compFrame !== null;
-		const held = onComposite ? compFrame : frame;
-		const size = onComposite ? compSampler.size : sampler.size;
-		const from = onComposite ? compSampler : sampler;
-		if (!held || !ramp || !size) return null;
-		const f = overlayFraction(extentCorners(held.extent),
-			lngLat.lng, lngLat.lat);
+		if (!ramp) return null;
+		// A composite sits in the same raster band as the radar overlays
+		// and covers far more ground, so where the two overlap the reader
+		// is looking at the composite and it is the one to report.
+		// Before 2026-11-21 no product had a measured ramp and this
+		// reported nothing at all while one was showing, which is the
+		// view the console opens on.
+		if (composite !== 'none' && compFrame) {
+			return sampleAt(ramp, compSampler, compFrame.extent, lngLat);
+		}
+		// Otherwise every radar that is on, nearest first. The legend
+		// draws one scale for radars that share a table, so the readout
+		// has to answer across all of them; asking only the lone-radar
+		// sampler left the legend promising a number that never came.
+		// Nearest first because where two scans overlap, the closer
+		// radar resolved that ground better.
+		void radarFramesAt;
+		const near = [...radarSamplers.entries()].sort(
+			(a, b) => extentGap(a[1].extent, lngLat) - extentGap(b[1].extent, lngLat));
+		for (const [, held] of near) {
+			const got = sampleAt(ramp, held.sampler, held.extent, lngLat);
+			if (got) return got;
+		}
+		return null;
+	}
+
+	/**
+	 * How far a point is from the middle of an extent, in degrees.
+	 *
+	 * Rough on purpose. It only orders overlapping scans, and at this
+	 * network's spacing a great-circle distance would order them the
+	 * same way for the cost of a trigonometric call per radar per
+	 * pointer move.
+	 *
+	 * @param e The extent.
+	 * @param at The point.
+	 * @returns The separation, with no units a caller should read.
+	 */
+	function extentGap(e: Extent, at: { lng: number; lat: number }): number {
+		const cx = (e.west + e.east) / 2;
+		const cy = (e.south + e.north) / 2;
+		return Math.abs(at.lng - cx) + Math.abs(at.lat - cy);
+	}
+
+	/**
+	 * Read one held frame at a ground point.
+	 *
+	 * @param ramp The table to read the color through.
+	 * @param from The frame's pixels.
+	 * @param extent Where that frame sits on the ground.
+	 * @param lngLat The point to read.
+	 * @returns The reading, or null where the frame says nothing there.
+	 */
+	function sampleAt(
+		ramp: Ramp, from: FrameSampler, extent: Extent,
+		lngLat: { lng: number; lat: number }
+	): string | null {
+		const size = from.size;
+		if (!size) return null;
+		const f = overlayFraction(extentCorners(extent), lngLat.lng, lngLat.lat);
 		if (!f) return null;
 		const px = overlayPixel(f, size.width, size.height);
 		const rgba = from.at(px.x, px.y);
 		if (!rgba) return null;
-		return readoutText(ramp,
+		return readoutFor(ramp, rgba,
 			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3]));
 	}
 
@@ -961,12 +1033,23 @@
 	$effect(() => {
 		void activeRadars;
 		void currentMoment;
-		if (activeRadars.length !== 1) {
-			sampler.clear();
-			readoutFrame = null;
-			readoutValue = null;
-			readoutAt = null;
-		} else if (readoutFrame && readoutFrame.radar !== activeRadars[0]) {
+		// A radar that went off keeps no frame. Its pixels still read
+		// back cleanly and would answer under a cursor anywhere in its
+		// box, long after it stopped being on screen.
+		for (const id of [...radarSamplers.keys()]) {
+			if (!activeRadars.includes(id)) {
+				radarSamplers.get(id)?.sampler.clear();
+				radarSamplers.delete(id);
+			}
+		}
+		bumpRadarFrames();
+		// The lone-radar frame is dropped when there is no lone radar, or
+		// when it belongs to a different one. Read untracked, because the
+		// branch below writes it and an effect that depends on what it
+		// writes reruns until Svelte gives up on it.
+		const held = untrack(() => readoutFrame);
+		if (activeRadars.length !== 1
+			|| (held && held.radar !== activeRadars[0])) {
 			sampler.clear();
 			readoutFrame = null;
 			readoutValue = null;
@@ -2344,11 +2427,39 @@
 		url: string,
 		e: Extent
 	): Promise<void> {
-		if (activeRadars.length !== 1 || activeRadars[0] !== id) return;
-		const img = await preloadImage(url, () => activeRadars.length === 1
-			&& activeRadars[0] === id);
+		if (!activeRadars.includes(id)) return;
+		const img = await preloadImage(url, () => activeRadars.includes(id));
 		if (!img) return;
-		readoutFrame = sampler.draw(img) ? { extent: e, radar: id } : null;
+		holdRadarFrame(id, img, e);
+	}
+
+	/**
+	 * Keep one radar's decoded frame for the cursor readout.
+	 *
+	 * Called from both paths that put a frame on screen, the first add and
+	 * every later update. Feeding it only on the add left the held pixels
+	 * at whatever the radar was showing when it came on, so after a scrub
+	 * the cursor reported a value the picture no longer had.
+	 *
+	 * @param id The radar.
+	 * @param img The frame, already decoded.
+	 * @param e The box it was placed in.
+	 */
+	function holdRadarFrame(id: string, img: HTMLImageElement, e: Extent): void {
+		// The per-radar frame, which answers wherever the cursor is.
+		let held = radarSamplers.get(id);
+		if (!held) {
+			held = { sampler: new FrameSampler(), extent: e };
+			radarSamplers.set(id, held);
+		}
+		held.extent = e;
+		if (!held.sampler.draw(img)) radarSamplers.delete(id);
+		bumpRadarFrames();
+		// And the single-radar frame, which `data-readout-frame` and the
+		// export caption both report.
+		if (activeRadars.length === 1 && activeRadars[0] === id) {
+			readoutFrame = sampler.draw(img) ? { extent: e, radar: id } : null;
+		}
 	}
 
 	/**
@@ -2544,6 +2655,32 @@
 	// place with two different shapes makes the reader check which mark
 	// is theirs before reading the numbers.
 	let pointerAt = $state<{ x: number; y: number } | null>(null);
+
+	/**
+	 * Follow the pointer across this pane, drag or no drag.
+	 *
+	 * @param e The DOM event.
+	 */
+	function onPointerMove(e: PointerEvent): void {
+		const box = mapDiv?.getBoundingClientRect();
+		if (!box) return;
+		pointerAt = { x: e.clientX - box.left, y: e.clientY - box.top };
+		hovering = true;
+		// A drag moves the world under the pointer, so the ground the
+		// other panes should mark changes with no MapLibre mousemove to
+		// report it. Read it from the map directly.
+		const at = map?.unproject([pointerAt.x, pointerAt.y]);
+		if (at) sharedCursor = { lng: at.lng, lat: at.lat };
+	}
+
+	/** The pointer left this pane. */
+	function onPointerGone(): void {
+		pointerAt = null;
+		hovering = false;
+		sharedCursor = null;
+		readoutValue = null;
+		readoutAt = null;
+	}
 
 	/**
 	 * Mark the shared ground point on this pane and read its value.
@@ -2777,15 +2914,7 @@
 					]
 				});
 				_appliedRadarUrl.set(t.id, t.url);
-				// The readout reads one scale, so it holds a frame only
-				// while one radar is on. Taking whichever radar happened to
-				// apply last would report that one's values under a cursor
-				// anywhere on the map.
-				if (activeRadars.length === 1 && t.id === activeRadars[0]) {
-					readoutFrame = sampler.draw(t.img)
-						? { extent: t.e, radar: t.id }
-						: null;
-				}
+				holdRadarFrame(t.id, t.img, t.e);
 			});
 		}
 		return applies;
@@ -3709,7 +3838,6 @@
 			// drawn once per swap in prepareRadars.
 			map.on('mousemove', (e) => {
 				readAt(e.lngLat, e.point);
-				pointerAt = { x: e.point.x, y: e.point.y };
 				// Publish the ground, not the screen point. The panes can
 				// be at different sizes, and in a stacked layout the same
 				// pixel is a different place in each.
@@ -3721,8 +3849,16 @@
 				readoutAt = null;
 				sharedCursor = null;
 				hovering = false;
-				pointerAt = null;
 			});
+			// The drawn crosshair follows the pointer from the DOM
+			// rather than from MapLibre's own mousemove. During a drag
+			// MapLibre takes the pointer for its gesture and stops
+			// emitting mousemove, so the crosshair froze where the drag
+			// began while the real cursor walked away from it, and a
+			// mouseout mid-drag took it off screen entirely.
+			mapDiv.addEventListener('pointermove', onPointerMove);
+			mapDiv.addEventListener('pointerleave', onPointerGone);
+			mapDiv.addEventListener('pointercancel', onPointerGone);
 			// A drag moves the world under a still cursor, so the value
 			// changes with no pointer event to report it.
 			//
@@ -3732,8 +3868,21 @@
 			// locked, they are a before and an after, and the one being
 			// dragged is the one the reader is watching.
 			map.on('move', () => {
-				readoutValue = null;
-				readoutAt = null;
+				// Re-read the ground under the pointer rather than blanking
+				// the number. A pan moves the world under a still cursor,
+				// and clearing the readout meant the value went away for
+				// the whole gesture and the other panes' marks stayed on
+				// the ground the drag started from, which is the ground
+				// the reader has just moved off.
+				const still = pointerAt;
+				if (hovering && still && map) {
+					const at = map.unproject([still.x, still.y]);
+					readAt(at, still);
+					sharedCursor = { lng: at.lng, lat: at.lat };
+				} else {
+					readoutValue = null;
+					readoutAt = null;
+				}
 				publishCamera();
 				placePins();
 				mapBearing = map?.getBearing() ?? 0;
@@ -3780,6 +3929,11 @@
 	onDestroy(() => {
 		stopPlay();
 		if (scanRefresh) clearInterval(scanRefresh);
+		mapDiv?.removeEventListener('pointermove', onPointerMove);
+		mapDiv?.removeEventListener('pointerleave', onPointerGone);
+		mapDiv?.removeEventListener('pointercancel', onPointerGone);
+		for (const held of radarSamplers.values()) held.sampler.clear();
+		radarSamplers.clear();
 		resizeObs?.disconnect();
 		map?.remove();
 		if (visHandler) document.removeEventListener('visibilitychange', visHandler);
@@ -4131,9 +4285,16 @@
 				class="pointer-events-none absolute z-30 -translate-y-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 shadow-lg backdrop-blur"
 				style="left: {readoutAt.x + 12}px; top: {readoutAt.y - 8}px;
 				       padding: {scaled(2, uiScale)}px {scaled(6, uiScale)}px"
+				title={readoutValue === OFF_SCALE
+					? 'The frame is painted here and the paint is not on this '
+						+ 'scale. The composite images carry their own basemap '
+						+ 'linework and background, which are not data.'
+					: (activeRamp ? readoutHint(activeRamp) ?? '' : '')}
 			>
 				<span
-					class="num text-[var(--color-bright)]"
+					class="num {readoutValue === OFF_SCALE
+						? 'text-[var(--color-faint)]'
+						: 'text-[var(--color-bright)]'}"
 					style="font-size: {scaled(10.5, uiScale)}px"
 					>{readoutValue}</span
 				>
@@ -4193,7 +4354,11 @@
 			     block 8 px and fit four numbers along the axis, which is
 			     a picture of a scale rather than one a value can be read
 			     off. max-w-full keeps it inside a narrow pane. -->
-			<div class="max-w-full" style="width: {scaled(280, uiScale)}px">
+			<div
+				class="max-w-full"
+				style="width: {scaled(280, uiScale)}px"
+				title={readoutHint(activeRamp) ?? ''}
+			>
 				<MapLegend ramp={activeRamp} scale={uiScale} />
 			</div>
 		{/if}

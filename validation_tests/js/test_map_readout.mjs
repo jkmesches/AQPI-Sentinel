@@ -15,6 +15,7 @@
 export function runTests(mod, ramps) {
   const {
     overlayFraction, overlayPixel, readoutText, bandDecimals,
+    readoutFor, readoutHint, OFF_SCALE,
     MERCATOR_LIMIT_DEG, RECTANGLE_TOLERANCE_M
   } = mod;
   const failures = [];
@@ -229,6 +230,82 @@ export function runTests(mod, ramps) {
   console.log('\nnothing under the cursor prints nothing:');
   {
     check('a null reading', readoutText(ramps['flow-reflectivity'], null) === null);
+  }
+
+  console.log('\nno data and nothing readable are different answers:');
+  {
+    // Three outcomes rather than two. A transparent pixel is outside
+    // the product's coverage. An opaque one that matches no stop is a
+    // painted pixel that is not on this table, and a composite frame is
+    // mostly that: they carry their own basemap linework and a
+    // near-black background at full alpha. Reporting nothing for both
+    // made the readout look broken, because a reader cannot tell
+    // "nothing here" from "I cannot read this" and blames their aim.
+    const blocks = {
+      moment: 'Reflectivity', unit: 'dBZ', label: 'Z [dBZ]',
+      min: 0, max: 40,
+      stops: [
+        { color: '#000080', value: 5, lo: 0, hi: 10 },
+        { color: '#00ff00', value: 15, lo: 10, hi: 20 },
+        { color: '#ff0000', value: 25, lo: 20, hi: 30 },
+        { color: '#ffffff', value: 35, lo: 30, hi: 40 }
+      ]
+    };
+    const hit = { value: 15, lo: 10, hi: 20, distance: 0 };
+
+    check('a transparent pixel says nothing at all',
+      readoutFor(blocks, [0, 0, 0, 0], null) === null);
+    check('a nearly transparent pixel says nothing',
+      readoutFor(blocks, [1, 2, 3, 4], null) === null);
+    // The black background of a composite frame is painted, so the
+    // reader gets told it is painted and unreadable.
+    check('an opaque pixel off the table says so',
+      readoutFor(blocks, [1, 1, 1, 255], null) === OFF_SCALE,
+      String(readoutFor(blocks, [1, 1, 1, 255], null)));
+    // No decimals, because the band is ten wide: bandDecimals keeps
+    // the printed precision under the band's own.
+    check('a matched pixel reports its band',
+      readoutFor(blocks, [0, 255, 0, 255], hit) === '10 to 20 dBZ',
+      String(readoutFor(blocks, [0, 255, 0, 255], hit)));
+    // A reading that arrived with a transparent pixel is a
+    // contradiction, and coverage wins: nothing is there to report.
+    check('coverage beats a reading',
+      readoutFor(blocks, [0, 255, 0, 0], hit) === null);
+    check('the off-scale text cannot be mistaken for a value',
+      !/\d/.test(OFF_SCALE), OFF_SCALE);
+  }
+
+  console.log('\na banded scale says why it reports a band:');
+  {
+    const blocks = {
+      moment: 'Reflectivity', unit: 'dBZ', label: 'Z [dBZ]',
+      min: 0, max: 40,
+      stops: [
+        { color: '#000080', value: 5, lo: 0, hi: 10 },
+        { color: '#00ff00', value: 15, lo: 10, hi: 20 },
+        { color: '#ff0000', value: 25, lo: 20, hi: 30 },
+        { color: '#ffffff', value: 35, lo: 30, hi: 40 }
+      ]
+    };
+    // A gradient reports one value, so it has nothing to explain.
+    const gradient = {
+      moment: 'Velocity', unit: 'm/s', label: 'V [m/s]',
+      min: -30, max: 30,
+      stops: Array.from({ length: 60 }, (_, i) => ({
+        color: `#${i.toString(16).padStart(2, '0')}0000`,
+        value: -30 + i, lo: -30 + i, hi: -29 + i
+      }))
+    };
+    const hint = readoutHint(blocks);
+    check('a block scale explains the band', typeof hint === 'string');
+    check('and says how many bands there are',
+      hint.includes(String(blocks.stops.length)), hint);
+    // The reason matters more than the fact: the producer quantized the
+    // field before publishing, so a single number would be invented.
+    check('and says the quantizing was the producer\'s',
+      /quantis|quantiz/.test(hint), hint);
+    check('a gradient scale has nothing to explain',
+      readoutHint(gradient) === null);
   }
 
   console.log(failures.length

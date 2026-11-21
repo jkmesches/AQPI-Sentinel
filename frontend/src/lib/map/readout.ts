@@ -14,7 +14,7 @@
  */
 
 import { lon2x, lat2y } from './nexrad';
-import type { Ramp, Reading } from './ramps/invert';
+import { TRANSPARENT_ALPHA, type Ramp, type Reading } from './ramps/invert';
 import { rampKind } from './ramps/legend';
 
 /** The four corners of a placed image, clockwise from the north-west. */
@@ -168,6 +168,55 @@ export function bandDecimals(width: number): number {
  * @param reading What `invert` returned, or null.
  * @returns The text, or null when there is nothing to say.
  */
+export const OFF_SCALE = 'not on this scale';
+
+/**
+ * What a cursor found at one pixel.
+ *
+ * Three outcomes. A transparent pixel is outside the product's
+ * coverage and the console says nothing, which is right. An opaque
+ * pixel that matches no stop is a different case, where the frame is
+ * painted there and the paint is not on this table. The composite PNGs carry
+ * their own basemap linework and a near-black background at full alpha,
+ * so most of a frame's opaque area is that rather than data.
+ *
+ * Telling the two apart is what stops the readout looking broken.
+ * Reporting nothing for both made the coverage read as spotty, and a
+ * reader who cannot tell "no data here" from "I cannot read this"
+ * blames their own pointing.
+ *
+ * @param ramp The table to read through.
+ * @param rgba The pixel, with its alpha.
+ * @param read What `invert` made of it.
+ * @returns The text, or null where there is genuinely nothing.
+ */
+export function readoutFor(
+	ramp: Ramp, rgba: readonly [number, number, number, number],
+	read: Reading | null
+): string | null {
+	if (rgba[3] <= TRANSPARENT_ALPHA) return null;
+	return readoutText(ramp, read) ?? OFF_SCALE;
+}
+
+/**
+ * Why a discrete reading names a band rather than a value.
+ *
+ * Shown where the reader meets the band, since that is where the
+ * question comes up. The overlay is a picture, and the producer
+ * quantized the field into these colors before the console ever saw
+ * it, so a single number would be invented precision.
+ *
+ * @param ramp The table the reading came from.
+ * @returns A sentence, or null for a scale that reports a value.
+ */
+export function readoutHint(ramp: Ramp): string | null {
+	if (rampKind(ramp) === 'continuous') return null;
+	return `This overlay is painted in ${ramp.stops.length} bands, so a `
+		+ 'pixel says which band it is in. The producer quantized the '
+		+ 'field into those colors before publishing it, and a single '
+		+ 'number here would be precision the picture does not carry.';
+}
+
 export function readoutText(ramp: Ramp, reading: Reading | null): string | null {
 	if (!reading) return null;
 	if (rampKind(ramp) === 'continuous') {
