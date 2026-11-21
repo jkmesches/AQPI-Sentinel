@@ -161,30 +161,76 @@ def lookup_table(anchors: list[tuple[int, int, int]],
     return out
 
 
-def build_stops(anchors: list[tuple[int, int, int]], vmin: float,
-                vmax: float, levels: int) -> list[dict[str, Any]]:
+def band_edges(norm: str, vmin: float, vmax: float, levels: int,
+               boundaries: list[float] | None) -> list[float]:
+    """The value each lookup entry starts and ends at.
+
+    Three norms, because the renderers use three.
+
+    `Normalize` maps v to (v-vmin)/(vmax-vmin), so entry i covers an
+    equal slice of the range.
+
+    `LogNorm` maps v to (log v - log vmin)/(log vmax - log vmin), so
+    entry i covers an equal slice of the log range and the bands are
+    geometric. Read as linear instead, the 1.00 tick of an accumulation
+    bar reported 12.14 inches.
+
+    `BoundaryNorm` is given its edges outright and entry i covers
+    [a[i], a[i+1]). Nothing is interpolated between them, so this is the
+    one norm whose bands are exact by construction.
+
+    Args:
+        norm: One of linear, log, boundary.
+        vmin: The low end, ignored for a boundary norm.
+        vmax: The high end, ignored for a boundary norm.
+        levels: The lookup table's size, ignored for a boundary norm.
+        boundaries: The edges, for a boundary norm.
+
+    Returns:
+        levels + 1 edges, low to high.
+
+    Raises:
+        ValueError: When the norm cannot describe a scale.
+    """
+    if norm == "boundary":
+        if not boundaries or len(boundaries) < 2:
+            raise ValueError("a boundary norm needs at least two edges")
+        edges = sorted(set(boundaries))
+        if len(edges) != len(boundaries):
+            raise ValueError("the boundaries repeat; np.unique them first")
+        return edges
+    if not vmax > vmin:
+        raise ValueError(f"vmin {vmin} is not below vmax {vmax}")
+    if norm == "log":
+        if vmin <= 0:
+            raise ValueError(f"a log norm needs a positive vmin, not {vmin}")
+        ratio = vmax / vmin
+        return [vmin * ratio ** (i / levels) for i in range(levels + 1)]
+    span = vmax - vmin
+    return [vmin + span * i / levels for i in range(levels + 1)]
+
+
+def build_stops(anchors: list[tuple[int, int, int]], edges: list[float],
+                levels: int) -> list[dict[str, Any]]:
     """One stop per lookup entry, with the value band it covers.
 
     Args:
         anchors: The colormap's anchor colors.
-        vmin: The low end of the imshow range.
-        vmax: The high end.
+        edges: The band edges, one more than there are entries.
         levels: The lookup table's size.
 
     Returns:
         The stops, low to high.
 
     Raises:
-        ValueError: When the range is empty or inverted.
+        ValueError: When the edges do not bound the entries.
     """
-    if not vmax > vmin:
-        raise ValueError(f"vmin {vmin} is not below vmax {vmax}")
-    span = vmax - vmin
+    if len(edges) != levels + 1:
+        raise ValueError(f"{len(edges)} edges cannot bound {levels} entries")
     table = lookup_table(anchors, levels)
     stops: list[dict[str, Any]] = []
     for i, rgb in enumerate(table):
-        lo = vmin + span * i / levels
-        hi = vmin + span * (i + 1) / levels
+        lo, hi = edges[i], edges[i + 1]
         stops.append({
             "color": to_hex(rgb),
             "value": round((lo + hi) / 2, PLACES),
@@ -263,6 +309,32 @@ def drop_colors(stops: list[dict[str, Any]],
     return kept, len(stops) - len(kept)
 
 
+def fraction_of(value: float, edges: list[float]) -> float:
+    """Where one value sits along a bar drawn from these bands.
+
+    By band rather than by value, because a segmented bar draws every
+    band at the same width whatever range it covers. Reading the
+    position off the value instead puts every tick of a nine-segment
+    accumulation bar in its first tenth.
+
+    Args:
+        value: The number the bar prints.
+        edges: The band edges, low to high.
+
+    Returns:
+        0 at the bar's foot and 1 at its head.
+    """
+    bands = len(edges) - 1
+    if bands < 1:
+        return 0.0
+    for i in range(bands):
+        lo, hi = edges[i], edges[i + 1]
+        if lo <= value <= hi:
+            within = 0.0 if hi == lo else (value - lo) / (hi - lo)
+            return (i + within) / bands
+    return 0.0 if value < edges[0] else 1.0
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
     """Assemble the ramp file.
 
@@ -276,7 +348,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         ValueError: When the inputs do not describe a colormap.
     """
     anchors = [parse_hex(c) for c in str(args.anchors).split(",") if c.strip()]
-    stops = build_stops(anchors, args.vmin, args.vmax, args.levels)
+    bounds = ([finite(t) for t in str(args.boundaries).split(",") if t.strip()]
+              if args.boundaries else None)
+    if args.norm == "boundary":
+        if not bounds:
+            raise ValueError("a boundary norm needs --boundaries")
+        # matplotlib's BoundaryNorm takes ncolors = len(boundaries) - 1,
+        # and the renderers pass that same number as the colormap's N,
+        # so the table's size is the edge count rather than --levels.
+        levels = len(sorted(set(bounds))) - 1
+    else:
+        levels = int(args.levels)
+    edges = band_edges(args.norm, args.vmin, args.vmax, levels, bounds)
+    stops = build_stops(anchors, edges, levels)
     stops, merged = merge_runs(stops)
     stops, ambiguous = drop_ambiguous(stops)
     stops, dropped = drop_colors(stops, list(args.exclude_color or []))
@@ -286,20 +370,35 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "moment": args.moment,
         "unit": args.unit,
         "label": args.label,
-        "min": float(args.vmin),
-        "max": float(args.vmax),
-        "scale": "linear",
+        "min": round(edges[0], PLACES),
+        "max": round(edges[-1], PLACES),
+        # A boundary norm has no formula between its printed numbers,
+        # so its legend places ticks from the measured positions the
+        # segmented axis carries.
+        "scale": "segmented" if args.norm == "boundary" else args.norm,
         "source": args.source,
         "read_on": datetime.now(timezone.utc).date().isoformat(),
         "built_from": {
             "kind": "LinearSegmentedColormap.from_list",
             "anchors": [to_hex(a) for a in anchors],
-            "levels": args.levels,
-            "vmin": float(args.vmin),
-            "vmax": float(args.vmax)
+            "levels": levels,
+            "norm": args.norm,
+            "vmin": round(edges[0], PLACES),
+            "vmax": round(edges[-1], PLACES)
         },
         "stops": stops
     }
+    if args.ticks:
+        # A segmented axis has no shape between its printed numbers, so
+        # the legend is told where each one sits rather than computing
+        # it. These are the renderer's own custom_ticks.
+        want = [finite(t) for t in str(args.ticks).split(",") if t.strip()]
+        lo, hi = edges[0], edges[-1]
+        ramp["ticks"] = [
+            {"value": v,
+             "fraction": round(fraction_of(v, edges), PLACES)}
+            for v in want if lo <= v <= hi
+        ]
     if merged:
         ramp["merged_runs"] = merged
     if ambiguous:
@@ -327,14 +426,24 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     _ = ap.add_argument("--anchors", required=True,
                         help="the anchor colors, comma separated")
-    _ = ap.add_argument("--vmin", type=finite, required=True)
-    _ = ap.add_argument("--vmax", type=finite, required=True)
-    _ = ap.add_argument("--levels", type=int, default=DEFAULT_LEVELS)
+    _ = ap.add_argument("--vmin", type=finite, default=0.0)
+    _ = ap.add_argument("--vmax", type=finite, default=1.0)
+    _ = ap.add_argument("--levels", type=int, default=DEFAULT_LEVELS,
+                        help="the lookup table's size, matplotlib's N; "
+                             "ignored for a boundary norm, which takes it "
+                             "from the edge count")
+    _ = ap.add_argument("--norm", choices=("linear", "log", "boundary"),
+                        default="linear",
+                        help="which Normalize the renderer passes")
+    _ = ap.add_argument("--boundaries", default="",
+                        help="the BoundaryNorm edges, comma separated")
     _ = ap.add_argument("--unit", required=True)
     _ = ap.add_argument("--label", required=True)
     _ = ap.add_argument("--moment", required=True)
     _ = ap.add_argument("--source", required=True,
                         help="where the definition was read, file and line")
+    _ = ap.add_argument("--ticks", default="",
+                        help="the numbers the bar prints, comma separated")
     _ = ap.add_argument("--exclude-color", action="append", default=[])
     _ = ap.add_argument("--exclude-reason", default="")
     _ = ap.add_argument("--out", type=Path, required=True)

@@ -270,11 +270,12 @@ function budgetedTolerances(ramp: Ramp, colors: Rgb[]): number[] {
 	// map does: its purples below zero repeat to within one channel
 	// step, while its greens and reds, where this data actually sits, do
 	// not. One number for the whole table takes the strictest region's
-	// answer and applies it everywhere, which is how a ramp measured at
-	// 95% of pixels within distance 5 read back only 18% of them.
+	// answer and applies it everywhere. That is why the water level
+	// ramp read back 18% of its pixels while 95% of them sat within
+	// distance 5 of a stop.
 	//
-	// The nearest stop beyond this one's budget, per stop. Everything
-	// below that distance is a stop near enough in value to be safe.
+	// Each stop's distance to the nearest stop outside its budget.
+	// Everything closer than that is near enough in value to be safe.
 	const limit = new Array<number>(colors.length).fill(MATCH_TOLERANCE + 1);
 	for (let i = 0; i < colors.length; i++) {
 		for (let j = i + 1; j < colors.length; j++) {

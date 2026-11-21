@@ -138,8 +138,17 @@ export function runTests(mod, coverage, products) {
   {
     check('a covered product finds its ramp',
       rampForProduct('comp_ref') !== null);
-    check('a rejected product finds none',
-      rampForProduct('qpe_1hr', 'in') === null);
+    // Over whatever the file records rather than over one named
+    // product. Naming qpe_1hr here meant that measuring it and letting
+    // it through failed a check about rejection in general.
+    const rejected = products.products.filter((r) => !r.covered);
+    check('every covered row resolves to its own ramp',
+      products.products.filter((r) => r.covered).every(
+        (r) => rampForProduct(r.product, r.unit) !== null),
+      `${products.products.filter((r) => r.covered).length} covered`);
+    check('no rejected row resolves to anything',
+      rejected.every((r) => rampForProduct(r.product, r.unit) === null),
+      `${rejected.length} rejected`);
     check('an unknown product finds none',
       rampForProduct('not_a_product') === null);
     check('the unit picks the bar',
@@ -152,8 +161,35 @@ export function runTests(mod, coverage, products) {
       check(`${p.product} says why`,
         (productCoverageFor(p.product, p.unit)?.note ?? '').length > 20);
     }
-    check('a rejected row keeps its measurement',
-      productCoverageFor('qpe_1hr', 'in')?.pixels < 10);
+    // A rejected row records what the measurement found, so a later
+    // pass starts from evidence rather than from scratch. That is how
+    // the QPE products came back: their rows carried the pixel share
+    // the published bar managed, which is what said the bar was wrong
+    // rather than the products unreadable.
+    for (const p of rejected) {
+      check(`${p.product} keeps what was measured`,
+        Number.isFinite(productCoverageFor(p.product, p.unit)?.pixels),
+        String(productCoverageFor(p.product, p.unit)?.pixels));
+    }
+    // A covered row carries what it measured. No threshold on the
+    // share itself, because what counts as enough differs by ramp:
+    // comp_ref reads 33% and is right, since the rest of its frame is
+    // coastline drawn into the image rather than data. What the file
+    // owes a reader is the reason, so a share short of near-total has
+    // to say where the remainder went.
+    const SPEAKS_FOR_ITSELF = 90;
+    for (const p of products.products.filter((r) => r.covered)) {
+      const row = productCoverageFor(p.product, p.unit);
+      const share = row?.pixels;
+      check(`${p.product}/${p.unit} records what it measured`,
+        Number.isFinite(share) && share > 0, String(share));
+      if (Number.isFinite(share) && share < SPEAKS_FOR_ITSELF) {
+        check(`${p.product}/${p.unit} says where the other ` +
+          `${(100 - share).toFixed(0)}% went`,
+          (row?.note ?? '').length > 20,
+          row?.note ? 'noted' : 'NO NOTE');
+      }
+    }
   }
 
   console.log('\nthe shared-colorbar record names only real radars:');

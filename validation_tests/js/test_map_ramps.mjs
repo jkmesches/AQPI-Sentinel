@@ -133,13 +133,33 @@ export function runTests(mod, ramps) {
         worst <= allowed, `worst ${worst.toFixed(4)} ${worstAt}`);
       // A tolerance of zero everywhere would pass the line above while
       // reading nothing, which is the state this work started from.
-      const loosest = Math.max(...ramp.stops.map((_, i) => toleranceAt(ramp, i)));
+      const per = ramp.stops.map((_, i) => toleranceAt(ramp, i));
+      const strictest = Math.min(...per);
+      const loosest = Math.max(...per);
       check(`${name}: some stop can be matched loosely`,
         loosest > 0, String(loosest));
-      // And a stop in the region that turns back on itself must not be.
-      const strictest = Math.min(...ramp.stops.map((_, i) => toleranceAt(ramp, i)));
-      check(`${name}: a stop near a repeat stays exact`,
-        strictest === 0, String(strictest));
+      // And where a colormap turns back on itself, the stops in that
+      // region must stay exact. Asked only of a ramp that has such a
+      // region: the QPE and forecast rate maps are injective over their
+      // whole range, so demanding a strict stop of them asked for a
+      // flaw they do not have.
+      const turnsBack = ramp.stops.some((a, i) => ramp.stops.some((b, j) =>
+        i !== j
+        && colorDistance(parseHex(a.color), parseHex(b.color)) <= MATCH_TOLERANCE
+        && Math.abs(a.value - b.value) > allowed));
+      if (turnsBack) {
+        // Tighter where it turns back than where it does not. The
+        // water level map repeats a color exactly and its purples go
+        // to zero; the QPE map only comes close and its stops there
+        // are merely tighter. Demanding zero of both asked the second
+        // one for a flaw it does not have.
+        check(`${name}: the stops near its repeat are held tighter`,
+          strictest < loosest, `${strictest} vs ${loosest}`);
+      } else {
+        check(`${name}: is injective, so every stop is equally loose`,
+          strictest === loosest && strictest > 0,
+          `${strictest} vs ${loosest}`);
+      }
     }
   }
 
@@ -240,7 +260,11 @@ export function runTests(mod, ramps) {
       // path to the plotter: it verified against its own printed
       // numbers and explained 0.032% of the pixels in real frames.
       const fromBar = /(colorbar|colormap)[a-z0-9_-]*\.png$/;
-      const fromCode = /\.py:\d+/;
+      // A python file plus a line, or a python file plus the function
+      // the definition sits in. Either one takes a reader to the same
+      // block, and a renderer's colormap is as often named by its
+      // function as by a line that moves with the next edit.
+      const fromCode = /\.py(:\d+|\s+\w+)/;
       check(`${name} names where its colors came from`,
         typeof ramp.source === 'string'
           && (fromBar.test(ramp.source) || fromCode.test(ramp.source)),

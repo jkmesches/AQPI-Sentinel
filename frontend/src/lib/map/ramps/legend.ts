@@ -300,8 +300,49 @@ export function legendTicks(
 			label: segmentLabel(t.value)
 		})), lengthPx, charPx, spacingChars);
 	}
+	// A log bar is ticked by decade, since a round step is round on the
+	// value and not on the bar. On the QPE bar, which runs 0.01 to 20,
+	// a step of 2 put 16.0 and 16.5 a sixth of a label apart while the
+	// whole of 0.01 to 1 went unmarked, and that lower end is where
+	// almost every rain rate sits.
+	if (ramp.scale === 'log') {
+		const spacingChars = 1;
+		const charPx = minSpacingPx / 2;
+		return thinToFit(decadeTicks(ramp), lengthPx, charPx, spacingChars);
+	}
 	const room = Math.max(1, Math.floor(lengthPx / minSpacingPx));
 	return ticksAtStep(ramp, niceStep(span / room), minSpacingPx / lengthPx);
+}
+
+/**
+ * The 1-3-10 ticks a log bar carries, with both of its ends.
+ *
+ * One and three per decade rather than one: a bar spanning three
+ * decades gets four marks from decades alone, which is a scale a reader
+ * can see the shape of but cannot read a value off.
+ *
+ * @param ramp The table, whose min must be positive.
+ * @returns The ticks, low to high.
+ */
+function decadeTicks(ramp: Ramp): LegendTick[] {
+	const out: LegendTick[] = [];
+	const push = (value: number) => {
+		if (value < ramp.min || value > ramp.max) return;
+		if (out.some((t) => Math.abs(t.value - value) < 1e-12)) return;
+		out.push({ value, at: fractionFor(ramp, value), label: segmentLabel(value) });
+	};
+	push(ramp.min);
+	const first = Math.floor(Math.log10(ramp.min));
+	const last = Math.ceil(Math.log10(ramp.max));
+	// Bounded: the loop runs once per decade of a ramp whose ends are
+	// finite and positive, which legendTicks has already checked.
+	for (let d = first; d <= last; d++) {
+		const decade = 10 ** d;
+		push(decade);
+		push(3 * decade);
+	}
+	push(ramp.max);
+	return out.sort((a, b) => a.value - b.value);
 }
 
 /**

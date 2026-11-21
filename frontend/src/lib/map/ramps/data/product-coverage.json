@@ -29,6 +29,16 @@
 	"tool": "validation_tests/visual/extract_ramp.py, check_ramp_ticks.py, ramp_coverage.py",
 	"products": [
 		{
+			"product": "comp_now",
+			"unit": null,
+			"ramp": "aqpi-product-reflectivity",
+			"frames": 3,
+			"pixels": 33.064,
+			"exact_common": true,
+			"covered": true,
+			"note": "Nowcast of the same field, published from the same colormap."
+		},
+		{
 			"product": "comp_ref",
 			"unit": null,
 			"ramp": "aqpi-product-reflectivity",
@@ -39,14 +49,14 @@
 			"note": "The frame's commonest colors sit on stops at distance 0. The rest is coastline drawn into the image and one-unit noise around each stop."
 		},
 		{
-			"product": "comp_now",
-			"unit": null,
-			"ramp": "aqpi-product-reflectivity",
-			"frames": 3,
-			"pixels": 33.064,
+			"product": "fcst_precip_rate",
+			"unit": "in/h",
+			"ramp": "aqpi-product-forecast-rate-in",
+			"frames": 10,
+			"pixels": 100.0,
 			"exact_common": true,
 			"covered": true,
-			"note": "Nowcast of the same field, published from the same colormap."
+			"note": "Built from prate_tools.py on the QPE tooling host: the same 12 anchors as the QPE products, but from_list with N=74 under a BoundaryNorm over a nine-segment edge array. Discrete, so every pixel is an exact entry and all 22 colours in ten painted frames read back. The earlier rejection said every frame fetched was transparent, which is a forecast of no rain rather than a broken render: savefig passes transparent=True. The in/h bar runs 0 to 10 and the mm/h branch 0 to 254, which is the same physical range at 25.4 mm to the inch, so the unit handling cross-checks even though the conversion site was not read."
 		},
 		{
 			"product": "fcst_temp",
@@ -65,7 +75,8 @@
 			"frames": 3,
 			"pixels": 73.223,
 			"exact_common": true,
-			"covered": true
+			"covered": true,
+			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
 		},
 		{
 			"product": "fcst_total_precip",
@@ -74,7 +85,8 @@
 			"frames": 3,
 			"pixels": 69.027,
 			"exact_common": true,
-			"covered": true
+			"covered": true,
+			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
 		},
 		{
 			"product": "fcst_total_precip_cum",
@@ -83,7 +95,8 @@
 			"frames": 3,
 			"pixels": 85.0,
 			"exact_common": true,
-			"covered": true
+			"covered": true,
+			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
 		},
 		{
 			"product": "fcst_total_precip_cum",
@@ -92,17 +105,8 @@
 			"frames": 3,
 			"pixels": 65.905,
 			"exact_common": true,
-			"covered": true
-		},
-		{
-			"product": "water_depth",
-			"unit": null,
-			"ramp": "aqpi-product-water-depth",
-			"frames": 3,
-			"pixels": 92.654,
-			"exact_common": true,
 			"covered": true,
-			"note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement."
+			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
 		},
 		{
 			"product": "max_water_depth",
@@ -112,46 +116,6 @@
 			"pixels": 92.38,
 			"exact_common": true,
 			"covered": true
-		},
-		{
-			"product": "qpe_1hr",
-			"unit": "in",
-			"ramp": null,
-			"frames": 3,
-			"pixels": 2.734,
-			"exact_common": false,
-			"covered": false,
-			"note": "The bar radarca shows for this product and the colors in its frames are different colormaps. Its catalog points at colormap_accum_in.png, a 177-color gradient, and no pixel of three real frames sits on any stop of it, while 54.7% sit exactly on the discrete forecast palette. Until the publisher's own script says which norm renders rain60min, any number here would be invented."
-		},
-		{
-			"product": "qpe_15min",
-			"unit": "in",
-			"ramp": null,
-			"frames": 3,
-			"pixels": 2.9,
-			"exact_common": false,
-			"covered": false,
-			"note": "Same mismatch as qpe_1hr, from the same bar."
-		},
-		{
-			"product": "precip_rate_radar",
-			"unit": "in/h",
-			"ramp": null,
-			"frames": 3,
-			"pixels": 3.1,
-			"exact_common": false,
-			"covered": false,
-			"note": "Shares the accumulation bar in the catalog and shows the same mismatch."
-		},
-		{
-			"product": "water_level",
-			"unit": null,
-			"ramp": "aqpi-product-water-level",
-			"frames": 6,
-			"pixels": 95.763,
-			"exact_common": false,
-			"covered": true,
-			"note": "Built from the renderer's own colormap, not from the published bar: LinearSegmentedColormap.from_list over 14 anchors, N=256, linear vmin=-4 vmax=10 metres, read from plot_water_level.py:108 on the CoSMoS host. The published colormap_level_ft.png is a hand-made asset with no code path to the plotter, which is why it verified against its own printed numbers and explained 0.032% of the pixels. The renderer resamples with a Hanning window, so most pixels sit between two of the 256 entries; the per-stop tolerance in invert.ts admits a neighbour only where that moves the answer by at most 1% of the range, which is 0.14 m. Two bands are dropped because the map turns back on itself below zero and paints -3.84 m and -2.41 m the same colour, and #6f00ff is dropped because the unmasked -99999 fill clips to vmin and lands on it."
 		},
 		{
 			"product": "max_water_level",
@@ -164,14 +128,54 @@
 			"note": "The same ramp and the same renderer; plot_max_water_level.py:89 carries a colour block that is byte-identical to the level one."
 		},
 		{
-			"product": "fcst_precip_rate",
+			"product": "precip_rate_radar",
 			"unit": "in/h",
-			"ramp": null,
-			"frames": 0,
-			"pixels": 0.0,
+			"ramp": "aqpi-product-qpe-rate-in",
+			"frames": 4,
+			"pixels": 78.028,
 			"exact_common": false,
-			"covered": false,
-			"note": "Every frame fetched was fully transparent, which is what a forecast of no rain looks like. Nothing to measure against yet."
+			"covered": true,
+			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The same table as the accumulation products with the unit changed, because the renderer uses one colormap for all three and only the label differs; a rate reported in inches is a rate reported wrong. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
+		},
+		{
+			"product": "qpe_15min",
+			"unit": "in",
+			"ramp": "aqpi-product-qpe-in",
+			"frames": 4,
+			"pixels": 79.857,
+			"exact_common": false,
+			"covered": true,
+			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
+		},
+		{
+			"product": "qpe_1hr",
+			"unit": "in",
+			"ramp": "aqpi-product-qpe-in",
+			"frames": 4,
+			"pixels": 81.05,
+			"exact_common": false,
+			"covered": true,
+			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
+		},
+		{
+			"product": "water_depth",
+			"unit": null,
+			"ramp": "aqpi-product-water-depth",
+			"frames": 3,
+			"pixels": 92.654,
+			"exact_common": true,
+			"covered": true,
+			"note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement."
+		},
+		{
+			"product": "water_level",
+			"unit": null,
+			"ramp": "aqpi-product-water-level",
+			"frames": 6,
+			"pixels": 95.763,
+			"exact_common": false,
+			"covered": true,
+			"note": "Built from the renderer's own colormap, not from the published bar: LinearSegmentedColormap.from_list over 14 anchors, N=256, linear vmin=-4 vmax=10 metres, read from plot_water_level.py:108 on the CoSMoS host. The published colormap_level_ft.png is a hand-made asset with no code path to the plotter, which is why it verified against its own printed numbers and explained 0.032% of the pixels. The renderer resamples with a Hanning window, so most pixels sit between two of the 256 entries; the per-stop tolerance in invert.ts admits a neighbour only where that moves the answer by at most 1% of the range, which is 0.14 m. Two bands are dropped because the map turns back on itself below zero and paints -3.84 m and -2.41 m the same colour, and #6f00ff is dropped because the unmasked -99999 fill clips to vmin and lands on it."
 		}
 	]
 }

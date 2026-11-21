@@ -38,12 +38,16 @@ export function runTests(mod, ramps) {
   // bars and the composite forecast bars are block bars and share no
   // naming pattern, and a rule that guessed from the name would pass by
   // agreeing with itself.
+  // The bars drawn as blocks rather than as a gradient. A ramp built
+  // from a BoundaryNorm belongs here by construction: its bands are the
+  // renderer's own edges and there is nothing between them.
   const BLOCKS = new Set([
     'flow-reflectivity',
     'aqpi-xband-reflectivity',
     'aqpi-product-reflectivity',
     'aqpi-product-forecast-accum-in',
-    'aqpi-product-forecast-accum-mm'
+    'aqpi-product-forecast-accum-mm',
+    'aqpi-product-forecast-rate-in'
   ]);
 
   console.log('a block bar and a gradient bar are told apart:');

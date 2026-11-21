@@ -27,6 +27,9 @@ import productFcstAccumIn from './data/aqpi-product-forecast-accum-in.json';
 import productFcstAccumMm from './data/aqpi-product-forecast-accum-mm.json';
 import productWaterDepth from './data/aqpi-product-water-depth.json';
 import productWaterLevel from './data/aqpi-product-water-level.json';
+import productQpeIn from './data/aqpi-product-qpe-in.json';
+import productQpeRateIn from './data/aqpi-product-qpe-rate-in.json';
+import productForecastRateIn from './data/aqpi-product-forecast-rate-in.json';
 import flowReflectivity from './data/flow-reflectivity.json';
 import flowVelocity from './data/flow-velocity.json';
 import flowZdr from './data/flow-differential-reflectivity.json';
@@ -54,7 +57,10 @@ export const RAMPS: Readonly<Record<string, Ramp>> = {
 	'aqpi-product-forecast-accum-in': productFcstAccumIn as Ramp,
 	'aqpi-product-forecast-accum-mm': productFcstAccumMm as Ramp,
 	'aqpi-product-water-depth': productWaterDepth as Ramp,
-	'aqpi-product-water-level': productWaterLevel as Ramp
+	'aqpi-product-water-level': productWaterLevel as Ramp,
+	'aqpi-product-qpe-in': productQpeIn as Ramp,
+	'aqpi-product-qpe-rate-in': productQpeRateIn as Ramp,
+	'aqpi-product-forecast-rate-in': productForecastRateIn as Ramp
 };
 
 /** One row of the coverage record. */
