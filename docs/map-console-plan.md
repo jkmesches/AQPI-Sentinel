@@ -163,6 +163,36 @@ the readout stays off for that product until it is fixed.
 The legend renders as themed SVG rather than a proxied PNG. It therefore reads
 in both themes, scales on a phone, and can carry the selected unit.
 
+### Measurement Results
+
+Shipped on 2026-11-21. The colorbars are on the mount rather than on
+radarca's site, written beside the frames by the code that paints them, so
+they are the painting code's own tables rather than a transcription.
+`validation_tests/visual/extract_ramp.py` reads them and
+`ramp_coverage.py` measures each one, with the results checked in as
+`frontend/src/lib/map/ramps/data/coverage.json`. The registry answers only
+for pairs that file records, so a ramp cannot reach the screen without its
+evidence.
+
+AQPI's X-band reflectivity bar carries the same colors as FLOW's over a
+different range, -20 to 80 dBZ against -30 to 80. The same pixel is 4.86 dBZ
+on one deployment and -2.40 on the other, so the ramps are keyed per radar
+rather than per moment.
+
+The C-band (radar id `CBAND`, folder `sscb`) shares the X-bands'
+reflectivity and velocity ramps and paints ZDR and PhiDP from some other
+colormap, with none of its 253 colors matching across a million opaque
+pixels. It publishes no colorbar, so those two have no ramp and the legend
+stays off for them. Measuring per radar rather than per band is what caught
+this.
+
+`KBBX`, `KDAX` and `KMUX` publish a reflectivity bar that the console never
+paints. Its NEXRAD overlay draws Iowa State's `nexrad-n0q-wmst` layer, which
+uses the NWS N0Q ramp. That bar is measured and deliberately left out.
+
+RhoHV has no ramp on either deployment, so slice 6's readout will stay off
+for it.
+
 ## 6. Cursor Readout
 
 Hovering the overlay reports the bin the pixel falls in, such as `35-40 dBZ`,

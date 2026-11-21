@@ -20,9 +20,10 @@ execFileSync(join(root, 'frontend/node_modules/.bin/esbuild'),
 
 const ramps = {};
 for (const f of readdirSync(rampDir).sort()) {
-  if (f.endsWith('.json')) {
-    ramps[f.slice(0, -5)] = JSON.parse(readFileSync(join(rampDir, f), 'utf8'));
-  }
+  if (!f.endsWith('.json')) continue;
+  const parsed = JSON.parse(readFileSync(join(rampDir, f), 'utf8'));
+  // coverage.json lives here too and is not a ramp.
+  if (Array.isArray(parsed.stops)) ramps[f.slice(0, -5)] = parsed;
 }
 if (Object.keys(ramps).length === 0) {
   console.error(`no ramps in ${rampDir}`);

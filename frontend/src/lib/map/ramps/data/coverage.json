@@ -1,0 +1,221 @@
+{
+ "_comment": [
+  "Which radar and moment each ramp was measured against, and what the",
+  "measurement found. The registry answers only for pairs listed here, so a",
+  "ramp cannot reach a legend or a readout without this evidence.",
+  "",
+  "Produced by validation_tests/visual/ramp_coverage.py, which samples every",
+  "distinct opaque color in real frames and asks the shipped invert.ts what",
+  "each one reads as. 'colors' is matched over distinct; a ramp ships only at",
+  "full coverage.",
+  "",
+  "'radar' is the id the app holds, as RADAR_FOLDER in backend/config.py keys",
+  "it, and 'folder' is where the frames were read from. 'moment' is the",
+  "published prefix, which is what moment_to_prefix() resolves a console",
+  "moment label to.",
+  "",
+  "Adding a pair means running the tool and pasting its numbers, not editing",
+  "this file by hand.",
+  "",
+  "KBBX, KDAX and KMUX publish a reflectivity bar in the same tree (md5 aad5def3, -30 to 80 dBZ, measured 15/15 over 422,055 px on 2026-07-01 frames). It is left out because the console never paints those frames: they are not selectable radars, and the NEXRAD overlay draws the Iowa State nexrad-n0q-wmst WMS layer, which uses the NWS N0Q ramp instead. A ramp with no display path is one more thing to mistake for the right one."
+ ],
+ "measured_on": "2026-11-21",
+ "tool": "validation_tests/visual/ramp_coverage.py",
+ "pairs": [
+  {
+   "radar": "FLOW",
+   "folder": "FLOW",
+   "moment": "Reflectivity",
+   "ramp": "flow-reflectivity",
+   "frames": 5,
+   "pixels": 8278,
+   "colors": "15/15",
+   "covered": true
+  },
+  {
+   "radar": "FLOW",
+   "folder": "FLOW",
+   "moment": "Velocity",
+   "ramp": "flow-velocity",
+   "frames": 5,
+   "pixels": 8278,
+   "colors": "198/198",
+   "covered": true
+  },
+  {
+   "radar": "FLOW",
+   "folder": "FLOW",
+   "moment": "DifferentialReflectivity",
+   "ramp": "flow-differential-reflectivity",
+   "frames": 5,
+   "pixels": 8278,
+   "colors": "238/238",
+   "covered": true
+  },
+  {
+   "radar": "FLOW",
+   "folder": "FLOW",
+   "moment": "DifferentialPhase",
+   "ramp": "flow-differential-phase",
+   "frames": 5,
+   "pixels": 8278,
+   "colors": "250/250",
+   "covered": true
+  },
+  {
+   "radar": "XEBY",
+   "folder": "ebay",
+   "moment": "CorrReflectivity",
+   "ramp": "aqpi-xband-reflectivity",
+   "frames": 3,
+   "pixels": 184158,
+   "colors": "17/17",
+   "covered": true
+  },
+  {
+   "radar": "XEBY",
+   "folder": "ebay",
+   "moment": "Velocity",
+   "ramp": "aqpi-xband-velocity",
+   "frames": 3,
+   "pixels": 365400,
+   "colors": "256/256",
+   "covered": true
+  },
+  {
+   "radar": "XEBY",
+   "folder": "ebay",
+   "moment": "CorrDifferentialReflectivity",
+   "ramp": "aqpi-xband-differential-reflectivity",
+   "frames": 3,
+   "pixels": 34881,
+   "colors": "250/250",
+   "covered": true
+  },
+  {
+   "radar": "XEBY",
+   "folder": "ebay",
+   "moment": "FilteredPhiDP",
+   "ramp": "aqpi-xband-differential-phase",
+   "frames": 3,
+   "pixels": 196595,
+   "colors": "29/29",
+   "covered": true
+  },
+  {
+   "radar": "XSCR",
+   "folder": "scrz",
+   "moment": "CorrReflectivity",
+   "ramp": "aqpi-xband-reflectivity",
+   "frames": 3,
+   "pixels": 184158,
+   "colors": "17/17",
+   "covered": true
+  },
+  {
+   "radar": "XSCR",
+   "folder": "scrz",
+   "moment": "Velocity",
+   "ramp": "aqpi-xband-velocity",
+   "frames": 3,
+   "pixels": 365400,
+   "colors": "256/256",
+   "covered": true
+  },
+  {
+   "radar": "XSWR",
+   "folder": "swyr",
+   "moment": "FilteredPhiDP",
+   "ramp": "aqpi-xband-differential-phase",
+   "frames": 3,
+   "pixels": 196595,
+   "colors": "51/51",
+   "covered": true
+  },
+  {
+   "radar": "CBAND",
+   "folder": "sscb",
+   "moment": "CorrReflectivity",
+   "ramp": "aqpi-xband-reflectivity",
+   "frames": 3,
+   "pixels": 1316297,
+   "colors": "21/21",
+   "covered": true
+  },
+  {
+   "radar": "CBAND",
+   "folder": "sscb",
+   "moment": "Velocity",
+   "ramp": "aqpi-xband-velocity",
+   "frames": 3,
+   "pixels": 365400,
+   "colors": "97/97",
+   "covered": true
+  },
+  {
+   "radar": "CBAND",
+   "folder": "sscb",
+   "moment": "CorrDifferentialReflectivity",
+   "ramp": null,
+   "frames": 3,
+   "pixels": 1052597,
+   "colors": "0/253",
+   "covered": false,
+   "note": "The C-band paints ZDR from a different colormap. Not one of the 253 colors in a million opaque pixels is within tolerance of the X-band ZDR ramp. sscb publishes no colorbar, so its own bounds cannot be read, and the readout stays off."
+  },
+  {
+   "radar": "CBAND",
+   "folder": "sscb",
+   "moment": "PhiDP",
+   "ramp": null,
+   "frames": 3,
+   "pixels": 196595,
+   "colors": "0/256",
+   "covered": false,
+   "note": "Same as the C-band's ZDR. Its prefix is PhiDP rather than FilteredPhiDP, which moment_to_prefix() already special-cases, and the colors are a different map."
+  }
+ ],
+ "shared_colorbars": {
+  "_comment": "Radars whose colorbar PNGs are byte-identical to the measured one, so they paint from the same table. md5 prefixes read on 2026-11-21. The C-band publishes no colorbar and so appears nowhere here, however its frames are measured above.",
+  "aqpi-xband-reflectivity": {
+   "md5": "f113bec5",
+   "radars": [
+    "XEBY",
+    "XSCR",
+    "XSCV",
+    "XSCW",
+    "XSWR"
+   ]
+  },
+  "aqpi-xband-velocity": {
+   "md5": "ef38ea41",
+   "radars": [
+    "XEBY",
+    "XSCR",
+    "XSCV",
+    "XSCW",
+    "XSWR"
+   ]
+  },
+  "aqpi-xband-differential-reflectivity": {
+   "md5": "fc248c88",
+   "radars": [
+    "XEBY",
+    "XSCR",
+    "XSCV",
+    "XSCW",
+    "XSWR"
+   ]
+  },
+  "aqpi-xband-differential-phase": {
+   "md5": "f75aab2c",
+   "radars": [
+    "XEBY",
+    "XSCR",
+    "XSCV",
+    "XSCW",
+    "XSWR"
+   ]
+  }
+ }
+}

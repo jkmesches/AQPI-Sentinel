@@ -3,8 +3,10 @@
 	import { getSite, ALL_OVERLAYS, type HomeView, type Overlay,
 	         type Extent, type Product,
 	         type MomentPrefixes } from '$lib/site';
-	import { momentChoices, momentDisplay,
-	         defaultMoment } from '$lib/map/moments';
+	import { momentChoices, momentDisplay, defaultMoment,
+	         prefixFor } from '$lib/map/moments';
+	import { rampFor } from '$lib/map/ramps/registry';
+	import MapLegend from '$lib/components/MapLegend.svelte';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
@@ -324,6 +326,22 @@
 	const LEGACY_MOMENTS = ['Reflectivity', 'Velocity',
 		'Differential Reflectivity', 'PhiDP', 'RhoHV'];
 	const MOMENTS = $derived(momentChoices(momentPrefixes, LEGACY_MOMENTS));
+
+	/**
+	 * The ramp the legend draws, or null when none was measured.
+	 *
+	 * Keyed on the first active radar, because the legend names one scale and
+	 * two radars can paint from different tables. The C-band shares the
+	 * X-bands' reflectivity and velocity and has its own ZDR and PhiDP, so a
+	 * legend taken from whichever radar happened to be first would be wrong
+	 * for the other half of the time.
+	 */
+	const activeRamp = $derived.by(() => {
+		if (activeRadars.length !== 1) return null;
+		const radar = activeRadars[0];
+		const prefix = prefixFor(momentPrefixes, radar, currentMoment);
+		return prefix ? rampFor(radar, prefix) : null;
+	});
 
 	// ---- per-elevation tilt (single-radar inspector, Phase 1) -------------
 	// radar-display only carries 3 of our 5 moments. Map the shared ones;
@@ -2478,7 +2496,20 @@
 		     Bottom-left, unlike the stale banner: that one is about data an
 		     operator must not act on at all, this is about data that is real
 		     but whose POSITION is unverified. Non-interactive. -->
+		<!-- Bottom-left stack. The legend and the provisional-bounds note
+		     share one column so they cannot land on top of each other; the
+		     note is conditional and the legend appears only for a measured
+		     radar and moment, so either may be the only one present. -->
 		<div class="pointer-events-none absolute bottom-3 left-3 z-20 flex max-w-[60%] flex-col gap-2">
+		{#if activeRamp}
+			<!-- Only for a pair ramps/data/coverage.json records as measured
+			     against real frames. A legend for an unmeasured ramp would
+			     name values the overlay is not painting, and would look
+			     exactly like a correct one. -->
+			<div class="w-[200px] max-w-full">
+				<MapLegend ramp={activeRamp} />
+			</div>
+		{/if}
 		{#if composite !== 'none' && compExtentProvisional.includes(composite)}
 			<div>
 				<div class="rounded-sm border border-[var(--color-warn)]/70 bg-[var(--color-canvas)]/90 px-2 py-1 shadow-lg backdrop-blur">
