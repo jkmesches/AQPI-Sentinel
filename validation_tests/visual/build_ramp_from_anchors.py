@@ -58,6 +58,7 @@ import argparse
 import json
 import math
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -366,6 +367,43 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     stops, dropped = drop_colors(stops, list(args.exclude_color or []))
     if not stops:
         raise ValueError("every stop was excluded")
+    return assemble(args, anchors, Built(
+        edges=edges, stops=stops, levels=levels, merged=merged,
+        ambiguous=ambiguous, dropped=dropped))
+
+
+@dataclass(frozen=True)
+class Built:
+    """What building the table produced, beside the table itself."""
+
+    #: The band edges the norm produced, one more than there are entries.
+    edges: list[float]
+    #: The surviving stops.
+    stops: list[dict[str, Any]]
+    #: The lookup table's size.
+    levels: int
+    #: How many entries a rounding collision absorbed.
+    merged: int
+    #: The bands dropped for naming two values at once.
+    ambiguous: list[dict[str, Any]]
+    #: How many stops an --exclude-color removed.
+    dropped: int
+
+
+def assemble(args: argparse.Namespace, anchors: list[tuple[int, int, int]],
+             built: Built) -> dict[str, Any]:
+    """Put the ramp file together from its measured parts.
+
+    Args:
+        args: The parsed command line.
+        anchors: The colormap's anchor colors.
+        built: Everything the build step measured.
+
+    Returns:
+        The ramp, ready to write.
+    """
+    edges, stops, levels = built.edges, built.stops, built.levels
+    merged, ambiguous, dropped = built.merged, built.ambiguous, built.dropped
     ramp: dict[str, Any] = {
         "moment": args.moment,
         "unit": args.unit,
@@ -378,6 +416,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "scale": "segmented" if args.norm == "boundary" else args.norm,
         "source": args.source,
         "read_on": datetime.now(timezone.utc).date().isoformat(),
+        **({"caveat": args.caveat} if args.caveat else {}),
         "built_from": {
             "kind": "LinearSegmentedColormap.from_list",
             "anchors": [to_hex(a) for a in anchors],
@@ -442,6 +481,10 @@ def main() -> int:
     _ = ap.add_argument("--moment", required=True)
     _ = ap.add_argument("--source", required=True,
                         help="where the definition was read, file and line")
+    _ = ap.add_argument("--caveat", default="",
+                        help="what a reader must know to read the numbers, "
+                             "for a field the renderer transforms before "
+                             "plotting it")
     _ = ap.add_argument("--ticks", default="",
                         help="the numbers the bar prints, comma separated")
     _ = ap.add_argument("--exclude-color", action="append", default=[])
