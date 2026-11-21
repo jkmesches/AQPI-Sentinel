@@ -39,10 +39,18 @@ export const FRAME_DWELL_MS = 900;
  * would skip against the wrong frames, which looks like playback jumping
  * at random.
  *
+ * Never returns the frame it started from. A scan over a list where every
+ * frame is quiet walks the whole way round and lands back on `from`, and
+ * returning that parks playback: the control still reads as playing and
+ * the time axis stops. Seven tilt frames on a clear day are exactly that
+ * shape, since the skip bound is six. Falling back to the plain next step
+ * keeps the loop running at its normal cadence over an empty hour.
+ *
  * @param from The step currently shown.
  * @param total How many steps there are.
  * @param activity Painted-pixel fraction per step, or an empty list.
- * @returns The next index, wrapping at the end.
+ * @returns The next index, wrapping at the end, and never `from` unless
+ *     there is only one step.
  */
 export function nextInterestingStep(
 	from: number,
@@ -62,7 +70,7 @@ export function nextInterestingStep(
 		i = (i + 1) % total;
 		skipped++;
 	}
-	return i;
+	return i === from ? (from + 1) % total : i;
 }
 
 /**

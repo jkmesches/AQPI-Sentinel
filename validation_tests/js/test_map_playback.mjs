@@ -81,21 +81,45 @@ export function runTests(mod) {
     // guard is what stops the scan there.
     check('one blank frame stays put', nextInterestingStep(0, 1, [BLANK]) === 0);
     check('one busy frame stays put', nextInterestingStep(0, 1, [BUSY]) === 0);
-    // A short all-blank list parks rather than advancing, because the scan
-    // wraps back onto `from` and the guard returns it. Playback stalls on
-    // one frame whenever every frame is blank and the list is no longer
-    // than the skip bound plus one. Seven tilt frames on a clear day are
-    // exactly that shape. Asserted as it behaves today; slice 10 owns the
-    // playback controls and is where this gets fixed.
-    check('a short all-blank list parks on the current frame',
-      nextInterestingStep(0, 2, [BLANK, BLANK]) === 0,
+    // An all-blank list used to park. The scan walked the whole way round
+    // and landed back on `from`, and returning that stopped playback with
+    // the control still reading as playing and the time axis frozen.
+    // Seven tilt frames on a clear day are exactly that shape, since the
+    // skip bound is six. Fixed on 2026-11-21.
+    const allBlank = (n) => Array.from({ length: n }, () => BLANK);
+    for (const [from, n] of [[0, 2], [3, 7], [0, 7], [6, 7], [5, 6],
+      [0, 3], [2, 4], [0, 12], [11, 12]]) {
+      const got = nextInterestingStep(from, n, allBlank(n));
+      check(`an all-blank list of ${n} advances from ${from}`,
+        got !== from, `stayed on ${got}`);
+      check(`...and ${got} is a real step`, got >= 0 && got < n, String(got));
+    }
+    check('an all-blank pair advances to the other frame',
+      nextInterestingStep(0, 2, [BLANK, BLANK]) === 1,
       String(nextInterestingStep(0, 2, [BLANK, BLANK])));
-    check('...and so does a seven-frame one',
-      nextInterestingStep(3, 7, Array.from({ length: 7 }, () => BLANK)) === 3,
-      String(nextInterestingStep(3, 7, Array.from({ length: 7 }, () => BLANK))));
-    check('one busy frame among them breaks the park',
+    check('an all-blank seven advances by one',
+      nextInterestingStep(3, 7, allBlank(7)) === 4,
+      String(nextInterestingStep(3, 7, allBlank(7))));
+    check('and wraps at the end',
+      nextInterestingStep(6, 7, allBlank(7)) === 0,
+      String(nextInterestingStep(6, 7, allBlank(7))));
+    check('one busy frame among them is still what the scan finds',
       nextInterestingStep(0, 7,
         [BLANK, BLANK, BLANK, BUSY, BLANK, BLANK, BLANK]) === 3);
+    // Playing an all-blank list has to keep moving, or the time axis
+    // stops while the control says it is running. Walked here rather than
+    // asserted at one position, since the old fault appeared only at a
+    // particular length.
+    for (const n of [2, 3, 5, 6, 7, 8, 13]) {
+      const seen = new Set();
+      let at = 0;
+      for (let tick = 0; tick < n * 2; tick++) {
+        at = nextInterestingStep(at, n, allBlank(n));
+        seen.add(at);
+      }
+      check(`playing ${n} blank frames visits more than one`, seen.size > 1,
+        `visited ${seen.size}`);
+    }
   }
 
   console.log('\nthe dwell absorbs the time the frame took:');

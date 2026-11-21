@@ -265,6 +265,18 @@ Playback position encodes as a timestamp and never as a step index. Indices
 shift as the window rolls, which is the same class of bug as the step list
 holding a product's frames after the product changed.
 
+Shipped on 2026-11-21. Two details are worth carrying into slice 9.
+
+The link has its own overlay vocabulary rather than `ALL_OVERLAYS`. That
+constant names only the four overlays a profile supplies data for and
+spells two of them with underscores, so validating against it lost terrain,
+3D terrain and NEXRAD. A second pane adds its own toggles to that
+vocabulary rather than reusing the first pane's.
+
+The write merges into the existing query rather than replacing it, because
+`?diag=probe` turns on the structural probe the visual baseline reads. Any
+parameter the console does not write survives.
+
 ## 9. Compare Panes
 
 Each pane owns its product, radars, moment and overlays. Both panes read the
@@ -426,14 +438,15 @@ One commit per slice, in this order.
 6. Cursor readout, shipped 2026-11-21.
 7. Units, backend and frontend together, shipped 2026-11-21, with the
    stale-subtree warning the measurement forced.
-8. Permalinks.
+8. Permalinks, shipped 2026-11-21.
 9. Compare panes.
-10. Keyboard, time axis, playback speed, per-layer opacity. Also fixes the
-    blank-frame stall found in slice 3: the skip scan wraps back onto the
-    frame it started from and returns it, so playback parks whenever every
-    frame is blank and the list is no shorter than the skip bound plus one.
-    Seven tilt frames on a clear day are that shape. Asserted as it behaves
-    today in `validation_tests/js/test_map_playback.mjs`.
+10. Keyboard, time axis, playback speed, per-layer opacity. The
+    blank-frame stall found in slice 3 was fixed ahead of the rest on
+    2026-11-21, since it sits in an already-extracted pure module and
+    needed none of the pane restructuring: the skip scan wrapped back onto
+    the frame it started from and returned it, so playback parked whenever
+    every frame was blank and the list was no shorter than the skip bound
+    plus one. Seven tilt frames on a clear day are that shape.
 11. Measure tool, export, place search, responsive pass.
 
 Slice 3 is the risky one, and it comes before the features. They land in the
