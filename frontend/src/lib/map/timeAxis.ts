@@ -240,3 +240,40 @@ export function gapLabel(ms: number): string {
 	const days = Math.floor(hours / 24);
 	return `${days}d ${hours % 24}h`;
 }
+
+/**
+ * Half of gapLabel's rounding step, below which it would print "0m".
+ *
+ * Not a tolerance for how far apart two panes may sit. It is the point
+ * where a label stops saying anything, and a mark reading "0m behind" is
+ * worse than no mark.
+ */
+export const OFFSET_FLOOR_MS = 30_000;
+
+/**
+ * How far a pane's frame sits from the time the panes share.
+ *
+ * A follower pane lands on the nearest frame its own product publishes,
+ * within an hour, and two products' manifests are not always equally
+ * fresh. So the panes can be minutes apart while one time strip sits under
+ * both of them. An unmarked gap is read as the same minute, which is the
+ * comparison this mode exists to prevent.
+ *
+ * @param at The frame this pane is on, ISO, or null when unknown.
+ * @param shared The time both panes are following, ISO, or null.
+ * @returns "8m behind", "4m ahead", or null when they agree or either
+ *   time is missing or unparsable.
+ */
+export function frameOffsetLabel(
+	at: string | null | undefined,
+	shared: string | null | undefined
+): string | null {
+	if (!at || !shared) return null;
+	const mine = Date.parse(at);
+	const theirs = Date.parse(shared);
+	if (!Number.isFinite(mine) || !Number.isFinite(theirs)) return null;
+	const delta = mine - theirs;
+	if (Math.abs(delta) < OFFSET_FLOOR_MS) return null;
+	const words = gapLabel(Math.abs(delta));
+	return words ? `${words} ${delta < 0 ? 'behind' : 'ahead'}` : null;
+}

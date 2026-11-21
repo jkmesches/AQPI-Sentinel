@@ -92,9 +92,15 @@
 	{@render children?.()}
 {:else}
 <div class="flex h-full flex-col">
-	<!-- HEADER -->
+	<!-- HEADER.
+	     Wraps rather than overflowing. A real phone is sent to /m by the
+	     UA sniff in hooks.server.ts, so this is the narrowed desktop
+	     window, where the row used to measure 1332 px whatever the
+	     viewport was and every page scrolled sideways under it. A page
+	     that scrolls sideways turns a drag on the map into a pan of the
+	     page. -->
 	<header
-		class="flex items-center gap-5 border-b border-[var(--color-border)] px-4 py-2.5 text-[12px]"
+		class="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-[var(--color-border)] px-4 py-2.5 text-[12px]"
 	>
 		<div class="flex items-baseline gap-3">
 			<span
@@ -104,7 +110,7 @@
 			<span class="text-[11px] text-[var(--color-muted)] num">{dataSource}</span>
 		</div>
 
-		<nav class="flex items-center gap-1 border-l border-[var(--color-border)] pl-3">
+		<nav class="flex flex-wrap items-center gap-1 border-l border-[var(--color-border)] pl-3">
 			<NavLink href="/" label="Map" />
 			<NavLink href="/dashboard" label="Dashboard" />
 			<NavLink href="/timeline" label="Timeline" />
@@ -115,7 +121,7 @@
 			{/if}
 		</nav>
 
-		<div class="ml-auto flex items-center gap-6 text-[11px]">
+		<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px]">
 			<!-- dual clock: UTC + local -->
 			<div class="flex items-baseline gap-3">
 				<div class="flex items-baseline gap-1">
@@ -197,9 +203,11 @@
 		</div>
 	</header>
 
-	<!-- STAGE STRIP -->
+	<!-- STAGE STRIP. Wraps for the reason the header does: six stages and
+	     an alarm count in one non-wrapping row measured 885 px whatever
+	     the viewport was. -->
 	<nav
-		class="flex items-center gap-5 border-b border-[var(--color-border)] px-4 py-1.5"
+		class="flex flex-wrap items-center gap-x-5 gap-y-0.5 border-b border-[var(--color-border)] px-4 py-1.5"
 	>
 		{#each Object.entries(counts) as [stage, c]}
 			<!-- Fall through to 'skip' (gray) when nothing in the stage

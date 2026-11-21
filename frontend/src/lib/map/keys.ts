@@ -44,6 +44,8 @@ export type Action =
 	| 'panel'
 	| 'help'
 	| 'close'
+	| 'measure'
+	| 'measure-undo'
 	| 'pan-left'
 	| 'pan-right'
 	| 'pan-up'
@@ -127,6 +129,8 @@ export const BINDINGS: Readonly<Record<string, Action>> = {
 	'[': 'panel',
 	'?': 'help',
 	'Escape': 'close',
+	'm': 'measure',
+	'Backspace': 'measure-undo',
 	'+': 'zoom-in',
 	'=': 'zoom-in',
 	'-': 'zoom-out',
@@ -274,8 +278,22 @@ export const SHORTCUTS: readonly {
 		does: 'show or hide the layers panel',
 		actions: ['panel']
 	},
+	{
+		keys: 'M',
+		does: 'measure distance and bearing',
+		actions: ['measure']
+	},
+	{
+		keys: 'Backspace',
+		does: 'drop the last measured point',
+		actions: ['measure-undo']
+	},
 	{ keys: '?', does: 'this list', actions: ['help'] },
-	{ keys: 'Esc', does: 'close this list', actions: ['close'] }
+	{
+		keys: 'Esc',
+		does: 'close this list, or stop measuring',
+		actions: ['close']
+	}
 ];
 
 /** How far a shifted arrow pans, as a fraction of the shorter map edge. */

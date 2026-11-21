@@ -303,9 +303,58 @@ it for each of them. The strip sits on the page rather than inside the pane:
 inside, it took height from that pane alone and left the two maps covering
 different ground at one zoom.
 
-The barrier is still per pane. Two panes each hold their own, so a pane can
-still paint while the other is loading. Closing that needs the page to gather
-both panes' thunks, which is the one piece of this section not yet built.
+The barrier spans both panes as of 2026-11-21. The page holds a rendezvous
+and each pane hands it the thunks its own barrier produced, so neither paints
+a new minute while the other is loading. A pane whose product has no frame
+inside the shared window never arrives at all, so the wait ends on a clock
+rather than on the other pane, and the result there is the old behavior
+rather than a stall.
+
+The wait is 400 ms, measured rather than chosen. Stepping six frames in
+compare mode on the deployed console, the arrivals fall into two groups: a
+step drives both panes and those pairs arrived 3 to 156 ms apart, while the
+panes' own 5 s poll and 2 min overlay sweep arrived 2.2 to 11.4 s apart.
+Those are not a pair, so holding one for the other would delay a pane for
+nothing. 400 ms sits above the slowest real pair and far below the fastest
+unrelated one.
+
+Building it found the larger fault it was supposed to refine. `followTime`
+moved the follower pane's step index and never loaded the frame, so that
+pane's scrubber tracked the primary while its imagery stayed on whatever it
+had last fetched. The panes read as locked and were showing different
+minutes, which is the fault compare mode exists to avoid. Slice 9's own
+harness missed it because it compared products and cameras, and a pane
+publishes its product the moment it is chosen. Each pane now publishes the
+frame its imagery is actually at, and the harness compares those.
+
+### Panes on Different Clocks
+
+Each product keeps its own step manifest, and the two are not always equally
+fresh. On 2026-11-21 the deployed `qpe_1hr` inch manifest sat four two-minute
+steps behind `comp_ref`'s, so the panes held 05:44 and 05:52 under one time
+strip and both were right. A follower lands on the nearest frame its own
+product publishes, within the hour that `STEP_TOLERANCE_MS` allows, which is
+the most it can do. Nothing said so, and two panes an hour apart are as
+convincing as two a minute apart.
+
+A pane whose step is not the shared time now carries its gap in its label,
+"8m behind" in the warning color beside the product name. The threshold is
+30 s, which is where `gapLabel` would round to "0m" and the mark would stop
+saying anything. The label is derived from the step rather than from the
+painted frame, so it states what the product can supply instead of appearing
+for the length of every load.
+
+The harness checked this the wrong way first. It demanded equal timestamps
+across the two panes, which tests the deployment's publishing luck: it passed
+on three runs while the manifests happened to agree and failed when they
+drifted apart, reporting a defect that was in itself. It now fetches pane B's
+own manifest with its own unit, computes the nearest frame to the shared time,
+and holds the pane to that. The barrier is counted separately, with both panes
+on one product, since on two the follower's nearest frame does not move on
+every step and a count of joint releases would be measuring the manifests. A
+third phase serves pane B a manifest that stops eight minutes behind the
+shared time, so the mark has to appear on every run rather than on the days
+the deployment drifts.
 
 ## 10. Console Controls
 
@@ -354,6 +403,67 @@ composite, 0.8 for the radars and 0.6 for NEXRAD, so three constants became
 three settings without repainting any console. The single slider older builds
 saved upgrades onto the radars alone, which is the only layer it ever moved,
 and only where no per-layer value exists yet.
+
+## 10a. Measure, Export, Search and Width
+
+Shipped 2026-11-21, as slice 11.
+
+The measure tool is great-circle. The console covers the Bay Area at zoom 7
+and the X-band network spans about 150 km, where a planar measurement on Web
+Mercator coordinates is long by the secant of the latitude, 27% at 38 degrees
+north. A tool that reports a radar's range 27% long is worse than no tool,
+because the number looks plausible. Bearings are true, and every label says
+so, since declination here is about 13 degrees east and a bearing silently
+off by that much is the kind of error that survives review. The assertions
+check the geometry against Vincenty's inverse on WGS84, which is a different
+algorithm on a different earth model, and the two agree to within 0.18% over
+the network's own legs.
+
+The export burns the caption and the color bar into the pixels. A screenshot
+pasted into a thread has no address bar and no legend panel, so a frame of
+reflectivity with neither is a picture of green blobs that may be three hours
+old, and both of those have caused real confusion here. The map is read back
+through `preserveDrawingBuffer`, because the alternative is grabbing the
+canvas inside a render callback, which returns a blank image intermittently
+rather than always.
+
+The place search runs on this deployment's own datasets, with no geocoder.
+The CSU namespace has no public internet route, so a search that called out
+to one would work on the laptop and fail on the machine the operators use,
+which is the worst place for a feature to differ. It covers the radars, the
+reservoir file and the HUC-8 watersheds, and says so on a miss, so nothing
+found reads as "not in these datasets" rather than as a broken box. Stream
+gauges are left out on purpose: they come from upstream, which has returned
+502 in this console's own tests, and a search sometimes missing a third of
+its answers is harder to trust than one whose scope is fixed.
+
+The responsive pass is driven by three measured widths rather than a
+framework's breakpoints, kept in one module because the panel, the panes and
+the time strip have to agree. Below 560 px the panel starts closed, since 280
+px of a 390 px screen leaves a sliver of map behind a wall of checkboxes.
+Below 720 px the time axis takes its own row. Below 900 px the comparison
+panes stack, which loses the north-south extent this network covers and is
+still better than two 200 px maps. A real phone never sees any of this, since
+`hooks.server.ts` sends it to `/m`, so these are the narrowed desktop window.
+
+The header was the actual obstacle. Its two rows measured 1332 px and 885 px
+whatever the viewport was, so every page scrolled sideways under them, which
+turns a drag on the map into a pan of the page. Both now wrap.
+
+### MapView's Remaining Size
+
+`MapView.svelte` is 4,380 lines. Slice 3 pulled the pure logic out into
+modules under `$lib/map`, and every slice since has added its own, so the
+geometry, the vocabularies, the thresholds and the matching are all testable
+and tested. What is left in the component is the MapLibre wiring, and there
+is a lot of it: eleven layer families, the frame barrier, the readout
+sampler, the prefs blob, the link, the panes' shared state and now the
+measure tool, the export, the search and the opacities.
+
+Nothing here is blocked on it. It is the next structural job, and it needs a
+slice of its own rather than being done alongside a feature, since the last
+behavior-preserving refactor of this component needed a 28-state structural
+baseline before anything moved.
 
 ## 11. Dashboard
 
@@ -496,7 +606,8 @@ One commit per slice, in this order.
 7. Units, backend and frontend together, shipped 2026-11-21, with the
    stale-subtree warning the measurement forced.
 8. Permalinks, shipped 2026-11-21.
-9. Compare panes, shipped 2026-11-21, except the barrier across both.
+9. Compare panes, shipped 2026-11-21. The barrier across both followed
+   with slice 11, since it needed the page to gather the panes' thunks.
 10. Keyboard, time axis, playback speed, per-layer opacity, shipped
     2026-11-21. The blank-frame stall found in slice 3 was fixed ahead of
     the rest, since it sits in an already-extracted pure module and needed
@@ -504,7 +615,11 @@ One commit per slice, in this order.
     frame it started from and returned it, so playback parked whenever
     every frame was blank and the list was no shorter than the skip bound
     plus one. Seven tilt frames on a clear day are that shape.
-11. Measure tool, export, place search, responsive pass.
+11. Measure tool, export, place search, responsive pass, shipped
+    2026-11-21, with slice 9's cross-pane frame barrier closed alongside
+    them. Building that barrier found what it was meant to refine: the
+    follower pane moved its scrubber and never loaded the frame, so the
+    panes read as locked while showing different minutes.
 
 Slice 3 is the risky one, and it comes before the features. They land in the
 new structure rather than being ported into it afterward.

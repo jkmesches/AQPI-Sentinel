@@ -2,6 +2,7 @@
 	/** Time controls strip — full-width band beneath the map. */
 	import { DEFAULT_SPEED, SPEEDS, speedLabel } from '$lib/map/playback';
 	import { buildAxis, gapLabel, nearestStep } from '$lib/map/timeAxis';
+	import { shouldWrapStrip } from '$lib/map/responsive';
 
 	let {
 		stepIdx = 0,
@@ -53,6 +54,8 @@
 
 	let trackEl: HTMLDivElement | undefined = $state();
 	let scrubbing = $state(false);
+	let stripWidth = $state(0);
+	const wrapped = $derived(shouldWrapStrip(stripWidth));
 
 	/**
 	 * Move to the frame nearest a point on the track.
@@ -102,9 +105,13 @@
      must have exactly one, since two would disagree about the time the
      panes share. -->
 <div
+	bind:clientWidth={stripWidth}
 	data-time-controls
 	data-time-strip={JSON.stringify({ stepIdx, totalSteps, playing, speed })}
-	class="flex items-center gap-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]/95 px-4 py-2 backdrop-blur"
+	data-strip-layout={wrapped ? 'wrapped' : 'one-row'}
+	class="relative z-10 flex gap-x-4 gap-y-1 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 {wrapped
+		? 'flex-wrap items-start'
+		: 'items-center'}"
 >
 	<!-- Timestamp readout: time prominent, date subdued -->
 	<div class="flex min-w-[10rem] flex-col leading-tight">
@@ -195,10 +202,12 @@
 	<!-- Timeline, placed by time rather than one even slot per frame. An
 	     hour with nothing published used to be one slot the same width as
 	     every other, so the control that picks the frame was saying the
-	     record was continuous. See $lib/map/timeAxis. -->
+	     record was continuous. See $lib/map/timeAxis.
+	     On a narrow strip it takes its own row, because an axis narrower
+	     than the 31 frames it draws is a row of hairlines. -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="flex flex-1 flex-col gap-1"
+		class="flex flex-col gap-1 {wrapped ? 'w-full' : 'flex-1'}"
 		data-time-axis={JSON.stringify({
 			even: axis.even,
 			gaps: axis.gaps.length,

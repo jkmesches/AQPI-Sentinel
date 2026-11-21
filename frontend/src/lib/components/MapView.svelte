@@ -28,11 +28,23 @@
 	import { decodeLink, encodeLink, hasAny, stepForTime,
 	         linkOverlayNames, mergeQuery, STEP_TOLERANCE_MS,
 	         type Camera as LinkCamera } from '$lib/map/permalink';
+	import { frameOffsetLabel } from '$lib/map/timeAxis';
 	import { invert } from '$lib/map/ramps/invert';
 	import { overlayFraction, overlayPixel,
 	         readoutText } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
 	import MapLegend from '$lib/components/MapLegend.svelte';
+	import { barLayout, legendGradient } from '$lib/map/ramps/legend';
+	import {
+		boundsCenter, buildIndex, coordinateBounds, searchEntries, stepHit,
+		type SearchEntry
+	} from '$lib/map/search';
+	import { RESERVOIRS_URL, WATERSHEDS_URL } from '$lib/map/layers/geography';
+	import { shouldClosePanel } from '$lib/map/responsive';
+	import type { Ramp } from '$lib/map/ramps/invert';
+	import {
+		exportCaption, exportFileName, exportLayout, type Box as ExportBox
+	} from '$lib/map/exportImage';
 	interface Props {
 		/** 0 is the primary pane, which owns the shared chrome. */
 		pane?: number;
@@ -57,6 +69,13 @@
 		 * one press, stepping time twice and switching both products.
 		 */
 		paneControls?: PaneControls | null;
+		/**
+		 * The rendezvous both panes hand their frame swaps to, so neither
+		 * paints a new minute while the other is still loading. Null when
+		 * the page does not provide one, which fires each pane's swaps on
+		 * their own as before.
+		 */
+		frameGate?: PaneGate | null;
 	}
 	let {
 		pane = 0,
@@ -65,7 +84,8 @@
 		sharedCamera = $bindable(null),
 		onToggleCompare = null,
 		timeStrip = $bindable(null),
-		paneControls = $bindable(null)
+		paneControls = $bindable(null),
+		frameGate = null
 	}: Props = $props();
 
 	/** Whether this pane owns the time strip, the prefs and the address bar. */
@@ -76,13 +96,17 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import type { TimeStrip } from '$lib/map/paneTime';
-	import type { PaneControls, PaneSize } from '$lib/map/paneControls';
+	import type { PaneControls, PaneGate, PaneSize } from '$lib/map/paneControls';
 	import {
 		DEFAULT_OPACITIES, OPACITY_LABELS, OPACITY_LAYERS, isHidden,
 		normalizeOpacities, opacityFromPercent, opacityPercent,
 		type Opacities, type OpacityLayer
 	} from '$lib/map/opacity';
 	import { stepProduct } from '$lib/map/keys';
+	import {
+		formatBearing, formatDistance, isUsable, measureLine,
+		segments, totalKm, type LngLat
+	} from '$lib/map/measure';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
 	import {
@@ -449,6 +473,372 @@
 	// The cursor readout. The sampler holds the frame on screen, and
 	// readoutFrame says which radar's box it was placed in; both are null
 	// whenever more than one radar is on, since the readout names one scale.
+	// === Measure tool ===
+	//
+	// Not persisted. A path drawn over yesterday's weather and restored
+	// today measures ground the reader was not looking at, and a line on
+	// the map with no memory of why it is there reads as a fault.
+	let measuring = $state(false);
+	let measurePoints = $state<LngLat[]>([]);
+	const measureLegs = $derived(segments(measurePoints));
+	const measureTotalKm = $derived(totalKm(measurePoints));
+	const MEASURE_SOURCE = 'measure-path';
+	const MEASURE_LINE_LAYER = 'measure-path-line';
+	const MEASURE_POINT_LAYER = 'measure-path-points';
+
+	/**
+	 * Draw the measured path, or take it off the map.
+	 *
+	 * The source is replaced rather than removed between clicks, because
+	 * removing and re-adding a layer on every click moves it in paint
+	 * order and it ends up under the overlays it is being drawn over.
+	 */
+	function syncMeasureLayer(): void {
+		if (!map || !styleReady || !mapAlive()) return;
+		const good = measurePoints.filter(isUsable);
+		const data: GeoJSON.FeatureCollection = {
+			type: 'FeatureCollection',
+			features: [
+				...(measureLine(measurePoints) ? [measureLine(measurePoints)!] : []),
+				...good.map((p, i) => ({
+					type: 'Feature' as const,
+					properties: { index: i },
+					geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] }
+				}))
+			]
+		};
+		const existing = map.getSource(MEASURE_SOURCE) as
+			maplibregl.GeoJSONSource | undefined;
+		if (existing) {
+			existing.setData(data);
+			return;
+		}
+		map.addSource(MEASURE_SOURCE, { type: 'geojson', data });
+		map.addLayer({
+			id: MEASURE_LINE_LAYER,
+			type: 'line',
+			source: MEASURE_SOURCE,
+			filter: ['==', ['geometry-type'], 'LineString'],
+			layout: { 'line-cap': 'round', 'line-join': 'round' },
+			paint: {
+				'line-color': '#ffffff',
+				'line-width': 2,
+				'line-dasharray': [2, 1.5]
+			}
+		});
+		map.addLayer({
+			id: MEASURE_POINT_LAYER,
+			type: 'circle',
+			source: MEASURE_SOURCE,
+			filter: ['==', ['geometry-type'], 'Point'],
+			paint: {
+				'circle-radius': 4,
+				'circle-color': '#ffffff',
+				'circle-stroke-width': 1.5,
+				'circle-stroke-color': '#000000'
+			}
+		});
+	}
+
+	/** Turn the measure tool on or off, clearing the path on the way out. */
+	function toggleMeasure(): void {
+		measuring = !measuring;
+		if (!measuring) measurePoints = [];
+		if (map && mapAlive()) {
+			map.getCanvas().style.cursor = measuring ? 'crosshair' : '';
+		}
+	}
+
+	/** Drop the last point, or leave the tool if there is none. */
+	function undoMeasurePoint(): void {
+		if (measurePoints.length === 0) {
+			toggleMeasure();
+			return;
+		}
+		measurePoints = measurePoints.slice(0, -1);
+	}
+
+	// === Export ===
+	//
+	// The caption and the color bar are burned into the pixels, because a
+	// screenshot pasted into a thread has no address bar and no legend
+	// panel, and a frame of reflectivity with neither is a picture of
+	// green blobs that may be three hours old.
+	let exporting = $state(false);
+	let exportError = $state<string | null>(null);
+
+	/**
+	 * Draw the color bar into the exported image.
+	 *
+	 * Drawn from the same ramp the on-screen legend uses and through the
+	 * same tick geometry, so the two cannot disagree about what a color
+	 * means.
+	 *
+	 * @param ctx Where to draw.
+	 * @param box Where the bar goes.
+	 * @param ramp The ramp to draw.
+	 * @param ink The text color.
+	 */
+	function drawExportLegend(
+		ctx: CanvasRenderingContext2D,
+		box: ExportBox,
+		ramp: Ramp,
+		ink: string
+	): void {
+		const charPx = 5.4;
+		const layout = barLayout(ramp, box.width, charPx, 1);
+		const left = box.x + layout.padPx;
+		const grad = ctx.createLinearGradient(left, 0, left + layout.barPx, 0);
+		for (const stop of legendGradient(ramp)) {
+			grad.addColorStop(Math.min(1, Math.max(0, stop.offset)), stop.color);
+		}
+		ctx.fillStyle = grad;
+		ctx.fillRect(left, box.y, layout.barPx, box.height);
+		ctx.strokeStyle = ink;
+		ctx.lineWidth = 1;
+		ctx.strokeRect(left + 0.5, box.y + 0.5, layout.barPx - 1,
+			box.height - 1);
+		ctx.fillStyle = ink;
+		ctx.font = '9px ui-monospace, monospace';
+		ctx.textBaseline = 'top';
+		for (const tick of layout.ticks) {
+			ctx.textAlign = 'center';
+			ctx.fillText(tick.label, left + tick.at * layout.barPx,
+				box.y + box.height + 3);
+		}
+		ctx.textAlign = 'right';
+		ctx.fillText(ramp.label, box.x + box.width, box.y - 12);
+	}
+
+	/**
+	 * Compose the exported image and hand it to the browser.
+	 *
+	 * Reads the map canvas directly, which needs `preserveDrawingBuffer`
+	 * on the map. A failure is reported in the panel rather than thrown,
+	 * because the only thing a reader can do about a tainted or missing
+	 * canvas is take an ordinary screenshot, and an export that silently
+	 * does nothing looks like a dead button.
+	 */
+	async function exportImage(): Promise<void> {
+		exportError = null;
+		if (!map || !mapAlive()) {
+			exportError = 'the map is not ready';
+			return;
+		}
+		exporting = true;
+		try {
+			// One repaint first, so the buffer holds the frame on screen
+			// rather than whatever was last drawn before an idle period.
+			map.triggerRepaint();
+			await new Promise<void>((resolve) => {
+				requestAnimationFrame(() => resolve());
+			});
+			const src = map.getCanvas();
+			const layout = exportLayout(src.width, src.height,
+				activeRamp !== null);
+			const out = document.createElement('canvas');
+			out.width = layout.width;
+			out.height = layout.height;
+			const ctx = out.getContext('2d');
+			if (!ctx) {
+				exportError = 'this browser gave no 2d canvas';
+				return;
+			}
+			const dark = theme.resolved === 'dark';
+			const ground = dark ? '#0b0f0d' : '#f6f7f6';
+			const ink = dark ? '#e6ece8' : '#1b211e';
+			const faint = dark ? '#8d9a93' : '#5a635e';
+			ctx.fillStyle = ground;
+			ctx.fillRect(0, 0, out.width, out.height);
+			ctx.drawImage(src, layout.map.x, layout.map.y,
+				layout.map.width, layout.map.height);
+
+			const caption = exportCaption({
+				site: siteName,
+				product: productLabel(composite),
+				moment: composite === 'none' ? currentMoment : null,
+				unit: currentUnit,
+				stepLabel,
+				radars: [...activeRadars].sort(),
+				source: dataSource
+			});
+			ctx.textBaseline = 'top';
+			ctx.textAlign = 'left';
+			ctx.fillStyle = ink;
+			ctx.font = '600 15px ui-sans-serif, system-ui, sans-serif';
+			ctx.fillText(caption.title, layout.footer.x, layout.footer.y + 8);
+			ctx.font = '13px ui-monospace, monospace';
+			ctx.fillText(caption.when, layout.footer.x, layout.footer.y + 28);
+			ctx.fillStyle = faint;
+			ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+			ctx.fillText(caption.credit, layout.footer.x,
+				layout.footer.y + 47);
+
+			if (layout.legend && activeRamp) {
+				drawExportLegend(ctx, layout.legend, activeRamp, faint);
+			}
+
+			const blob = await new Promise<Blob | null>((resolve) => {
+				out.toBlob(resolve, 'image/png');
+			});
+			if (!blob) {
+				exportError = 'the image could not be encoded';
+				return;
+			}
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = exportFileName(composite, stepLabel);
+			a.click();
+			// Revoked on the next tick rather than immediately: Safari
+			// reads the href after the click returns.
+			setTimeout(() => URL.revokeObjectURL(url), 10_000);
+		} catch (e) {
+			exportError = e instanceof Error ? e.message : String(e);
+		} finally {
+			exporting = false;
+		}
+	}
+
+	// === Place search ===
+	//
+	// Over this deployment's own datasets, with no geocoder. The CSU
+	// namespace has no public internet route, so a search that called one
+	// would work here and fail there, which is the worst place for a
+	// feature to differ. Stream gauges are left out on purpose: they come
+	// from upstream, which has returned 502 in this console's own tests,
+	// and a search that is sometimes missing a third of its answers is
+	// harder to trust than one whose scope is fixed.
+	let searchText = $state('');
+	let searchOpen = $state(false);
+	let searchHit = $state(-1);
+	let searchPlaces = $state<SearchEntry[]>([]);
+	let searchLoaded = false;
+	let searchInput: HTMLInputElement | undefined = $state();
+
+	const searchIndex = $derived(buildIndex([
+		...radars.map((r) => ({
+			id: r.id,
+			name: r.name || r.id,
+			kind: 'radar',
+			lng: r.lon,
+			lat: r.lat,
+			detail: r.id,
+			zoom: 9
+		})),
+		...searchPlaces
+	]));
+	const searchHits = $derived(searchEntries(searchIndex, searchText));
+
+	/**
+	 * Read the reservoir and watershed files into the search index.
+	 *
+	 * Once, on the first use of the box, rather than at load. Neither file
+	 * is needed to draw a map and together they are about a megabyte, so
+	 * fetching them for every visit would cost every reader for a feature
+	 * most of them never open.
+	 */
+	async function loadSearchPlaces(): Promise<void> {
+		if (searchLoaded) return;
+		searchLoaded = true;
+		const found: SearchEntry[] = [];
+		try {
+			const res = await fetch(RESERVOIRS_URL);
+			if (res.ok) {
+				const fc = await res.json() as GeoJSON.FeatureCollection;
+				for (const f of fc.features ?? []) {
+					const p = (f.properties ?? {}) as
+						{ name?: string; river?: string };
+					const g = f.geometry as GeoJSON.Point;
+					if (!p.name || g?.type !== 'Point') continue;
+					found.push({
+						id: `res-${p.name}`,
+						name: `${p.name} Reservoir`,
+						kind: 'reservoir',
+						lng: g.coordinates[0],
+						lat: g.coordinates[1],
+						detail: p.river ? `${p.river} River` : undefined,
+						zoom: 11
+					});
+				}
+			}
+		} catch { /* the box works over the radars alone */ }
+		try {
+			const res = await fetch(WATERSHEDS_URL);
+			if (res.ok) {
+				const fc = await res.json() as GeoJSON.FeatureCollection;
+				for (const f of fc.features ?? []) {
+					const p = (f.properties ?? {}) as
+						{ NAME?: string; HUC8?: string };
+					const bounds = coordinateBounds(
+						(f.geometry as { coordinates?: unknown })?.coordinates);
+					if (!p.NAME || !bounds) continue;
+					const center = boundsCenter(bounds);
+					found.push({
+						id: `huc-${p.HUC8 ?? p.NAME}`,
+						name: p.NAME,
+						kind: 'watershed',
+						lng: center.lng,
+						lat: center.lat,
+						detail: p.HUC8 ? `HUC-8 ${p.HUC8}` : undefined,
+						bounds
+					});
+				}
+			}
+		} catch { /* as above */ }
+		searchPlaces = found;
+	}
+
+	/** Move the camera to a result and close the box. */
+	function goToPlace(entry: SearchEntry): void {
+		if (!map || !mapAlive()) return;
+		if (entry.bounds) {
+			map.fitBounds(
+				[[entry.bounds[0], entry.bounds[1]],
+					[entry.bounds[2], entry.bounds[3]]],
+				{ padding: 48, duration: 600 });
+		} else {
+			map.flyTo({
+				center: [entry.lng, entry.lat],
+				zoom: entry.zoom ?? 10,
+				duration: 800
+			});
+		}
+		searchOpen = false;
+		searchText = '';
+		searchHit = -1;
+	}
+
+	/**
+	 * Handle a key inside the search box.
+	 *
+	 * The box swallows every key it handles, and the console's own
+	 * listener already leaves an input alone, so nothing here can reach
+	 * the map.
+	 *
+	 * @param e The press.
+	 */
+	function onSearchKey(e: KeyboardEvent): void {
+		if (e.key === 'Escape') {
+			searchOpen = false;
+			searchText = '';
+			searchHit = -1;
+			searchInput?.blur();
+			return;
+		}
+		if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+			e.preventDefault();
+			searchHit = stepHit(searchHit, searchHits.length,
+				e.key === 'ArrowDown' ? 1 : -1);
+			return;
+		}
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			const pick = searchHits[searchHit >= 0 ? searchHit : 0];
+			if (pick) goToPlace(pick.entry);
+		}
+	}
+
 	const sampler = new FrameSampler();
 	let readoutFrame = $state<
 		{ extent: Extent; radar: string } | null>(null);
@@ -566,6 +956,8 @@
 	 */
 	let stepsFor = $state('');
 	let playing = $state(false);
+	/** The frame time the imagery on screen is at, which can lag stepIdx. */
+	let paintedTs = $state<string | null>(null);
 	// Persisted, unlike `playing`. A speed is a preference; a running loop
 	// on arrival is not, which is why the saved prefs never restore one.
 	let playSpeed = $state(DEFAULT_SPEED);
@@ -1470,8 +1862,23 @@
 		// layer with nothing to swap.
 		const result = await prepareFrame(FRAME_MODULES, { map: m, alive }, FRAME_DEADLINE_MS);
 		if (!alive()) return;
-		for (const apply of result.applies) apply();
 		frameErrors = result.errors;
+		// What is actually on screen, as opposed to what the scrubber
+		// says. The two came apart in compare mode and nothing reported
+		// it, so this is published in `data-view` for the harness.
+		const painting = steps[stepIdx]?.ts ?? null;
+		// Through the page's gate when there is another pane, so the two
+		// swap together. On its own this fires at once, since the gate
+		// expects one. See $lib/map/frameGate.
+		if (frameGate) {
+			frameGate.arrive(pane, [
+				...result.applies,
+				() => { paintedTs = painting; }
+			]);
+		} else {
+			for (const apply of result.applies) apply();
+			paintedTs = painting;
+		}
 		refreshTilt();
 	}
 	function stepMove(move: 'first' | 'last' | 'prev' | 'next') {
@@ -1929,13 +2336,22 @@
 		// link said which overlays the view had.
 		const raw = new URLSearchParams(window.location.search);
 		if (raw.has('o')) applyOverlayNames(link.overlays);
-		if (link.camera && map) {
+		// On mount this runs before the map is constructed, so the camera
+		// is held for the constructor instead of being dropped. It used to
+		// be dropped: a link opened in a fresh browser restored the
+		// product, the radars and the overlays, and then showed them at
+		// the default view, which is the one thing a link is for. Found on
+		// 2026-11-21 by a harness that pinned the camera through a link
+		// and got the default bearing back.
+		pendingLinkCamera = link.camera ?? null;
+		if (pendingLinkCamera && map) {
 			map.jumpTo({
-				center: [link.camera.lon, link.camera.lat],
-				zoom: link.camera.zoom,
-				bearing: link.camera.bearing,
-				pitch: link.camera.pitch
+				center: [pendingLinkCamera.lon, pendingLinkCamera.lat],
+				zoom: pendingLinkCamera.zoom,
+				bearing: pendingLinkCamera.bearing,
+				pitch: pendingLinkCamera.pitch
 			});
+			pendingLinkCamera = null;
 		}
 		_linkTs = link.ts;
 	}
@@ -1945,6 +2361,15 @@
 	// than used as an index: indices shift as the window rolls, and an hour
 	// later the 30th step is a different minute.
 	let _linkTs: string | null = null;
+	/**
+	 * A camera a link asked for before the map existed.
+	 *
+	 * `applyLink` runs during mount, ahead of the constructor, because the
+	 * product and radar ids it sets have to be corrected against what this
+	 * deployment publishes before the map is built. So the camera waits
+	 * here and the constructor takes it.
+	 */
+	let pendingLinkCamera: LinkCamera | null = null;
 
 	/** The camera, for a link. Null before the map exists. */
 	function linkCamera(): LinkCamera | null {
@@ -1992,8 +2417,22 @@
 			_applyingShared = true;
 			stepIdx = at;
 			_applyingShared = false;
+			// And load the frame. Moving the index alone moved this pane's
+			// scrubber and left its imagery on whatever it had last
+			// fetched, so the panes read as locked and were not. Nothing
+			// else drives a load here: the primary pane calls this itself
+			// from stepMove, and a follower has no such call.
+			void syncAllToStep();
 		}
 	}
+
+	// How far this pane's step sits from the shared time, for the label.
+	// Read from the step list rather than from the painted frame, so it
+	// states what this product can supply instead of flickering on for the
+	// length of every load.
+	const frameOffset = $derived(
+		compare ? frameOffsetLabel(steps[stepIdx]?.ts ?? null, sharedTime) : null
+	);
 
 	/** Publish this pane's camera, so the other pane can match it. */
 	function publishCamera(): void {
@@ -2218,6 +2657,10 @@
 	$effect(() => {
 		void layerOpacity;
 		applyOpacity();
+	});
+	$effect(() => {
+		void measurePoints; void styleReady;
+		syncMeasureLayer();
 	});
 	// Moment switch — swaps every active overlay to the new moment.
 	$effect(() => {
@@ -2771,8 +3214,22 @@
 		}
 		// Second pass, now able to drop a decommissioned radar or a renamed
 		// product rather than handing a stale id to MapLibre.
+		// Read before loadPrefs, which writes nothing but is the only other
+		// reader of this key: the question is whether this browser has
+		// been here before, not what it stored.
+		let seenBefore = true;
+		try {
+			seenBefore = localStorage.getItem('sentinel-map-prefs') !== null;
+		} catch { /* blocked storage reads as a first visit */ }
 		const restored = loadPrefs(prefsVocabulary());
 		applyPrefs(restored);
+		// On a phone the 280 px panel leaves about 110 px of map, so a
+		// console that opens it by default opens onto a sliver of weather
+		// behind a wall of checkboxes. Only on a first visit: a reader who
+		// opened it on a narrow screen meant to.
+		if (shouldClosePanel(mapDiv?.clientWidth ?? 0, seenBefore)) {
+			panelOpen = false;
+		}
 		// A link wins over stored prefs where it says anything, and leaves
 		// the rest alone. Applied after applyPrefs for the same reason the
 		// composite correction below is: applyPrefs assigns straight from
@@ -2803,7 +3260,16 @@
 		// Build the map AT the saved camera rather than jumping to it after
 		// load: a jumpTo here would render the default view first and visibly
 		// snap, and it would also fight the fitBounds paths on slow loads.
-		const cam = restored.camera;
+		//
+		// A link's camera outranks the stored one, the same way its product
+		// and radars do, because the sender chose the view and the reader's
+		// own last position is not what the link was sent to show.
+		const linkCam = pendingLinkCamera;
+		pendingLinkCamera = null;
+		const cam = linkCam
+			? { lng: linkCam.lon, lat: linkCam.lat, zoom: linkCam.zoom,
+				bearing: linkCam.bearing, pitch: linkCam.pitch }
+			: restored.camera;
 		map = new maplibregl.Map({
 			container: mapDiv,
 			style: styleUrl(),
@@ -2812,6 +3278,14 @@
 			pitch: cam ? cam.pitch : 0,
 			bearing: cam ? cam.bearing : defaultBearingFromRadars(radars),
 			attributionControl: { compact: true },
+			// preserveDrawingBuffer is what lets the export read the canvas
+			// back. Without it the drawing buffer is cleared after each
+			// frame and toDataURL returns a blank image, intermittently
+			// rather than always, which is the worst way for an export to
+			// fail. The cost is some WebGL buffer reuse, and this map
+			// already caps its tile cache and throttles decodes for the
+			// same reason. MapLibre 5 moved it under canvasContextAttributes.
+			canvasContextAttributes: { preserveDrawingBuffer: true },
 			// Bound MapLibre's tile cache. Default is undefined → grows
 			// effectively unbounded. We don't pan, so a small cap suffices.
 			maxTileCacheSize: 32,
@@ -2883,19 +3357,33 @@
 			syncAllToStep();
 			refreshRadarOverlays();
 
+			// Every click handler below asks `measuring` first. A click
+			// while the measure tool is on is a point on the path, and
+			// toggling a radar or opening a gauge popup under it would
+			// both act and measure on one press.
 			map.on('click', 'radar-point', (e) => {
+				if (measuring) return;
 				const f = e.features?.[0];
 				if (!f) return;
 				const p = f.properties as { id: string; clickable?: boolean };
 				if (p.clickable) toggleRadar(p.id);
 			});
 			map.on('click', 'radar-label', (e) => {
+				if (measuring) return;
 				const f = e.features?.[0];
 				if (!f) return;
 				const p = f.properties as { id: string; clickable?: boolean };
 				if (p.clickable) toggleRadar(p.id);
 			});
-			map.on('click', 'stream-gauge-marker', onStreamGaugeClick);
+			map.on('click', 'stream-gauge-marker', (e) => {
+				if (measuring) return;
+				void onStreamGaugeClick(e);
+			});
+			map.on('click', (e) => {
+				if (!measuring) return;
+				measurePoints = [...measurePoints,
+					{ lng: e.lngLat.lng, lat: e.lngLat.lat }];
+			});
 			for (const layer of ['radar-point', 'radar-label', 'stream-gauge-marker']) {
 				map.on('mouseenter', layer, () => {
 					if (map) map.getCanvas().style.cursor = 'pointer';
@@ -3079,13 +3567,20 @@
 	// the pane the pointer is over, and the second pane is the one being
 	// compared against.
 	$effect(() => {
-		void keyProducts; void panelOpen;
+		void keyProducts; void panelOpen; void measuring;
 		paneControls = {
 			stepProduct: stepProductBy,
 			togglePanel: () => { panelOpen = !panelOpen; },
 			panBy: panByPx,
 			zoomBy: zoomByDelta,
-			size: mapSize
+			size: mapSize,
+			toggleMeasure,
+			undoMeasure: undoMeasurePoint,
+			cancelMeasure: () => {
+				if (!measuring) return false;
+				toggleMeasure();
+				return true;
+			}
 		};
 	});
 
@@ -3113,6 +3608,17 @@
 			product: composite,
 			moment: currentMoment,
 			unit: currentUnit,
+			// The frame the imagery is at, not the one the scrubber says.
+			// In compare mode the follower pane moved its scrubber and
+			// kept its old imagery, and only this tells the two apart.
+			frame: paintedTs,
+			// The step this pane settled on, which is the nearest frame its
+			// own product has to the shared time. It differs from `frame`
+			// only while a load is in flight.
+			step: steps[stepIdx]?.ts ?? null,
+			// What the pane says about that difference, so a harness can
+			// check the mark is on screen and not only in the markup.
+			offset: frameOffset,
 			radars: [...activeRadars].sort(),
 			overlays: overlayNames().sort(),
 			// Rounded to the places a link keeps, so two panes locked to
@@ -3137,8 +3643,17 @@
 				class="pointer-events-none absolute left-3 top-3 z-20 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 px-2 py-0.5 shadow-lg backdrop-blur"
 			>
 				<span class="num text-[9.5px] uppercase tracking-wider text-[var(--color-faint)]">
-					{isPrimary ? 'A' : 'B'} · {productLabel(composite)}
+					{isPrimary ? 'A' : 'B'} · {productLabel(composite)}{frameOffset ? ' ·' : ''}
 				</span>
+				<!-- When this pane's nearest frame is not the time under the
+				     strip. Two panes an hour apart are as convincing as two a
+				     minute apart, and the strip shows one time for both. -->
+				{#if frameOffset}
+					<span
+						data-frame-offset
+						class="num ml-1 text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]"
+					>{frameOffset}</span>
+				{/if}
 			</div>
 		{/if}
 
@@ -3172,6 +3687,46 @@
 		     note is conditional and the legend appears only for a measured
 		     radar and moment, so either may be the only one present. -->
 		<div class="pointer-events-none absolute bottom-3 left-3 z-20 flex max-w-[60%] flex-col gap-2">
+		{#if measuring}
+			<!-- Shown as soon as the tool is on, with no points yet, so the
+			     reader is told what to do rather than left with a crosshair
+			     and no explanation. -->
+			<div
+				data-measure-readout
+				class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/92 px-2 py-1.5 shadow-lg backdrop-blur"
+			>
+				<div class="mb-1 flex items-baseline gap-2">
+					<span class="text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-muted)]">
+						Measure
+					</span>
+					<span class="text-[9.5px] text-[var(--color-faint)]">
+						click to add a point · Backspace undoes · Esc stops
+					</span>
+				</div>
+				{#if measureLegs.length === 0}
+					<div class="num text-[10.5px] text-[var(--color-faint)]">
+						{measurePoints.length === 1
+							? 'one point placed, click again for a distance'
+							: 'no points yet'}
+					</div>
+				{:else}
+					{#each measureLegs as leg, i (i)}
+						<div class="num text-[10.5px] text-[var(--color-default)]">
+							<span class="text-[var(--color-faint)]">{i + 1}.</span>
+							{formatDistance(leg.km)}
+							<span class="text-[var(--color-muted)]">
+								{formatBearing(leg.bearing)}
+							</span>
+						</div>
+					{/each}
+					{#if measureLegs.length > 1}
+						<div class="mt-0.5 border-t border-[var(--color-border)] pt-0.5 num text-[10.5px] text-[var(--color-bright)]">
+							total {formatDistance(measureTotalKm)}
+						</div>
+					{/if}
+				{/if}
+			</div>
+		{/if}
 		{#if activeRamp}
 			<!-- Only for a pair ramps/data/coverage.json records as measured
 			     against real frames. A legend for an unmeasured ramp would
@@ -3262,9 +3817,11 @@
 	     attribution has to stay readable. -->
 	<div
 		data-panel="open"
-		class="pointer-events-auto absolute right-3 top-3 flex w-[280px] max-h-[calc(100%-3.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
+		class="pointer-events-auto absolute right-3 top-3 flex w-[min(280px,calc(100%-1.5rem))] max-h-[calc(100%-3.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
 	>
-		<!-- Header -->
+		<!-- Header. The title and the collapse control only: four tools
+		     beside them overflowed 280 px and pushed RESET off the edge,
+		     so the tools have their own row below. -->
 		<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5">
 			<div class="flex items-baseline gap-2">
 				<span class="label tracking-[0.2em]">Layers</span>
@@ -3272,7 +3829,21 @@
 					{layersOnCount} on
 				</span>
 			</div>
-			<div class="flex items-center gap-2">
+			<button
+				class="inline-flex h-4 w-4 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				title="hide panel"
+				aria-label="hide layers panel"
+				onclick={() => { panelOpen = false; }}
+			>
+				<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5">
+					<line x1="2.5" y1="6" x2="9.5" y2="6" />
+				</svg>
+			</button>
+		</div>
+
+		<!-- Tools. Wraps rather than overflowing, so a narrow pane in
+		     compare mode stacks them instead of hiding the last one. -->
+		<div class="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5">
 				<!-- Compare, offered by the primary pane only. The second
 				     pane turning itself off would leave the control it was
 				     turned on with nowhere to go. -->
@@ -3291,6 +3862,34 @@
 						compare
 					</button>
 				{/if}
+				<!-- The measure tool is per pane, since the path is drawn on
+				     one map and the panes can be showing different ground
+				     only if someone has unlocked them. -->
+				<button
+					data-measure-toggle
+					class="border px-1.5 py-0 text-[9.5px] uppercase tracking-wider transition-colors {measuring
+						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)]'
+						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]'}"
+					title={measuring
+						? 'stop measuring (Esc)'
+						: 'measure distance and bearing between points (M)'}
+					aria-pressed={measuring}
+					onclick={toggleMeasure}
+				>
+					measure
+				</button>
+				<!-- The caption and the color bar go into the pixels, so a
+				     paste into a thread still says which minute it is and
+				     what the colors mean. -->
+				<button
+					data-export
+					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)] disabled:opacity-40"
+					title="save a PNG with the timestamp and legend burned in"
+					disabled={exporting}
+					onclick={() => { void exportImage(); }}
+				>
+					{exporting ? '...' : 'export'}
+				</button>
 				<button
 					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
 					title="reset radars, products, layers and view to defaults"
@@ -3299,17 +3898,61 @@
 				>
 					reset
 				</button>
-			<button
-				class="inline-flex h-4 w-4 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
-				title="hide panel"
-				aria-label="hide layers panel"
-				onclick={() => { panelOpen = false; }}
-			>
-				<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5">
-					<line x1="2.5" y1="6" x2="9.5" y2="6" />
-				</svg>
-			</button>
-			</div>
+		</div>
+
+		<!-- Place search, over this deployment's own datasets. See
+		     $lib/map/search for why there is no geocoder behind it. -->
+		<div class="relative border-b border-[var(--color-border)] px-3 py-2">
+			<input
+				bind:this={searchInput}
+				data-place-search
+				type="search"
+				placeholder="find a radar, reservoir or watershed"
+				class="w-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-bright)] placeholder:text-[var(--color-faint)] focus:border-[var(--color-info)] focus:outline-none"
+				value={searchText}
+				oninput={(e) => {
+					searchText = (e.target as HTMLInputElement).value;
+					searchHit = -1;
+					searchOpen = true;
+					void loadSearchPlaces();
+				}}
+				onfocus={() => { searchOpen = true; void loadSearchPlaces(); }}
+				onkeydown={onSearchKey}
+			/>
+			{#if searchOpen && searchText.trim().length > 0}
+				<div
+					data-search-results
+					class="absolute left-3 right-3 top-[2.4rem] z-30 max-h-[14rem] overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-xl"
+				>
+					{#if searchHits.length === 0}
+						<!-- Says what is searched, so a miss reads as "not in
+						     these datasets" rather than as a broken box. -->
+						<div class="px-2 py-1.5 text-[10px] text-[var(--color-faint)]">
+							nothing by that name among the radars, reservoirs
+							and watersheds this deployment carries
+						</div>
+					{:else}
+						{#each searchHits as hit, i (hit.entry.kind + hit.entry.id)}
+							<button
+								class="flex w-full items-baseline gap-2 px-2 py-1 text-left text-[11px] {i === searchHit
+									? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
+									: 'text-[var(--color-default)] hover:bg-[var(--color-elevated)]'}"
+								onclick={() => goToPlace(hit.entry)}
+							>
+								<span class="flex-1 truncate">{hit.entry.name}</span>
+								{#if hit.entry.detail}
+									<span class="num shrink-0 text-[9px] text-[var(--color-faint)]">
+										{hit.entry.detail}
+									</span>
+								{/if}
+								<span class="shrink-0 text-[9px] uppercase tracking-wider text-[var(--color-muted)]">
+									{hit.entry.kind}
+								</span>
+							</button>
+						{/each}
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Composite — dropdown picker (5 products + Off) -->
@@ -3688,6 +4331,19 @@
 				</li>
 			{/each}
 		</ul>
+
+		{#if exportError}
+			<!-- Reported rather than thrown. The only thing a reader can do
+			     about a canvas that will not export is take an ordinary
+			     screenshot, and a button that silently does nothing reads
+			     as broken. -->
+			<div
+				data-export-error
+				class="border-t border-[var(--color-warn)]/50 bg-[var(--color-warn)]/10 px-3 py-1 text-[10px] text-[var(--color-warn)]"
+			>
+				export failed: {exportError}
+			</div>
+		{/if}
 
 		<!-- Opacity, one row per raster layer. The three stack on the same
 		     ground, so the question is which to fade against the others.

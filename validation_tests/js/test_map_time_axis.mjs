@@ -31,7 +31,7 @@ const steady = (n, startMs = Date.UTC(2026, 10, 21, 0, 0, 0)) =>
 export function runTests(mod) {
   const {
     buildAxis, parseTimes, medianInterval, nearestStep, gapLabel,
-    GAP_FACTOR, MIN_BAR_FRACTION
+    frameOffsetLabel, GAP_FACTOR, MIN_BAR_FRACTION, OFFSET_FLOOR_MS
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -206,6 +206,37 @@ export function runTests(mod) {
     check('nothing is blank rather than "0m"', gapLabel(0) === '');
     check('a negative is blank', gapLabel(-5) === '');
     check('a NaN is blank', gapLabel(NaN) === '');
+  }
+
+  // Two panes on different products land on different frames, because
+  // each product's manifest has its own newest time. On 2026-11-21 the
+  // deployed qpe_1hr inch manifest sat four steps behind comp_ref's, so
+  // the panes showed 05:44 beside 05:52 under one time strip.
+  console.log('\na pane says when its frame is not the shared time:');
+  {
+    const shared = '2026-11-21T05:52:00';
+    check('a pane on the shared time says nothing',
+      frameOffsetLabel(shared, shared) === null);
+    check('an older frame says how far behind',
+      frameOffsetLabel('2026-11-21T05:44:00', shared) === '8m behind',
+      String(frameOffsetLabel('2026-11-21T05:44:00', shared)));
+    check('a newer frame says how far ahead',
+      frameOffsetLabel('2026-11-21T05:56:00', shared) === '4m ahead',
+      String(frameOffsetLabel('2026-11-21T05:56:00', shared)));
+    check('an hour out, which the follow tolerance allows, still reads',
+      frameOffsetLabel('2026-11-21T04:52:00', shared) === '1h behind',
+      String(frameOffsetLabel('2026-11-21T04:52:00', shared)));
+    check('a difference too small to print says nothing',
+      frameOffsetLabel('2026-11-21T05:52:20', shared) === null);
+    check('the floor is where the label would print "0m"',
+      OFFSET_FLOOR_MS === 30_000 && gapLabel(OFFSET_FLOOR_MS - 1) === '0m');
+    check('a missing time on either side says nothing',
+      frameOffsetLabel(null, shared) === null
+        && frameOffsetLabel(shared, null) === null
+        && frameOffsetLabel(undefined, undefined) === null);
+    check('an unparsable time says nothing rather than NaN',
+      frameOffsetLabel('latest', shared) === null
+        && frameOffsetLabel(shared, '') === null);
   }
 
   if (failures.length) {

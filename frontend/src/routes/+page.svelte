@@ -31,8 +31,15 @@
 	import TimeControls from '$lib/components/TimeControls.svelte';
 	import type { TimeStrip } from '$lib/map/paneTime';
 	import type { Camera } from '$lib/map/permalink';
-	import { paneForKey, type PaneControls } from '$lib/map/paneControls';
+	import { onDestroy } from 'svelte';
+	import {
+		paneForKey, type PaneControls, type PaneGate
+	} from '$lib/map/paneControls';
+	import {
+		arrive, drain, isWaiting, newGate, setExpected, GATE_WAIT_MS
+	} from '$lib/map/frameGate';
 	import { actionForKey, panOffset, SHORTCUTS, ZOOM_STEP } from '$lib/map/keys';
+	import { shouldStackPanes } from '$lib/map/responsive';
 	import { diag } from '$lib/diag';
 
 	let compare = $state(false);
@@ -47,6 +54,103 @@
 	// Which pane the pointer is over, for the keys that belong to one pane.
 	let hoveredPane = $state<number | null>(null);
 	let helpOpen = $state(false);
+	// Two 200 px panes are not a comparison, so below the threshold in
+	// $lib/map/responsive they stack. Side by side loses nothing above it,
+	// and stacking costs the north-south extent this network covers.
+	let pageWidth = $state(0);
+	const stacked = $derived(compare && shouldStackPanes(pageWidth));
+
+	// The frame rendezvous. Each pane already swaps its own layers
+	// together; without this the pane that loads first paints the new
+	// minute while the other is still fetching, so a comparison shows one
+	// product a frame ahead of the other. See $lib/map/frameGate.
+	const gate = newGate();
+	let gateTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// Counted so the barrier can be measured rather than assumed. A gate
+	// whose releases are nearly all timeouts is not holding the panes
+	// together, it is delaying one of them, and the two look identical
+	// from outside. Published under ?diag=probe only, like the map's own
+	// snapshot: a page that handed every visitor a lever on this would be
+	// exposing a surface meant to be read.
+	const gateStats = {
+		released: 0, together: 0, timedOut: 0, waitedMs: 0,
+		/** Milliseconds between the two panes' arrivals, newest last. */
+		gaps: [] as number[]
+	};
+	/** When each pane last arrived, for measuring the stagger. */
+	const lastArrival = new Map<number, number>();
+	/** Kept short: this is a diagnostic, not a log. */
+	const MAX_GAPS = 40;
+
+	/** Fire whatever is waiting and forget the timer. */
+	function releaseGate(): void {
+		if (gateTimer !== undefined) {
+			clearTimeout(gateTimer);
+			gateTimer = undefined;
+		}
+		const held = drain(gate);
+		if (held.length > 0) {
+			gateStats.released += 1;
+			gateStats.timedOut += 1;
+		}
+		for (const apply of held) apply();
+	}
+
+	const frameGate: PaneGate = {
+		arrive(pane, applies) {
+			const at = performance.now();
+			// The stagger between the panes, measured whether or not the
+			// gate managed to release them together. The wait below is set
+			// from this, so it has to be visible even when the wait is too
+			// short for it.
+			for (const [other, when] of lastArrival) {
+				if (other !== pane) {
+					gateStats.gaps.push(Math.round(at - when));
+					if (gateStats.gaps.length > MAX_GAPS) gateStats.gaps.shift();
+				}
+			}
+			lastArrival.set(pane, at);
+			const waiting = isWaiting(gate);
+			const ready = arrive(gate, pane, applies, at);
+			if (ready) {
+				if (gateTimer !== undefined) {
+					clearTimeout(gateTimer);
+					gateTimer = undefined;
+				}
+				gateStats.released += 1;
+				if (waiting) {
+					gateStats.together += 1;
+					gateStats.waitedMs += Math.round(performance.now() - at);
+				}
+				for (const apply of ready) apply();
+				return;
+			}
+			// A pane whose product has no frame inside the shared window
+			// never arrives at all, so the wait has to end on a clock
+			// rather than on the other pane.
+			if (gateTimer === undefined) {
+				gateTimer = setTimeout(releaseGate, GATE_WAIT_MS);
+			}
+		}
+	};
+
+	// The pane count is what the gate waits for, and a pane that has
+	// closed will never arrive, so anything held for it is released here.
+	$effect(() => {
+		const held = setExpected(gate, compare ? 2 : 1);
+		for (const apply of held) apply();
+	});
+
+	$effect(() => {
+		if (!diag.probe || typeof window === 'undefined') return;
+		(window as unknown as { __sentinelGate?: () => typeof gateStats })
+			.__sentinelGate = () => ({ ...gateStats });
+	});
+
+	onDestroy(() => {
+		if (gateTimer !== undefined) clearTimeout(gateTimer);
+	});
 
 	// A pane that has closed leaves its last published controls behind, and
 	// those close over a map that MapLibre has torn down. Reading the second
@@ -80,9 +184,10 @@
 
 		if (action === 'help') { helpOpen = !helpOpen; return true; }
 		if (action === 'close') {
-			if (!helpOpen) return false;
-			helpOpen = false;
-			return true;
+			// The list first, then the measure tool, so one Escape closes
+			// whatever is most recently in the way rather than both.
+			if (helpOpen) { helpOpen = false; return true; }
+			return paneForKey(panes, hoveredPane)?.cancelMeasure() ?? false;
 		}
 		if (action === 'compare') { compare = !compare; return true; }
 
@@ -99,6 +204,8 @@
 		if (action === 'product-prev') { target.stepProduct(-1); return true; }
 		if (action === 'product-next') { target.stepProduct(1); return true; }
 		if (action === 'panel') { target.togglePanel(); return true; }
+		if (action === 'measure') { target.toggleMeasure(); return true; }
+		if (action === 'measure-undo') { target.undoMeasure(); return true; }
 		if (action === 'zoom-in') { target.zoomBy(ZOOM_STEP); return true; }
 		if (action === 'zoom-out') { target.zoomBy(-ZOOM_STEP); return true; }
 
@@ -115,15 +222,20 @@
 </script>
 
 <svelte:head><title>AQPI Sentinel</title></svelte:head>
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} bind:innerWidth={pageWidth} />
 
 <div class="h-full p-2">
 	<section class="panel relative flex h-full flex-col overflow-hidden">
 		{#if diag.map}
-			<div class="flex min-h-0 w-full flex-1 gap-px">
+			<div
+				class="flex min-h-0 w-full flex-1 gap-px {stacked
+					? 'flex-col'
+					: 'flex-row'}"
+				data-pane-layout={stacked ? 'stacked' : 'side-by-side'}
+			>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
-					class="h-full min-w-0 flex-1"
+					class="min-h-0 min-w-0 flex-1 {stacked ? 'w-full' : 'h-full'}"
 					data-pane-hover={hoveredPane === 0 ? 'on' : 'off'}
 					onpointerenter={() => { hoveredPane = 0; }}
 					onpointerleave={() => { if (hoveredPane === 0) hoveredPane = null; }}
@@ -135,6 +247,7 @@
 						bind:sharedCamera
 						bind:timeStrip
 						bind:paneControls={controlsA}
+						{frameGate}
 						onToggleCompare={() => { compare = !compare; }}
 					/>
 				</div>
@@ -145,7 +258,9 @@
 					     a torn-down style. -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div
-						class="h-full min-w-0 flex-1 border-l border-[var(--color-border-strong)]"
+						class="min-h-0 min-w-0 flex-1 {stacked
+							? 'w-full border-t'
+							: 'h-full border-l'} border-[var(--color-border-strong)]"
 						data-pane-hover={hoveredPane === 1 ? 'on' : 'off'}
 						onpointerenter={() => { hoveredPane = 1; }}
 						onpointerleave={() => { if (hoveredPane === 1) hoveredPane = null; }}
@@ -156,6 +271,7 @@
 							bind:sharedTime
 							bind:sharedCamera
 							bind:paneControls={controlsB}
+							{frameGate}
 						/>
 					</div>
 				{/if}

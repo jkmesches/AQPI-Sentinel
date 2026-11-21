@@ -11,6 +11,22 @@
  * over and falls back to the primary when it is over neither.
  */
 
+import type { FrameApply } from './layers/registry';
+
+/** How a pane hands its frame swaps to the page's rendezvous. */
+export interface PaneGate {
+	/**
+	 * This pane's frame is ready.
+	 *
+	 * The page decides when it is painted, which is once every open pane
+	 * has arrived or once the wait has run out.
+	 *
+	 * @param pane Which pane.
+	 * @param applies Its swaps.
+	 */
+	arrive: (pane: number, applies: readonly FrameApply[]) => void;
+}
+
 /** A pane's size in CSS pixels. */
 export interface PaneSize {
 	width: number;
@@ -29,6 +45,17 @@ export interface PaneControls {
 	zoomBy: (dz: number) => void;
 	/** The map's current size, for a pan that scales with what is shown. */
 	size: () => PaneSize;
+	/** Start or stop measuring, clearing the path on the way out. */
+	toggleMeasure: () => void;
+	/** Drop the last measured point, or leave the tool if there is none. */
+	undoMeasure: () => void;
+	/**
+	 * Stop measuring if it is running.
+	 *
+	 * Reports whether it did anything, so the page can let Escape fall
+	 * through to whatever else it closes rather than swallowing the key.
+	 */
+	cancelMeasure: () => boolean;
 }
 
 /**

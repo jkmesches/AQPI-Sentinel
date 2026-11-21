@@ -78,3 +78,6 @@ SENTINEL_BACKEND_ROOT
 CorrReflectivity
 devtools
 homelab
+geocoder
+unprojection
+typeahead

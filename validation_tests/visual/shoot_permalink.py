@@ -46,6 +46,11 @@ LINK_SETTLE_MS = 1200
 
 VIEWPORT = {"width": 1600, "height": 1000}
 
+# How far the reopened camera may sit from the one the link was taken at.
+# The link rounds longitude and latitude to five places, about a meter, so
+# anything past that rounding is a real drift.
+CAMERA_EPS = 2e-5
+
 # The view the first console is put into. Chosen so every field a link
 # carries is non-default: a product with units, two radars, a moment that
 # is not reflectivity, and overlays.
@@ -169,6 +174,22 @@ def judge_reopened(first: dict[str, Any], second: dict[str, Any]) -> list[str]:
             problems.append(
                 f"{field} came back as {second[field]!r}, not "
                 f"{first[field]!r}")
+    # The view is the purpose of a link, and it was the one field this did
+    # not compare. The camera was dropped on load for three days, because
+    # applyLink runs before the map is constructed and quietly did nothing
+    # when there was no map to jump.
+    a, b = first.get("camera"), second.get("camera")
+    if a is None or b is None:
+        problems.append(
+            f"a console published no camera, {a} and {b}; the view the link "
+            f"was sent to show cannot be compared")
+    else:
+        names = ("longitude", "latitude", "zoom")
+        for name, x, y in zip(names, a, b, strict=True):
+            if abs(x - y) > CAMERA_EPS:
+                problems.append(
+                    f"{name} came back as {y}, not the {x} the link was "
+                    f"taken at; the reader is looking somewhere else")
     return problems
 
 
@@ -209,6 +230,16 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
     problems: list[str] = []
 
     first = await open_with(browser, base, SET_VIEW)
+    # The drag puts the camera somewhere no fresh console opens at. A link
+    # carrying the default view compares equal at the other end whether or
+    # not the camera travels, and that is a check of nothing.
+    box = await first.locator(".maplibregl-canvas").first.bounding_box()
+    if box:
+        await first.mouse.move(box["x"] + 260, box["y"] + 340)
+        await first.mouse.down()
+        await first.mouse.move(box["x"] + 430, box["y"] + 250, steps=12)
+        await first.mouse.up()
+        await first.wait_for_timeout(LINK_SETTLE_MS)
     state = await read_state(first)
     report["written"] = state
     await first.screenshot(path=str(outdir / "permalink-source.png"))

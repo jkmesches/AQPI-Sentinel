@@ -51,6 +51,15 @@ LOAD_SETTLE_MS = 6000
 KEY_SETTLE_MS = 1200
 PANE_SETTLE_MS = 6000
 
+# How much longer to give the map's style after the settle. The style
+# comes from an outside tile host, and 20 s past a 6 s settle separates a
+# slow host from one that is not answering.
+MAP_READY_MS = 20_000
+
+
+class MapNeverLoadedError(RuntimeError):
+    """The console loaded without a map, so no key check means anything."""
+
 VIEWPORT = {"width": 1600, "height": 950}
 
 # How far apart two cameras may sit and still count as unmoved. The published
@@ -137,6 +146,21 @@ async def open_console(browser: Browser, base: str) -> Page:
         " panelOpen:true}));")
     await page.goto(base, wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
+    # The map's style comes from an outside tile host, and on 2026-11-21
+    # a run found it had not arrived: the canvas was black, no camera was
+    # published, the strip held no frames, and every key check failed on
+    # a console that was never there to take a key. Waiting for the
+    # camera says that in one line instead of six.
+    try:
+        await page.wait_for_function(
+            "() => { const el = document.querySelector('[data-view]');"
+            " return el && JSON.parse(el.getAttribute('data-view')).camera; }",
+            timeout=MAP_READY_MS)
+    except PlaywrightTimeout:
+        raise MapNeverLoadedError(
+            f"no pane published a camera {LOAD_SETTLE_MS + MAP_READY_MS} ms "
+            f"after load; the map's style never arrived, so nothing here "
+            f"is about the keys") from None
     return page
 
 
@@ -455,6 +479,8 @@ async def shoot(outdir: Path, base: str) -> int:
             report = await run(browser, base, outdir)
         except PlaywrightTimeout as e:
             report = {"problems": [f"the console stopped answering: {e}"]}
+        except MapNeverLoadedError as e:
+            report = {"problems": [str(e)]}
         await browser.close()
     (outdir / "report.json").write_text(json.dumps(report, indent=1))
 
