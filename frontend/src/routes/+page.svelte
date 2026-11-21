@@ -359,8 +359,8 @@
 					{#if dockOpen}
 						{#if compare}
 							<!-- Which pane the dock drives. Each pane owns its
-							     own product, radars and overlays, which is the
-							     whole point of opening a second one. -->
+							     own product, radars and overlays, which is why
+							     a reader opens a second one. -->
 							<span class="label mr-1 tracking-[0.2em] text-[var(--color-faint)]">
 								pane
 							</span>

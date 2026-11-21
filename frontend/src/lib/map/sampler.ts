@@ -61,6 +61,32 @@ export class FrameSampler {
 	}
 
 	/**
+	 * The frame itself, for a caller that has to draw it rather than
+	 * read one pixel of it.
+	 *
+	 * The elevated sheet uploads this as a GL texture. Taking it from
+	 * here rather than fetching the image again means the sheet draws
+	 * exactly the frame the readout is reporting, so a value and the
+	 * pixel it came from can never be one step apart.
+	 *
+	 * @returns The canvas holding the frame, or null when none is held.
+	 */
+	get frame(): TexImageSource | null {
+		if (!this.size || !this.canvas) return null;
+		// Narrowed rather than cast, because a test runner supplies a
+		// stub canvas that holds pixels and is not a DOM object, and GL
+		// cannot upload one of those. The map always has a real canvas
+		// here, so this returns null only under a runner, where nothing
+		// is drawing anyway.
+		const held: unknown = this.canvas;
+		if (typeof HTMLCanvasElement !== 'undefined'
+			&& held instanceof HTMLCanvasElement) return held;
+		if (typeof OffscreenCanvas !== 'undefined'
+			&& held instanceof OffscreenCanvas) return held;
+		return null;
+	}
+
+	/**
 	 * Take a frame, replacing whatever was held.
 	 *
 	 * @param img The decoded frame.

@@ -37,6 +37,11 @@
 	import MapCompass from '$lib/components/MapCompass.svelte';
 	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
 	import { portal } from '$lib/map/portal';
+	import { ElevatedSheet } from '$lib/map/layers/elevatedLayer';
+	import {
+		DEFAULT_ALTITUDE_M, MAX_ALTITUDE_M, MIN_ALTITUDE_M, clampAltitude,
+		type Corners
+	} from '$lib/map/layers/elevatedRaster';
 	import {
 		addPin, nextPinId, pinLabel, removePin, type Pin
 	} from '$lib/map/probe';
@@ -3203,6 +3208,113 @@
 		}
 	}
 
+	// ---- imagery in the air, rather than painted on the hillsides -------
+	//
+	// MapLibre drapes a raster layer onto the terrain mesh, so with the
+	// mesh on, a composite follows the slopes and a reader sees rain
+	// lying on Mount Diablo. A composite is a measurement made aloft and
+	// shown in plan, so the draped form states something about the data
+	// that is not true.
+	//
+	// With the mesh on, the raster layers are hidden and the same frames
+	// are drawn as flat sheets at an altitude by a custom 3D layer; see
+	// $lib/map/layers/elevatedLayer. With the mesh off the map is flat,
+	// there is nothing to drape onto, and the ordinary layers are right.
+
+	/** How high the sheets sit. Nominal, and the reader can move it. */
+	let sheetAltitudeM = $state(DEFAULT_ALTITUDE_M);
+	/** One sheet per overlay that is drawn in the air. */
+	const sheets = new Map<string, ElevatedSheet>();
+
+	/** The overlays that would otherwise be draped onto the mesh. */
+	function sheetSpecs(): {
+		id: string; corners: Corners; image: TexImageSource | string;
+		version: string; opacity: number;
+	}[] {
+		const out: {
+			id: string; corners: Corners; image: TexImageSource | string;
+			version: string; opacity: number;
+		}[] = [];
+		const ring = (e: Extent): Corners => [
+			{ lng: e.west, lat: e.north },
+			{ lng: e.east, lat: e.north },
+			{ lng: e.east, lat: e.south },
+			{ lng: e.west, lat: e.south }
+		];
+		// The composite, from the frame the readout already holds, so
+		// the sheet and the number beside the cursor can never be one
+		// step apart.
+		const comp = compSampler.frame;
+		if (composite !== 'none' && compFrame && comp) {
+			out.push({
+				id: 'sheet-composite',
+				corners: ring(compFrame.extent),
+				image: comp,
+				version: `${compFrame.product}|${paintedTs ?? ''}`,
+				opacity: layerOpacity.composite
+			});
+		}
+		for (const id of activeRadars) {
+			const r = radars.find((x) => x.id === id);
+			const url = _appliedRadarUrl.get(id);
+			if (!r || !url) continue;
+			out.push({
+				id: `sheet-radar-${id}`,
+				corners: ring(radarExtent(r)),
+				image: url,
+				version: url,
+				opacity: overlayOpacity
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Make the sheets and the draped layers agree with the mesh.
+	 *
+	 * Runs on every change that moves a frame, an opacity or the mesh,
+	 * because a sheet that kept the previous frame would show imagery
+	 * the time strip has already moved past.
+	 */
+	function refreshSheets(): void {
+		if (!map || !styleReady) return;
+		const want = terrain3DOn ? sheetSpecs() : [];
+		const keep = new Set(want.map((w) => w.id));
+		for (const [id, sheet] of [...sheets]) {
+			if (keep.has(id)) continue;
+			if (map.getLayer(id)) map.removeLayer(id);
+			sheets.delete(id);
+			void sheet;
+		}
+		for (const spec of want) {
+			const full = { ...spec, altitudeM: clampAltitude(sheetAltitudeM) };
+			const have = sheets.get(spec.id);
+			if (have && map.getLayer(spec.id)) {
+				have.update(full);
+				continue;
+			}
+			const sheet = new ElevatedSheet(full);
+			sheets.set(spec.id, sheet);
+			map.addLayer(sheet);
+		}
+		// The draped copies are hidden rather than removed, so turning
+		// the mesh off brings them straight back without refetching a
+		// frame the browser already has.
+		const drapedOff = terrain3DOn;
+		for (const layer of ['comp-overlay-layer',
+			...activeRadars.map((id) => radarLayerId(id))]) {
+			if (!map.getLayer(layer)) continue;
+			map.setLayoutProperty(layer, 'visibility',
+				drapedOff ? 'none' : 'visible');
+		}
+	}
+
+	$effect(() => {
+		void terrain3DOn; void composite; void paintedTs; void activeRadars;
+		void layerOpacity; void sheetAltitudeM; void styleReady;
+		refreshSheets();
+	});
+
 	/**
 	 * Flip the 3D mesh and pitch the camera to match.
 	 *
@@ -4360,7 +4472,7 @@
 		<button
 			class="flex items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
 			onclick={toggleTerrain3D}
-			title="3D terrain mesh — pitches the camera and drapes the scene over an elevation mesh. Raster overlays may distort at the edges."
+			title="3D terrain mesh. Pitches the camera and puts the basemap on an elevation mesh. The radar imagery is drawn as a flat sheet in the air above it rather than draped on it, because a composite is measured aloft and is not a property of the ground."
 		>
 			<span class="flex items-center gap-2">
 				<span
@@ -4375,6 +4487,43 @@
 				{terrain3DOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
+		{#if terrain3DOn}
+			<!-- How high the imagery floats. Nominal and said to be: a
+			     composite is a column maximum or a lowest unblocked tilt
+			     depending on the product, so it has no one height, and a
+			     number presented without that caveat would be read as the
+			     measurement's altitude. -->
+			<div class="flex items-center gap-2 px-3 pb-1 pt-0.5">
+				<span class="w-[4.2rem] shrink-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)]">
+					sheet
+				</span>
+				<input
+					type="range"
+					min={MIN_ALTITUDE_M}
+					max={MAX_ALTITUDE_M}
+					step="250"
+					data-sheet-altitude
+					value={sheetAltitudeM}
+					oninput={(e) => {
+						sheetAltitudeM = clampAltitude(
+							Number((e.target as HTMLInputElement).value));
+					}}
+					class="flex-1 accent-[var(--color-ok)]"
+					title="how high the radar imagery floats above the ground"
+					aria-label="imagery sheet altitude"
+				/>
+				<span class="num w-[3.4rem] text-right text-[9.5px] text-[var(--color-muted)]">
+					{(sheetAltitudeM / 1000).toFixed(2)} km
+				</span>
+			</div>
+			<p
+				data-sheet-note
+				class="px-3 pb-2 text-[9px] leading-tight text-[var(--color-faint)]"
+			>
+				Nominal height. The imagery floats rather than draping, because a
+				composite is measured aloft; it has no single altitude of its own.
+			</p>
+		{/if}
 		{#if hasOverlay('stream_gauges')}
 		<button
 			class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
