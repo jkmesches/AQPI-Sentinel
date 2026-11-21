@@ -904,6 +904,14 @@
 	/** Bumped when a radar's held frame changes, so the readout reruns. */
 	let radarFramesAt = $state(0);
 	/**
+	 * The moment the held frames were drawn for.
+	 *
+	 * Plain, not `$state`: it is written by the effect that reads it, and
+	 * the only reader is that effect. Tracking it would be the update
+	 * loop described below.
+	 */
+	let heldMoment = '';
+	/**
 	 * Say that the held frames changed.
 	 *
 	 * The read is untracked because one caller is an effect, and `x += 1`
@@ -1032,12 +1040,20 @@
 	// cursor anywhere. The next single-radar load redraws it.
 	$effect(() => {
 		void activeRadars;
-		void currentMoment;
+		// A moment the radar does not publish leaves the previous
+		// moment's pixels held, and they read back cleanly. XSCW answers
+		// for Reflectivity and 404s for RhoHV, so switching to it would
+		// have reported reflectivity under whatever scale RhoHV draws.
+		// Dropping on the change costs one reload of a frame that is in
+		// the browser cache.
+		const moment = currentMoment;
+		const stale = moment !== heldMoment;
+		heldMoment = moment;
 		// A radar that went off keeps no frame. Its pixels still read
 		// back cleanly and would answer under a cursor anywhere in its
 		// box, long after it stopped being on screen.
 		for (const id of [...radarSamplers.keys()]) {
-			if (!activeRadars.includes(id)) {
+			if (stale || !activeRadars.includes(id)) {
 				radarSamplers.get(id)?.sampler.clear();
 				radarSamplers.delete(id);
 			}
@@ -4556,7 +4572,11 @@
 						: 'bg-[var(--color-faint)]'}"
 					aria-hidden="true"
 				></span>
+				<!-- Named, because a harness reaching for "the second select on
+				     the page" got the playback speed and left both panes on
+				     one product while reporting that it had switched them. -->
 				<select
+					data-product-select
 					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 					value={composite}
 					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
@@ -4873,6 +4893,7 @@
 				<div class="mt-2 flex items-center gap-2">
 					<span class="num text-[9.5px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
 					<select
+						data-tilt-select
 						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 						value={tiltEl}
 						onchange={(e) => {
