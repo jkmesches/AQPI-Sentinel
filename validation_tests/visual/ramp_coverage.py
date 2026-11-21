@@ -115,15 +115,24 @@ def invert_all(
         if build.returncode != 0:
             raise RuntimeError(f"esbuild failed: {build.stderr.strip()}")
         script = Path(tmp) / "run.mjs"
+        # Through a file rather than argv. A composite frame carries tens
+        # of thousands of distinct colors, and the whole list as one
+        # argument passes the kernel's limit and fails with E2BIG, which
+        # reads as the ramp being broken rather than the call being too
+        # long.
+        payload = Path(tmp) / "in.json"
+        payload.write_text(json.dumps([ramp, colors]))
         script.write_text(
             f"import {{ invert, TRANSPARENT_ALPHA }} from {str(bundle)!r};\n"
-            "const [ramp, colors] = JSON.parse(process.argv[2]);\n"
+            "import { readFileSync } from 'node:fs';\n"
+            "const [ramp, colors] = JSON.parse("
+            "readFileSync(process.argv[2], 'utf8'));\n"
             "console.log(JSON.stringify({\n"
             "  alpha: TRANSPARENT_ALPHA,\n"
             "  readings: colors.map((c) => invert(ramp, c))\n"
             "}));\n")
         run = subprocess.run(
-            ["node", str(script), json.dumps([ramp, colors])],
+            ["node", str(script), str(payload)],
             capture_output=True, text=True, check=False,
             timeout=CHILD_TIMEOUT_S)
         if run.returncode != 0:

@@ -18,7 +18,9 @@ execFileSync(join(root, 'frontend/node_modules/.bin/esbuild'),
 
 const coverage = JSON.parse(readFileSync(
   join(root, 'frontend/src/lib/map/ramps/data/coverage.json'), 'utf8'));
+const products = JSON.parse(readFileSync(
+  join(root, 'frontend/src/lib/map/ramps/data/product-coverage.json'), 'utf8'));
 
 const mod = await import(out);
 const { runTests } = await import('./test_map_ramp_registry.mjs');
-process.exit(runTests(mod, coverage));
+process.exit(runTests(mod, coverage, products));

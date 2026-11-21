@@ -20,6 +20,12 @@
 
 import type { Ramp } from './invert';
 import coverage from './data/coverage.json';
+import productCoverage from './data/product-coverage.json';
+import productReflectivity from './data/aqpi-product-reflectivity.json';
+import productTempF from './data/aqpi-product-temp-f.json';
+import productFcstAccumIn from './data/aqpi-product-forecast-accum-in.json';
+import productFcstAccumMm from './data/aqpi-product-forecast-accum-mm.json';
+import productWaterDepth from './data/aqpi-product-water-depth.json';
 import flowReflectivity from './data/flow-reflectivity.json';
 import flowVelocity from './data/flow-velocity.json';
 import flowZdr from './data/flow-differential-reflectivity.json';
@@ -38,7 +44,15 @@ export const RAMPS: Readonly<Record<string, Ramp>> = {
 	'aqpi-xband-reflectivity': aqpiXReflectivity as Ramp,
 	'aqpi-xband-velocity': aqpiXVelocity as Ramp,
 	'aqpi-xband-differential-reflectivity': aqpiXZdr as Ramp,
-	'aqpi-xband-differential-phase': aqpiXPhidp as Ramp
+	'aqpi-xband-differential-phase': aqpiXPhidp as Ramp,
+	// The composite products. These come from radarca's own colormap
+	// images rather than from the mount, since the publisher writes a
+	// colorbar per radar moment and nothing per product.
+	'aqpi-product-reflectivity': productReflectivity as Ramp,
+	'aqpi-product-temp-f': productTempF as Ramp,
+	'aqpi-product-forecast-accum-in': productFcstAccumIn as Ramp,
+	'aqpi-product-forecast-accum-mm': productFcstAccumMm as Ramp,
+	'aqpi-product-water-depth': productWaterDepth as Ramp
 };
 
 /** One row of the coverage record. */
@@ -104,6 +118,105 @@ export function keyOf(radar: string, moment: string): string {
 }
 
 const INDEX = buildIndex();
+
+/** One row of the product coverage record. */
+export interface ProductCoverage {
+	product: string;
+	unit: string | null;
+	ramp: string | null;
+	frames: number;
+	/** Share of painted area that read back, as a percentage. */
+	pixels: number;
+	/** Whether the frames' commonest colors sat on stops exactly. */
+	exact_common: boolean;
+	covered: boolean;
+	note?: string;
+}
+
+interface ProductFile {
+	measured_on: string;
+	products: ProductCoverage[];
+}
+
+const PRODUCT_FILE = productCoverage as unknown as ProductFile;
+
+/**
+ * Build the product lookup, refusing a row that names an absent ramp.
+ *
+ * @returns Product and unit to ramp.
+ * @raises Error If a covered row points at a ramp that is not in RAMPS.
+ */
+function buildProductIndex(): Map<string, Ramp> {
+	const index = new Map<string, Ramp>();
+	for (const p of PRODUCT_FILE.products) {
+		if (!p.covered || p.ramp === null) continue;
+		const ramp = RAMPS[p.ramp];
+		if (!ramp) {
+			throw new Error(
+				`product-coverage.json covers ${p.product} with ramp ` +
+				`"${p.ramp}", which is not in RAMPS`);
+		}
+		index.set(productKey(p.product, p.unit), ramp);
+	}
+	return index;
+}
+
+/**
+ * The lookup key for a product and unit.
+ *
+ * A product published in two units has a bar for each, and the two carry
+ * different numbers against the same colors, so the unit is part of the
+ * key rather than a detail of the ramp it finds.
+ *
+ * @param product The product id.
+ * @param unit The unit, or null for a product published in one unit.
+ * @returns The key.
+ */
+function productKey(product: string, unit: string | null): string {
+	return `${product.toLowerCase()}\u0000${(unit ?? '').toLowerCase()}`;
+}
+
+const PRODUCT_INDEX = buildProductIndex();
+
+/**
+ * The ramp that reads one composite product, or null when none was measured.
+ *
+ * Null for a product whose colorbar was never measured against its frames
+ * and for one the measurement rejected, and the caller then draws no
+ * legend and reports no value. radarca publishes a bar for every product,
+ * and for several of them the bar and the frames turn out to come from
+ * different colormaps, so having a bar is not evidence that it reads the
+ * pixels.
+ *
+ * @param product The product id, as the console holds it.
+ * @param unit The unit in view, or null for a single-unit product.
+ * @returns The ramp, or null.
+ */
+export function rampForProduct(product: string,
+	unit: string | null = null): Ramp | null {
+	return PRODUCT_INDEX.get(productKey(product, unit))
+		?? PRODUCT_INDEX.get(productKey(product, null))
+		?? null;
+}
+
+/**
+ * What the measurement found for one product, whether or not it passed.
+ *
+ * Lets the console say why a product reports nothing instead of leaving
+ * the reader to wonder whether the feature is broken.
+ *
+ * @param product The product id.
+ * @param unit The unit in view, or null.
+ * @returns The record, or null when the product was never measured.
+ */
+export function productCoverageFor(product: string,
+	unit: string | null = null): ProductCoverage | null {
+	const want = productKey(product, unit);
+	const bare = productKey(product, null);
+	return PRODUCT_FILE.products.find(
+		(p) => productKey(p.product, p.unit) === want) ?? PRODUCT_FILE.products.find(
+		(p) => productKey(p.product, p.unit) === bare) ?? null;
+}
 
 /**
  * The ramp that reads one radar's one moment, or null when none was measured.

@@ -15,6 +15,7 @@
 export function runTests(mod, ramps) {
   const {
     rampKind, medianAdjacentStep, fractionFor, legendBlocks, legendGradient,
+    thinToFit, segmentLabel, dropCrowdedEnds,
     niceStep, stepDecimals, legendTicks, ticksAtStep, fitTicks, fitsLabels,
     barLayout,
     DISCRETE_MEDIAN_STEP
@@ -32,13 +33,23 @@ export function runTests(mod, ramps) {
     try { fn(); return false; } catch (e) { return e instanceof kind; }
   };
 
+  // Which bars the publisher paints in blocks, by inspection of each
+  // one. Listed rather than matched on the name: the radar reflectivity
+  // bars and the composite forecast bars are block bars and share no
+  // naming pattern, and a rule that guessed from the name would pass by
+  // agreeing with itself.
+  const BLOCKS = new Set([
+    'flow-reflectivity',
+    'aqpi-xband-reflectivity',
+    'aqpi-product-reflectivity',
+    'aqpi-product-forecast-accum-in',
+    'aqpi-product-forecast-accum-mm'
+  ]);
+
   console.log('a block bar and a gradient bar are told apart:');
   {
-    // Every reflectivity bar is painted in blocks and every other moment is
-    // a sampled gradient, on both deployments.
     for (const [name, ramp] of all) {
-      const want = name.endsWith('-reflectivity')
-        && !name.includes('differential') ? 'discrete' : 'continuous';
+      const want = BLOCKS.has(name) ? 'discrete' : 'continuous';
       check(`${name} is ${want}`, rampKind(ramp) === want, rampKind(ramp));
     }
   }
@@ -50,8 +61,7 @@ export function runTests(mod, ramps) {
     // reflectivity's 22 painted bands as one smooth wash.
     for (const [name, ramp] of all) {
       const m = medianAdjacentStep(ramp);
-      const discrete = name.endsWith('-reflectivity')
-        && !name.includes('differential');
+      const discrete = BLOCKS.has(name);
       check(`${name} median ${m} is ${discrete ? 'above' : 'below'} ${DISCRETE_MEDIAN_STEP}`,
         discrete ? m >= DISCRETE_MEDIAN_STEP : m < DISCRETE_MEDIAN_STEP,
         String(m));
@@ -77,6 +87,99 @@ export function runTests(mod, ramps) {
       threw(() => fractionFor({ ...refl, min: 5, max: 5 }, 5)));
     check('an inverted ramp is refused',
       threw(() => fractionFor({ ...refl, min: 80, max: -30 }, 0)));
+  }
+
+  // radarca's accumulation bars run 0.01 to 20 inches with their ticks
+  // evenly spaced in the exponent, measured off the bar's own tick rows
+  // at R2 0.999976 against 0.616 for a linear fit. Placed linearly, the
+  // whole gradient below an inch would draw in the bottom twentieth.
+  console.log('\na log bar places its values by the exponent:');
+  {
+    const acc = { ...refl, scale: 'log', min: 0.01, max: 20, unit: 'in' };
+    check('the minimum is at the start', fractionFor(acc, 0.01) === 0);
+    check('the maximum is at the end', fractionFor(acc, 20) === 1);
+    const decades = Math.log10(20) + 2;
+    check('a decade up is a decade along',
+      Math.abs(fractionFor(acc, 0.1) - 1 / decades) < 1e-12,
+      String(fractionFor(acc, 0.1)));
+    check('an inch sits three fifths up, not a twentieth',
+      Math.abs(fractionFor(acc, 1) - 2 / decades) < 1e-12,
+      String(fractionFor(acc, 1)));
+    check('the linear reading of an inch would be far lower',
+      fractionFor(acc, 1) - (1 - 0.01) / 19.99 > 0.55);
+    check('zero clamps to the start rather than returning -Infinity',
+      fractionFor(acc, 0) === 0);
+    check('a negative clamps to the start', fractionFor(acc, -3) === 0);
+    check('above the top clamps to the end', fractionFor(acc, 1e6) === 1);
+    check('a log ramp reaching zero is refused',
+      threw(() => fractionFor({ ...acc, min: 0 }, 1)));
+    check('linear is still the default',
+      Math.abs(fractionFor(refl, 25) - 0.5) < 1e-12);
+  }
+
+  // The forecast bars print 0, 0.01, 0.03, 0.1, 0.3, 1, 3 and 10 at
+  // roughly equal distances, which is neither linear nor log, and a log
+  // axis cannot reach the zero at the bottom. Their measured positions
+  // travel with the ramp and the legend places from those.
+  console.log('\na segmented bar places from its measured ticks:');
+  {
+    const seg = {
+      ...refl,
+      scale: 'segmented',
+      min: 0,
+      max: 10,
+      unit: 'in',
+      ticks: [
+        { value: 0, fraction: 0 },
+        { value: 0.01, fraction: 0.0654 },
+        { value: 0.1, fraction: 0.4548 },
+        { value: 1, fraction: 0.7134 },
+        { value: 10, fraction: 0.9611 }
+      ]
+    };
+    check('a printed number sits where it was measured',
+      Math.abs(fractionFor(seg, 1) - 0.7134) < 1e-9,
+      String(fractionFor(seg, 1)));
+    check('an inch is far from the tenth a linear bar would give',
+      fractionFor(seg, 1) - 0.1 > 0.6);
+    check('between two printed numbers it interpolates across that pair',
+      Math.abs(fractionFor(seg, 0.55) - (0.4548 + 0.5 * (0.7134 - 0.4548)))
+        < 1e-6, String(fractionFor(seg, 0.55)));
+    check('below the first it clamps there', fractionFor(seg, -5) === 0);
+    check('above the last it clamps there',
+      fractionFor(seg, 99) === 0.9611);
+    check('a segmented ramp with no ticks falls back to linear',
+      Math.abs(fractionFor({ ...seg, ticks: undefined }, 5) - 0.5) < 1e-12);
+  }
+
+  console.log('\nthe ticks thin from the middle and keep both ends:');
+  {
+    const mk = (v, at, label) => ({ value: v, at, label });
+    const dense = [mk(0, 0, '0'), mk(1, 0.02, '0.01'), mk(2, 0.5, '0.5'),
+      mk(3, 0.98, '9.99'), mk(4, 1, '10')];
+    const kept = thinToFit(dense, 200, 6.6, 1);
+    check('both ends survive',
+      kept[0].label === '0' && kept[kept.length - 1].label === '10');
+    check('the crowding neighbors go',
+      !kept.some((t) => t.label === '0.01' || t.label === '9.99'),
+      kept.map((t) => t.label).join(' '));
+    check('a roomy set is kept whole',
+      thinToFit([mk(0, 0, '0'), mk(5, 0.5, '5'), mk(10, 1, '10')],
+        300, 6.6, 1).length === 3);
+    check('two ticks are never thinned',
+      thinToFit([mk(0, 0, '0'), mk(1, 1, '1')], 1, 6.6, 1).length === 2);
+    check('an impossible width still leaves the ends',
+      thinToFit(dense, 1, 6.6, 1).length === 2);
+  }
+
+  console.log('\na number is printed to the places it needs:');
+  {
+    check('zero is bare', segmentLabel(0) === '0');
+    check('a hundredth keeps two places', segmentLabel(0.01) === '0.01');
+    check('a tenth drops the trailing zero', segmentLabel(0.3) === '0.3');
+    check('a small whole number is bare', segmentLabel(3) === '3');
+    check('a large one is rounded', segmentLabel(250) === '250');
+    check('a negative keeps its sign', segmentLabel(-4) === '-4');
   }
 
   console.log('\nthe blocks of a discrete bar cover it end to end:');
@@ -140,9 +243,14 @@ export function runTests(mod, ramps) {
     for (const [name, ramp] of all) {
       for (const len of [40, 120, 400]) {
         const t = legendTicks(ramp, len, 16);
+        // A segmented bar's outermost printed numbers need not sit at
+        // the painted ends: the forecast bars carry an overflow block
+        // above their top number, so 10 is measured at 0.961 of the
+        // bar and the colors above it mean more than 10.
+        const toEnds = ramp.scale !== 'segmented';
         const ok = t[0].value === ramp.min
           && t[t.length - 1].value === ramp.max
-          && t[0].at === 0 && t[t.length - 1].at === 1;
+          && (!toEnds || (t[0].at === 0 && t[t.length - 1].at === 1));
         check(`${name} at ${len}px labels both ends`, ok,
           `${t[0].label} .. ${t[t.length - 1].label}`);
       }

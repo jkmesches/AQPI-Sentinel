@@ -22,6 +22,15 @@ export interface RampStop {
 	lo: number;
 	/** The top of its range. */
 	hi: number;
+	/**
+	 * Where this color starts along the bar, 0 at the bottom.
+	 *
+	 * Carried by a segmented ramp, whose colors are reported as the
+	 * band between two printed numbers, so several of them share one
+	 * value range and only their measured positions tell them apart on
+	 * the legend. Absent elsewhere, where the value places the block.
+	 */
+	at?: number;
 }
 
 /** One moment's color-to-value table. */
@@ -32,6 +41,23 @@ export interface Ramp {
 	label: string;
 	min: number;
 	max: number;
+	/**
+	 * How the bar's axis maps position to value.
+	 *
+	 * Absent means linear, which is every radar moment. The composite
+	 * accumulation bars are logarithmic, 0.01 to 20 inches, and placing
+	 * their stops linearly would draw the whole gradient in the bottom
+	 * tenth of the legend. Inversion does not consult this, since each
+	 * stop carries its own bounds.
+	 */
+	scale?: 'linear' | 'log' | 'segmented';
+	/**
+	 * Where each number printed on the bar sits along it, 0 at the
+	 * bottom. Present for a segmented axis, whose shape between two
+	 * printed numbers is not recoverable from the picture, so the
+	 * legend places them from the measurement rather than from a rule.
+	 */
+	ticks?: { value: number; fraction: number }[];
 	/** Where the colorbar was read from. */
 	source: string;
 	/** The date it was read, ISO 8601. */
@@ -142,8 +168,44 @@ export function invert(
 		}
 		if (d === 0) break;
 	}
-	if (!best || bestDistance > MATCH_TOLERANCE) return null;
+	if (!best || bestDistance > toleranceFor(ramp)) return null;
 	return { value: best.value, lo: best.lo, hi: best.hi, distance: bestDistance };
+}
+
+/** Each ramp's own tolerance, computed once per table. */
+const TOLERANCES = new WeakMap<Ramp, number>();
+
+/**
+ * How far a pixel may sit from a stop of this ramp and still be it.
+ *
+ * MATCH_TOLERANCE was set against the radar ramps, whose closest pair of
+ * distinct stops is 13. The product ramps are not all that loose: the
+ * forecast rate bars put two stops 7 apart, and a flat 12 there would let
+ * a pixel halfway between them match either one and print a confident
+ * wrong rate. Reading the spacing off the table keeps the rule the
+ * comment above states, a tolerance under the closest pair, without a
+ * second constant to maintain beside the data.
+ *
+ * @param ramp The table.
+ * @returns The tolerance in summed channel distance, at most
+ *   MATCH_TOLERANCE and always under this ramp's closest distinct pair.
+ */
+export function toleranceFor(ramp: Ramp): number {
+	const cached = TOLERANCES.get(ramp);
+	if (cached !== undefined) return cached;
+	const colors = ramp.stops.map((s) => parseHex(s.color));
+	let closest = Infinity;
+	for (let i = 0; i < colors.length; i++) {
+		for (let j = i + 1; j < colors.length; j++) {
+			const d = colorDistance(colors[i], colors[j]);
+			if (d > 0 && d < closest) closest = d;
+		}
+	}
+	const out = Number.isFinite(closest)
+		? Math.max(0, Math.min(MATCH_TOLERANCE, closest - 1))
+		: MATCH_TOLERANCE;
+	TOLERANCES.set(ramp, out);
+	return out;
 }
 
 /**

@@ -13,9 +13,10 @@
 // so a registry keyed on profile alone would put a confident dB under the
 // cursor on a frame it cannot read.
 
-export function runTests(mod, coverage) {
+export function runTests(mod, coverage, products) {
   const {
-    rampFor, coverageFor, radarsSharing, keyOf, RAMPS, MEASURED_ON
+    rampFor, coverageFor, radarsSharing, keyOf, RAMPS, MEASURED_ON,
+    rampForProduct, productCoverageFor
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -120,9 +121,39 @@ export function runTests(mod, coverage) {
     for (const n of named) {
       check(`${n} is in RAMPS`, !!RAMPS[n]);
     }
+    for (const p of products.products.filter((r) => r.covered)) {
+      check(`${p.ramp} is in RAMPS for ${p.product}`, !!RAMPS[p.ramp]);
+      named.add(p.ramp);
+    }
     const unused = Object.keys(RAMPS).filter((n) => !named.has(n));
-    check('no ramp ships without a covered pair', unused.length === 0,
-      unused.join(' ') || 'none');
+    check('no ramp ships without a covered pair or product',
+      unused.length === 0, unused.join(' ') || 'none');
+  }
+
+  // A product reaches a legend and a readout only on evidence, the same
+  // rule the radar pairs follow. radarca publishes a colorbar for every
+  // product and several of them do not read their own frames, so having
+  // a bar is not evidence that it reads the pixels.
+  console.log('\na product answers only where it was measured:');
+  {
+    check('a covered product finds its ramp',
+      rampForProduct('comp_ref') !== null);
+    check('a rejected product finds none',
+      rampForProduct('qpe_1hr', 'in') === null);
+    check('an unknown product finds none',
+      rampForProduct('not_a_product') === null);
+    check('the unit picks the bar',
+      rampForProduct('fcst_total_precip', 'in') !== null);
+    check('a single-unit product answers without one',
+      rampForProduct('water_depth', null) !== null);
+    for (const p of products.products.filter((r) => !r.covered)) {
+      check(`${p.product} reports nothing`,
+        rampForProduct(p.product, p.unit) === null);
+      check(`${p.product} says why`,
+        (productCoverageFor(p.product, p.unit)?.note ?? '').length > 20);
+    }
+    check('a rejected row keeps its measurement',
+      productCoverageFor('qpe_1hr', 'in')?.pixels < 10);
   }
 
   console.log('\nthe shared-colorbar record names only real radars:');

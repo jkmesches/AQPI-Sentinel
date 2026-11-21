@@ -237,14 +237,16 @@ async def opaque_share(page: Page, base: str) -> float | None:
     return got
 
 
-async def composite_is_silent(browser: Browser, base: str,
-                              outdir: Path) -> list[str]:
-    """Check the readout says nothing while a composite is displayed.
+async def composite_reads_itself(browser: Browser, base: str,
+                                 outdir: Path) -> list[str]:
+    """Check the readout reports the composite the cursor is over.
 
     A composite sits in the same raster band as the radar overlays and
-    covers a far wider area, so where the two overlap the reader is looking
-    at the composite while the sampler holds the radar's frame. No composite
-    has a measured ramp, so the readout has to stay quiet.
+    covers far more ground, so where the two overlap the reader is looking
+    at the composite and that is the value owed. Until comp_ref's ramp was
+    measured on 2026-11-21 no product had one and this had to stay quiet
+    instead; reporting the radar's dBZ for a pixel the composite painted
+    is the failure either way.
 
     Args:
         browser: The running chromium.
@@ -252,7 +254,7 @@ async def composite_is_silent(browser: Browser, base: str,
         outdir: Where the screenshot goes.
 
     Returns:
-        One message per point that reported anyway.
+        One message per way the reading is wrong or absent.
     """
     ctx = await browser.new_context(viewport=VIEWPORT)
     page = await ctx.new_page()
@@ -269,11 +271,24 @@ async def composite_is_silent(browser: Browser, base: str,
     await page.wait_for_timeout(LOAD_SETTLE_MS)
     spoke = await hover_grid(page)
     await page.screenshot(path=str(outdir / "readout-composite.png"))
+    held = await page.evaluate(
+        "() => document.querySelector('[data-readout-frame]')"
+        "?.getAttribute('data-readout-frame') ?? null")
     await ctx.close()
-    if spoke:
+    if not spoke:
+        return [f"with the {COMPOSITE} composite on, no grid point reported; "
+                f"its ramp is measured, so the composite's own value is owed"]
+    # The composite covers the whole Bay while one radar covers a corner
+    # of it, so a reading that only appears where the radar is painting
+    # is the radar's. The grid is wider than any single radar's range.
+    xs = {round(p["x"]) for p in spoke}
+    ys = {round(p["y"]) for p in spoke}
+    if len(xs) < 3 or len(ys) < 3:
         return [f"with the {COMPOSITE} composite on, {len(spoke)} points "
-                f"still reported, e.g. {spoke[0]['text']!r}; the reader is "
-                f"looking at the composite and being told the radar's value"]
+                f"reported and they sit in {len(xs)} columns and {len(ys)} "
+                f"rows; that is one radar's footprint rather than the "
+                f"composite's, so the reading is coming from underneath "
+                f"(frame held: {held!r})"]
     return []
 
 
@@ -342,7 +357,7 @@ async def shoot(outdir: Path, base: str) -> int:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         report = await run(browser, base, outdir)
-        report["problems"] += await composite_is_silent(browser, base, outdir)
+        report["problems"] += await composite_reads_itself(browser, base, outdir)
         await browser.close()
     (outdir / "report.json").write_text(json.dumps(report, indent=1))
 
@@ -357,7 +372,7 @@ async def shoot(outdir: Path, base: str) -> int:
           + (f", {share * 100:.2f}% painted" if share is not None else ""))
     if report.get("off_overlay") is None:
         print("the off-overlay corner: silent, as it should be")
-    print(f"with the {COMPOSITE} composite on: checked for silence")
+    print(f"with the {COMPOSITE} composite on: checked it reads its own value")
 
     if report["problems"]:
         print("\nFAIL:")

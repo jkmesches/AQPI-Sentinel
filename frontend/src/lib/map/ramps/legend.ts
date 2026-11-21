@@ -100,6 +100,36 @@ export function fractionFor(ramp: Ramp, value: number): number {
 	if (!Number.isFinite(value)) {
 		throw new RangeError(`value is ${value}`);
 	}
+	// A segmented bar has no formula between its printed numbers, so it
+	// carries the fraction each one was measured at and everything in
+	// between is interpolated across the pair it falls in. Read as
+	// linear, the forecast bar puts one inch at a tenth of its length
+	// where the publisher drew it at seven tenths.
+	if (ramp.scale === 'segmented' && ramp.ticks && ramp.ticks.length > 1) {
+		const pts = ramp.ticks;
+		if (value <= pts[0].value) return pts[0].fraction;
+		for (let i = 1; i < pts.length; i++) {
+			if (value <= pts[i].value) {
+				const run = pts[i].value - pts[i - 1].value;
+				const t = run > 0 ? (value - pts[i - 1].value) / run : 0;
+				return Math.min(1, Math.max(0, pts[i - 1].fraction
+					+ t * (pts[i].fraction - pts[i - 1].fraction)));
+			}
+		}
+		return pts[pts.length - 1].fraction;
+	}
+	// A log bar is linear in the exponent. radarca's accumulation bars run
+	// 0.01 to 20 inches, where an inch sits two thirds of the way up and
+	// a linear placement would put it at a twentieth.
+	if (ramp.scale === 'log') {
+		if (ramp.min <= 0) {
+			throw new RangeError(`a log ramp cannot start at ${ramp.min}`);
+		}
+		if (value <= 0) return 0;
+		const lo = Math.log10(ramp.min);
+		const top = Math.log10(ramp.max) - lo;
+		return Math.min(1, Math.max(0, (Math.log10(value) - lo) / top));
+	}
 	return Math.min(1, Math.max(0, (value - ramp.min) / span));
 }
 
@@ -135,6 +165,20 @@ export function legendBlocks(ramp: Ramp): LegendBlock[] {
 	return ramp.stops.map((s, i) => {
 		const prev = ramp.stops[i - 1];
 		const next = ramp.stops[i + 1];
+		// A stop that carries its own measured position is drawn there.
+		// A segmented bar reports the band between the numbers printed
+		// on it, so ten of its colors share one band, and placing them
+		// by value stacks all ten at one spot and draws slivers with
+		// gaps where the publisher drew a solid run.
+		if (s.at !== undefined) {
+			return {
+				color: s.color,
+				from: i === 0 ? 0 : s.at,
+				to: next?.at ?? 1,
+				lo: s.lo,
+				hi: s.hi
+			};
+		}
 		return {
 			color: s.color,
 			from: i === 0 ? 0 : fractionFor(ramp, (prev.hi + s.lo) / 2),
@@ -243,6 +287,19 @@ export function legendTicks(
 		throw new RangeError(`ramp spans ${ramp.min} to ${ramp.max}`);
 	}
 
+	// A segmented bar is ticked with its own printed numbers, which sit
+	// at measured positions. A round step placed through those positions
+	// bunches: on the millimeter forecast bar, 90 and 100 land a fifth of
+	// a label apart because the top decade occupies a tenth of the bar.
+	if (ramp.scale === 'segmented' && ramp.ticks && ramp.ticks.length > 1) {
+		const spacingChars = 1;
+		const charPx = minSpacingPx / 2;
+		return thinToFit(ramp.ticks.map((t) => ({
+			value: t.value,
+			at: t.fraction,
+			label: segmentLabel(t.value)
+		})), lengthPx, charPx, spacingChars);
+	}
 	const room = Math.max(1, Math.floor(lengthPx / minSpacingPx));
 	return ticksAtStep(ramp, niceStep(span / room), minSpacingPx / lengthPx);
 }
@@ -334,6 +391,18 @@ export function fitTicks(
 		throw new RangeError(`ramp spans ${ramp.min} to ${ramp.max}`);
 	}
 
+	// A segmented bar is ticked with the numbers printed on it. A round
+	// step means nothing there: the publisher spaced 0, 0.01, 0.03, 0.1,
+	// 0.3, 1, 3 and 10 at roughly equal distances, so a step of 1 would
+	// crowd eight labels into the top third and leave the bottom bare.
+	if (ramp.scale === 'segmented' && ramp.ticks && ramp.ticks.length > 1) {
+		return thinToFit(ramp.ticks.map((t) => ({
+			value: t.value,
+			at: t.fraction,
+			label: segmentLabel(t.value)
+		})), lengthPx, charPx, gapChars);
+	}
+
 	// A label is at least one character wide, so a bar of lengthPx holds at
 	// most lengthPx/charPx of them, and any step finer than this cannot fit
 	// whatever its labels say. The walk starts here to stay bounded. Starting
@@ -358,6 +427,18 @@ export function fitTicks(
 		const t = ticksAtStep(ramp, step, 0);
 		coarsest = t;
 		if (fitsLabels(t, lengthPx, charPx, gapChars)) return t;
+		// One crowded neighbor at an end should not cost the whole step.
+		// A bar from -30 to 80 is not on the 20 grid, so its first
+		// interior tick lands at -20, ten units from an end that is
+		// never dropped, and the pair collides while every other pair
+		// has room. Rejecting the step for that took reflectivity from
+		// seven labels to -30, 0, 50, 80, where two of the four gaps
+		// are 50 and one is 30.
+		const trimmed = dropCrowdedEnds(t, lengthPx, charPx, gapChars);
+		if (trimmed.length > 2
+			&& fitsLabels(trimmed, lengthPx, charPx, gapChars)) {
+			return trimmed;
+		}
 	}
 	// Nothing finer fit, so only the ends remain. They are never dropped: a
 	// bar whose range the reader has to infer from interior ticks can be
@@ -382,6 +463,98 @@ export function fitTicks(
  * @param gapChars Clear space between labels, in characters.
  * @returns True when no two labels overlap.
  */
+/**
+ * Print one of a segmented bar's own numbers as the bar prints it.
+ *
+ * Enough places to tell the number from its neighbor and no more: these
+ * run from 0.01 to 250 on one bar, and a fixed two places would write
+ * the top of it as 250.00.
+ *
+ * @param value The printed number.
+ * @returns Its label.
+ */
+export function segmentLabel(value: number): string {
+	const size = Math.abs(value);
+	if (size === 0) return '0';
+	if (size < 0.1) return value.toFixed(2);
+	if (size < 10) return String(Number(value.toFixed(2)));
+	return String(Math.round(value));
+}
+
+/**
+ * Keep as many of these ticks as fit, dropping from the middle outward.
+ *
+ * The ends stay, because a bar whose range the reader has to infer can
+ * be misread by a factor of ten. Every other candidate is dropped in
+ * turn until the rest clear each other.
+ *
+ * @param ticks The candidates, ascending.
+ * @param lengthPx The bar's length.
+ * @param charPx The advance width of one character.
+ * @param gapChars Clear space between labels, in characters.
+ * @returns The ticks that fit.
+ */
+export function thinToFit(
+	ticks: LegendTick[],
+	lengthPx: number,
+	charPx: number,
+	gapChars: number
+): LegendTick[] {
+	if (ticks.length <= 2) return ticks;
+	const gap = gapChars * charPx;
+	const right = (t: LegendTick): number =>
+		t.at * lengthPx + (t.label.length * charPx) / 2;
+	const left = (t: LegendTick): number =>
+		t.at * lengthPx - (t.label.length * charPx) / 2;
+	// Greedy from the left, keeping both ends. Halving the interior
+	// instead kept every odd candidate, and on these bars the first
+	// interior tick is the one crowding the start, so it survived every
+	// pass and took the whole set down to two labels with it.
+	const last = ticks[ticks.length - 1];
+	const out: LegendTick[] = [ticks[0]];
+	for (const t of ticks.slice(1, -1)) {
+		if (left(t) - right(out[out.length - 1]) < gap) continue;
+		if (left(last) - right(t) < gap) continue;
+		out.push(t);
+	}
+	out.push(last);
+	return out;
+}
+
+/**
+ * Drop an interior tick that crowds an end, keeping the rest of the step.
+ *
+ * The end labels stay whatever happens: a bar whose range the reader has
+ * to infer from interior ticks can be misread by a factor of ten. So when
+ * the tick beside an end has no room, it is the one to go.
+ *
+ * @param ticks The ticks at one step, ascending.
+ * @param lengthPx The bar's length.
+ * @param charPx The advance width of one character.
+ * @param gapChars Clear space between labels, in characters.
+ * @returns The ticks, less at most one at each end.
+ */
+export function dropCrowdedEnds(
+	ticks: LegendTick[],
+	lengthPx: number,
+	charPx: number,
+	gapChars: number
+): LegendTick[] {
+	if (ticks.length < 3) return ticks;
+	const gap = gapChars * charPx;
+	const right = (t: LegendTick): number =>
+		t.at * lengthPx + (t.label.length * charPx) / 2;
+	const left = (t: LegendTick): number =>
+		t.at * lengthPx - (t.label.length * charPx) / 2;
+	let out = ticks;
+	if (left(out[1]) - right(out[0]) < gap) out = [out[0], ...out.slice(2)];
+	const n = out.length;
+	if (n >= 3 && left(out[n - 1]) - right(out[n - 2]) < gap) {
+		out = [...out.slice(0, n - 2), out[n - 1]];
+	}
+	return out;
+}
+
 export function fitsLabels(
 	ticks: LegendTick[],
 	lengthPx: number,

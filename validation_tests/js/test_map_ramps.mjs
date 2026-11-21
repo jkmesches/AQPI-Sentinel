@@ -17,7 +17,7 @@
 export function runTests(mod, ramps) {
   const {
     invert, parseHex, colorDistance, selfCoverage,
-    MATCH_TOLERANCE, TRANSPARENT_ALPHA
+    MATCH_TOLERANCE, TRANSPARENT_ALPHA, toleranceFor
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -78,9 +78,46 @@ export function runTests(mod, ramps) {
           if (d < min) min = d;
         }
       }
-      check(`${name}: closest pair ${min} > tolerance ${MATCH_TOLERANCE}`,
-        min > MATCH_TOLERANCE, `${min} vs ${MATCH_TOLERANCE}`);
+      // Against this ramp's own tolerance. The product bars are not all
+      // as loose as the radar ones: the forecast rate bars put two stops
+      // 7 apart, where a flat 12 would match a pixel between them to
+      // either one.
+      const tol = toleranceFor(ramp);
+      check(`${name}: closest pair ${min} > its tolerance ${tol}`,
+        min > tol, `${min} vs ${tol}`);
+      check(`${name}: its tolerance is at most the global ${MATCH_TOLERANCE}`,
+        tol <= MATCH_TOLERANCE, String(tol));
     }
+  }
+
+  console.log('\na ramp with close stops gets a tighter tolerance:');
+  {
+    const tight = {
+      ...refl,
+      stops: [
+        { color: '#000000', value: 0, lo: 0, hi: 1 },
+        { color: '#000007', value: 1, lo: 1, hi: 2 }
+      ]
+    };
+    check('seven apart allows six', toleranceFor(tight) === 6,
+      String(toleranceFor(tight)));
+    check('a pixel between the two still reads the nearer one',
+      invert(tight, [0, 0, 3])?.value === 0,
+      String(invert(tight, [0, 0, 3])?.value));
+    check('a pixel past the tolerance reads nothing',
+      invert(tight, [0, 0, 60]) === null);
+    const wide = {
+      ...refl,
+      stops: [
+        { color: '#000000', value: 0, lo: 0, hi: 1 },
+        { color: '#ffffff', value: 1, lo: 1, hi: 2 }
+      ]
+    };
+    check('a wide ramp is capped at the global tolerance',
+      toleranceFor(wide) === MATCH_TOLERANCE, String(toleranceFor(wide)));
+    const one = { ...refl, stops: [refl.stops[0]] };
+    check('a single-stop ramp keeps the global tolerance',
+      toleranceFor(one) === MATCH_TOLERANCE, String(toleranceFor(one)));
   }
 
   console.log('\nan exact color reads its own value:');
@@ -139,8 +176,12 @@ export function runTests(mod, ramps) {
   console.log('\nthe ramps carry their provenance:');
   {
     for (const [name, ramp] of all) {
-      check(`${name} names its source`,
-        typeof ramp.source === 'string' && ramp.source.includes('colorbar'),
+      // A path on the mount for a radar moment, a URL for a composite
+      // product. Both name the image the colors were read out of, which
+      // is what a reader needs to go and check one.
+      check(`${name} names the bar it was read from`,
+        typeof ramp.source === 'string'
+          && /(colorbar|colormap)[a-z0-9_-]*\.png$/.test(ramp.source),
         ramp.source);
       check(`${name} carries the date it was read`,
         /^\d{4}-\d{2}-\d{2}$/.test(ramp.read_on), ramp.read_on);
@@ -158,11 +199,21 @@ export function runTests(mod, ramps) {
         Math.abs(first.lo - ramp.min) < 0.5, `${first.lo} vs ${ramp.min}`);
       check(`${name} ends at its maximum`,
         Math.abs(last.hi - ramp.max) < 0.5, `${last.hi} vs ${ramp.max}`);
+      // A segmented bar reports the band between the numbers printed on
+      // it, because the shape between two of them is not recoverable
+      // from the picture. Ten of its colors can carry one band, so its
+      // stops rise without strictly increasing and repeat a band rather
+      // than tiling the axis. Both are the point of that ramp kind.
+      const banded = ramp.scale === 'segmented';
       const ascending = ramp.stops.every((s, i) =>
-        i === 0 || s.value > ramp.stops[i - 1].value);
+        i === 0 || (banded
+          ? s.value >= ramp.stops[i - 1].value
+          : s.value > ramp.stops[i - 1].value));
       check(`${name} ascends`, ascending);
       const contiguous = ramp.stops.every((s, i) =>
-        i === 0 || Math.abs(s.lo - ramp.stops[i - 1].hi) < ramp.stops.length * 0.1);
+        i === 0 || (banded
+          ? s.lo >= ramp.stops[i - 1].lo
+          : Math.abs(s.lo - ramp.stops[i - 1].hi) < ramp.stops.length * 0.1));
       check(`${name} leaves no gap between stops`, contiguous);
     }
   }

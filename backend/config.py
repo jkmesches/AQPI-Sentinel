@@ -265,26 +265,33 @@ PRODUCTS = {
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 5_000,
                                "unit": "F", "unit_subdir": True},
+    # The four CoSMoS products are published in meters. radarca's catalog
+    # advertises them as feet and this table copied that, while the
+    # colorbars the publisher draws beside the frames are labelled m and
+    # run 0 to 5 for depth and -4 to 10 for level. Meters confirmed for
+    # depth on 2026-11-21; level rests on its bar's own label, which is
+    # drawn by the same code. A readout off by 3.28 is worse than none,
+    # so the ramp and this label are kept on one source.
     "water_level":            {"details": "water_level/details.json",
                                "image_dir": "water_level/images/",
                                "cadence_s": 3600, "expected_steps": 19,
                                "max_freshness_s": -3600, "min_png_bytes": 5_000,
-                               "unit": "ft"},
+                               "unit": "m"},
     "water_depth":            {"details": "water_depth/details.json",
                                "image_dir": "water_depth/images/",
                                "cadence_s": 3600, "expected_steps": 19,
                                "max_freshness_s": -3600, "min_png_bytes": 5_000,
-                               "unit": "ft"},
+                               "unit": "m"},
     "max_water_level":        {"details": "max_water_level/details.json",
                                "image_dir": "max_water_level/images/",
                                "cadence_s": None, "expected_steps": 1,
                                "max_freshness_s": 90_000, "min_png_bytes": 5_000,
-                               "unit": "ft"},
+                               "unit": "m"},
     "max_water_depth":        {"details": "max_water_depth/details.json",
                                "image_dir": "max_water_depth/images/",
                                "cadence_s": None, "expected_steps": 1,
                                "max_freshness_s": 90_000, "min_png_bytes": 5_000,
-                               "unit": "ft"},
+                               "unit": "m"},
 }
 
 # Radar id → on-disk folder slug (from the JS bundle's `C` map).

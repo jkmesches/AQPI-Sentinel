@@ -38,7 +38,10 @@ import math
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import pairwise
 from pathlib import Path
+
+from bar_geometry import bar_columns, bar_rows, tick_fractions
 
 try:
     from PIL import Image
@@ -57,6 +60,12 @@ BLOCK_TOLERANCE = 12
 # The bar must be at least this many pixels tall to be read at all. Below it
 # the sampling has too few rows to place a boundary.
 MIN_BAR_ROWS = 32
+
+# Decimal places for a value off a log axis. Four would round the bottom
+# of an accumulation bar, 0.01 in, to two significant figures while giving
+# the top, 20 in, six. Six keeps three figures at the small end, which is
+# where the gradient is fine enough to tell neighboring colors apart.
+LOG_PLACES = 6
 
 # Matplotlib draws the bar inside a black outline, and the row beside that
 # outline is a blend of it and the first real color. Measured on the FLOW
@@ -102,6 +111,10 @@ class Stop:
     value: float
     lo: float
     hi: float
+    # Where this color starts along the bar, 0 at the bottom. Carried
+    # only for a segmented axis, where ten colors can share one band
+    # and placing them by value would stack all ten at one position.
+    at: float | None = None
 
 
 def opaque_columns(img: Image.Image) -> list[int]:
@@ -139,10 +152,23 @@ def bar_bounds(img: Image.Image, col: int) -> tuple[int, int]:
     """
     _, h = img.size
     px = img.load()
-    rows = [y for y in range(h) if px[col, y][3] >= ALPHA_FLOOR]
-    if not rows:
+    # The longest unbroken run rather than the first and last painted
+    # rows. These bars carry their unit as a title centered above the
+    # bar, wider than the bar on the narrow ones, so its glyphs are
+    # painted in the same columns and would stretch the bar upward into
+    # a black stop and a white one that nothing on the map is painted in.
+    best = (0, 0, 0)
+    run = 0
+    for y in range(h):
+        if px[col, y][3] >= ALPHA_FLOOR:
+            run += 1
+            if run > best[0]:
+                best = (run, y - run + 1, y)
+        else:
+            run = 0
+    if best[0] == 0:
         raise ValueError(f"column {col} is empty")
-    return rows[0], rows[-1]
+    return best[1], best[2]
 
 
 def frame_inset(img: Image.Image, col: int, row: int) -> int:
@@ -176,13 +202,15 @@ def near(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
     return sum(abs(x - y) for x, y in zip(a, b, strict=True)) <= BLOCK_TOLERANCE
 
 
-def read_stops(img: Image.Image, vmin: float, vmax: float) -> list[Stop]:
+def read_stops(img: Image.Image, vmin: float, vmax: float,
+               *, log: bool) -> list[Stop]:
     """Sample the bar into one stop per block of constant color.
 
     Args:
         img: The colorbar, in RGBA.
         vmin: The value at the bottom of the bar.
         vmax: The value at the top.
+        log: Whether the axis is logarithmic rather than linear.
 
     Returns:
         Stops from the minimum upward.
@@ -204,7 +232,16 @@ def read_stops(img: Image.Image, vmin: float, vmax: float) -> list[Stop]:
         raise ValueError(f"bar is {rows} rows tall, under the {MIN_BAR_ROWS} needed")
 
     px = img.load()
-    span = vmax - vmin
+    # A log axis is linear in the exponent, so the mapping is done there
+    # and brought back at the end. radarca's accumulation bars run 0.01 to
+    # 20 inches over eight labelled decades-and-thirds; read as linear,
+    # the middle of that bar says 10 inches where it means 0.45, which is
+    # a number an operator would act on.
+    if log and (vmin <= 0 or vmax <= 0):
+        raise ValueError(f"a log axis cannot reach {min(vmin, vmax)}")
+    lo_e = math.log10(vmin) if log else vmin
+    hi_e = math.log10(vmax) if log else vmax
+    span = hi_e - lo_e
     blocks: list[tuple[tuple[int, int, int], int, int]] = []
     # Bottom to top, so the stops come out ascending in value.
     for y in range(bottom, top - 1, -1):
@@ -217,11 +254,90 @@ def read_stops(img: Image.Image, vmin: float, vmax: float) -> list[Stop]:
     out: list[Stop] = []
     for rgb, y0, y1 in blocks:
         # y runs downward and value upward, so the bottom row is the minimum.
-        lo = vmin + span * (bottom - y0) / (rows - 1)
-        hi = vmin + span * (bottom - y1) / (rows - 1)
-        out.append(Stop(rgb=rgb, value=round((lo + hi) / 2, 4),
-                        lo=round(lo, 4), hi=round(hi, 4)))
+        lo_x = lo_e + span * (bottom - y0) / (rows - 1)
+        hi_x = lo_e + span * (bottom - y1) / (rows - 1)
+        mid = (lo_x + hi_x) / 2
+        lo, hi, value = ((10 ** lo_x, 10 ** hi_x, 10 ** mid) if log
+                         else (lo_x, hi_x, mid))
+        places = LOG_PLACES if log else 4
+        out.append(Stop(rgb=rgb, value=round(value, places),
+                        lo=round(lo, places), hi=round(hi, places)))
     return out
+
+
+def banded_stops(img: Image.Image, ticks: list[tuple[float, float]]
+                 ) -> list[Stop]:
+    """Read a bar whose axis is neither linear nor logarithmic.
+
+    radarca's forecast accumulation bars print 0.00, 0.01, 0.03, 0.10,
+    0.30, 1.00, 3.00 and 10.00 with roughly a tenth of the bar between
+    each pair, which no linear or log axis produces, and a log axis
+    cannot reach the zero at the bottom. The shape between two printed
+    numbers is not recoverable from the picture, so every color between
+    them is reported as that band rather than interpolated. The bar does
+    distinguish ten blocks inside one band, and calling all of them
+    "0.30 to 1.00 in" is coarse where a guessed subdivision would be
+    precise and sometimes wrong.
+
+    Args:
+        img: The colorbar, in RGBA.
+        ticks: Each printed number with its fraction along the bar,
+            ascending by fraction.
+
+    Returns:
+        Stops from the bottom of the bar upward.
+
+    Raises:
+        ValueError: If the bar cannot be found or fewer than two numbers
+            are printed beside it.
+    """
+    if len(ticks) < 2:
+        raise ValueError(f"{len(ticks)} printed numbers is too few to band")
+    left, right = bar_columns(img)
+    top, bottom = bar_rows(img, left, right)
+    col = (left + right) // 2
+    # The outline, which is otherwise read as a black stop at the bottom
+    # and a white one at the top, both reporting a band they never paint.
+    top += frame_inset(img, col, top)
+    bottom -= frame_inset(img, col, bottom)
+    rows = bottom - top + 1
+    if rows < MIN_BAR_ROWS:
+        raise ValueError(f"bar is {rows} rows tall, under {MIN_BAR_ROWS}")
+    px = img.load()
+    out: list[Stop] = []
+    seen: set[tuple[int, int, int]] = set()
+    for y in range(bottom, top - 1, -1):
+        rgb = px[col, y][:3]
+        if rgb in seen:
+            continue
+        seen.add(rgb)
+        frac = (bottom - y) / (rows - 1)
+        lo, hi = band_for(frac, ticks)
+        out.append(Stop(rgb=rgb, value=round((lo + hi) / 2, LOG_PLACES),
+                        lo=round(lo, LOG_PLACES), hi=round(hi, LOG_PLACES),
+                        at=round(frac, 6)))
+    return out
+
+
+def band_for(frac: float,
+             ticks: list[tuple[float, float]]) -> tuple[float, float]:
+    """Which printed interval a point on the bar falls in.
+
+    Args:
+        frac: How far up the bar, 0 at the bottom.
+        ticks: Each printed number with its fraction, ascending.
+
+    Returns:
+        The values printed below and above that point. Past the outermost
+        numbers the band is open and both ends read as that number, which
+        is what an overflow block at the top of a bar means.
+    """
+    if frac <= ticks[0][1]:
+        return ticks[0][0], ticks[0][0]
+    for (v0, _), (v1, f1) in pairwise(ticks):
+        if frac <= f1:
+            return v0, v1
+    return ticks[-1][0], ticks[-1][0]
 
 
 def to_hex(rgb: tuple[int, int, int]) -> str:
@@ -252,20 +368,52 @@ def main() -> int:
     ap.add_argument("--label", required=True, help="the bar's own axis label")
     ap.add_argument("--moment", required=True, help="the moment this ramp is for")
     ap.add_argument("--source", required=True, help="where the file was read from")
+    ap.add_argument("--scale", choices=("linear", "log", "segmented"),
+                    default="linear",
+                    help="how the axis maps rows to values; check it against "
+                         "the bar's own tick spacing rather than assuming")
+    ap.add_argument("--ticks",
+                    help="for a segmented axis, the printed numbers top to "
+                         "bottom; their positions are read off the bar")
     args = ap.parse_args()
 
     img = Image.open(args.image).convert("RGBA")
-    stops = read_stops(img, args.min, args.max)
+    ticks: list[tuple[float, float]] = []
+    if args.scale == "segmented":
+        if not args.ticks:
+            print("a segmented axis needs --ticks", file=sys.stderr)
+            return 2
+        printed = [finite(v) for v in args.ticks.split(",")]
+        fractions = tick_fractions(img)
+        if len(printed) != len(fractions):
+            print(f"{len(printed)} numbers given and {len(fractions)} found "
+                  f"beside the bar; they have to pair up", file=sys.stderr)
+            return 2
+        ticks = sorted(zip(printed, fractions, strict=True),
+                       key=lambda t: t[1])
+    stops = (banded_stops(img, ticks) if args.scale == "segmented"
+             else read_stops(img, args.min, args.max, log=args.scale == "log"))
     print(json.dumps({
         "moment": args.moment,
         "unit": args.unit,
         "label": args.label,
         "min": args.min,
         "max": args.max,
+        "scale": args.scale,
+        # Where each printed number sits along the bar, measured. A
+        # segmented axis has no formula, so the legend places its ticks
+        # from these rather than computing them.
+        # Clamped, because a label's center can measure a pixel or two
+        # past the bar once the outline is taken off each end, and a
+        # fraction over 1 draws its tick off the drawn bar.
+        **({"ticks": [{"value": v, "fraction": round(min(1.0, max(0.0, f)), 6)}
+                      for v, f in ticks]} if ticks else {}),
         "source": args.source,
         "read_on": datetime.now(timezone.utc).date().isoformat(),
         "stops": [{"color": to_hex(s.rgb), "value": s.value,
-                   "lo": s.lo, "hi": s.hi} for s in stops]
+                   "lo": s.lo, "hi": s.hi,
+                   **({"at": s.at} if s.at is not None else {})}
+                  for s in stops]
     }, indent=1))
     return 0
 
