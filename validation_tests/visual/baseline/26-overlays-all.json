@@ -91,11 +91,11 @@
    "comp-overlay-layer",
    "range-fill",
    "range-stroke",
-   "watershed-line",
    "burn-scar-fill",
    "burn-scar-line",
-   "stream-gauge-marker",
+   "watershed-line",
    "reservoir-marker",
+   "stream-gauge-marker",
    "reservoir-label",
    "radar-halo",
    "radar-point",
@@ -608,7 +608,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=comp_ref&step=30&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=comp_ref&step=<N>&ts=<N>"
    },
    "nexrad": {
     "coordinates": [
@@ -725,5 +725,8 @@
   "terrain": null
  },
  "unstableOrder": false,
- "volatile": []
+ "volatile": [
+  "state.stepCount",
+  "state.stepIdx"
+ ]
 }

@@ -44,7 +44,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias, TypedDict
+from typing import NotRequired, TypeAlias, TypedDict
 
 try:
     from playwright.async_api import Page, async_playwright
@@ -81,6 +81,18 @@ SETTLE_MAX_MS = 30_000
 # sees none of those and the baseline then reports them as regressions.
 RELOAD_SETTLE_MS = 1500
 
+# Attempts per state before it is recorded as failed.
+#
+# A state failed once in 56 loads across two captures of the same build: the
+# forecast composite never appeared inside the 30 s cap, while the same state
+# loaded in 0.5 s on 12 of 12 reloads measured straight afterward and the
+# upstream answered in under 120 ms. At roughly 1 in 56, a 28-state run would
+# carry a failure about half the time and never finish clean.
+#
+# A retry makes a run usable without hiding the rate: the first error is kept
+# on the record and counted in the manifest.
+ATTEMPTS = 2
+
 # The camera lands on a float that a fitBounds animation chose, so it is
 # recorded at a precision a reader could tell apart on screen.
 CAMERA_PLACES = 4
@@ -99,6 +111,8 @@ class StateRecord(TypedDict):
     counts: dict[str, int]
     volatile: list[str]
     unstableOrder: bool
+    # Present only when a first attempt failed; carries that error.
+    retried: NotRequired[str]
 
 
 @dataclass(frozen=True)
@@ -234,8 +248,10 @@ _TS_PATTERNS = [
     (re.compile(r"\d{8}[-T]\d{4,6}Z?"), "<TS>"),
     # Ages the panel renders, e.g. +2m38s, -5d2h51m, 13.1h.
     (re.compile(r"[+-]?\d+(\.\d+)?[dhms](\d+[hms])*\b"), "<AGE>"),
-    # Cache-busting and frame-index query parameters.
-    (re.compile(r"([?&](?:frame|t|ts|_)=)[^&\"]*"), r"\1<N>"),
+    # Cache-busting and frame-index query parameters. `step` joins them
+    # because the index follows a step list whose length drifts; see
+    # UPSTREAM_OWNED.
+    (re.compile(r"([?&](?:frame|step|t|ts|_)=)[^&\"]*"), r"\1<N>"),
 ]
 
 # Epoch milliseconds, which the burn-scar layer bakes into its own paint and
@@ -257,7 +273,20 @@ EPOCH_MS_MAX = 9_999_999_999_999
 # exactly. A composite placed on the wrong box is the fault this whole capture
 # exists to catch, and coarsening the geometry to silence one source would
 # blunt it everywhere.
-UPSTREAM_GEOMETRY = ("sources.tilt-overlay.coordinates",)
+#
+# The step counts belong here too, for a different reason. The radar
+# composites roll a fixed window and sit still at 31, but the forecast keeps
+# growing: `fcst_total_precip` went from 69 steps to 74 across one afternoon
+# as further forecast hours published. A baseline that pinned the number
+# would report a difference on that state every day.
+#
+# Losing them costs the capture its view of a broken step list, so the
+# playback logic gets its own runner assertions rather than leaning on this.
+UPSTREAM_OWNED = (
+    "sources.tilt-overlay.coordinates",
+    "state.stepCount",
+    "state.stepIdx",
+)
 
 
 def scrub(value: Json, depth: int = 0) -> Json:  # bounded: MAX_DEPTH
@@ -513,7 +542,7 @@ async def capture_state(page: Page, cfg: RunConfig, name: str,
     right = flatten(scrub(second if second is not None else first))
     keys = sorted(set(left) | set(right))
     volatile = [k for k in keys
-                if left.get(k) != right.get(k) or k.startswith(UPSTREAM_GEOMETRY)]
+                if left.get(k) != right.get(k) or k.startswith(UPSTREAM_OWNED)]
 
     order_a = as_ids(scrubbed.get("layerOrder"))
     order_b = as_ids((second or {}).get("layerOrder"))
@@ -524,6 +553,42 @@ async def capture_state(page: Page, cfg: RunConfig, name: str,
             # order change on such a state to a warning, so a later refactor
             # does not wear the blame for it.
             "unstableOrder": order_a != order_b}
+
+
+async def capture_with_retry(
+    page: Page, cfg: RunConfig, name: str,
+    prefs: dict[str, Json], expect: frozenset[str]
+) -> tuple[StateRecord, str]:
+    """Capture one state, allowing for a transient failure to load.
+
+    A state that fails and then succeeds is recorded, with what went wrong
+    kept on the record and printed. The console genuinely failed to show
+    what it was asked for, and a reader of the page would have seen the same
+    thing, so the retry buys a usable run without hiding the rate.
+
+    Args:
+        page: A page already on the target origin.
+        cfg: Where to capture from and what to write.
+        name: Matrix entry name.
+        prefs: The `mapPrefs` object to restore from.
+        expect: Source ids this state must produce.
+
+    Returns:
+        The record, and the first attempt's error when one was needed.
+
+    Raises:
+        RuntimeError: If every attempt failed, carrying the last message.
+    """
+    note = ""
+    for attempt in range(ATTEMPTS):
+        try:
+            return await capture_state(page, cfg, name, prefs, expect), note
+        except (RuntimeError, TypeError, RecursionError,
+                TimeoutError, PlaywrightTimeout) as e:
+            note = str(e)
+            if attempt + 1 < ATTEMPTS:
+                print(f"  retry {name}: {note}")
+    raise RuntimeError(note)
 
 
 async def run(cfg: RunConfig) -> int:
@@ -537,6 +602,7 @@ async def run(cfg: RunConfig) -> int:
     """
     cfg.out.mkdir(parents=True, exist_ok=True)
     captured: list[str] = []
+    retried: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
@@ -546,24 +612,29 @@ async def run(cfg: RunConfig) -> int:
                         wait_until="domcontentloaded", timeout=60_000)
         for name, prefs, expect in STATES:
             try:
-                rec = await capture_state(page, cfg, name, prefs, expect)
-            except (RuntimeError, TypeError, RecursionError,
-                    TimeoutError, PlaywrightTimeout) as e:
+                rec, note = await capture_with_retry(page, cfg, name, prefs, expect)
+            except RuntimeError as e:
                 print(f"  FAIL  {name}: {e}")
                 failed.append({"name": name, "error": str(e)})
                 continue
+            if note:
+                rec["retried"] = note
+                retried.append({"name": name, "error": note})
             (cfg.out / f"{name}.json").write_text(
                 json.dumps(rec, indent=1, sort_keys=True) + "\n")
             c = rec["counts"]
             print(f"  ok    {name:<24} {c['layers']:>3} layers, "
                   f"{c['ours']:>2} ours, {c['sources']:>2} sources, "
-                  f"{len(rec['volatile']):>2} volatile")
+                  f"{len(rec['volatile']):>2} volatile"
+                  f"{'  (retried)' if note else ''}")
             captured.append(name)
         await browser.close()
     (cfg.out / "manifest.json").write_text(
-        json.dumps({"base": cfg.base, "states": captured, "failed": failed},
+        json.dumps({"base": cfg.base, "states": captured,
+                    "retried": retried, "failed": failed},
                    indent=1, sort_keys=True) + "\n")
-    print(f"\n{len(captured)}/{len(STATES)} states captured into {cfg.out}")
+    print(f"\n{len(captured)}/{len(STATES)} states captured into {cfg.out}"
+          + (f"; {len(retried)} needed a retry" if retried else ""))
     return 1 if failed else 0
 
 

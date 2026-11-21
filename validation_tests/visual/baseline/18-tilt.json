@@ -282,20 +282,20 @@
    "tilt-overlay": {
     "coordinates": [
      [
-      -122.524,
-      38.1806
+      -122.5234,
+      38.1801
      ],
      [
-      -121.5999,
-      38.1806
+      -121.6006,
+      38.1801
      ],
      [
-      -121.5999,
-      37.4505
+      -121.6006,
+      37.4511
      ],
      [
-      -122.524,
-      37.4505
+      -122.5234,
+      37.4511
      ]
     ],
     "type": "image",
@@ -340,6 +340,8 @@
   "sources.tilt-overlay.coordinates[2][0]",
   "sources.tilt-overlay.coordinates[2][1]",
   "sources.tilt-overlay.coordinates[3][0]",
-  "sources.tilt-overlay.coordinates[3][1]"
+  "sources.tilt-overlay.coordinates[3][1]",
+  "state.stepCount",
+  "state.stepIdx"
  ]
 }

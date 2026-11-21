@@ -297,5 +297,8 @@
   "terrain": null
  },
  "unstableOrder": false,
- "volatile": []
+ "volatile": [
+  "state.stepCount",
+  "state.stepIdx"
+ ]
 }

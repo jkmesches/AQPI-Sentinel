@@ -397,14 +397,22 @@ Two consecutive captures of unchanged code agree on all 28 states
 structurally, which is the baseline's noise floor. Anything the
 decomposition moves shows against it.
 
-The layer-order race survives readiness gating and still surfaces, as an
-order-only warning on `26-overlays-all` or `06-composite-fcst`. It appeared
-on two of the four comparisons run since the gating landed, which is too few
-to put a rate on. The capture marks the state unstable and the
-comparison keeps its exit status at 0, so a run reporting one has passed. The
-race itself belongs to the overlays loading independently, and the layer
-registry in slice 3 should end it by declaring an order rather than letting
-fetch completion decide.
+The layer-order race is fixed. It survived readiness gating and appeared on
+two of the four comparisons run after it, as an order-only warning on
+`26-overlays-all` or `06-composite-fcst`. Every vector overlay was added
+with `beforeId: 'radar-halo'`, which put each immediately under the radar
+markers and left their order among themselves to whichever fetch returned
+first. `$lib/map/layers/stack.ts` declares the order and each overlay is
+inserted before the first layer above it that is already on the map, so a
+layer toggled on late still lands in its declared place. Two captures of
+that build agree on all 28 states with no order warnings.
+
+One state in 56 loads has failed to show what it was asked for, the
+forecast composite not appearing inside the 30 s cap. The same state then
+loaded in 0.5 s on 12 of 12 reloads, and the upstream answered in under
+120 ms, so it is neither the network nor a settled fault in the component.
+The capture retries a state once and keeps the first error on its record, so
+a run finishes while the rate stays visible. The cause is open.
 
 The LB2 change cannot be seen working on the test deployment, whose catalog is L0, L1,
 L2, L3 and L4-T1T2 with no backend tier at all. It gets unit tests here plus a

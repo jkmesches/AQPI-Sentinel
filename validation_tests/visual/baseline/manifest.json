@@ -1,6 +1,7 @@
 {
  "base": "https://the test deployment",
  "failed": [],
+ "retried": [],
  "states": [
   "00-default",
   "01-composite-off",

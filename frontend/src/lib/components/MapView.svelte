@@ -21,6 +21,7 @@
 	} from '$lib/map/burnScars';
 	import { gaugeChartSvg, gaugeSummaryHtml } from '$lib/map/gaugeChart';
 	import { selectionBounds, toggleId, uniqueIds } from '$lib/map/selection';
+	import { beforeIdFor } from '$lib/map/layers/stack';
 	import { radarExtent, radarPointsGeo, radarRangesGeo } from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
@@ -202,6 +203,15 @@
 	function addOverlayBelowMarkers(m: maplibregl.Map, layer: maplibregl.AddLayerObject) {
 		m.addLayer(layer, m.getLayer(MARKER_BASE_LAYER) ? MARKER_BASE_LAYER : undefined);
 	}
+
+	// Where one vector overlay goes, from the order declared in
+	// $lib/map/layers/stack. These all used `beforeId: 'radar-halo'`, which
+	// puts each immediately under the markers and leaves their order among
+	// themselves to whichever fetch returned first. The visual baseline
+	// caught watershed-line landing either side of burn-scar-line across
+	// runs of identical code.
+	const vectorBefore = (id: string) =>
+		beforeIdFor(id, (x) => !!map?.getLayer(x));
 
 	/** MapLibre's ImageSource wants exactly four corners, clockwise from the
 	 *  top-left. A plain [number, number][] loses that arity and will not
@@ -1911,7 +1921,7 @@
 					'circle-stroke-width': ['case', ['==', ['get', 'status'], 'R'], 1.2, 0.6]
 				}
 			},
-			'radar-halo'
+			vectorBefore('stream-gauge-marker')
 		);
 	}
 
@@ -2129,7 +2139,7 @@
 						'line-opacity': 0.4
 					}
 				},
-				'radar-halo'
+				vectorBefore('watershed-line')
 			);
 		}
 
@@ -2155,7 +2165,7 @@
 						'circle-opacity': 0.9
 					}
 				},
-				'radar-halo'
+				vectorBefore('reservoir-marker')
 			);
 			map.addLayer(
 				{
@@ -2175,7 +2185,7 @@
 						'text-halo-width': 1
 					}
 				},
-				'radar-halo'
+				vectorBefore('reservoir-label')
 			);
 		}
 	}
@@ -2255,7 +2265,7 @@
 					'fill-opacity': ['interpolate', ['linear'], age, 0, 0.3, 5, 0.1]
 				}
 			},
-			'radar-halo'
+			vectorBefore(BURN_SCAR_FILL)
 		);
 		map.addLayer(
 			{
@@ -2272,7 +2282,7 @@
 					'line-opacity': ['interpolate', ['linear'], age, 0, 0.9, 5, 0.45]
 				}
 			},
-			'radar-halo'
+			vectorBefore(BURN_SCAR_LINE)
 		);
 	}
 

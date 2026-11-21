@@ -279,7 +279,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=comp_ref&step=30&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=comp_ref&step=<N>&ts=<N>"
    },
    "radars": {
     "data": {
@@ -353,5 +353,8 @@
   }
  },
  "unstableOrder": false,
- "volatile": []
+ "volatile": [
+  "state.stepCount",
+  "state.stepIdx"
+ ]
 }

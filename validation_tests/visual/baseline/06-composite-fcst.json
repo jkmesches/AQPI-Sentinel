@@ -267,7 +267,7 @@
      ]
     ],
     "type": "image",
-    "url": "/api/upstream/product_image.png?product_id=fcst_total_precip&step=68&ts=<N>"
+    "url": "/api/upstream/product_image.png?product_id=fcst_total_precip&step=<N>&ts=<N>"
    },
    "radars": {
     "data": {
@@ -316,8 +316,8 @@
    "prefsReady": true,
    "profile": "aqpi",
    "reservoirsOn": false,
-   "stepCount": 69,
-   "stepIdx": 68,
+   "stepCount": 74,
+   "stepIdx": 73,
    "stepsFor": "fcst_total_precip",
    "streamGaugesOn": false,
    "terrain3DOn": false,
@@ -328,5 +328,8 @@
   "terrain": null
  },
  "unstableOrder": false,
- "volatile": []
+ "volatile": [
+  "state.stepCount",
+  "state.stepIdx"
+ ]
 }
