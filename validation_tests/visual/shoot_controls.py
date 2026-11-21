@@ -46,7 +46,8 @@ except ImportError:  # pragma: no cover - environment check
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
 
-from capture import open_dock  # noqa: E402  sibling module, loaded by path
+from capture import (  # noqa: E402  sibling module, loaded by path
+    open_dock, open_settings)
 
 DEFAULT_BASE = "https://the test deployment"
 
@@ -184,6 +185,9 @@ async def open_console(browser: Browser, base: str) -> Page:
     await page.goto(f"{base}/?diag=probe", wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
     await open_dock(page)
+    # The opacity sliders moved out of the dock and into the toolbar's
+    # settings menu, so reaching them is two openings rather than one.
+    await open_settings(page)
     return page
 
 
@@ -287,9 +291,10 @@ async def check_persistence(page: Page, base: str,
     await page.goto(f"{base}/?diag=probe", wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
     # A narrow window or a stored preference can leave the dock closed
-    # after a reload. The opacities it holds are the setting, and they are
-    # what this checks.
+    # after a reload, and the settings menu always opens closed. The
+    # opacities are the setting this checks came back.
     await open_dock(page)
+    await open_settings(page)
     after = await sliders(page)
     if after.get("composite") != MOVED_TO:
         problems.append(

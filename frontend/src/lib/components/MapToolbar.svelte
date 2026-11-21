@@ -182,11 +182,16 @@
 			onclick={() => { settingsOpen = !settingsOpen; }}
 		>settings</button>
 
-		{#if settingsOpen}
-			<div
-				data-settings-panel
-				class="absolute right-0 top-[calc(100%+0.35rem)] z-40 w-[15rem] rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/97 p-3 shadow-xl backdrop-blur"
-			>
+		<!-- Mounted whether or not it is open, because the opacity sliders
+		     are published into it from the pane that owns them and a
+		     portal cannot place a node in a host that is not there yet.
+		     Hidden with the attribute rather than torn down, so the
+		     sliders keep their values across an open and a close. -->
+		<div
+			data-settings-panel
+			hidden={!settingsOpen}
+			class="absolute right-0 top-[calc(100%+0.35rem)] z-40 w-[17rem] rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/97 p-3 shadow-xl backdrop-blur"
+		>
 				<div class="label tracking-[0.2em] text-[var(--color-default)]">
 					Element size
 				</div>
@@ -218,7 +223,21 @@
 				>
 					{scaleName(uiScale)} · {Math.round(uiScale * 100)}%
 				</div>
-			</div>
-		{/if}
+
+				<!-- Where the pane publishes its opacity sliders. They were a
+				     group in the dock, which put a control a reader touches
+				     a few times a session in the same column as the product
+				     and the radar list, which they touch constantly. -->
+				<div
+					class="label mt-3 border-t border-[var(--color-border)] pt-3 tracking-[0.2em] text-[var(--color-default)]"
+				>
+					Layer opacity
+				</div>
+				<p class="mt-1 text-[9.5px] leading-tight text-[var(--color-faint)]">
+					How hard each raster layer is painted in the pane you have
+					selected. The three stack on the same ground.
+				</p>
+				<div data-settings-slot class="mt-2"></div>
+		</div>
 	</div>
 </div>

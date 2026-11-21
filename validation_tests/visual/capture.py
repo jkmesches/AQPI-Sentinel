@@ -411,6 +411,31 @@ async def open_dock(page: Page, pane: int = 0) -> None:
         timeout=5_000)
 
 
+async def open_settings(page: Page, pane: int = 0) -> None:
+    """Open the toolbar's settings menu, where the opacity sliders are.
+
+    The menu's panel is in the page whether or not it is open, because
+    the pane publishes its sliders into it, so a harness cannot tell
+    open from closed by looking for the panel. It waits on the sliders
+    being visible instead.
+
+    Args:
+        page: The loaded console page.
+        pane: Which pane's sliders to wait for.
+
+    Raises:
+        RuntimeError: When the page has no settings menu.
+    """
+    toggle = page.locator("[data-settings-toggle]")
+    if await toggle.count() != 1:
+        raise RuntimeError("the console has no settings menu")
+    if await toggle.get_attribute("aria-expanded") != "true":
+        await toggle.click()
+    await page.locator(
+        f'[data-settings-slot] [data-settings-pane="{pane}"]'
+    ).wait_for(state="visible", timeout=5_000)
+
+
 def as_ids(value: Json) -> list[str]:
     """Coerce a snapshot's `layerOrder` to a list of ids.
 

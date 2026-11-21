@@ -4990,14 +4990,10 @@
 		     ground, so the question is which to fade against the others.
 		     The minimum is 0 rather than the old 10, because a layer you
 		     want out of the way entirely is the common case and the toggle
-		     for it is elsewhere in the panel. -->
-		<!-- Sticky, because three rows where there was one pushed this below
-		     the fold of a scrolling panel on a 950 px window and the last
-		     slider could not be seen at all. The radar list scrolls under
-		     it instead. -->
+		     for it is elsewhere. -->
 		<div
 			data-opacity-panel
-			class="sticky bottom-0 z-10 flex flex-col gap-1 border-t border-[var(--color-border)] bg-[var(--color-surface)]/95 px-3 py-1.5 backdrop-blur"
+			class="flex flex-col gap-1"
 		>
 			{#each OPACITY_LAYERS as key (key)}
 				<div class="flex items-center gap-2">
@@ -5059,26 +5055,31 @@
 			{@render dockSection('Moment', momentBody)}
 			{@render dockSection('Radars', radarsBody)}
 			{@render dockSection('Reference', referenceBody)}
-			{@render dockSection('Opacity', opacityBody, true)}
+		</div>
+		<!-- The opacity sliders go to the toolbar's settings menu, where
+		     the console's own preferences live, rather than into the dock
+		     beside the product and the radar list. Those get touched
+		     constantly and a layer's opacity a few times a session, and
+		     the dock had to pin opacity to the bottom to keep the sliders
+		     reachable at all on a 950 px window. The pane still owns the
+		     values, so this publishes the same snippet to a different
+		     host. -->
+		<div
+			use:portal={'[data-settings-slot]'}
+			data-settings-pane={pane}
+			style="font-size: {scaled(11, uiScale)}px"
+		>
+			{@render opacityBody()}
 		</div>
 	{/if}
 
 	<!-- One heading and one rule per group. The groups came from a panel
 	     where each drew its own, and three of them drew none. -->
-	{#snippet dockSection(
-		name: string, body: import('svelte').Snippet, pinned = false
-	)}
+	{#snippet dockSection(name: string, body: import('svelte').Snippet)}
 		<!-- flex-col because the rows inside are `justify-between` buttons
 		     that were written for the panel's own flex column. In a block
-		     each shrank to its text and the ON ran into the layer's name.
-		     Pinned sections stay on screen while the rest scrolls under
-		     them: the opacity sliders are the one group a reader reaches
-		     for while looking at the map rather than at the dock. -->
-		<div
-			class="flex flex-col border-b border-[var(--color-border)] last:border-b-0 {pinned
-				? 'sticky bottom-0 z-10 border-t border-[var(--color-border-strong)] bg-[var(--color-surface)]'
-				: ''}"
-		>
+		     each shrank to its text and the ON ran into the layer's name. -->
+		<div class="flex flex-col border-b border-[var(--color-border)] last:border-b-0">
 			<div
 				class="label px-3 pt-2 tracking-[0.2em] text-[var(--color-muted)]"
 				style="font-size: {scaled(9.5, uiScale)}px"

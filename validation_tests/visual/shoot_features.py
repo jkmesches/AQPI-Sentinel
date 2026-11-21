@@ -83,8 +83,11 @@ PAINT_STOP = 10
 FRAME_SIZE = (843, 1108)
 
 #: The dock's groups. Every one is open as soon as the console is.
-WANT_GROUPS = ("Product", "Moment", "Radars", "Reference", "Geography",
-               "Opacity")
+#: Opacity is not among these. It moved to the toolbar's settings menu,
+#: where the console's own preferences are, because the dock is the
+#: column a reader works constantly and a layer's opacity is set a few
+#: times a session.
+WANT_GROUPS = ("Product", "Moment", "Radars", "Reference", "Geography")
 
 #: Geometry the overlays are drawn at, at the default size and at 2x.
 COMPASS_PX = 56
@@ -255,6 +258,12 @@ async def check_dock(page: Page, rep: Report) -> None:
         "'[data-map-toolbar] [data-place-search]')"))
     rep.check("and is gone from the dock", await page.evaluate(
         "()=>!document.querySelector('[data-dock-slot] [data-place-search]')"))
+    rep.check("the opacity sliders are in the settings menu", await
+              page.evaluate(
+                  "()=>document.querySelectorAll("
+                  "'[data-settings-slot] [data-opacity]').length") == 3)
+    rep.check("and are gone from the dock", await page.evaluate(
+        "()=>!document.querySelector('[data-dock-slot] [data-opacity]')"))
 
 
 async def check_compass(page: Page, rep: Report) -> None:
