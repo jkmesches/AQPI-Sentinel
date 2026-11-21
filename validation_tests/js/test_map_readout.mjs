@@ -1,0 +1,238 @@
+// Cursor position to overlay pixel, and the text that goes beside it.
+//
+// Run:  node validation_tests/js/run_map_readout.mjs
+//
+// A readout is the most trusted thing on the map. Nobody checks a number
+// against a color by eye, and a number half a cell from where the cursor is
+// reads exactly like one that is right.
+//
+// The failure these assertions are built around is interpolating in latitude
+// instead of Web Mercator. MapLibre places an image by its corners and
+// interpolates between them in Mercator, so a latitude-linear inverse drifts
+// toward the middle of the overlay and is worst there. Over a Bay Area box
+// that drift is kilometers, which is several cells.
+
+export function runTests(mod, ramps) {
+  const {
+    overlayFraction, overlayPixel, readoutText, bandDecimals,
+    MERCATOR_LIMIT_DEG, RECTANGLE_TOLERANCE_M
+  } = mod;
+  const failures = [];
+  const check = (label, cond, detail = '') => {
+    console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  — ${detail}` : ''}`);
+    if (!cond) failures.push(label);
+  };
+  const threw = (fn) => {
+    try { fn(); return false; } catch (e) { return e instanceof RangeError; }
+  };
+  // AQPI's composite box, near enough: a Bay Area overlay.
+  const box = (w, s, e, n) => [[w, n], [e, n], [e, s], [w, s]];
+  const BAY = box(-123.5, 36.5, -121.0, 39.0);
+
+  console.log('the corners map to the corners:');
+  {
+    const nw = overlayFraction(BAY, -123.5, 39.0);
+    const se = overlayFraction(BAY, -121.0, 36.5);
+    check('north-west is 0,0',
+      Math.abs(nw.u) < 1e-9 && Math.abs(nw.v) < 1e-9,
+      `${nw.u} ${nw.v}`);
+    check('south-east is 1,1',
+      Math.abs(se.u - 1) < 1e-9 && Math.abs(se.v - 1) < 1e-9,
+      `${se.u} ${se.v}`);
+    const ne = overlayFraction(BAY, -121.0, 39.0);
+    const sw = overlayFraction(BAY, -123.5, 36.5);
+    check('north-east is 1,0',
+      Math.abs(ne.u - 1) < 1e-9 && Math.abs(ne.v) < 1e-9);
+    check('south-west is 0,1',
+      Math.abs(sw.u) < 1e-9 && Math.abs(sw.v - 1) < 1e-9);
+  }
+
+  console.log('\nlongitude is linear and latitude is not:');
+  {
+    // Longitude maps linearly to Mercator x, so the midpoint is 0.5 exactly.
+    const midLon = overlayFraction(BAY, -122.25, 39.0);
+    check('the longitude midpoint is halfway across',
+      Math.abs(midLon.u - 0.5) < 1e-12, String(midLon.u));
+    // Latitude does not. This is the whole reason the inverse runs in
+    // Mercator: a latitude-linear reading would put the midpoint at 0.5.
+    const midLat = overlayFraction(BAY, -123.5, 37.75);
+    check('the latitude midpoint is not halfway down',
+      Math.abs(midLat.v - 0.5) > 1e-4, String(midLat.v));
+    // v grows southward, so v > 0.5 puts the mid-latitude point below the
+    // overlay's vertical center. Mercator stretches poleward, so the
+    // northern half of the box takes more of the image than the southern.
+    check('and it sits below center, since the northern half is stretched',
+      midLat.v > 0.5, String(midLat.v));
+  }
+
+  console.log('\nthe Mercator drift is worth the arithmetic:');
+  {
+    // How far a latitude-linear inverse would be wrong, in overlay pixels
+    // and on the ground. If this ever came out small, the simpler inverse
+    // would be defensible; it does not.
+    const span = 39.0 - 36.5;
+    let worstFrac = 0;
+    let worstLat = 0;
+    for (let lat = 36.5; lat <= 39.0; lat += 0.01) {
+      const merc = overlayFraction(BAY, -123.5, lat).v;
+      const naive = (39.0 - lat) / span;
+      if (Math.abs(merc - naive) > worstFrac) {
+        worstFrac = Math.abs(merc - naive);
+        worstLat = lat;
+      }
+    }
+    // 2.5 degrees of latitude is about 278 km.
+    const km = worstFrac * 278;
+    check('a latitude-linear inverse drifts by kilometers',
+      km > 1, `${km.toFixed(2)} km at ${worstLat.toFixed(2)}N ` +
+      `(${(worstFrac * 100).toFixed(3)}% of the overlay)`);
+    const edgeN = overlayFraction(BAY, -123.5, 39.0).v;
+    const edgeS = overlayFraction(BAY, -123.5, 36.5).v;
+    check('and is exact at both edges, which is why it looks right',
+      Math.abs(edgeN - 0) < 1e-12 && Math.abs(edgeS - 1) < 1e-12);
+  }
+
+  console.log('\noutside the overlay reads nothing:');
+  {
+    check('west of it', overlayFraction(BAY, -124.0, 37.5) === null);
+    check('east of it', overlayFraction(BAY, -120.0, 37.5) === null);
+    check('north of it', overlayFraction(BAY, -122.0, 40.0) === null);
+    check('south of it', overlayFraction(BAY, -122.0, 35.0) === null);
+    check('just outside the west edge',
+      overlayFraction(BAY, -123.5001, 37.5) === null);
+    check('just inside it',
+      overlayFraction(BAY, -123.4999, 37.5) !== null);
+  }
+
+  console.log('\nan unprojectable point reads nothing:');
+  {
+    check('NaN longitude', overlayFraction(BAY, NaN, 37.5) === null);
+    check('NaN latitude', overlayFraction(BAY, -122, NaN) === null);
+    check('infinite longitude', overlayFraction(BAY, Infinity, 37.5) === null);
+    check('past the Mercator limit',
+      overlayFraction(BAY, -122, MERCATOR_LIMIT_DEG + 0.001) === null);
+    check('a point just inside the limit still projects',
+      overlayFraction(box(-123.5, 80, -121, MERCATOR_LIMIT_DEG), -122, 85)
+      !== null);
+    check('and a box reaching past it is refused outright',
+      threw(() => overlayFraction(box(-123.5, 80, -121, 86), -122, 84)));
+  }
+
+  console.log('\na box with no area is refused, not guessed at:');
+  {
+    check('zero width', threw(() => overlayFraction(
+      box(-122, 36.5, -122, 39), -122, 37.5)));
+    check('zero height', threw(() => overlayFraction(
+      box(-123.5, 37, -121, 37), -122, 37)));
+    check('west and east swapped', threw(() => overlayFraction(
+      box(-121, 36.5, -123.5, 39), -122, 37.5)));
+    check('north and south swapped', threw(() => overlayFraction(
+      box(-123.5, 39, -121, 36.5), -122, 37.5)));
+    check('an unprojectable corner', threw(() => overlayFraction(
+      box(-123.5, 36.5, -121, 89), -122, 37.5)));
+    check('a NaN corner', threw(() => overlayFraction(
+      box(NaN, 36.5, -121, 39), -122, 37.5)));
+  }
+
+  console.log('\na quad that is not a rectangle reads nothing:');
+  {
+    // A projective inverse would be needed. Answering with the rectangular
+    // one gives a plausible wrong pixel, which is the worst outcome here.
+    const sheared = [[-123.5, 39.0], [-121.0, 39.0], [-120.5, 36.5],
+      [-123.5, 36.5]];
+    check('a sheared quad', overlayFraction(sheared, -122, 37.5) === null);
+    const tilted = [[-123.5, 39.0], [-121.0, 38.9], [-121.0, 36.5],
+      [-123.5, 36.5]];
+    check('a tilted top edge', overlayFraction(tilted, -122, 37.5) === null);
+    check('the tolerance is tight enough to be meaningful',
+      RECTANGLE_TOLERANCE_M <= 1, String(RECTANGLE_TOLERANCE_M));
+  }
+
+  console.log('\na fraction lands on a real pixel:');
+  {
+    check('the north-west corner is 0,0',
+      JSON.stringify(overlayPixel({ u: 0, v: 0 }, 800, 600)) === '{"x":0,"y":0}');
+    check('the south-east corner is the last pixel',
+      JSON.stringify(overlayPixel({ u: 1, v: 1 }, 800, 600))
+      === '{"x":799,"y":599}',
+      JSON.stringify(overlayPixel({ u: 1, v: 1 }, 800, 600)));
+    check('the middle is the middle',
+      JSON.stringify(overlayPixel({ u: 0.5, v: 0.5 }, 800, 600))
+      === '{"x":400,"y":300}');
+    check('just inside the last pixel stays inside',
+      overlayPixel({ u: 0.99999, v: 0.99999 }, 800, 600).x === 799);
+    check('a one-pixel image has one pixel',
+      JSON.stringify(overlayPixel({ u: 1, v: 1 }, 1, 1)) === '{"x":0,"y":0}');
+    check('a zero width is refused',
+      threw(() => overlayPixel({ u: 0.5, v: 0.5 }, 0, 600)));
+    check('a fractional size is refused',
+      threw(() => overlayPixel({ u: 0.5, v: 0.5 }, 800.5, 600)));
+    check('a negative size is refused',
+      threw(() => overlayPixel({ u: 0.5, v: 0.5 }, 800, -600)));
+  }
+
+  console.log('\nthe band precision follows the band:');
+  {
+    for (const [w, want] of [[20, 0], [10, 0], [5, 1], [4.55, 1], [1, 1],
+      [0.5, 2], [0.1, 2]]) {
+      check(`a band ${w} wide takes ${want} decimals`,
+        bandDecimals(w) === want, String(bandDecimals(w)));
+    }
+    check('a zero band does not crash', bandDecimals(0) === 1);
+    check('NaN does not crash', bandDecimals(NaN) === 1);
+  }
+
+  console.log('\na discrete ramp reports its band, honestly:');
+  {
+    // AQPI reuses the 22-color palette over -20 to 80 dBZ, so its bins are
+    // 4.55 wide on bounds like -15.5. Printing "-20 to -15" would be a
+    // tidier band than the producer painted.
+    const aqpi = ramps['aqpi-xband-reflectivity'];
+    const s = aqpi.stops[0];
+    const text = readoutText(aqpi, { value: s.value, lo: s.lo, hi: s.hi, distance: 0 });
+    check('it reads as a range', /to/.test(text), text);
+    check('it carries the unit', text.endsWith(' dBZ'), text);
+    check('it keeps the half-dBZ bound',
+      text === '-20.0 to -15.9 dBZ', text);
+    const flow = ramps['flow-reflectivity'];
+    const f = flow.stops[2];
+    check("FLOW's bins are the round ones",
+      readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 })
+      === '-20.0 to -15.2 dBZ',
+      readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 }));
+  }
+
+  console.log('\na continuous ramp reports one value:');
+  {
+    const vel = ramps['aqpi-xband-velocity'];
+    const s = vel.stops[20];
+    const text = readoutText(vel, { value: s.value, lo: s.lo, hi: s.hi, distance: 3 });
+    check('no range', !/to/.test(text), text);
+    check('it carries the unit', text.endsWith(' m/s'), text);
+    // The precision is the ramp's own resolution, its span over its stop
+    // count, not a fixed fraction of the span. Velocity resolves to about
+    // 1.07 m/s, so a second decimal would be invented.
+    check('one decimal, since velocity resolves to about 1 m/s',
+      /^-?\d+\.\d m\/s$/.test(text), text);
+    const zdr = ramps['aqpi-xband-differential-reflectivity'];
+    const z = zdr.stops[30];
+    const ztext = readoutText(zdr, { value: z.value, lo: z.lo, hi: z.hi, distance: 0 });
+    check('two decimals, since ZDR resolves to about 0.1 dB',
+      /^-?\d+\.\d\d dB$/.test(ztext), ztext);
+    const phi = ramps['aqpi-xband-differential-phase'];
+    const ph = phi.stops[30];
+    const ptext = readoutText(phi, { value: ph.value, lo: ph.lo, hi: ph.hi, distance: 0 });
+    check('one decimal, since PhiDP resolves to about 6 degrees',
+      /^-?\d+\.\d deg$/.test(ptext), ptext);
+  }
+
+  console.log('\nnothing under the cursor prints nothing:');
+  {
+    check('a null reading', readoutText(ramps['flow-reflectivity'], null) === null);
+  }
+
+  console.log(failures.length
+    ? `\n${failures.length} FAILED: ${failures.join(', ')}`
+    : '\nall readout assertions passed');
+  return failures.length ? 1 : 0;
+}

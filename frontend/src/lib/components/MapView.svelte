@@ -6,6 +6,10 @@
 	import { momentChoices, momentDisplay, defaultMoment,
 	         prefixFor } from '$lib/map/moments';
 	import { rampFor } from '$lib/map/ramps/registry';
+	import { invert } from '$lib/map/ramps/invert';
+	import { overlayFraction, overlayPixel,
+	         readoutText } from '$lib/map/readout';
+	import { FrameSampler } from '$lib/map/sampler';
 	import MapLegend from '$lib/components/MapLegend.svelte';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
@@ -110,14 +114,17 @@
 			fn();
 		}
 	}
-	async function preloadImage(url: string, isCurrent: () => boolean): Promise<boolean> {
+	async function preloadImage(
+		url: string,
+		isCurrent: () => boolean
+	): Promise<HTMLImageElement | null> {
 		// Wait for a free slot.
 		await new Promise<void>((resolve) => {
 			_decodeQueue.push(resolve);
 			_pumpDecodes();
 		});
 		try {
-			if (!isCurrent()) return false;
+			if (!isCurrent()) return null;
 			const img = new Image();
 			// === Load-bearing: crossOrigin BEFORE src ===
 			//
@@ -137,9 +144,12 @@
 			img.decoding = 'async';
 			img.src = url;
 			await img.decode();
-			return isCurrent();
+			// The decoded frame goes back to the caller so the cursor
+			// readout can sample it. Loading it a second time for that
+			// would double the decode cost of every frame.
+			return isCurrent() ? img : null;
 		} catch {
-			return false;
+			return null;
 		} finally {
 			_decodesInFlight--;
 			_pumpDecodes();
@@ -336,6 +346,83 @@
 	 * legend taken from whichever radar happened to be first would be wrong
 	 * for the other half of the time.
 	 */
+	// The cursor readout. The sampler holds the frame on screen, and
+	// readoutFrame says which radar's box it was placed in; both are null
+	// whenever more than one radar is on, since the readout names one scale.
+	const sampler = new FrameSampler();
+	let readoutFrame = $state<
+		{ extent: Extent; radar: string } | null>(null);
+	let readoutValue = $state<string | null>(null);
+	let readoutAt = $state<{ x: number; y: number } | null>(null);
+
+	/**
+	 * Read the value under a map position, or clear the readout.
+	 *
+	 * Null for a cursor off the overlay, over a transparent pixel, or over a
+	 * color no stop is within tolerance of. A guess there would put a
+	 * confident dBZ on a road name, which is the failure the whole ramp
+	 * measurement exists to prevent.
+	 *
+	 * @param lngLat Where the pointer is.
+	 * @param point Where that is on screen, for placing the chip.
+	 */
+	function readAt(
+		lngLat: { lng: number; lat: number },
+		point: { x: number; y: number }
+	): void {
+		const frame = readoutFrame;
+		const ramp = activeRamp;
+		const size = sampler.size;
+		// A composite sits in the same raster band as the radar overlays
+		// and covers a far wider area, so where the two overlap the user is
+		// looking at the composite while the sampler holds the radar's
+		// frame. No composite has a measured ramp, so there is nothing
+		// honest to report until one does.
+		if (composite !== 'none' || !frame || !ramp || !size) {
+			readoutValue = null;
+			readoutAt = null;
+			return;
+		}
+		const f = overlayFraction(extentCorners(frame.extent),
+			lngLat.lng, lngLat.lat);
+		if (!f) {
+			readoutValue = null;
+			readoutAt = null;
+			return;
+		}
+		const px = overlayPixel(f, size.width, size.height);
+		const rgba = sampler.at(px.x, px.y);
+		if (!rgba) {
+			readoutValue = null;
+			readoutAt = null;
+			return;
+		}
+		const text = readoutText(ramp,
+			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3]));
+		readoutValue = text;
+		readoutAt = text ? point : null;
+	}
+
+	// Drop the held frame the moment it stops being the one on screen. A
+	// second radar coming on, or the only one going off, leaves pixels that
+	// still read back cleanly and would report that radar's values under a
+	// cursor anywhere. The next single-radar load redraws it.
+	$effect(() => {
+		void activeRadars;
+		void currentMoment;
+		if (activeRadars.length !== 1) {
+			sampler.clear();
+			readoutFrame = null;
+			readoutValue = null;
+			readoutAt = null;
+		} else if (readoutFrame && readoutFrame.radar !== activeRadars[0]) {
+			sampler.clear();
+			readoutFrame = null;
+			readoutValue = null;
+			readoutAt = null;
+		}
+	});
+
 	const activeRamp = $derived.by(() => {
 		if (activeRadars.length !== 1) return null;
 		const radar = activeRadars[0];
@@ -1512,6 +1599,13 @@
 				paint: { 'raster-opacity': overlayOpacity }
 			});
 			_addedOverlays.add(id);
+			// Feed the readout too. This path hands the URL to MapLibre and
+			// lets it fetch, so preloadImage never runs and prepareRadars
+			// then skips the frame as already applied. Without this the
+			// readout holds nothing until the user scrubs to another step.
+			// The fetch is the one MapLibre just made, with the same CORS
+			// mode, so it comes from the browser cache.
+			void fillReadoutFrame(id, addUrl, e);
 		}
 		syncBaseSources();
 	}
@@ -1601,6 +1695,29 @@
 		}
 	}
 
+	/**
+	 * Load one radar's frame into the readout sampler.
+	 *
+	 * Only while that radar is the only one on, since the readout names one
+	 * scale. Silent on failure: a readout that cannot sample reports
+	 * nothing, which is the same answer it gives over empty sky.
+	 *
+	 * @param id The radar.
+	 * @param url The frame the overlay was given.
+	 * @param e The box it was placed in.
+	 */
+	async function fillReadoutFrame(
+		id: string,
+		url: string,
+		e: Extent
+	): Promise<void> {
+		if (activeRadars.length !== 1 || activeRadars[0] !== id) return;
+		const img = await preloadImage(url, () => activeRadars.length === 1
+			&& activeRadars[0] === id);
+		if (!img) return;
+		readoutFrame = sampler.draw(img) ? { extent: e, radar: id } : null;
+	}
+
 	let _radarSyncToken = 0;
 
 	/**
@@ -1633,9 +1750,9 @@
 			// runs on each step change plus the 120s poke. The URL carries the
 			// time and _forceBuster, so a genuine refresh still gets through.
 			if (_appliedRadarUrl.get(t.id) === t.url) return null;
-			const ok = await preloadImage(t.url, isCurrent);
-			if (!ok || !isCurrent()) return null;
-			return t;
+			const img = await preloadImage(t.url, isCurrent);
+			if (!img || !isCurrent()) return null;
+			return { ...t, img };
 		}));
 
 		const applies: FrameApply[] = [];
@@ -1654,6 +1771,15 @@
 					]
 				});
 				_appliedRadarUrl.set(t.id, t.url);
+				// The readout reads one scale, so it holds a frame only
+				// while one radar is on. Taking whichever radar happened to
+				// apply last would report that one's values under a cursor
+				// anywhere on the map.
+				if (activeRadars.length === 1 && t.id === activeRadars[0]) {
+					readoutFrame = sampler.draw(t.img)
+						? { extent: t.e, radar: t.id }
+						: null;
+				}
 			});
 		}
 		return applies;
@@ -2377,6 +2503,14 @@
 				map.on('mouseenter', layer, showRadarHover);
 				map.on('mouseleave', layer, hideRadarHover);
 			}
+			// Cursor readout. Sampling one pixel from a canvas already
+			// drawn is cheap enough to run on every move; the frame is
+			// drawn once per swap in prepareRadars.
+			map.on('mousemove', (e) => { readAt(e.lngLat, e.point); });
+			map.on('mouseout', () => { readoutValue = null; readoutAt = null; });
+			// A drag moves the world under a still cursor, so the value
+			// changes with no pointer event to report it.
+			map.on('move', () => { readoutValue = null; readoutAt = null; });
 		});
 
 		scanRefresh = setInterval(pokeOverlays, 120_000);
@@ -2484,7 +2618,18 @@
 
 <div class="flex h-full min-h-[420px] w-full flex-col">
 	<!-- map area -->
-	<div class="relative flex-1">
+	<!-- data-readout-frame says which radar's frame the cursor readout is
+	     holding and at what size, or is absent when it holds none. A run of
+	     validation_tests/visual/shoot_readout.py that finds no value can
+	     then tell a clear sky from a broken sampler, which otherwise look
+	     identical: on a quiet day an X-band frame is 0.3% opaque and a grid
+	     of hover points lands on nothing. -->
+	<div
+		class="relative flex-1"
+		data-readout-frame={readoutFrame && sampler.size
+			? `${readoutFrame.radar} ${sampler.size.width}x${sampler.size.height}`
+			: undefined}
+	>
 		<div bind:this={mapDiv} class="h-full w-full"></div>
 
 		<!-- Provisional-georeferencing marker. The composite overlay is placed
@@ -2496,6 +2641,22 @@
 		     Bottom-left, unlike the stale banner: that one is about data an
 		     operator must not act on at all, this is about data that is real
 		     but whose POSITION is unverified. Non-interactive. -->
+		<!-- Cursor readout. Follows the pointer rather than sitting in a
+		     corner, because a number far from the thing it describes is one
+		     the reader has to pair up by eye. Offset up and right of the
+		     cursor so it never sits under it. Non-interactive, so it cannot
+		     swallow a click or a drag on the map. -->
+		{#if readoutValue && readoutAt}
+			<div
+				data-readout
+				class="pointer-events-none absolute z-30 -translate-y-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 px-1.5 py-0.5 shadow-lg backdrop-blur"
+				style="left: {readoutAt.x + 12}px; top: {readoutAt.y - 8}px;"
+			>
+				<span class="num text-[10.5px] text-[var(--color-bright)]"
+					>{readoutValue}</span
+				>
+			</div>
+		{/if}
 		<!-- Bottom-left stack. The legend and the provisional-bounds note
 		     share one column so they cannot land on top of each other; the
 		     note is conditional and the legend appears only for a measured

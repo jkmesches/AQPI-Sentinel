@@ -205,6 +205,18 @@ Implementation draws the current frame to an offscreen canvas once per frame
 swap, then samples on pointer move. Sampling cost stays off the hot path
 because the canvas is only redrawn when the frame changes.
 
+Shipped on 2026-11-21. Two of its properties constrain slice 9's second
+pane.
+
+The inverse runs in Web Mercator, since that is how MapLibre interpolates
+between an image source's corners. A latitude-linear inverse is exact at both
+edges of the overlay and worst in the middle, where it is off by 1.17 km over
+a Bay Area box, so it reads correct wherever a reviewer checks it first.
+
+The sampler holds a frame only while exactly one radar is on, because the
+readout names one scale. Two panes each need their own sampler and their own
+`activeRamp`, and a pane showing two radars shows no readout.
+
 ## 7. Units
 
 `PRODUCTS` gains a unit vocabulary per product, naming the details file and
