@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { getSite, ALL_OVERLAYS, type HomeView, type Overlay,
-	         type Extent, type Product } from '$lib/site';
+	         type Extent, type Product,
+	         type MomentPrefixes } from '$lib/site';
+	import { momentChoices, momentDisplay,
+	         defaultMoment } from '$lib/map/moments';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
@@ -307,26 +310,36 @@
 	 * generated draws nothing rather than throwing.
 	 */
 	// Per-radar moment chooser — applies to every active overlay.
-	type Moment = 'Reflectivity' | 'Velocity' | 'Differential Reflectivity' | 'PhiDP' | 'RhoHV';
+	// Radar id to moment label to published prefix, from /api/version. Null
+	// until it answers, and on a backend that predates the field, in which
+	// case the picker keeps LEGACY_MOMENTS.
+	let momentPrefixes = $state<MomentPrefixes | null>(null);
+	// The label the scan route takes. A string rather than a union, because
+	// the set is the deployment's: AQPI writes "Differential Reflectivity"
+	// where XQPI writes "DifferentialReflectivity", and XQPI has no RhoHV.
+	type Moment = string;
 	let currentMoment = $state<Moment>('Reflectivity');
-	const MOMENTS: { key: Moment; short: string; full: string }[] = [
-		{ key: 'Reflectivity',              short: 'Z',    full: 'Reflectivity' },
-		{ key: 'Velocity',                  short: 'V',    full: 'Velocity' },
-		{ key: 'Differential Reflectivity', short: 'Zdr',  full: 'Differential Refl' },
-		{ key: 'PhiDP',                     short: 'ΦDP',  full: 'Differential Phase' },
-		{ key: 'RhoHV',                     short: 'ρhv',  full: 'Correlation Coef' }
-	];
+	// What to offer until /api/version answers, and on a backend too old to
+	// send the table. AQPI's five, which is what this list always was.
+	const LEGACY_MOMENTS = ['Reflectivity', 'Velocity',
+		'Differential Reflectivity', 'PhiDP', 'RhoHV'];
+	const MOMENTS = $derived(momentChoices(momentPrefixes, LEGACY_MOMENTS));
 
 	// ---- per-elevation tilt (single-radar inspector, Phase 1) -------------
 	// radar-display only carries 3 of our 5 moments. Map the shared ones;
 	// Zdr + ΦDP have no tilt source (null → tab disabled while tilt is on).
-	const MOMENT_TO_TILT: Record<Moment, string | null> = {
+	// Keyed by the display name rather than the API label, so the two
+	// spellings of each polarimetric moment resolve the same way. Zdr and
+	// ΦDP have no tilt source at all, so they are absent and read as null.
+	const TILT_SOURCE: Record<string, string> = {
 		'Reflectivity': 'reflectivity',
 		'Velocity': 'velocity',
-		'RhoHV': 'copolarcorrelation',
-		'Differential Reflectivity': null,
-		'PhiDP': null
+		'Correlation Coef': 'copolarcorrelation'
 	};
+	/** The radar-display moment for one of ours, or null when it has none. */
+	function tiltSourceFor(moment: Moment): string | null {
+		return TILT_SOURCE[momentDisplay(moment).full] ?? null;
+	}
 	// 0 = off (radarca single-tilt overlay). 1..4 = radar-display elevation
 	// folder. Only takes effect when exactly one X-band radar is active.
 	let tiltEl = $state(0);
@@ -876,7 +889,7 @@
 		// frames replace the radarca/composite step list. Highest priority.
 		if (tiltEngaged) {
 			const r = singleTiltRadar();
-			const tiltMoment = MOMENT_TO_TILT[currentMoment];
+			const tiltMoment = tiltSourceFor(currentMoment);
 			if (r && tiltMoment) {
 				try {
 					const resp = await fetch(
@@ -1431,7 +1444,7 @@
 		if (tiltEl < 1) return null;
 		const r = singleTiltRadar();
 		if (!r) return null;
-		if (!MOMENT_TO_TILT[currentMoment]) return null;  // moment has no tilt source
+		if (!tiltSourceFor(currentMoment)) return null;  // moment has no tilt source
 		return r.id;
 	}
 
@@ -1517,7 +1530,7 @@
 	async function refreshTilt() {
 		if (!map || !styleReady) return;
 		const id = tiltOverlayRadarId();
-		const tiltMoment = MOMENT_TO_TILT[currentMoment];
+		const tiltMoment = tiltSourceFor(currentMoment);
 		// Not engaged → tear down and bail.
 		if (!id || !tiltMoment || !_tiltGeo) {
 			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
@@ -2213,6 +2226,13 @@
 		hasRadarca = site.hasRadarca;
 		siteProducts = site.products;
 		siteProfile = site.profile;
+		// Set before the second prefs pass, so prefsVocabulary() offers this
+		// deployment's moment labels. Restoring a stored "PhiDP" on XQPI
+		// would otherwise keep a label its scan route answers 400 to.
+		momentPrefixes = site.momentPrefixes;
+		if (!MOMENTS.some((m) => m.key === currentMoment)) {
+			currentMoment = defaultMoment(MOMENTS) ?? currentMoment;
+		}
 		// Second pass, now able to drop a decommissioned radar or a renamed
 		// product rather than handing a stale id to MapLibre.
 		const restored = loadPrefs(prefsVocabulary());
@@ -2458,8 +2478,9 @@
 		     Bottom-left, unlike the stale banner: that one is about data an
 		     operator must not act on at all, this is about data that is real
 		     but whose POSITION is unverified. Non-interactive. -->
+		<div class="pointer-events-none absolute bottom-3 left-3 z-20 flex max-w-[60%] flex-col gap-2">
 		{#if composite !== 'none' && compExtentProvisional.includes(composite)}
-			<div class="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[60%]">
+			<div>
 				<div class="rounded-sm border border-[var(--color-warn)]/70 bg-[var(--color-canvas)]/90 px-2 py-1 shadow-lg backdrop-blur">
 					<div class="num text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]">
 						⚠ Overlay position provisional
@@ -2470,6 +2491,7 @@
 				</div>
 			</div>
 		{/if}
+		</div>
 		<!-- Stale-composite banner. Deliberately centerd over the map rather
 		     than tucked in a corner: the failure this guards against is an
 		     operator reading a 50-day-old inundation frame as current, and a
@@ -2760,7 +2782,7 @@
 			     treatment was too subtle to read at a glance (2026-05-18). -->
 			<div class="mt-1 flex gap-px rounded-sm border border-[var(--color-border-strong)] overflow-hidden">
 				{#each MOMENTS as m}
-					{@const unavailable = tiltEngaged && !MOMENT_TO_TILT[m.key]}
+					{@const unavailable = tiltEngaged && !tiltSourceFor(m.key)}
 					<button
 						class="num flex-1 py-1 text-[10.5px] font-medium transition-colors {currentMoment === m.key
 							? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
@@ -2805,7 +2827,9 @@
 								// the scrubber isn't ambiguous.
 								composite = 'none';
 								// radar-display lacks Zdr/ΦDP — fall back to Z.
-								if (!MOMENT_TO_TILT[currentMoment]) currentMoment = 'Reflectivity';
+								if (!tiltSourceFor(currentMoment)) {
+									currentMoment = defaultMoment(MOMENTS) ?? currentMoment;
+								}
 							}
 						}}
 						title={`Pick a scan elevation. Default uses ${RADARCA_LABEL}'s single sweep. Drives the time strip on the radar's 7-frame loop.`}

@@ -28,6 +28,10 @@ export const ALL_OVERLAYS = [
 ] as const;
 export type Overlay = (typeof ALL_OVERLAYS)[number];
 
+/** Radar id to moment label to the prefix the published tree uses. */
+export type MomentPrefixes =
+	Readonly<Record<string, Readonly<Record<string, string>>>>;
+
 /**
  * Profile slugs are interpolated into a static asset path, so the shape is
  * constrained here rather than trusted. Anything with a slash, a dot or a
@@ -106,6 +110,21 @@ export interface SiteMap {
 	 * the map says which is which rather than letting them look alike.
 	 */
 	compExtentProvisional: readonly string[];
+	/**
+	 * Radar id to moment label to the prefix the published tree uses, as the
+	 * backend's own `moment_to_prefix()` resolves it.
+	 *
+	 * The moment picker is built from this rather than from a constant. AQPI
+	 * writes "Differential Reflectivity" where XQPI writes
+	 * "DifferentialReflectivity", AQPI has a RhoHV that XQPI does not, and
+	 * the C-band's PhiDP resolves differently from the X-bands'. A constant
+	 * carrying one profile's spelling sent three labels the other profile's
+	 * scan route answers 400 to.
+	 *
+	 * Null means the backend did not say, and the picker falls back to its
+	 * own list.
+	 */
+	momentPrefixes: MomentPrefixes | null;
 }
 
 export interface HomeView {
@@ -128,6 +147,32 @@ function looksLikeExtent(v: unknown): v is Extent {
 		Math.abs(e.west) <= 180 && Math.abs(e.east) <= 180 &&
 		Math.abs(e.south) <= 90 && Math.abs(e.north) <= 90
 	);
+}
+
+/**
+ * Validate the moment table, dropping whatever does not parse.
+ *
+ * A bad entry costs that radar or that moment its picker button rather than
+ * the whole table, which matches how the extents are handled above.
+ *
+ * @param v The `moment_prefixes` field, unvalidated.
+ * @returns The table, or null when nothing usable came back.
+ */
+function parseMomentPrefixes(v: unknown): MomentPrefixes | null {
+	if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+	const out: Record<string, Record<string, string>> = {};
+	for (const [radar, moments] of Object.entries(v as Record<string, unknown>)) {
+		if (!moments || typeof moments !== 'object' || Array.isArray(moments)) {
+			continue;
+		}
+		const inner: Record<string, string> = {};
+		for (const [label, prefix] of
+			Object.entries(moments as Record<string, unknown>)) {
+			if (typeof prefix === 'string' && prefix) inner[label] = prefix;
+		}
+		if (Object.keys(inner).length > 0) out[radar] = inner;
+	}
+	return Object.keys(out).length > 0 ? out : null;
 }
 
 function parseExtents(v: unknown): Record<string, Extent> | null {
@@ -188,7 +233,7 @@ export async function resolveHomeView(
 		profile: PROFILE_UNKNOWN,
 		name: FALLBACK_NAME, dataSource: FALLBACK_SOURCE, hasRadarca: true,
 		products: null, compositeProduct: '', home: fallback, overlays: ALL_OVERLAYS,
-		compExtent: null, compExtentProvisional: []
+		compExtent: null, compExtentProvisional: [], momentPrefixes: null
 	};
 	try {
 		const resp = await fetcher(url);
@@ -230,7 +275,8 @@ export async function resolveHomeView(
 						.filter((p: unknown): p is Product =>
 							!!p && typeof (p as Product).id === 'string'
 							&& typeof (p as Product).label === 'string')
-				: null
+				: null,
+			momentPrefixes: parseMomentPrefixes(body?.moment_prefixes)
 		};
 	} catch {
 		return miss;

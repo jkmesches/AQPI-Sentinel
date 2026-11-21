@@ -308,7 +308,8 @@ def create_app() -> FastAPI:
                               COMPOSITE_PRODUCT, DATA_SOURCE,
                               HAS_RADARCA,
                               HOME_VIEW, MAP_OVERLAYS, PRODUCT_LABELS, PRODUCTS,
-                              SETTINGS, SITE_NAME)
+                              RADAR_FOLDER, SETTINGS, SITE_NAME, X_MOMENTS,
+                              moment_to_prefix)
         return {"version": __version__, "profile": SETTINGS.profile,
                 "site_name": SITE_NAME, "data_source": DATA_SOURCE,
                 "has_radarca": HAS_RADARCA,
@@ -332,7 +333,16 @@ def create_app() -> FastAPI:
                 # Only when the profile renames the products — otherwise the
                 # frontend's own picker table already knows them.
                 "products": ([{"id": p, "label": PRODUCT_LABELS.get(p, p)}
-                              for p in PRODUCTS] if PRODUCT_LABELS else None)}
+                              for p in PRODUCTS] if PRODUCT_LABELS else None),
+                # Radar id to {moment label: published prefix}, resolved here
+                # rather than in the frontend. The map's color ramps are keyed
+                # by the prefix, since that is what the colorbars on disk were
+                # measured under, and the rule has a per-radar exception (the
+                # C-band's PhiDP). A second copy of it in TypeScript is the
+                # bug this project keeps finding.
+                "moment_prefixes": {
+                    rid: {m: moment_to_prefix(rid, m) for m in X_MOMENTS}
+                    for rid in RADAR_FOLDER}}
     app.include_router(version_router)
 
     app.include_router(status_routes.router)
