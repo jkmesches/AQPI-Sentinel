@@ -133,17 +133,59 @@ def _newest_declared(path: str) -> dict[str, Any]:
             "count": len(steps), "truncated": False, "basis": "manifest"}
 
 
+# What counts as a published frame. A positive filter rather than a list of
+# junk suffixes, because this check's failure direction is a false PASS: any
+# entry carrying a fresh mtime sets the product's age, so a lock file, an
+# editor backup or a half-written temp file reports a stale product as
+# current. A denylist only covers the junk someone thought of.
+#
+# Measured on the main archive on 2026-11-21, between publishes: 2138 frames under
+# product_images, and no non-PNG entry in any images/ directory. The .lock
+# and .tmp leftovers that do exist sit beside the manifests one level up,
+# which _scan never reads, and some have sat there for months
+# (rain60min/details_in.json.868453.tmp since 2026-09-17). All 13 products on
+# this basis published a .png as their newest entry, names like
+# qpe_15m_step_COMP_20261121_033600_rainfall.nc.png included.
+#
+# During a publish it is not inert, so do not read the measurement above as
+# dead code. The XQPI session's probe stat()ed
+# images/20261121_1600.png.tmp at 03:20:02Z, 1.4 s before that frame's
+# rename, so a temp file is present in images/ for much of the 76 s a burst
+# takes. It changes no verdict, because a temp file written mid-burst carries
+# nearly the same mtime as the frames landing beside it. It would change one
+# if a burst ever abandoned, which is the case this guards.
+FRAME_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def _is_frame(name: str) -> bool:
+    """Whether a directory entry is a published image frame.
+
+    Args:
+        name: The entry's name.
+
+    Returns:
+        True when it may set the product's freshness.
+    """
+    if name.startswith("."):
+        return False
+    return name.lower().endswith(FRAME_SUFFIXES)
+
+
 def _scan(path: str) -> dict[str, Any]:
     """Blocking. Newest mtime + entry count, bounded.
 
     ``scandir`` rather than ``ls -t``: one syscall per entry, no sort of the whole
     directory, and it never materialises a list of 100k names. ``MAX_ENTRIES`` caps the
     walk so a directory that has grown unexpectedly cannot turn a check into a scan.
+
+    Only published frames count toward the mtime and the count. See
+    ``FRAME_SUFFIXES``; anything else reports a stale product as fresh.
     """
     MAX_ENTRIES = 5_000
     newest = 0.0
     newest_name = ""
     n = 0
+    skipped = 0
     truncated = False
     with os.scandir(path) as it:
         for e in it:
@@ -151,6 +193,9 @@ def _scan(path: str) -> dict[str, Any]:
             if n > MAX_ENTRIES:
                 truncated = True
                 break
+            if not _is_frame(e.name):
+                skipped += 1
+                continue
             try:
                 if not e.is_file(follow_symlinks=False):
                     continue
@@ -160,7 +205,8 @@ def _scan(path: str) -> dict[str, Any]:
             if m > newest:
                 newest, newest_name = m, e.name
     return {"newest_mtime": newest, "newest_name": newest_name,
-            "count": n, "truncated": truncated, "basis": "newest_mtime"}
+            "count": n - skipped, "non_frames": skipped,
+            "truncated": truncated, "basis": "newest_mtime"}
 
 
 class Layer1BackendProductCheck(Check):
@@ -249,6 +295,10 @@ class Layer1BackendProductCheck(Check):
 
         metrics["fs_timeout"] = 0.0
         metrics["file_count"] = float(info["count"])
+        # Recorded so the frame filter is not silent. If this ever rises, the
+        # directory has grown something the check is deliberately ignoring,
+        # and "no files published" would otherwise be the only symptom.
+        metrics["non_frames"] = float(info.get("non_frames", 0))
         payload["newest_file"] = info["newest_name"]
         payload["truncated"] = info["truncated"]
 
