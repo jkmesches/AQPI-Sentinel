@@ -20,6 +20,10 @@ data/
 # outlines, reservoir markers) that ships with the build.
 !frontend/static/data/
 !frontend/static/data/**
+# Color ramps read out of the producers' own colorbar PNGs. Source, not
+# runtime data: invert.ts is useless without them.
+!frontend/src/lib/map/ramps/data/
+!frontend/src/lib/map/ramps/data/**
 
 # --- Local config / secrets ---
 #

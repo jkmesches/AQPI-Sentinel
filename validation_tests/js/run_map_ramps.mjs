@@ -1,0 +1,34 @@
+// Compiles $lib/map/ramps/invert.ts with the esbuild vite ships, then runs the
+// assertions against the real module the readout will read pixels with.
+//
+// The checked-in ramps come in as JSON rather than through the bundle, so an
+// assertion about a ramp's contents is reading the same file the app imports.
+// validation_tests/visual/ramp_coverage.py builds the same module the same way
+// and measures it against real frames.
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const root = resolve(new URL('../..', import.meta.url).pathname);
+const rampDir = join(root, 'frontend/src/lib/map/ramps/data');
+const out = join(mkdtempSync(join(tmpdir(), 'ramp-')), 'invert.mjs');
+execFileSync(join(root, 'frontend/node_modules/.bin/esbuild'),
+  [join(root, 'frontend/src/lib/map/ramps/invert.ts'), '--format=esm',
+   `--outfile=${out}`],
+  { stdio: 'inherit' });
+
+const ramps = {};
+for (const f of readdirSync(rampDir).sort()) {
+  if (f.endsWith('.json')) {
+    ramps[f.slice(0, -5)] = JSON.parse(readFileSync(join(rampDir, f), 'utf8'));
+  }
+}
+if (Object.keys(ramps).length === 0) {
+  console.error(`no ramps in ${rampDir}`);
+  process.exit(2);
+}
+
+const mod = await import(out);
+const { runTests } = await import('./test_map_ramps.mjs');
+process.exit(runTests(mod, ramps));
