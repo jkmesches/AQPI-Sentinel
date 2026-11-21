@@ -802,13 +802,22 @@ async def _xband_frames(radar: str, moment: str, ctx: CheckContext,
 
 def _xband_fs_fetcher(
     radar: str, moment: str, ts: _dt.datetime, source: str,
-) -> Callable[[], Awaitable[_fs.FsResponse]]:
-    """Fetcher for ``_serve_source`` that reads one frame off the mount.
+) -> Callable[[], Awaitable[_fs.FsResponse]] | None:
+    """Fetcher for ``_serve_source``, or None when there is no mount to read.
 
     The timestamp comes from the listing rather than being re-parsed, because
     the two profiles name frames at different resolutions and a parser that
     knows only AQPI's minute form returns None for every XQPI frame.
+
+    Keyed on the mount the way ``_product_fetcher`` is. Returning a fetcher
+    unconditionally made every moment that was not already archived raise
+    ``backend_root is not set`` out of the path join, as a 500. Reflectivity
+    hid it, because it is the moment everyone looks at and so the only one
+    with archive entries to answer from; Velocity, Zdr and PhiDP went
+    straight through to the mount and failed on a deployment that has none.
     """
+    if not _fs.available():
+        return None
     name = source.rsplit("/", 1)[-1]
 
     async def _fetch() -> _fs.FsResponse:
