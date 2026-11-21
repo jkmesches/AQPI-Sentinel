@@ -114,21 +114,6 @@
 	>
 		{titleText}
 	</div>
-	<!-- What a reader has to know to read these numbers, for a field the
-	     renderer transforms before plotting it. Beside the scale rather
-	     than in a tooltip, because the number it qualifies is read at a
-	     glance and a qualifier nobody opens is one nobody has. -->
-	{#if ramp.caveat}
-		<div
-			data-legend-caveat
-			class="leading-tight text-[var(--color-warn)]"
-			style="font-size: {scaled(9, scale)}px;
-			       margin-bottom: {scaled(6, scale)}px;
-			       max-width: {scaled(280, scale)}px"
-		>
-			{ramp.caveat}
-		</div>
-	{/if}
 	<div bind:clientWidth={barWidth} class="w-full">
 		{#if barWidth > 0}
 			<svg

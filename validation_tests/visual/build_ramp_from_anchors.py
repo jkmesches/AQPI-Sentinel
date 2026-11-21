@@ -416,7 +416,6 @@ def assemble(args: argparse.Namespace, anchors: list[tuple[int, int, int]],
         "scale": "segmented" if args.norm == "boundary" else args.norm,
         "source": args.source,
         "read_on": datetime.now(timezone.utc).date().isoformat(),
-        **({"caveat": args.caveat} if args.caveat else {}),
         "built_from": {
             "kind": "LinearSegmentedColormap.from_list",
             "anchors": [to_hex(a) for a in anchors],
@@ -481,10 +480,6 @@ def main() -> int:
     _ = ap.add_argument("--moment", required=True)
     _ = ap.add_argument("--source", required=True,
                         help="where the definition was read, file and line")
-    _ = ap.add_argument("--caveat", default="",
-                        help="what a reader must know to read the numbers, "
-                             "for a field the renderer transforms before "
-                             "plotting it")
     _ = ap.add_argument("--ticks", default="",
                         help="the numbers the bar prints, comma separated")
     _ = ap.add_argument("--exclude-color", action="append", default=[])

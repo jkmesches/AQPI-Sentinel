@@ -61,17 +61,6 @@ export interface Ramp {
 	 * apart. The two want different matching rules, and this says which
 	 * kind the table is without a second field to keep in step.
 	 */
-	/**
-	 * What a reader has to know to read these numbers correctly.
-	 *
-	 * This qualifies the field the table was painted from. The table
-	 * itself is exact either way. The forecast rate is smoothed over a
-	 * grid cell before it is plotted, so a value read off it is a
-	 * smoothed value, with peaks reading low and cells beside rain
-	 * reading high. A number carrying no such note reads as the
-	 * model's own output at that point.
-	 */
-	caveat?: string;
 	built_from?: {
 		kind: string;
 		anchors: string[];

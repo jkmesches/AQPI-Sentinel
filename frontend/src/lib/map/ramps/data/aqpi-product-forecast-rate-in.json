@@ -5,9 +5,8 @@
 	"min": 0.0,
 	"max": 10.0,
 	"scale": "segmented",
-	"source": "LinearSegmentedColormap.from_list(\"custom_cmap\", colors, N=74) with BoundaryNorm over the nine-segment edge array, prate_tools.py gen_products_prate on the QPE tooling host, rendered by pcolormesh at line 112 and contourf at line 114; read by the AQPI Laptop session 2026-11-21",
+	"source": "LinearSegmentedColormap.from_list(\"custom_cmap\", colors, N=74) with BoundaryNorm over the nine-segment edge array, prate_tools.py gen_products_prate on the QPE tooling host, rendered by pcolormesh at line 112 and contourf at line 114, over a field passed through gaussian_filter(sigma=1.0) first, read by the AQPI Laptop session 2026-11-21",
 	"read_on": "2026-11-21",
-	"caveat": "Smoothed over one grid cell before plotting, so peaks read low and cells beside rain read high.",
 	"built_from": {
 		"kind": "LinearSegmentedColormap.from_list",
 		"anchors": [
