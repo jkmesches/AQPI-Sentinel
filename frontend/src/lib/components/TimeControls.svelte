@@ -17,7 +17,7 @@
 		totalSteps?: number;
 		stepLabel?: string;
 		playing?: boolean;
-		activity?: number[];
+		activity?: readonly number[];
 		onFirst?: () => void;
 		onPrev?: () => void;
 		onTogglePlay?: () => void;
@@ -41,7 +41,11 @@
 		'inline-flex h-7 w-7 items-center justify-center text-[var(--color-default)] hover:text-[var(--color-bright)] disabled:opacity-30 disabled:hover:text-[var(--color-default)] transition-colors';
 </script>
 
+<!-- data-time-controls lets a harness count the strips. Compare mode
+     must have exactly one, since two would disagree about the time the
+     panes share. -->
 <div
+	data-time-controls
 	class="flex items-center gap-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]/95 px-4 py-2 backdrop-blur"
 >
 	<!-- Timestamp readout: time prominent, date subdued -->

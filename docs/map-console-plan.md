@@ -288,6 +288,25 @@ other is still loading would make the comparison itself wrong, which is worse
 than a slow frame. Image fetches share the backend LRU, because it keys on the
 logical source string rather than on which pane asked.
 
+### Locking By Time
+
+Shipped on 2026-11-21, with one departure from the paragraph above. The panes
+are locked by the time they show and not by a shared step index, because
+their products can have different cadences and index 12 is then a different
+minute in each list. Slice 8 settled that a position is a time, and each pane
+resolves the shared time to its own nearest step through the same
+`stepForTime`. A pane with no step inside the window stays where it is.
+
+Each pane is a MapView with a pane number. The primary pane owns the stored
+prefs, the address bar and the time strip, since a second writer would fight
+it for each of them. The strip sits on the page rather than inside the pane:
+inside, it took height from that pane alone and left the two maps covering
+different ground at one zoom.
+
+The barrier is still per pane. Two panes each hold their own, so a pane can
+still paint while the other is loading. Closing that needs the page to gather
+both panes' thunks, which is the one piece of this section not yet built.
+
 ## 10. Console Controls
 
 Keyboard control for play, step, jump to live and product switching. A time
@@ -439,7 +458,7 @@ One commit per slice, in this order.
 7. Units, backend and frontend together, shipped 2026-11-21, with the
    stale-subtree warning the measurement forced.
 8. Permalinks, shipped 2026-11-21.
-9. Compare panes.
+9. Compare panes, shipped 2026-11-21, except the barrier across both.
 10. Keyboard, time axis, playback speed, per-layer opacity. The
     blank-frame stall found in slice 3 was fixed ahead of the rest on
     2026-11-21, since it sits in an already-extracted pure module and

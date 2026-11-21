@@ -1,4 +1,21 @@
 <script lang="ts">
+	/**
+	 * One console pane: a map, its overlays, and the panel that drives them.
+	 *
+	 * Rendered once normally and twice in compare mode. Each pane owns its
+	 * product, radars, moment, unit and overlays, which is the whole point
+	 * of comparing: the only difference on screen should be the thing being
+	 * compared.
+	 *
+	 * The primary pane owns what there can only be one of, namely the time
+	 * control strip, the stored prefs and the address bar. A second pane
+	 * writing any of those would fight the first for them.
+	 *
+	 * The two are locked by time rather than by step index. Their products
+	 * can have different cadences, so index 12 is not the same minute in
+	 * both lists, and slice 8 already established that a position is a time.
+	 * Each pane resolves the shared time to its own nearest step.
+	 */
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { getSite, ALL_OVERLAYS, type HomeView, type Overlay,
 	         type Extent, type Product,
@@ -16,11 +33,42 @@
 	         readoutText } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
 	import MapLegend from '$lib/components/MapLegend.svelte';
+	interface Props {
+		/** 0 is the primary pane, which owns the shared chrome. */
+		pane?: number;
+		/** Whether a second pane is on screen. */
+		compare?: boolean;
+		/** The time both panes show. Written by the primary pane. */
+		sharedTime?: string | null;
+		/** The camera both panes share. Written by whichever moved last. */
+		sharedCamera?: LinkCamera | null;
+		/** Turns the comparison pane on and off. */
+		onToggleCompare?: (() => void) | null;
+		/**
+		 * The time control's state, published by the primary pane so the
+		 * page can draw one strip below both. Drawn inside this pane it
+		 * would take height from this pane alone, leaving the two maps
+		 * different sizes and covering different ground.
+		 */
+		timeStrip?: TimeStrip | null;
+	}
+	let {
+		pane = 0,
+		compare = false,
+		sharedTime = $bindable(null),
+		sharedCamera = $bindable(null),
+		onToggleCompare = null,
+		timeStrip = $bindable(null)
+	}: Props = $props();
+
+	/** Whether this pane owns the time strip, the prefs and the address bar. */
+	const isPrimary = $derived(pane === 0);
+
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
-	import TimeControls from '$lib/components/TimeControls.svelte';
+	import type { TimeStrip } from '$lib/map/paneTime';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
 	import {
@@ -698,7 +746,7 @@
 		void overlayOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
 		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
 		void burnScarsOn; void burnScarYears;
-		if (!prefsReady) return;
+		if (!prefsReady || !isPrimary) return;
 		savePrefs(currentPrefs());
 	});
 
@@ -1827,7 +1875,10 @@
 
 	/** Read the current URL and apply whatever this deployment recognizes. */
 	function applyLink(): void {
-		if (typeof window === 'undefined') return;
+		// Only the primary pane reads the link. A second pane reading the
+		// same one would come up identical to the first, which is the one
+		// view a comparison cannot show anything in.
+		if (typeof window === 'undefined' || !isPrimary) return;
 		const link = decodeLink(window.location.search, linkVocabulary());
 		if (!hasAny(link)) return;
 		if (link.product) composite = link.product as Composite;
@@ -1870,6 +1921,107 @@
 
 	let _lastLink = '';
 
+	// ---- pane locking ------------------------------------------------------
+	//
+	// The primary pane publishes the time and the camera; the other follows.
+	// Both guards exist because following writes the same state that
+	// publishing reads, and without them each pane would answer the other
+	// forever.
+	let _applyingShared = false;
+	// This pane's camera once a move settles, published for the harness.
+	// Set from moveend rather than from every frame of a drag, so it
+	// changes once per gesture instead of sixty times a second.
+	let settledCamera = $state<LinkCamera | null>(null);
+
+	/** Publish this pane's frame time, so the other pane can match it. */
+	function publishTime(): void {
+		if (!isPrimary || _applyingShared) return;
+		const ts = steps[stepIdx]?.ts ?? null;
+		if (ts !== sharedTime) sharedTime = ts;
+	}
+
+	/**
+	 * Move to the step nearest the shared time.
+	 *
+	 * By time rather than by index, because the panes can be on products
+	 * with different cadences and index 12 is then a different minute in
+	 * each. Nothing happens when no step is within the window, which leaves
+	 * the pane where it is rather than jumping it somewhere unrelated.
+	 */
+	function followTime(): void {
+		if (isPrimary || !sharedTime || steps.length === 0) return;
+		const at = stepForTime(steps, sharedTime, STEP_TOLERANCE_MS);
+		if (at !== null && at !== stepIdx) {
+			_applyingShared = true;
+			stepIdx = at;
+			_applyingShared = false;
+		}
+	}
+
+	/** Publish this pane's camera, so the other pane can match it. */
+	function publishCamera(): void {
+		if (!compare || _applyingShared || !map) return;
+		const c = linkCamera();
+		if (!c) return;
+		const same = sharedCamera
+			&& Math.abs(sharedCamera.lon - c.lon) < 1e-9
+			&& Math.abs(sharedCamera.lat - c.lat) < 1e-9
+			&& Math.abs(sharedCamera.zoom - c.zoom) < 1e-9
+			&& Math.abs(sharedCamera.bearing - c.bearing) < 1e-9
+			&& Math.abs(sharedCamera.pitch - c.pitch) < 1e-9;
+		if (!same) sharedCamera = c;
+	}
+
+	/**
+	 * Match the other pane's camera.
+	 *
+	 * `jumpTo` rather than an animation: two panes easing at slightly
+	 * different times read as lag, and the comparison is between the
+	 * pictures rather than the motion.
+	 */
+	function followCamera(): void {
+		if (!compare || !map || !sharedCamera) return;
+		const c = linkCamera();
+		if (!c) return;
+		const d = sharedCamera;
+		if (Math.abs(d.lon - c.lon) < 1e-7 && Math.abs(d.lat - c.lat) < 1e-7
+			&& Math.abs(d.zoom - c.zoom) < 1e-4
+			&& Math.abs(d.bearing - c.bearing) < 1e-4
+			&& Math.abs(d.pitch - c.pitch) < 1e-4) return;
+		_applyingShared = true;
+		map.jumpTo({
+			center: [d.lon, d.lat], zoom: d.zoom,
+			bearing: d.bearing, pitch: d.pitch
+		});
+		_applyingShared = false;
+	}
+
+	$effect(() => {
+		void stepIdx; void steps;
+		publishTime();
+	});
+	// The page draws the strip, below both panes, so neither pane loses
+	// height to it. Only the primary pane publishes one.
+	$effect(() => {
+		void stepIdx; void steps; void playing; void activity; void stepLabel;
+		timeStrip = isPrimary
+			? {
+				stepIdx, totalSteps: steps.length, stepLabel, playing,
+				activity, onFirst: stepFirst, onPrev: stepPrev,
+				onTogglePlay: togglePlay, onNext: stepNext,
+				onLast: stepLast, onScrub: scrub
+			}
+			: null;
+	});
+	$effect(() => {
+		void sharedTime; void steps;
+		followTime();
+	});
+	$effect(() => {
+		void sharedCamera; void compare;
+		followCamera();
+	});
+
 	/**
 	 * Write the view into the address bar.
 	 *
@@ -1879,7 +2031,7 @@
 	 * one frame.
 	 */
 	function writeLink(): void {
-		if (typeof window === 'undefined' || !prefsReady) return;
+		if (typeof window === 'undefined' || !prefsReady || !isPrimary) return;
 		const q = encodeLink({
 			product: composite === 'none' ? null : composite,
 			ts: steps[stepIdx]?.ts ?? null,
@@ -2638,7 +2790,9 @@
 
 		// Persist the camera after the user stops moving, not during — moveend
 		// fires once per gesture, where `move` fires every frame.
-		map.on('moveend', () => { if (prefsReady) savePrefs(currentPrefs()); });
+		map.on('moveend', () => {
+			if (prefsReady && isPrimary) savePrefs(currentPrefs());
+		});
 
 		map.on('load', () => {
 			if (!map) return;
@@ -2718,7 +2872,11 @@
 			// cannot follow it from an effect. moveend fires once when a
 			// drag or zoom settles, which is exactly when a link should
 			// be rewritten.
-			map.on('moveend', () => { writeLinkSoon(); });
+			map.on('moveend', () => {
+				writeLinkSoon();
+				publishCamera();
+				settledCamera = linkCamera();
+			});
 		});
 
 		scanRefresh = setInterval(pokeOverlays, 120_000);
@@ -2845,13 +3003,33 @@
 			moment: currentMoment,
 			unit: currentUnit,
 			radars: [...activeRadars].sort(),
-			overlays: overlayNames().sort()
+			overlays: overlayNames().sort(),
+			// Rounded to the places a link keeps, so two panes locked to
+			// each other read as equal rather than differing in the last
+			// bit of a float.
+			camera: settledCamera
+				? [Number(settledCamera.lon.toFixed(5)),
+					Number(settledCamera.lat.toFixed(5)),
+					Number(settledCamera.zoom.toFixed(2))]
+				: null
 		})}
 		data-readout-frame={readoutFrame && sampler.size
 			? `${readoutFrame.radar} ${sampler.size.width}x${sampler.size.height}`
 			: undefined}
 	>
 		<div bind:this={mapDiv} class="h-full w-full"></div>
+		{#if compare}
+			<!-- Which pane this is. Two maps of the same area are otherwise
+			     indistinguishable in a screenshot or a handover. -->
+			<div
+				data-pane-label
+				class="pointer-events-none absolute left-3 top-3 z-20 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 px-2 py-0.5 shadow-lg backdrop-blur"
+			>
+				<span class="num text-[9.5px] uppercase tracking-wider text-[var(--color-faint)]">
+					{isPrimary ? 'A' : 'B'} · {productLabel(composite)}
+				</span>
+			</div>
+		{/if}
 
 		<!-- Provisional-georeferencing marker. The composite overlay is placed
 		     from an ASSUMED extent on this deployment — the publisher supplies
@@ -2976,6 +3154,24 @@
 				</span>
 			</div>
 			<div class="flex items-center gap-2">
+				<!-- Compare, offered by the primary pane only. The second
+				     pane turning itself off would leave the control it was
+				     turned on with nowhere to go. -->
+				{#if onToggleCompare}
+					<button
+						data-compare-toggle
+						class="border px-1.5 py-0 text-[9.5px] uppercase tracking-wider transition-colors {compare
+							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)]'
+							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]'}"
+						title={compare
+							? 'close the comparison pane'
+							: 'open a second pane, locked to this one in time and view'}
+						aria-pressed={compare}
+						onclick={() => onToggleCompare?.()}
+					>
+						compare
+					</button>
+				{/if}
 				<button
 					class="border border-[var(--color-border-strong)] px-1.5 py-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
 					title="reset radars, products, layers and view to defaults"
@@ -3399,18 +3595,4 @@
 	{/if}
 	</div>
 
-	<!-- time controls strip — below the map -->
-	<TimeControls
-		stepIdx={stepIdx}
-		totalSteps={steps.length}
-		stepLabel={stepLabel}
-		playing={playing}
-		activity={activity}
-		onFirst={stepFirst}
-		onPrev={stepPrev}
-		onTogglePlay={togglePlay}
-		onNext={stepNext}
-		onLast={stepLast}
-		onScrub={scrub}
-	/>
 </div>
