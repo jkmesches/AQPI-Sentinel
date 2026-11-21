@@ -19,10 +19,15 @@ export interface TimeStrip {
 	playing: boolean;
 	/** Painted-pixel fraction per step, for the activity bars. */
 	activity: readonly number[];
+	/** Each step's timestamp, so the axis can place it by time. */
+	times: readonly (string | null)[];
+	/** Playback rate, one of playback.SPEEDS. */
+	speed: number;
 	onFirst: () => void;
 	onPrev: () => void;
 	onTogglePlay: () => void;
 	onNext: () => void;
 	onLast: () => void;
 	onScrub: (i: number) => void;
+	onSpeed: (s: number) => void;
 }

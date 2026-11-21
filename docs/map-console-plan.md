@@ -312,10 +312,48 @@ both panes' thunks, which is the one piece of this section not yet built.
 Keyboard control for play, step, jump to live and product switching. A time
 axis that shows its gaps instead of a bare step slider, which the per-step
 activity fractions already make possible. Playback speed. Per-layer opacity in
-place of one global slider. A measure tool for distance and bearing. Export
-with the legend and the timestamp burned in, since a screenshot without either
-is unreadable in a thread. Place search. A panel that collapses properly at
-phone width, where 280px fixed is most of the screen.
+place of one global slider. The measure tool, export, place search and the
+responsive pass move to section 11, since none of them shares anything with
+these four.
+
+The keyboard cannot be shared with MapLibre. Its own handler pans with the
+arrows whenever the canvas has focus, which it has as soon as anyone clicks
+the map to read a value, so a bound arrow would pan and step at once. The
+console takes the bare arrows for time, disables that handler, and gives the
+shifted arrows and the zoom keys back, so a keyboard user loses nothing.
+
+A focused control owns the keys it handles and no others. Treating any focus
+as owning the whole keyboard is the obvious rule, and it is wrong, because
+clicking play and then pressing an arrow is ordinary, and a button has never
+handled an arrow. Text entry is the exception that does own everything. The
+deployed page found this, not the unit tests: every check after the play
+button took focus failed.
+
+The listener belongs to the page rather than the pane, for the same reason
+the time strip does. Two panes each holding one would both answer a press.
+Time keys go to the published strip; the keys that belong to one pane go to
+whichever pane the pointer is over.
+
+The time axis places each frame at its own time, and a bar covers its own
+interval only up to the normal cadence. Drawn from one frame to the next, a
+three-hour hole becomes a three-hour bar at the last frame's activity, which
+says the weather held rather than that nothing was published. Whatever is
+left over is drawn as a gap, and the strip says how long it was. The cadence
+is the median interval, since a mean would be dragged toward the gaps it
+exists to find. Anything the times cannot support (a null, a string that is
+not a date, an unsorted list) falls back to even spacing and says so, because
+a strip that cannot be drawn is worse than one drawn the old way.
+
+Playback speed is four fixed steps rather than a slider. The dwell is a floor
+and not a rate: the loop waits for the frame to load and then waits out
+whatever of the dwell is left, so above about 2x on six radars the load sets
+the interval, and finer control would be a fiction.
+
+Per-layer opacity keeps the values that shipped as its defaults, 0.7 for the
+composite, 0.8 for the radars and 0.6 for NEXRAD, so three constants became
+three settings without repainting any console. The single slider older builds
+saved upgrades onto the radars alone, which is the only layer it ever moved,
+and only where no per-layer value exists yet.
 
 ## 11. Dashboard
 
@@ -459,11 +497,11 @@ One commit per slice, in this order.
    stale-subtree warning the measurement forced.
 8. Permalinks, shipped 2026-11-21.
 9. Compare panes, shipped 2026-11-21, except the barrier across both.
-10. Keyboard, time axis, playback speed, per-layer opacity. The
-    blank-frame stall found in slice 3 was fixed ahead of the rest on
-    2026-11-21, since it sits in an already-extracted pure module and
-    needed none of the pane restructuring: the skip scan wrapped back onto
-    the frame it started from and returned it, so playback parked whenever
+10. Keyboard, time axis, playback speed, per-layer opacity, shipped
+    2026-11-21. The blank-frame stall found in slice 3 was fixed ahead of
+    the rest, since it sits in an already-extracted pure module and needed
+    none of the pane restructuring: the skip scan wrapped back onto the
+    frame it started from and returned it, so playback parked whenever
     every frame was blank and the list was no shorter than the skip bound
     plus one. Seven tilt frames on a clear day are that shape.
 11. Measure tool, export, place search, responsive pass.

@@ -20,12 +20,17 @@
  *    the animation was running are deliberately NOT persisted: restoring a
  *    scrubber to a timestamp that has since scrolled out of the window shows
  *    stale weather, and auto-playing on arrival is hostile. Those reset to
- *    live on every visit.
+ *    live on every visit. How fast it plays is a preference rather than
+ *    transient state, so that one is kept.
  *
  * Storage can be unavailable or throw outright (private windows, blocked site
  * data, thumbnailing contexts), so every read and write is guarded and the
  * caller always gets a usable object.
  */
+import {
+	DEFAULT_OPACITIES, normalizeOpacities, type Opacities
+} from '$lib/map/opacity';
+import { DEFAULT_SPEED, normalizeSpeed } from '$lib/map/playback';
 
 const KEY = 'sentinel-map-prefs';
 const VERSION = 1;
@@ -64,7 +69,13 @@ export interface MapPrefs {
 	moment: string;
 	activeRadars: string[];
 	nexrad: boolean;
+	/**
+	 * The radar overlays' opacity, kept so a build without per-layer
+	 * opacity still reads a usable value out of a blob this one wrote.
+	 */
 	opacity: number;
+	/** One opacity per raster layer. See $lib/map/opacity. */
+	layerOpacity: Opacities;
 	panelOpen: boolean;
 	watersheds: boolean;
 	reservoirs: boolean;
@@ -75,6 +86,8 @@ export interface MapPrefs {
 	/** Oldest scar the layer draws, in years. See BURN_SCAR_YEARS_MIN/MAX. */
 	burnScarYears: number;
 	tiltEl: number;
+	/** Playback rate, one of playback.SPEEDS. */
+	playSpeed: number;
 	camera: MapCamera | null;
 }
 
@@ -83,7 +96,8 @@ export const DEFAULT_PREFS: MapPrefs = {
 	moment: 'Reflectivity',
 	activeRadars: [],
 	nexrad: false,
-	opacity: 0.8,
+	opacity: DEFAULT_OPACITIES.radars,
+	layerOpacity: { ...DEFAULT_OPACITIES },
 	panelOpen: true,
 	watersheds: false,
 	reservoirs: false,
@@ -96,6 +110,7 @@ export const DEFAULT_PREFS: MapPrefs = {
 	// overlapping perimeters to obscure the composite underneath.
 	burnScarYears: 2,
 	tiltEl: 0,
+	playSpeed: DEFAULT_SPEED,
 	camera: null
 };
 
@@ -239,6 +254,9 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 		activeRadars: [...new Set(radars)],
 		nexrad:       bool(obj.nexrad, DEFAULT_PREFS.nexrad),
 		opacity:      num(obj.opacity, DEFAULT_PREFS.opacity, 0, 1),
+		// `obj.opacity` is the single slider older builds wrote, and it
+		// seeds the radar layer only where no per-layer value exists yet.
+		layerOpacity: normalizeOpacities(obj.layerOpacity, obj.opacity),
 		panelOpen:    bool(obj.panelOpen, DEFAULT_PREFS.panelOpen),
 		watersheds:   bool(obj.watersheds, DEFAULT_PREFS.watersheds),
 		reservoirs:   bool(obj.reservoirs, DEFAULT_PREFS.reservoirs),
@@ -249,6 +267,9 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 		burnScarYears: years(obj.burnScarYears, DEFAULT_PREFS.burnScarYears,
 		                     BURN_SCAR_YEARS_MIN, BURN_SCAR_YEARS_MAX),
 		tiltEl:       num(obj.tiltEl, DEFAULT_PREFS.tiltEl, 0, 90),
+		// Validated by the module that owns the set of legal speeds, so a
+		// speed that is dropped from that set cannot survive in storage.
+		playSpeed:    normalizeSpeed(obj.playSpeed),
 		camera:       camera(obj.camera)
 	};
 }

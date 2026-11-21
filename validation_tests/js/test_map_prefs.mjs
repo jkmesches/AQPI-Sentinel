@@ -282,6 +282,63 @@ export function runTests(mod) {
 	check('...and with no vocabulary is unchanged',
 	      after.composite === DEFAULT_PREFS.composite, after.composite);
 
+	// --- per-layer opacity, and the single slider it replaced ------------
+	//
+	// A blob written before the three sliders existed carries one `opacity`
+	// number, which moved the radar overlays and nothing else. Dropping it
+	// would silently reset a setting; applying it to all three would repaint
+	// the composite and NEXRAD on upgrade.
+	console.log('\nthe old single opacity upgrades onto the radars alone:');
+	reset();
+	store.set(KEY, JSON.stringify({ v: 1, ...DEFAULT_PREFS, opacity: 0.3,
+		layerOpacity: undefined }));
+	p = loadPrefs(VOCAB);
+	check('it becomes the radar opacity', p.layerOpacity.radars === 0.3,
+	      String(p.layerOpacity.radars));
+	check('the composite keeps its default',
+	      p.layerOpacity.composite === DEFAULT_PREFS.layerOpacity.composite,
+	      String(p.layerOpacity.composite));
+	check('NEXRAD keeps its default',
+	      p.layerOpacity.nexrad === DEFAULT_PREFS.layerOpacity.nexrad,
+	      String(p.layerOpacity.nexrad));
+
+	reset();
+	store.set(KEY, JSON.stringify({ v: 1, ...DEFAULT_PREFS, opacity: 0.3,
+		layerOpacity: { radars: 0.9, composite: 'junk', nexrad: 4 } }));
+	p = loadPrefs(VOCAB);
+	check('a per-layer value set since the upgrade wins',
+	      p.layerOpacity.radars === 0.9, String(p.layerOpacity.radars));
+	check('a corrupt one falls back to its own layer',
+	      p.layerOpacity.composite === DEFAULT_PREFS.layerOpacity.composite,
+	      String(p.layerOpacity.composite));
+	check('an out-of-range one clamps', p.layerOpacity.nexrad === 1,
+	      String(p.layerOpacity.nexrad));
+	check('the legacy field is still written, for an older build reading it',
+	      typeof p.opacity === 'number', String(p.opacity));
+
+	// --- playback speed ---------------------------------------------------
+	//
+	// Kept, unlike the playback position and whether it was running. A speed
+	// that reaches MapLibre's loop as 0 or NaN is a loop that spins or stops.
+	console.log('\nthe playback speed survives, and only if it is legal:');
+	reset();
+	store.set(KEY, JSON.stringify({ v: 1, ...DEFAULT_PREFS, playSpeed: 2 }));
+	check('a legal speed is restored', loadPrefs(VOCAB).playSpeed === 2);
+	for (const bad of [0, -1, 3, 'fast', null]) {
+		reset();
+		store.set(KEY, JSON.stringify({ v: 1, ...DEFAULT_PREFS,
+			playSpeed: bad }));
+		const got = loadPrefs(VOCAB).playSpeed;
+		check(`a stored ${String(bad)} falls back to the default`,
+		      got === DEFAULT_PREFS.playSpeed, String(got));
+	}
+	reset();
+	check('a first visit gets the default speed',
+	      loadPrefs(VOCAB).playSpeed === DEFAULT_PREFS.playSpeed);
+	check('...and a full set of opacities',
+	      ['composite', 'radars', 'nexrad']
+	        .every((k) => typeof loadPrefs(VOCAB).layerOpacity[k] === 'number'));
+
 	console.log(failures.length
 		? `\n${failures.length} FAILED: ${failures.join(', ')}`
 		: '\nall map-prefs assertions passed');

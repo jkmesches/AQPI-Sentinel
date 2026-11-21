@@ -32,6 +32,83 @@ export const MAX_SKIP_PER_TICK = 6;
 export const FRAME_DWELL_MS = 900;
 
 /**
+ * The speeds the control offers, as multipliers of the dwell above.
+ *
+ * Four, spaced by doubling. A continuous slider reads as finer control than
+ * there is, since the dwell is a floor and not a rate: the loop waits for
+ * the frame to load and then waits out whatever of the dwell is left, so
+ * above about 2x on six radars the load is what sets the interval.
+ */
+export const SPEEDS: readonly number[] = [0.5, 1, 2, 4];
+
+/** The speed a console starts at, and falls back to. */
+export const DEFAULT_SPEED = 1;
+
+/**
+ * The shortest dwell any speed may ask for, in milliseconds.
+ *
+ * A loop with no floor is not a loop a reader can interrupt, and a frame
+ * that paints for 30 ms is a flicker rather than a frame.
+ */
+export const MIN_DWELL_MS = 150;
+
+/**
+ * A stored or typed speed, reduced to one the control offers.
+ *
+ * Anything unrecognized becomes the default rather than being honored. The
+ * value reaches here from saved preferences and from a link, so it can be a
+ * string, a negative, a zero or a NaN, and each of those would otherwise
+ * turn into a dwell that spins the loop or stops it.
+ *
+ * @param raw Whatever arrived.
+ * @returns One of `SPEEDS`.
+ */
+export function normalizeSpeed(raw: unknown): number {
+	const n = typeof raw === 'string' ? Number(raw) : raw;
+	if (typeof n !== 'number' || !Number.isFinite(n)) return DEFAULT_SPEED;
+	return SPEEDS.includes(n) ? n : DEFAULT_SPEED;
+}
+
+/**
+ * How long a frame holds at a given speed.
+ *
+ * @param speed A speed multiplier, or anything at all.
+ * @returns The dwell in milliseconds, never below `MIN_DWELL_MS`.
+ */
+export function dwellFor(speed: unknown): number {
+	return Math.max(MIN_DWELL_MS, FRAME_DWELL_MS / normalizeSpeed(speed));
+}
+
+/**
+ * The next speed when the control is stepped.
+ *
+ * Clamps at both ends rather than wrapping. Wrapping from 4x back to 0.5x
+ * on one more press of the same control is a jump in the direction the
+ * reader did not ask for.
+ *
+ * @param speed The current speed.
+ * @param step How many notches, 1 for faster and -1 for slower.
+ * @returns The new speed, one of `SPEEDS`.
+ */
+export function stepSpeed(speed: unknown, step: number): number {
+	const at = SPEEDS.indexOf(normalizeSpeed(speed));
+	const by = Number.isFinite(step) ? Math.trunc(step) : 0;
+	const next = Math.min(SPEEDS.length - 1, Math.max(0, at + by));
+	return SPEEDS[next];
+}
+
+/**
+ * How a speed reads on the control.
+ *
+ * @param speed The speed.
+ * @returns A short label, "1x" rather than "1.0x".
+ */
+export function speedLabel(speed: unknown): string {
+	const n = normalizeSpeed(speed);
+	return `${Number.isInteger(n) ? n : n.toFixed(1)}x`;
+}
+
+/**
  * The next step to show, skipping blank frames where the data allows.
  *
  * Skipping needs an activity reading per step, so the list is used only

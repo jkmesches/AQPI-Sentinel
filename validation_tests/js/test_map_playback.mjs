@@ -11,7 +11,9 @@
 export function runTests(mod) {
   const {
     nextInterestingStep, remainingDwell, stepTo,
-    ACTIVITY_FLOOR, MAX_SKIP_PER_TICK, FRAME_DWELL_MS
+    normalizeSpeed, dwellFor, stepSpeed, speedLabel,
+    ACTIVITY_FLOOR, MAX_SKIP_PER_TICK, FRAME_DWELL_MS, SPEEDS,
+    DEFAULT_SPEED, MIN_DWELL_MS
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -154,6 +156,56 @@ export function runTests(mod) {
       && stepTo(0, 0, 'last') === -1 && stepTo(0, 0, 'prev') === -1);
     check('a single step stays put',
       stepTo(0, 1, 'next') === 0 && stepTo(0, 1, 'prev') === 0);
+  }
+
+  // The speed arrives from stored preferences and from a link, so it can be
+  // a string, a zero, a negative or a NaN. Each of those turned straight
+  // into a dwell is either a loop that spins or one that never ticks.
+  console.log('\nthe speed control cannot produce a bad dwell:');
+  {
+    check('1x is the plain dwell', dwellFor(1) === FRAME_DWELL_MS);
+    check('2x halves it', dwellFor(2) === FRAME_DWELL_MS / 2);
+    check('a half speed doubles it', dwellFor(0.5) === FRAME_DWELL_MS * 2);
+    check('every offered speed clears the floor',
+      SPEEDS.every((s) => dwellFor(s) >= MIN_DWELL_MS));
+    check('the default is one of them', SPEEDS.includes(DEFAULT_SPEED));
+    const name = (v) => (v === '' ? "''" : String(v));
+    for (const bad of [0, -2, NaN, Infinity, null, undefined, {}, [],
+      'fast', '', 3, 1000]) {
+      const got = normalizeSpeed(bad);
+      check(`${name(bad)} falls back to the default`,
+        got === DEFAULT_SPEED, String(got));
+      check(`...and ${name(bad)} still gives a usable dwell`,
+        dwellFor(bad) >= MIN_DWELL_MS && Number.isFinite(dwellFor(bad)),
+        String(dwellFor(bad)));
+    }
+    check('a numeric string is honored, since a link carries strings',
+      normalizeSpeed('2') === 2);
+    check('a dwell is never below the floor',
+      dwellFor(1e9) >= MIN_DWELL_MS, String(dwellFor(1e9)));
+  }
+
+  console.log('\nstepping the speed clamps rather than wrapping:');
+  {
+    check('faster from 1x', stepSpeed(1, 1) === 2);
+    check('slower from 1x', stepSpeed(1, -1) === 0.5);
+    check('the fastest stays put', stepSpeed(SPEEDS[SPEEDS.length - 1], 1)
+      === SPEEDS[SPEEDS.length - 1]);
+    check('the slowest stays put', stepSpeed(SPEEDS[0], -1) === SPEEDS[0]);
+    check('a step of zero changes nothing', stepSpeed(2, 0) === 2);
+    check('two notches skips one', stepSpeed(0.5, 2) === SPEEDS[2]);
+    check('a step past the end clamps there', stepSpeed(1, 99)
+      === SPEEDS[SPEEDS.length - 1]);
+    check('a step past the start clamps there',
+      stepSpeed(4, -99) === SPEEDS[0]);
+    check('a NaN step changes nothing', stepSpeed(2, NaN) === 2);
+    check('stepping a bad speed starts from the default',
+      stepSpeed('nonsense', 1) === stepSpeed(DEFAULT_SPEED, 1));
+    check('a whole speed reads without a decimal', speedLabel(2) === '2x');
+    check('a fractional one keeps one place', speedLabel(0.5) === '0.5x');
+    check('every offered speed has a label',
+      SPEEDS.every((s) => /^\d+(\.\d)?x$/.test(speedLabel(s))),
+      SPEEDS.map(speedLabel).join(' '));
   }
 
   console.log(failures.length

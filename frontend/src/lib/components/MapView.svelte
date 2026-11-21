@@ -51,6 +51,12 @@
 		 * different sizes and covering different ground.
 		 */
 		timeStrip?: TimeStrip | null;
+		/**
+		 * The acts a key press can ask of this pane, published so the page
+		 * can hold one keydown listener. Two listeners would both answer
+		 * one press, stepping time twice and switching both products.
+		 */
+		paneControls?: PaneControls | null;
 	}
 	let {
 		pane = 0,
@@ -58,7 +64,8 @@
 		sharedTime = $bindable(null),
 		sharedCamera = $bindable(null),
 		onToggleCompare = null,
-		timeStrip = $bindable(null)
+		timeStrip = $bindable(null),
+		paneControls = $bindable(null)
 	}: Props = $props();
 
 	/** Whether this pane owns the time strip, the prefs and the address bar. */
@@ -69,6 +76,13 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import type { TimeStrip } from '$lib/map/paneTime';
+	import type { PaneControls, PaneSize } from '$lib/map/paneControls';
+	import {
+		DEFAULT_OPACITIES, OPACITY_LABELS, OPACITY_LAYERS, isHidden,
+		normalizeOpacities, opacityFromPercent, opacityPercent,
+		type Opacities, type OpacityLayer
+	} from '$lib/map/opacity';
+	import { stepProduct } from '$lib/map/keys';
 	import { url as apiUrl } from '$lib/origin';
 	import { productLabel } from '$lib/format';
 	import {
@@ -85,7 +99,8 @@
 	import { selectionBounds, toggleId, uniqueIds } from '$lib/map/selection';
 	import { beforeIdFor } from '$lib/map/layers/stack';
 	import {
-		nextInterestingStep, remainingDwell, stepTo, FRAME_DWELL_MS
+		nextInterestingStep, remainingDwell, stepTo, dwellFor,
+		normalizeSpeed, DEFAULT_SPEED
 	} from '$lib/map/playback';
 	import {
 		compositeImagePath, compositeStepsPath, extentCorners, scanImagePath,
@@ -247,7 +262,12 @@
 	// Default to Reflectivity composite — most useful at-a-glance view.
 	let composite = $state<Composite>('comp_ref');
 	let nexradEnabled = $state(false);
-	let overlayOpacity = $state(0.8);
+	// One per raster layer. They stack on the same ground, so the question a
+	// reader has is which to fade against the others, and the single slider
+	// this replaces could not answer it: it moved the radars alone, while
+	// the composite sat at a hard-coded 0.7 and NEXRAD at 0.6.
+	let layerOpacity = $state<Opacities>({ ...DEFAULT_OPACITIES });
+	const overlayOpacity = $derived(layerOpacity.radars);
 
 	// Layers panel show/hide — persisted per browser.
 	let panelOpen = $state(true);
@@ -546,6 +566,9 @@
 	 */
 	let stepsFor = $state('');
 	let playing = $state(false);
+	// Persisted, unlike `playing`. A speed is a preference; a running loop
+	// on arrival is not, which is why the saved prefs never restore one.
+	let playSpeed = $state(DEFAULT_SPEED);
 	let activity = $state<number[]>([]);     // non-empty pixel fraction per step
 	// === Stale-composite guard ===
 	//
@@ -707,7 +730,7 @@
 		currentMoment   = p.moment as Moment;
 		activeRadars    = [...p.activeRadars];
 		nexradEnabled   = p.nexrad;
-		overlayOpacity  = p.opacity;
+		layerOpacity    = normalizeOpacities(p.layerOpacity, p.opacity);
 		panelOpen       = p.panelOpen;
 		watershedsOn    = p.watersheds;
 		reservoirsOn    = p.reservoirs;
@@ -717,6 +740,7 @@
 		burnScarsOn     = p.burnScars;
 		burnScarYears   = p.burnScarYears;
 		tiltEl          = p.tiltEl;
+		playSpeed       = normalizeSpeed(p.playSpeed);
 		// Camera is deliberately NOT applied here. On mount the map is
 		// constructed at the saved camera instead (no visible snap), and Reset
 		// moves it explicitly. Calling jumpTo from here would also fire during
@@ -727,10 +751,11 @@
 		const c = map?.getCenter();
 		return {
 			composite, moment: currentMoment, activeRadars: [...activeRadars],
-			nexrad: nexradEnabled, opacity: overlayOpacity, panelOpen,
+			nexrad: nexradEnabled, opacity: overlayOpacity,
+			layerOpacity: { ...layerOpacity }, panelOpen,
 			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
 			terrain3D: terrain3DOn, streamGauges: streamGaugesOn,
-			burnScars: burnScarsOn, burnScarYears, tiltEl,
+			burnScars: burnScarsOn, burnScarYears, tiltEl, playSpeed,
 			camera: c && map
 				? { lng: c.lng, lat: c.lat, zoom: map.getZoom(),
 				    bearing: map.getBearing(), pitch: map.getPitch() }
@@ -743,9 +768,9 @@
 	// restoring — without that gate, opening the page erases your settings.
 	$effect(() => {
 		void composite; void currentMoment; void activeRadars; void nexradEnabled;
-		void overlayOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
+		void layerOpacity; void panelOpen; void watershedsOn; void reservoirsOn;
 		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
-		void burnScarsOn; void burnScarYears;
+		void burnScarsOn; void burnScarYears; void playSpeed;
 		if (!prefsReady || !isPrimary) return;
 		savePrefs(currentPrefs());
 	});
@@ -1275,7 +1300,7 @@
 					id: 'comp-overlay-layer',
 					type: 'raster',
 					source: 'comp-overlay',
-					paint: { 'raster-opacity': 0.7 }
+					paint: { 'raster-opacity': layerOpacity.composite }
 				});
 			}
 		};
@@ -1344,7 +1369,10 @@
 			stepIdx = _nextInterestingStep(stepIdx);
 			await syncAllToStep();
 			if (!playing || id !== _playLoopId) return;
-			const left = remainingDwell(started, performance.now(), FRAME_DWELL_MS);
+			// Read the speed each pass, so changing it takes effect on the
+			// next frame rather than after the loop is stopped and started.
+			const left = remainingDwell(started, performance.now(),
+				dwellFor(playSpeed));
 			if (left > 0) {
 				await new Promise<void>((resolve) => setTimeout(resolve, left));
 			}
@@ -1490,7 +1518,7 @@
 				id: 'nexrad-layer',
 				type: 'raster',
 				source: 'nexrad',
-				paint: { 'raster-opacity': 0.6 }
+				paint: { 'raster-opacity': layerOpacity.nexrad }
 			},
 			'range-fill'
 		);
@@ -1783,8 +1811,17 @@
 				map.setPaintProperty(radarLayerId(id), 'raster-opacity', overlayOpacity);
 			}
 		}
+		// The tilt overlay is one radar's own imagery, so it moves with them.
 		if (map.getLayer('tilt-overlay-layer')) {
 			map.setPaintProperty('tilt-overlay-layer', 'raster-opacity', overlayOpacity);
+		}
+		if (map.getLayer('comp-overlay-layer')) {
+			map.setPaintProperty('comp-overlay-layer', 'raster-opacity',
+				layerOpacity.composite);
+		}
+		if (map.getLayer('nexrad-layer')) {
+			map.setPaintProperty('nexrad-layer', 'raster-opacity',
+				layerOpacity.nexrad);
 		}
 	}
 
@@ -2004,12 +2041,16 @@
 	// height to it. Only the primary pane publishes one.
 	$effect(() => {
 		void stepIdx; void steps; void playing; void activity; void stepLabel;
+		void playSpeed;
 		timeStrip = isPrimary
 			? {
 				stepIdx, totalSteps: steps.length, stepLabel, playing,
-				activity, onFirst: stepFirst, onPrev: stepPrev,
+				activity, times: steps.map((s) => s.ts ?? null),
+				speed: playSpeed,
+				onFirst: stepFirst, onPrev: stepPrev,
 				onTogglePlay: togglePlay, onNext: stepNext,
-				onLast: stepLast, onScrub: scrub
+				onLast: stepLast, onScrub: scrub,
+				onSpeed: (s: number) => { playSpeed = normalizeSpeed(s); }
 			}
 			: null;
 	});
@@ -2175,7 +2216,7 @@
 	});
 	// Opacity slider — cheap setPaintProperty per layer, no source churn.
 	$effect(() => {
-		void overlayOpacity;
+		void layerOpacity;
 		applyOpacity();
 	});
 	// Moment switch — swaps every active overlay to the new moment.
@@ -2681,7 +2722,8 @@
 			terrain: style.terrain ?? null,
 			state: {
 				composite, moment: currentMoment, activeRadars: [...activeRadars],
-				nexradEnabled, overlayOpacity, tiltEl,
+				nexradEnabled, overlayOpacity,
+				layerOpacity: { ...layerOpacity }, tiltEl,
 				watershedsOn, reservoirsOn, terrainOn, terrain3DOn,
 				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
 				stepIdx, stepCount: steps.length, stepsFor, playing,
@@ -2777,6 +2819,13 @@
 			// fine for foreground but doesn't help backgrounded tabs.
 			refreshExpiredTiles: false
 		});
+		// The console owns the arrows. MapLibre's keyboard handler pans with
+		// them whenever the canvas has focus, which it has as soon as anyone
+		// clicks the map to read a value, so leaving it on would make one
+		// press pan and step at once. Shift with an arrow and the zoom keys
+		// replace what it did, routed through `paneControls`, so a keyboard
+		// user loses nothing. See $lib/map/keys.
+		map.keyboard.disable();
 		requestAnimationFrame(() => map?.resize());
 		resizeObs = new ResizeObserver(() => map?.resize());
 		resizeObs.observe(mapDiv);
@@ -2877,6 +2926,11 @@
 				publishCamera();
 				settledCamera = linkCamera();
 			});
+			// Publish the camera the map opened at, rather than waiting for
+			// the first gesture. `data-view` claims to carry what a link
+			// should reproduce, and until something moved it carried a null
+			// camera, so a reader on arrival saw no view at all.
+			settledCamera = linkCamera();
 		});
 
 		scanRefresh = setInterval(pokeOverlays, 120_000);
@@ -2976,6 +3030,63 @@
 		return COMPOSITE_GROUPS
 			.map((g) => ({ ...g, options: g.options.filter((o) => placeable(o.key)) }))
 			.filter((g) => g.options.length > 0);
+	});
+
+	/**
+	 * The products a key press steps through, in picker order.
+	 *
+	 * 'none' is left out. It is a real selection and the picker offers it,
+	 * but landing on an empty map while walking the list with one key reads
+	 * as the overlay having broken rather than as a choice.
+	 */
+	const keyProducts = $derived(
+		compGroups.flatMap((g) => g.options.map((o) => o.key))
+			.filter((k) => k !== 'none')
+	);
+
+	/** Move the product selection by one, wrapping. */
+	function stepProductBy(step: number): void {
+		if (keyProducts.length === 0) return;
+		composite = stepProduct(keyProducts, composite, step) as Composite;
+	}
+
+	/** This pane's map size in CSS pixels, or zeros before it exists. */
+	function mapSize(): PaneSize {
+		const canvas = map?.getCanvas();
+		if (!canvas) return { width: 0, height: 0 };
+		return { width: canvas.clientWidth, height: canvas.clientHeight };
+	}
+
+	/**
+	 * Pan by a screen offset, with no animation.
+	 *
+	 * Instant rather than eased, for the same reason the shared camera uses
+	 * `jumpTo`: two panes easing from slightly different moments read as one
+	 * of them lagging. The other pane follows through `moveend` either way.
+	 */
+	function panByPx(dx: number, dy: number): void {
+		if (!mapAlive() || !map) return;
+		map.panBy([dx, dy], { duration: 0 });
+	}
+
+	/** Change the zoom, letting MapLibre clamp it to the style's limits. */
+	function zoomByDelta(dz: number): void {
+		if (!mapAlive() || !map) return;
+		map.setZoom(map.getZoom() + dz);
+	}
+
+	// Published by every pane, not only the primary. These acts belong to
+	// the pane the pointer is over, and the second pane is the one being
+	// compared against.
+	$effect(() => {
+		void keyProducts; void panelOpen;
+		paneControls = {
+			stepProduct: stepProductBy,
+			togglePanel: () => { panelOpen = !panelOpen; },
+			panBy: panByPx,
+			zoomBy: zoomByDelta,
+			size: mapSize
+		};
 	});
 
 	const statusLabel = (s: string) =>
@@ -3123,10 +3234,13 @@
 			</div>
 		{/if}
 
-	<!-- LAYERS CONTROL -->
+	<!-- LAYERS CONTROL. data-panel says which way it is, so a harness driving
+	     the `[` key reads the state rather than inferring it from which of
+	     the two shapes below is in the DOM. -->
 	{#if !panelOpen}
 		<!-- Collapsed: a single compact badge -->
 		<button
+			data-panel="closed"
 			class="pointer-events-auto absolute right-3 top-3 flex items-center gap-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 px-2 py-1 text-[10.5px] shadow-xl backdrop-blur transition-colors hover:bg-[var(--color-elevated)]"
 			onclick={() => { panelOpen = true; }}
 			title="show layers"
@@ -3142,8 +3256,13 @@
 			</span>
 		</button>
 	{:else}
+	<!-- The open panel stops 3.5rem short of the bottom rather than 1.5rem.
+	     MapLibre's attribution sits bottom right with a z-index above this,
+	     so a taller panel put its last row underneath it, and the
+	     attribution has to stay readable. -->
 	<div
-		class="pointer-events-auto absolute right-3 top-3 flex w-[280px] max-h-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
+		data-panel="open"
+		class="pointer-events-auto absolute right-3 top-3 flex w-[280px] max-h-[calc(100%-3.5rem)] flex-col overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 text-[11px] shadow-xl backdrop-blur"
 	>
 		<!-- Header -->
 		<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5">
@@ -3570,26 +3689,58 @@
 			{/each}
 		</ul>
 
-		<!-- Opacity — slim, no label clutter -->
-		<div class="flex items-center gap-2 border-t border-[var(--color-border)] px-3 py-2">
-			<svg viewBox="0 0 12 12" width="11" height="11" class="text-[var(--color-muted)]">
-				<circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" stroke-width="1.2" />
-				<path d="M6 1 A5 5 0 0 1 6 11 Z" fill="currentColor" />
-			</svg>
-			<input
-				type="range"
-				min="10"
-				max="100"
-				step="5"
-				value={Math.round(overlayOpacity * 100)}
-				oninput={(e) =>
-					(overlayOpacity = Number((e.target as HTMLInputElement).value) / 100)}
-				class="flex-1 accent-[var(--color-ok)]"
-				title="overlay opacity"
-			/>
-			<span class="num w-[2.4rem] text-right text-[9.5px] text-[var(--color-muted)]">
-				{Math.round(overlayOpacity * 100)}%
-			</span>
+		<!-- Opacity, one row per raster layer. The three stack on the same
+		     ground, so the question is which to fade against the others.
+		     The minimum is 0 rather than the old 10, because a layer you
+		     want out of the way entirely is the common case and the toggle
+		     for it is elsewhere in the panel. -->
+		<!-- Sticky, because three rows where there was one pushed this below
+		     the fold of a scrolling panel on a 950 px window and the last
+		     slider could not be seen at all. The radar list scrolls under
+		     it instead. -->
+		<div
+			data-opacity-panel
+			class="sticky bottom-0 z-10 flex flex-col gap-1 border-t border-[var(--color-border)] bg-[var(--color-surface)]/95 px-3 py-1.5 backdrop-blur"
+		>
+			{#each OPACITY_LAYERS as key (key)}
+				<div class="flex items-center gap-2">
+					<span class="w-[4.2rem] shrink-0 text-[9.5px] uppercase tracking-wider
+					             text-[var(--color-muted)]">
+						{OPACITY_LABELS[key]}
+					</span>
+					<input
+						type="range"
+						min="0"
+						max="100"
+						step="5"
+						data-opacity={key}
+						value={opacityPercent(layerOpacity[key])}
+						oninput={(e) => {
+							layerOpacity = {
+								...layerOpacity,
+								[key]: opacityFromPercent(
+									(e.target as HTMLInputElement).value,
+									layerOpacity[key])
+							};
+						}}
+						class="flex-1 accent-[var(--color-ok)]"
+						title="{OPACITY_LABELS[key]} opacity"
+						aria-label="{OPACITY_LABELS[key]} opacity"
+					/>
+					<!-- A layer at zero is still switched on and still
+					     fetching, so say it is hidden rather than leaving a
+					     reader to wonder why it draws nothing. -->
+					<span
+						class="num w-[2.8rem] text-right text-[9.5px] {isHidden(layerOpacity[key])
+							? 'text-[var(--color-warn)]'
+							: 'text-[var(--color-muted)]'}"
+					>
+						{isHidden(layerOpacity[key])
+							? 'hidden'
+							: `${opacityPercent(layerOpacity[key])}%`}
+					</span>
+				</div>
+			{/each}
 		</div>
 	</div>
 	{/if}
