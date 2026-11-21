@@ -206,6 +206,127 @@
 			"pixels": 196595,
 			"colors": "51/51",
 			"covered": true
+		},
+		{
+			"radar": "XSCW",
+			"folder": "scw",
+			"moment": "Velocity",
+			"ramp": "aqpi-xband-velocity",
+			"frames": 1,
+			"pixels": 133663,
+			"colors": "211/211",
+			"covered": true,
+			"note": "Measured 2026-11-21 over a frame with rain across most of the scan, which is why it reaches 211 of the palette's 56 stops' worth of quantised colors. These four pairs could not be measured before today: the scan route handed every moment a filesystem fetcher on a deployment with no mount, so Velocity, Zdr and PhiDP answered 500 and only Reflectivity, which the archive already held, came back at all."
+		},
+		{
+			"radar": "XSWR",
+			"folder": "swyr",
+			"moment": "Velocity",
+			"ramp": "aqpi-xband-velocity",
+			"frames": 1,
+			"pixels": 10769,
+			"colors": "112/112",
+			"covered": true,
+			"note": "Measured 2026-11-21."
+		},
+		{
+			"radar": "XSCV",
+			"folder": "scv",
+			"moment": "Velocity",
+			"ramp": "aqpi-xband-velocity",
+			"frames": 1,
+			"pixels": 74,
+			"colors": "17/17",
+			"covered": true,
+			"note": "Measured 2026-11-21 on a nearly clear scan: 74 opaque pixels carrying 17 colors, so this exercises a small part of the table. The table itself is the band's, established by XSCW at 211/211 over 133,663 pixels off a byte-identical colorbar."
+		},
+		{
+			"radar": "XSCR",
+			"folder": "scrz",
+			"moment": "CorrDifferentialReflectivity",
+			"ramp": "aqpi-xband-differential-reflectivity",
+			"frames": 1,
+			"pixels": 57,
+			"colors": "34/34",
+			"covered": true,
+			"note": "Measured 2026-11-21 on a nearly clear scan, 57 opaque pixels. The table is established by XSCW at 235/235 over 133,663 pixels off a byte-identical colorbar."
+		},
+		{
+			"radar": "XSCW",
+			"folder": "scw",
+			"moment": "CorrDifferentialReflectivity",
+			"ramp": "aqpi-xband-differential-reflectivity",
+			"frames": 1,
+			"pixels": 133663,
+			"colors": "235/235",
+			"covered": true,
+			"note": "Measured 2026-11-21."
+		},
+		{
+			"radar": "XSWR",
+			"folder": "swyr",
+			"moment": "CorrDifferentialReflectivity",
+			"ramp": "aqpi-xband-differential-reflectivity",
+			"frames": 1,
+			"pixels": 10769,
+			"colors": "184/184",
+			"covered": true,
+			"note": "Measured 2026-11-21."
+		},
+		{
+			"radar": "XSCV",
+			"folder": "scv",
+			"moment": "CorrDifferentialReflectivity",
+			"ramp": "aqpi-xband-differential-reflectivity",
+			"frames": 1,
+			"pixels": 74,
+			"colors": "21/21",
+			"covered": true,
+			"note": "Measured 2026-11-21 on a nearly clear scan, 74 opaque pixels. The table is established by XSCW as above."
+		},
+		{
+			"radar": "XSCW",
+			"folder": "scw",
+			"moment": "FilteredPhiDP",
+			"ramp": "aqpi-xband-differential-phase",
+			"frames": 1,
+			"pixels": 115390,
+			"colors": "14/14",
+			"covered": true,
+			"note": "Measured 2026-11-21."
+		},
+		{
+			"radar": "XSCV",
+			"folder": "scv",
+			"moment": "FilteredPhiDP",
+			"ramp": null,
+			"frames": 8,
+			"pixels": 0,
+			"colors": "0/0",
+			"covered": false,
+			"note": "Not measurable on 2026-11-21: every FilteredPhiDP frame in the rolling hour is fully transparent. The filter is the reason, since it masks PhiDP where the correlation or the signal is low, so a quiet day leaves nothing to sample while the same radar's Velocity and Zdr do carry echo. Its colorbar is byte-identical to the three radars measured at 100% above, so the table is almost certainly theirs, which is not a measurement and so is not covered here. Re-measure when there is rain over Coyote Valley."
+		},
+		{
+			"radar": "XSCR",
+			"folder": "scrz",
+			"moment": "FilteredPhiDP",
+			"ramp": null,
+			"frames": 8,
+			"pixels": 0,
+			"colors": "0/0",
+			"covered": false,
+			"note": "Not measurable on 2026-11-21, for the same reason as XSCV above. Re-measure when there is rain over Santa Cruz."
+		},
+		{
+			"radar": "CBAND",
+			"folder": "sscb",
+			"moment": "RhoHV",
+			"ramp": null,
+			"frames": 1,
+			"pixels": 0,
+			"colors": "0/0",
+			"covered": false,
+			"note": "The only radar that publishes RhoHV at all: the five X-band folders carry Reflectivity, Zdr, FilteredPhiDP and Velocity, and the route answers 404 for RhoHV on every one of them. The C-band publishes no colorbar, and its Zdr and PhiDP already fail against the X-band tables at 0/253 and 0/256, so it paints these from a colormap nothing here has read. Reading RhoHV's needs the renderer's source on the CoSMoS host rather than anything on this side."
 		}
 	],
 	"shared_colorbars": {

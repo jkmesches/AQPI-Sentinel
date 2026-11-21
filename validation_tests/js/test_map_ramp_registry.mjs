@@ -63,9 +63,15 @@ export function runTests(mod, coverage, products) {
     check('the C-band ZDR does not',
       rampFor('CBAND', 'CorrDifferentialReflectivity') === null);
     check('the C-band PhiDP does not', rampFor('CBAND', 'PhiDP') === null);
-    check('the C-band RhoHV was never measured',
-      rampFor('CBAND', 'RhoHV') === null
-      && coverageFor('CBAND', 'RhoHV') === null);
+    // Asked as "has no table", not as "has no row". The row appeared the
+    // day someone looked, and a rule that demanded its absence would have
+    // failed on the record getting better rather than on anything breaking.
+    const rhohv = coverageFor('CBAND', 'RhoHV');
+    check('the C-band RhoHV has no table',
+      rampFor('CBAND', 'RhoHV') === null);
+    check('and if it has been looked at, the record says why not',
+      rhohv === null || (rhohv.covered === false && !!rhohv.note),
+      rhohv ? `covered=${rhohv.covered} note=${!!rhohv.note}` : 'no row');
     check('the C-band reflectivity is the same object XEBY gets',
       rampFor('CBAND', 'CorrReflectivity')
       === rampFor('XEBY', 'CorrReflectivity'));
@@ -231,8 +237,14 @@ export function runTests(mod, coverage, products) {
   {
     check('it is dated', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_ON), MEASURED_ON);
     for (const p of coverage.pairs) {
-      check(`${p.radar}/${p.moment} reports frames and pixels`,
-        p.frames > 0 && p.pixels > 0, `${p.frames} frames, ${p.pixels} px`);
+      // Frames always, pixels only where there were any. A pair whose
+      // frames are all transparent is a result the record should keep,
+      // and the rule that matters is that nothing claims coverage from
+      // nothing, which the count check below enforces. Demanding pixels
+      // instead pushed a real null result out of the record.
+      check(`${p.radar}/${p.moment} reports what it sampled`,
+        p.frames > 0 && (p.pixels > 0 || (!p.covered && !!p.note)),
+        `${p.frames} frames, ${p.pixels} px, covered=${p.covered}`);
       check(`${p.radar}/${p.moment} reports a matched-over-distinct count`,
         /^\d+\/\d+$/.test(p.colors), p.colors);
       const [got, total] = p.colors.split('/').map(Number);
