@@ -163,11 +163,22 @@ export function runTests(mod, coverage, products) {
       check(`${name} names a checked-in ramp`, !!RAMPS[name]);
       check(`${name} lists radars`, radarsSharing(name).length > 0,
         radarsSharing(name).join(' '));
-      const measured = covered.find((p) => p.ramp === name);
-      check(`${name}'s measured radar is among them`,
-        !measured || radarsSharing(name)
-          .some((r) => r.toLowerCase() === measured.radar.toLowerCase()),
-        `${measured?.radar} in [${radarsSharing(name).join(' ')}]`);
+      // The record says these radars publish a byte-identical colorbar,
+      // so one of THEM has to carry the frame measurement that anchors
+      // it. Byte identity moves a measurement between radars; it does
+      // not make one.
+      //
+      // Asking instead whether one arbitrary covered row's radar was in
+      // the list made the check depend on the order of coverage.json,
+      // and adding three measured pairs reordered it onto the C-band,
+      // which is deliberately absent from these lists and is measured
+      // from its own frames.
+      const anchors = covered.filter((p) => p.ramp === name
+        && radarsSharing(name).some(
+          (r) => r.toLowerCase() === p.radar.toLowerCase()));
+      check(`${name} is anchored by a radar it names`,
+        anchors.length > 0,
+        anchors.map((p) => `${p.radar}/${p.moment}`).join(' ') || 'none');
     }
     check('an unknown ramp shares with nobody',
       radarsSharing('nosuch').length === 0);

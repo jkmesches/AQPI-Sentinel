@@ -1,177 +1,177 @@
 {
-  "_comment": [
-    "Which composite product each ramp reads, and what the measurement",
-    "found. A product reaches a legend and a readout only from a row here",
-    "with covered true, the same rule the per-radar coverage file applies.",
-    "",
-    "Two checks stand behind each row, and a ramp ships only after both.",
-    "",
-    "The first is validation_tests/visual/check_ramp_ticks.py, which reads",
-    "the bar's color at the row of each number printed beside it, puts that",
-    "color through the shipped invert.ts, and requires the band that comes",
-    "back to contain the printed number. That is what makes the bounds and",
-    "the axis shape evidence rather than a transcription: read as linear,",
-    "the accumulation bar reports 12.14 inches at its own 1.00 tick.",
-    "",
-    "The second is validation_tests/visual/ramp_coverage.py against real",
-    "frames from the deployment. Full coverage is the rule for radar",
-    "frames, whose images are nothing but data. The composite PNGs are not:",
-    "they carry coastlines and boundaries drawn in near-black, and their",
-    "colors sit one or two units off the bar's, so 'pixels' here is the",
-    "share of painted area that reads back rather than a pass mark. A",
-    "product ships when its frames' common colors land on stops exactly,",
-    "which says the table is the right one, and unmatched colors then read",
-    "as nothing rather than as a wrong number.",
-    "",
-    "Measured on 2026-11-21 against the test deployment."
-  ],
-  "measured_on": "2026-11-21",
-  "tool": "validation_tests/visual/extract_ramp.py, check_ramp_ticks.py, ramp_coverage.py",
-  "products": [
-    {
-      "product": "comp_ref",
-      "unit": null,
-      "ramp": "aqpi-product-reflectivity",
-      "frames": 3,
-      "pixels": 33.064,
-      "exact_common": true,
-      "covered": true,
-      "note": "The frame's commonest colors sit on stops at distance 0. The rest is coastline drawn into the image and one-unit noise around each stop."
-    },
-    {
-      "product": "comp_now",
-      "unit": null,
-      "ramp": "aqpi-product-reflectivity",
-      "frames": 3,
-      "pixels": 33.064,
-      "exact_common": true,
-      "covered": true,
-      "note": "Nowcast of the same field, published from the same colormap."
-    },
-    {
-      "product": "fcst_temp",
-      "unit": null,
-      "ramp": "aqpi-product-temp-f",
-      "frames": 3,
-      "pixels": 100.0,
-      "exact_common": true,
-      "covered": true,
-      "note": "Nine distinct colors over a million painted pixels, all on stops."
-    },
-    {
-      "product": "fcst_total_precip",
-      "unit": "in",
-      "ramp": "aqpi-product-forecast-accum-in",
-      "frames": 3,
-      "pixels": 73.223,
-      "exact_common": true,
-      "covered": true
-    },
-    {
-      "product": "fcst_total_precip",
-      "unit": "mm",
-      "ramp": "aqpi-product-forecast-accum-mm",
-      "frames": 3,
-      "pixels": 69.027,
-      "exact_common": true,
-      "covered": true
-    },
-    {
-      "product": "fcst_total_precip_cum",
-      "unit": "in",
-      "ramp": "aqpi-product-forecast-accum-in",
-      "frames": 3,
-      "pixels": 85.0,
-      "exact_common": true,
-      "covered": true
-    },
-    {
-      "product": "fcst_total_precip_cum",
-      "unit": "mm",
-      "ramp": "aqpi-product-forecast-accum-mm",
-      "frames": 3,
-      "pixels": 65.905,
-      "exact_common": true,
-      "covered": true
-    },
-    {
-      "product": "water_depth",
-      "unit": null,
-      "ramp": "aqpi-product-water-depth",
-      "frames": 3,
-      "pixels": 92.654,
-      "exact_common": true,
-      "covered": true,
-      "note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement."
-    },
-    {
-      "product": "max_water_depth",
-      "unit": null,
-      "ramp": "aqpi-product-water-depth",
-      "frames": 1,
-      "pixels": 92.38,
-      "exact_common": true,
-      "covered": true
-    },
-    {
-      "product": "qpe_1hr",
-      "unit": "in",
-      "ramp": null,
-      "frames": 3,
-      "pixels": 2.734,
-      "exact_common": false,
-      "covered": false,
-      "note": "The bar radarca shows for this product and the colors in its frames are different colormaps. Its catalog points at colormap_accum_in.png, a 177-color gradient, and no pixel of three real frames sits on any stop of it, while 54.7% sit exactly on the discrete forecast palette. Until the publisher's own script says which norm renders rain60min, any number here would be invented."
-    },
-    {
-      "product": "qpe_15min",
-      "unit": "in",
-      "ramp": null,
-      "frames": 3,
-      "pixels": 2.9,
-      "exact_common": false,
-      "covered": false,
-      "note": "Same mismatch as qpe_1hr, from the same bar."
-    },
-    {
-      "product": "precip_rate_radar",
-      "unit": "in/h",
-      "ramp": null,
-      "frames": 3,
-      "pixels": 3.1,
-      "exact_common": false,
-      "covered": false,
-      "note": "Shares the accumulation bar in the catalog and shows the same mismatch."
-    },
-    {
-      "product": "water_level",
-      "unit": null,
-      "ramp": null,
-      "frames": 3,
-      "pixels": 0.032,
-      "exact_common": false,
-      "covered": false,
-      "note": "Its bar verifies against its own printed numbers and explains almost nothing in the frames, so the frames are painted from some other table. The unit is unsettled too: the bar says meters and the catalog says feet."
-    },
-    {
-      "product": "max_water_level",
-      "unit": null,
-      "ramp": null,
-      "frames": 1,
-      "pixels": 0.01,
-      "exact_common": false,
-      "covered": false,
-      "note": "The same mismatch as water_level, from the same bar: it verifies against its own printed numbers and explains almost none of the frames."
-    },
-    {
-      "product": "fcst_precip_rate",
-      "unit": "in/h",
-      "ramp": null,
-      "frames": 0,
-      "pixels": 0.0,
-      "exact_common": false,
-      "covered": false,
-      "note": "Every frame fetched was fully transparent, which is what a forecast of no rain looks like. Nothing to measure against yet."
-    }
-  ]
+	"_comment": [
+		"Which composite product each ramp reads, and what the measurement",
+		"found. A product reaches a legend and a readout only from a row here",
+		"with covered true, the same rule the per-radar coverage file applies.",
+		"",
+		"Two checks stand behind each row, and a ramp ships only after both.",
+		"",
+		"The first is validation_tests/visual/check_ramp_ticks.py, which reads",
+		"the bar's color at the row of each number printed beside it, puts that",
+		"color through the shipped invert.ts, and requires the band that comes",
+		"back to contain the printed number. That is what makes the bounds and",
+		"the axis shape evidence rather than a transcription: read as linear,",
+		"the accumulation bar reports 12.14 inches at its own 1.00 tick.",
+		"",
+		"The second is validation_tests/visual/ramp_coverage.py against real",
+		"frames from the deployment. Full coverage is the rule for radar",
+		"frames, whose images are nothing but data. The composite PNGs are not:",
+		"they carry coastlines and boundaries drawn in near-black, and their",
+		"colors sit one or two units off the bar's, so 'pixels' here is the",
+		"share of painted area that reads back rather than a pass mark. A",
+		"product ships when its frames' common colors land on stops exactly,",
+		"which says the table is the right one, and unmatched colors then read",
+		"as nothing rather than as a wrong number.",
+		"",
+		"Measured on 2026-11-21 against the test deployment."
+	],
+	"measured_on": "2026-11-21",
+	"tool": "validation_tests/visual/extract_ramp.py, check_ramp_ticks.py, ramp_coverage.py",
+	"products": [
+		{
+			"product": "comp_ref",
+			"unit": null,
+			"ramp": "aqpi-product-reflectivity",
+			"frames": 3,
+			"pixels": 33.064,
+			"exact_common": true,
+			"covered": true,
+			"note": "The frame's commonest colors sit on stops at distance 0. The rest is coastline drawn into the image and one-unit noise around each stop."
+		},
+		{
+			"product": "comp_now",
+			"unit": null,
+			"ramp": "aqpi-product-reflectivity",
+			"frames": 3,
+			"pixels": 33.064,
+			"exact_common": true,
+			"covered": true,
+			"note": "Nowcast of the same field, published from the same colormap."
+		},
+		{
+			"product": "fcst_temp",
+			"unit": null,
+			"ramp": "aqpi-product-temp-f",
+			"frames": 3,
+			"pixels": 100.0,
+			"exact_common": true,
+			"covered": true,
+			"note": "Nine distinct colors over a million painted pixels, all on stops."
+		},
+		{
+			"product": "fcst_total_precip",
+			"unit": "in",
+			"ramp": "aqpi-product-forecast-accum-in",
+			"frames": 3,
+			"pixels": 73.223,
+			"exact_common": true,
+			"covered": true
+		},
+		{
+			"product": "fcst_total_precip",
+			"unit": "mm",
+			"ramp": "aqpi-product-forecast-accum-mm",
+			"frames": 3,
+			"pixels": 69.027,
+			"exact_common": true,
+			"covered": true
+		},
+		{
+			"product": "fcst_total_precip_cum",
+			"unit": "in",
+			"ramp": "aqpi-product-forecast-accum-in",
+			"frames": 3,
+			"pixels": 85.0,
+			"exact_common": true,
+			"covered": true
+		},
+		{
+			"product": "fcst_total_precip_cum",
+			"unit": "mm",
+			"ramp": "aqpi-product-forecast-accum-mm",
+			"frames": 3,
+			"pixels": 65.905,
+			"exact_common": true,
+			"covered": true
+		},
+		{
+			"product": "water_depth",
+			"unit": null,
+			"ramp": "aqpi-product-water-depth",
+			"frames": 3,
+			"pixels": 92.654,
+			"exact_common": true,
+			"covered": true,
+			"note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement."
+		},
+		{
+			"product": "max_water_depth",
+			"unit": null,
+			"ramp": "aqpi-product-water-depth",
+			"frames": 1,
+			"pixels": 92.38,
+			"exact_common": true,
+			"covered": true
+		},
+		{
+			"product": "qpe_1hr",
+			"unit": "in",
+			"ramp": null,
+			"frames": 3,
+			"pixels": 2.734,
+			"exact_common": false,
+			"covered": false,
+			"note": "The bar radarca shows for this product and the colors in its frames are different colormaps. Its catalog points at colormap_accum_in.png, a 177-color gradient, and no pixel of three real frames sits on any stop of it, while 54.7% sit exactly on the discrete forecast palette. Until the publisher's own script says which norm renders rain60min, any number here would be invented."
+		},
+		{
+			"product": "qpe_15min",
+			"unit": "in",
+			"ramp": null,
+			"frames": 3,
+			"pixels": 2.9,
+			"exact_common": false,
+			"covered": false,
+			"note": "Same mismatch as qpe_1hr, from the same bar."
+		},
+		{
+			"product": "precip_rate_radar",
+			"unit": "in/h",
+			"ramp": null,
+			"frames": 3,
+			"pixels": 3.1,
+			"exact_common": false,
+			"covered": false,
+			"note": "Shares the accumulation bar in the catalog and shows the same mismatch."
+		},
+		{
+			"product": "water_level",
+			"unit": null,
+			"ramp": "aqpi-product-water-level",
+			"frames": 6,
+			"pixels": 95.763,
+			"exact_common": false,
+			"covered": true,
+			"note": "Built from the renderer's own colormap, not from the published bar: LinearSegmentedColormap.from_list over 14 anchors, N=256, linear vmin=-4 vmax=10 metres, read from plot_water_level.py:108 on the CoSMoS host. The published colormap_level_ft.png is a hand-made asset with no code path to the plotter, which is why it verified against its own printed numbers and explained 0.032% of the pixels. The renderer resamples with a Hanning window, so most pixels sit between two of the 256 entries; the per-stop tolerance in invert.ts admits a neighbour only where that moves the answer by at most 1% of the range, which is 0.14 m. Two bands are dropped because the map turns back on itself below zero and paints -3.84 m and -2.41 m the same colour, and #6f00ff is dropped because the unmasked -99999 fill clips to vmin and lands on it."
+		},
+		{
+			"product": "max_water_level",
+			"unit": null,
+			"ramp": "aqpi-product-water-level",
+			"frames": 1,
+			"pixels": 95.321,
+			"exact_common": false,
+			"covered": true,
+			"note": "The same ramp and the same renderer; plot_max_water_level.py:89 carries a colour block that is byte-identical to the level one."
+		},
+		{
+			"product": "fcst_precip_rate",
+			"unit": "in/h",
+			"ramp": null,
+			"frames": 0,
+			"pixels": 0.0,
+			"exact_common": false,
+			"covered": false,
+			"note": "Every frame fetched was fully transparent, which is what a forecast of no rain looks like. Nothing to measure against yet."
+		}
+	]
 }

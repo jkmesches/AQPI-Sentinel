@@ -52,6 +52,23 @@ export interface Ramp {
 	 */
 	scale?: 'linear' | 'log' | 'segmented';
 	/**
+	 * The colormap definition this table was generated from, when it was
+	 * generated rather than read off a published colorbar.
+	 *
+	 * Its presence is what marks a ramp as continuous: a table quantised
+	 * from a colormap has neighbors one channel step apart, where a
+	 * table read off a block bar has stops that are meant to be told
+	 * apart. The two want different matching rules, and this says which
+	 * kind the table is without a second field to keep in step.
+	 */
+	built_from?: {
+		kind: string;
+		anchors: string[];
+		levels: number;
+		vmin: number;
+		vmax: number;
+	};
+	/**
 	 * Where each number printed on the bar sits along it, 0 at the
 	 * bottom. Present for a segmented axis, whose shape between two
 	 * printed numbers is not recoverable from the picture, so the
@@ -160,15 +177,17 @@ export function invert(
 	if (alpha <= TRANSPARENT_ALPHA) return null;
 	let best: RampStop | null = null;
 	let bestDistance = Infinity;
-	for (const stop of ramp.stops) {
+	let bestIndex = -1;
+	for (const [i, stop] of ramp.stops.entries()) {
 		const d = colorDistance(rgb, parseHex(stop.color));
 		if (d < bestDistance) {
 			bestDistance = d;
 			best = stop;
+			bestIndex = i;
 		}
 		if (d === 0) break;
 	}
-	if (!best || bestDistance > toleranceFor(ramp)) return null;
+	if (!best || bestDistance > toleranceAt(ramp, bestIndex)) return null;
 	return { value: best.value, lo: best.lo, hi: best.hi, distance: bestDistance };
 }
 
@@ -201,11 +220,103 @@ export function toleranceFor(ramp: Ramp): number {
 			if (d > 0 && d < closest) closest = d;
 		}
 	}
-	const out = Number.isFinite(closest)
-		? Math.max(0, Math.min(MATCH_TOLERANCE, closest - 1))
-		: MATCH_TOLERANCE;
+	const out = ramp.built_from
+		? Math.max(0, ...budgetedTolerances(ramp, colors))
+		: Number.isFinite(closest)
+			? Math.max(0, Math.min(MATCH_TOLERANCE, closest - 1))
+			: MATCH_TOLERANCE;
 	TOLERANCES.set(ramp, out);
 	return out;
+}
+
+/**
+ * How much of a ramp's range a snapped match may be wrong by.
+ *
+ * One percent. A table quantised from a continuous colormap puts its
+ * neighbors one channel step apart, so the closest-pair rule above
+ * returns zero for it and only an exact pixel reads back. On the water
+ * level frames that left 18% of the painted area readable, because the
+ * renderer resamples with a Hanning window and most pixels land between
+ * two entries rather than on one.
+ *
+ * Snapping to the nearer entry is safe there in a way it is not for a
+ * block ramp, because the two candidates are neighbors on one continuous
+ * scale and the answer differs by a band width. This budget says how
+ * wide a band width is allowed to be before that stops being true.
+ */
+export const SNAP_BUDGET = 0.01;
+
+/**
+ * The largest tolerance whose worst wrong answer stays inside the budget.
+ *
+ * Derived from the ramp rather than set: it walks every pair of stops
+ * within each candidate tolerance and takes the largest one where no
+ * pair differs in value by more than SNAP_BUDGET of the range. A ramp
+ * that turns back on itself, so that one color sits near two distant
+ * values, gets a small tolerance from this for the same reason a block
+ * ramp does.
+ *
+ * @param ramp The table.
+ * @param colors Its stop colors, already parsed.
+ * @returns The tolerance in summed channel distance.
+ */
+function budgetedTolerances(ramp: Ramp, colors: Rgb[]): number[] {
+	const span = Math.abs(ramp.max - ramp.min);
+	const out = new Array<number>(colors.length).fill(0);
+	if (!(span > 0)) return out;
+	const allowed = span * SNAP_BUDGET;
+	// Per stop, because a colormap can be injective over most of its
+	// range and turn back on itself over a little of it. The water level
+	// map does: its purples below zero repeat to within one channel
+	// step, while its greens and reds, where this data actually sits, do
+	// not. One number for the whole table takes the strictest region's
+	// answer and applies it everywhere, which is how a ramp measured at
+	// 95% of pixels within distance 5 read back only 18% of them.
+	//
+	// The nearest stop beyond this one's budget, per stop. Everything
+	// below that distance is a stop near enough in value to be safe.
+	const limit = new Array<number>(colors.length).fill(MATCH_TOLERANCE + 1);
+	for (let i = 0; i < colors.length; i++) {
+		for (let j = i + 1; j < colors.length; j++) {
+			const d = colorDistance(colors[i], colors[j]);
+			if (d > MATCH_TOLERANCE) continue;
+			if (Math.abs(ramp.stops[i].value - ramp.stops[j].value) <= allowed) {
+				continue;
+			}
+			if (d < limit[i]) limit[i] = d;
+			if (d < limit[j]) limit[j] = d;
+		}
+	}
+	for (let i = 0; i < colors.length; i++) {
+		out[i] = Math.max(0, Math.min(MATCH_TOLERANCE, limit[i] - 1));
+	}
+	return out;
+}
+
+/** Each generated ramp's per-stop tolerances, computed once per table. */
+const STOP_TOLERANCES = new WeakMap<Ramp, number[]>();
+
+/**
+ * How far a pixel may sit from one stop of this ramp and still be it.
+ *
+ * A table read off a published block bar gets one answer for every
+ * stop, since its stops are meant to be told apart and the closest pair
+ * bounds them all. A table generated from a renderer's colormap gets an
+ * answer per stop, because it is a quantised continuous scale and its
+ * neighbors are one channel step apart by construction.
+ *
+ * @param ramp The table.
+ * @param index Which stop matched.
+ * @returns The tolerance in summed channel distance.
+ */
+export function toleranceAt(ramp: Ramp, index: number): number {
+	if (!ramp.built_from) return toleranceFor(ramp);
+	let per = STOP_TOLERANCES.get(ramp);
+	if (per === undefined) {
+		per = budgetedTolerances(ramp, ramp.stops.map((s) => parseHex(s.color)));
+		STOP_TOLERANCES.set(ramp, per);
+	}
+	return index >= 0 && index < per.length ? per[index] : 0;
 }
 
 /**

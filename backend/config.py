@@ -269,9 +269,13 @@ PRODUCTS = {
     # advertises them as feet and this table copied that, while the
     # colorbars the publisher draws beside the frames are labelled m and
     # run 0 to 5 for depth and -4 to 10 for level. Meters confirmed for
-    # depth on 2026-11-21; level rests on its bar's own label, which is
-    # drawn by the same code. A readout off by 3.28 is worse than none,
-    # so the ramp and this label are kept on one source.
+    # depth on 2026-11-21, and level the same day from the plotting
+    # scripts themselves: waterLevel declares units='meters' in the
+    # CoSMoS netCDF and none of the four plotters applies a conversion,
+    # with no occurrence of 3.28, 0.3048, ft or feet in any of them. The
+    # _ft filenames are stale and the catalog is wrong on all four.
+    # A readout off by 3.28 is worse than none, so the ramp and this
+    # label are kept on one source.
     "water_level":            {"details": "water_level/details.json",
                                "image_dir": "water_level/images/",
                                "cadence_s": 3600, "expected_steps": 19,

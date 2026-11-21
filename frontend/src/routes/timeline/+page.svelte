@@ -403,7 +403,13 @@
 			if (p.product_label) out.push(`Product: ${p.product_label}.`);
 			if (p.last_ts) {
 				const ageS = (Date.now() - new Date(p.last_ts).getTime()) / 1000;
-				out.push(`Latest scan timestamp: ${p.last_ts} (${fmtAge(ageS)} ago).`);
+				// A forecast's newest frame is in the future, so its age is
+				// negative. Printed through the unsigned form it read as
+				// "5d3h13m ago" for a product running five days AHEAD,
+				// which is the opposite of what the reader needs to know.
+				out.push(`Latest scan timestamp: ${p.last_ts} (${ageS < 0
+					? `${fmtAge(ageS)} ahead`
+					: `${fmtAge(ageS)} ago`}).`);
 			}
 			if (typeof p.n_steps === 'number') out.push(`${p.n_steps} time steps available.`);
 			if (typeof p.image_http === 'number') out.push(`Image fetch HTTP ${p.image_http}.`);
@@ -599,7 +605,13 @@
 			}
 			if (p.last_ts) {
 				const ageS = (Date.now() - new Date(p.last_ts).getTime()) / 1000;
-				rows.push({ label: 'newest scan age', observed: fmtAge(ageS), threshold: 'depends per product (see config.PRODUCTS.max_freshness_s)' });
+				rows.push({
+					label: ageS < 0 ? 'newest frame, ahead of now' : 'newest scan age',
+					observed: fmtAge(ageS, { signed: ageS < 0 }),
+					threshold: ageS < 0
+						? 'a forecast runs ahead; freshness is judged on the run time, not this'
+						: 'depends per product (see config.PRODUCTS.max_freshness_s)'
+				});
 			}
 			if (p.n_steps != null) {
 				rows.push({ label: 'step count', observed: String(p.n_steps), threshold: 'within ±4 of expected_steps (None ⇒ skip)' });

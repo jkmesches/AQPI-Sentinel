@@ -37,6 +37,9 @@
 	import MapCompass from '$lib/components/MapCompass.svelte';
 	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
 	import { portal } from '$lib/map/portal';
+	import {
+		addPin, nextPinId, pinLabel, removePin, type Pin
+	} from '$lib/map/probe';
 	import { resetCamera } from '$lib/map/compass';
 	import { barLayout, legendGradient } from '$lib/map/ramps/legend';
 	import {
@@ -90,6 +93,14 @@
 		 */
 		sharedCursor?: { lng: number; lat: number } | null;
 		/**
+		 * The points the reader has pinned, shared by every pane.
+		 *
+		 * Shared for the same reason the cursor is. A pin is a place,
+		 * and a place pinned in one pane and not the others would make
+		 * the panes report different ground.
+		 */
+		sharedPins?: Pin[];
+		/**
 		 * How large to draw everything laid over the map.
 		 *
 		 * One number for the legend, the compass, the display bar and the
@@ -117,6 +128,7 @@
 		frameGate = null,
 		probing = false,
 		sharedCursor = $bindable(null),
+		sharedPins = $bindable([]),
 		uiScale = DEFAULT_UI_SCALE,
 		inDock = false
 	}: Props = $props();
@@ -968,10 +980,21 @@
 		if (composite !== 'none') {
 			return rampForProduct(composite, currentUnit);
 		}
-		if (activeRadars.length !== 1) return null;
-		const radar = activeRadars[0];
-		const prefix = prefixFor(momentPrefixes, radar, currentMoment);
-		return prefix ? rampFor(radar, prefix) : null;
+		if (activeRadars.length === 0) return null;
+		// Every active radar, not just a single one. The X-band radars
+		// paint one moment from one table, so two of them on screen have
+		// one scale and refusing to draw it took the legend and the
+		// readout away for the ordinary case of watching two radars at
+		// once. Where they disagree, as the C-band does on ZDR and
+		// PhiDP, there is no one scale to draw and the answer is still
+		// nothing.
+		const ramps = activeRadars.map((radar) => {
+			const prefix = prefixFor(momentPrefixes, radar, currentMoment);
+			return prefix ? rampFor(radar, prefix) : null;
+		});
+		const first = ramps[0];
+		if (!first) return null;
+		return ramps.every((r) => r === first) ? first : null;
 	});
 
 	// ---- per-elevation tilt (single-radar inspector, Phase 1) -------------
@@ -2511,6 +2534,11 @@
 	let followValue = $state<string | null>(null);
 	/** Whether the pointer is in this pane's map. */
 	let hovering = $state(false);
+	// Where the pointer is in this pane, so the pane under it draws the
+	// same crosshair the others are drawing. Three panes marking one
+	// place with two different shapes makes the reader check which mark
+	// is theirs before reading the numbers.
+	let pointerAt = $state<{ x: number; y: number } | null>(null);
 
 	/**
 	 * Mark the shared ground point on this pane and read its value.
@@ -2539,6 +2567,48 @@
 	$effect(() => {
 		void sharedCursor; void compare; void hovering; void paintedTs;
 		followCursor();
+	});
+
+	// Where each pin lands in this pane, and what this pane's imagery
+	// says there. One entry per pin that is on screen; a pin panned out
+	// of view is still a pin, it just has nothing to draw.
+	let pinMarks = $state<
+		{ id: string; label: string; x: number; y: number; value: string | null }[]
+	>([]);
+
+	/**
+	 * Place every pin in this pane and read its value.
+	 *
+	 * Re-run on each frame as well as on each camera move, because the
+	 * point of a pin is to hold still while the imagery under it
+	 * changes.
+	 */
+	function placePins(): void {
+		if (!map || sharedPins.length === 0) {
+			pinMarks = [];
+			return;
+		}
+		const size = mapSize();
+		const out: typeof pinMarks = [];
+		for (const [i, pin] of sharedPins.entries()) {
+			const at = map.project([pin.lng, pin.lat]);
+			if (at.x < 0 || at.y < 0 || at.x > size.width || at.y > size.height) {
+				continue;
+			}
+			out.push({
+				id: pin.id,
+				label: pinLabel(i),
+				x: at.x,
+				y: at.y,
+				value: valueAt(pin)
+			});
+		}
+		pinMarks = out;
+	}
+
+	$effect(() => {
+		void sharedPins; void paintedTs; void composite; void currentMoment;
+		placePins();
 	});
 
 	// How far this pane's step sits from the shared time, for the label.
@@ -3496,9 +3566,18 @@
 				void onStreamGaugeClick(e);
 			});
 			map.on('click', (e) => {
-				if (!measuring) return;
-				measurePoints = [...measurePoints,
-					{ lng: e.lngLat.lng, lat: e.lngLat.lat }];
+				if (measuring) {
+					measurePoints = [...measurePoints,
+						{ lng: e.lngLat.lng, lat: e.lngLat.lat }];
+					return;
+				}
+				// Measuring wins the click when both are on, since a
+				// measurement is a sequence and a stray pin in the middle
+				// of one would be a point on the path.
+				if (probing) {
+					sharedPins = addPin(sharedPins, e.lngLat.lng, e.lngLat.lat,
+						nextPinId());
+				}
 			});
 			for (const layer of ['radar-point', 'radar-label', 'stream-gauge-marker']) {
 				map.on('mouseenter', layer, () => {
@@ -3518,6 +3597,7 @@
 			// drawn once per swap in prepareRadars.
 			map.on('mousemove', (e) => {
 				readAt(e.lngLat, e.point);
+				pointerAt = { x: e.point.x, y: e.point.y };
 				// Publish the ground, not the screen point. The panes can
 				// be at different sizes, and in a stacked layout the same
 				// pixel is a different place in each.
@@ -3529,6 +3609,7 @@
 				readoutAt = null;
 				sharedCursor = null;
 				hovering = false;
+				pointerAt = null;
 			});
 			// A drag moves the world under a still cursor, so the value
 			// changes with no pointer event to report it.
@@ -3542,6 +3623,7 @@
 				readoutValue = null;
 				readoutAt = null;
 				publishCamera();
+				placePins();
 				mapBearing = map?.getBearing() ?? 0;
 			});
 			mapBearing = map.getBearing();
@@ -3791,7 +3873,13 @@
 			: undefined}
 		data-readout-ramp={activeRamp ? activeRamp.label : undefined}
 	>
-		<div bind:this={mapDiv} class="h-full w-full"></div>
+		<!-- cursor-none so the drawn crosshair is the pointer rather than
+		     a second mark beside it. MapLibre's own grab/grabbing cursors
+		     are set on the canvas, so this has to win over them. -->
+		<div
+			bind:this={mapDiv}
+			class="h-full w-full [&_.maplibregl-canvas-container]:!cursor-none [&_canvas]:!cursor-none"
+		></div>
 		{#if compare}
 			<!-- Which pane this is. Two maps of the same area are otherwise
 			     indistinguishable in a screenshot or a handover, and the
@@ -3822,18 +3910,23 @@
 			<MapCompass bearing={mapBearing} scale={uiScale} onreset={faceNorth} />
 		</div>
 
-		<!-- The same ground the pointer is over, marked on every other
-		     pane with that pane's own reading. Two panes each marking
-		     their own pointer would not be comparing a point. -->
-		{#if followAt}
+		<!-- The same ground the pointer is over, marked on every pane
+		     with that pane's own reading, including the pane the pointer
+		     is in. That one used to show the system arrow while the
+		     others showed this crosshair, so the reader had to work out
+		     which mark was theirs before reading the numbers beside the
+		     other two. The system cursor is hidden under it. -->
+		{#if followAt || (hovering && pointerAt)}
+			{@const mark = followAt ?? pointerAt}
 			<div
-				data-cursor-follow
+				data-cursor-follow={followAt ? '' : undefined}
+				data-cursor-self={followAt ? undefined : ''}
 				class="pointer-events-none absolute z-30"
-				style="left: {followAt.x}px; top: {followAt.y}px;"
+				style="left: {mark?.x ?? 0}px; top: {mark?.y ?? 0}px;"
 			>
 				<svg
-					width="28"
-					height="28"
+					width={scaled(28, uiScale)}
+					height={scaled(28, uiScale)}
 					viewBox="-14 -14 28 28"
 					class="-translate-x-1/2 -translate-y-1/2"
 					aria-hidden="true"
@@ -3844,7 +3937,7 @@
 					<line x1="0" y1="4" x2="0" y2="11" stroke="var(--color-bright)" stroke-width="1.25" />
 					<circle r="1.5" fill="var(--color-bright)" />
 				</svg>
-				{#if followValue}
+				{#if followValue && followAt}
 					<span
 						data-cursor-follow-value
 						class="num absolute left-4 top-[-0.4rem] whitespace-nowrap rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 text-[var(--color-default)] shadow-lg backdrop-blur"
@@ -3854,6 +3947,57 @@
 				{/if}
 			</div>
 		{/if}
+
+		<!-- Pinned probes. Drawn whether or not the tool is still on: the
+		     pin is the measurement, and turning the tool off means "stop
+		     adding", not "throw away what I pinned". Each carries this
+		     pane's own reading, so one pin across three panes compares
+		     three products at one place. Click one to take it off. -->
+		{#each pinMarks as mark (mark.id)}
+			<button
+				type="button"
+				data-probe-pin={mark.id}
+				data-probe-value={mark.value}
+				title="{mark.value ?? 'nothing to read here'} · click to remove"
+				aria-label="Probe {mark.label}, {mark.value ?? 'no reading'}. Activate to remove."
+				class="absolute z-30 -translate-x-1/2 -translate-y-1/2"
+				style="left: {mark.x}px; top: {mark.y}px"
+				onclick={() => { sharedPins = removePin(sharedPins, mark.id); }}
+			>
+				<svg
+					width={scaled(22, uiScale)}
+					height={scaled(22, uiScale)}
+					viewBox="-11 -11 22 22"
+					aria-hidden="true"
+				>
+					<!-- A ring rather than a filled dot, so the color the
+					     reading came from is still visible inside it. -->
+					<circle
+						r="7"
+						fill="none"
+						stroke="var(--color-canvas)"
+						stroke-width="3.5"
+					/>
+					<circle
+						r="7"
+						fill="none"
+						stroke="var(--color-accent)"
+						stroke-width="1.5"
+					/>
+					<circle r="1.5" fill="var(--color-accent)" />
+				</svg>
+				<span
+					class="num absolute whitespace-nowrap rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 text-[var(--color-bright)] shadow-lg backdrop-blur"
+					style="left: {scaled(14, uiScale)}px;
+					       top: {scaled(-6, uiScale)}px;
+					       font-size: {scaled(10, uiScale)}px;
+					       padding: {scaled(2, uiScale)}px {scaled(5, uiScale)}px"
+				>
+					<span class="text-[var(--color-faint)]">{mark.label}</span>
+					{mark.value ?? '—'}
+				</span>
+			</button>
+		{/each}
 
 		<!-- Provisional-georeferencing marker. The composite overlay is placed
 		     from an ASSUMED extent on this deployment — the publisher supplies
@@ -4000,11 +4144,18 @@
 	     own chrome is what went, not the controls inside it. Declared as
 	     snippets so the bar below can render whichever one is open, in
 	     one place, at the width of the pane rather than of a button. -->
-	{#snippet findBody()}
-
-		<!-- Place search, over this deployment's own datasets. See
-		     $lib/map/search for why there is no geocoder behind it. -->
-		<div class="relative border-b border-[var(--color-border)] px-3 py-2">
+	<!-- Place search, over this deployment's own datasets. See
+	     $lib/map/search for why there is no geocoder behind it.
+	     Drawn in the toolbar rather than in the dock, because finding a
+	     place moves the camera and the cameras are locked together, so
+	     it is the console's control and not one pane's. The pane that
+	     fills the dock owns it, for the same reason that pane owns the
+	     product picker. -->
+	{#if inDock}
+		<div
+			use:portal={'[data-toolbar-search-slot]'}
+			class="relative w-[min(20rem,38vw)]"
+		>
 			<input
 				bind:this={searchInput}
 				data-place-search
@@ -4024,7 +4175,7 @@
 			{#if searchOpen && searchText.trim().length > 0}
 				<div
 					data-search-results
-					class="absolute left-3 right-3 top-[2.4rem] z-30 max-h-[14rem] overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-xl"
+					class="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-50 max-h-[18rem] overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-xl"
 				>
 					{#if searchHits.length === 0}
 						<!-- Says what is searched, so a miss reads as "not in
@@ -4056,7 +4207,7 @@
 				</div>
 			{/if}
 		</div>
-	{/snippet}
+	{/if}
 
 	{#snippet compositeBody()}
 		<!-- Composite — dropdown picker (5 products + Off) -->
@@ -4519,7 +4670,6 @@
 			class="flex flex-col"
 			style="font-size: {scaled(11, uiScale)}px"
 		>
-			{@render dockSection('Find', findBody)}
 			{@render dockSection('Product', compositeBody)}
 			{@render dockSection('Moment', momentBody)}
 			{@render dockSection('Radars', radarsBody)}

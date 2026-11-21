@@ -27,6 +27,10 @@
 		exporting: boolean;
 		/** Whether the value probe is on. */
 		probing: boolean;
+		/** How many points the reader has pinned. */
+		pins?: number;
+		/** The most the map will hold. */
+		pinLimit?: number;
 		/** The size every pane draws its overlays at. */
 		uiScale?: number;
 		onaddpane: () => void;
@@ -35,13 +39,17 @@
 		onprobe: () => void;
 		onexport: () => void;
 		onreset: () => void;
+		/** Called to take every pinned probe off the map. */
+		onclearpins: () => void;
 		/** Called with the size the reader picked. */
 		onscale: (scale: number) => void;
 	}
 	let {
-		panes, maxPanes, measuring, exporting, probing,
+		panes, maxPanes, measuring, exporting, probing, pins = 0,
+		pinLimit = 0,
 		uiScale = DEFAULT_UI_SCALE,
-		onaddpane, onremovepane, onmeasure, onprobe, onexport, onreset, onscale
+		onaddpane, onremovepane, onmeasure, onprobe, onexport, onreset, onscale,
+		onclearpins
 	}: Props = $props();
 
 	let settingsOpen = $state(false);
@@ -98,7 +106,22 @@
 			: 'click the map to pin the value under a point'}
 		aria-pressed={probing}
 		onclick={onprobe}
-	>probe</button>
+	>probe{pins > 0 ? ` ${pins}` : ''}</button>
+
+	<!-- Only once there is something to clear. A control that is always
+	     there and does nothing most of the time is one a reader stops
+	     reading. -->
+	{#if pins > 0}
+		<button
+			data-probe-clear
+			class="{base} {off}"
+			title="take all {pins} pinned {pins === 1 ? 'probe' : 'probes'} off the map{pins >= pinLimit
+				? `; the map holds ${pinLimit}, and the next pin drops the oldest`
+				: ''}"
+			aria-label="clear pinned probes"
+			onclick={onclearpins}
+		>clear</button>
+	{/if}
 
 	<button
 		data-export
@@ -114,6 +137,12 @@
 		aria-label="reset map settings"
 		onclick={onreset}
 	>reset</button>
+
+	<!-- Where the pane that fills the dock draws the place search. The
+	     slot is here and the control is the pane's, so the field keeps
+	     reading that pane's own datasets; see $lib/map/portal. -->
+	<span class="mx-1 h-3 w-px bg-[var(--color-border-strong)]"></span>
+	<div data-toolbar-search-slot class="flex items-center"></div>
 
 	<span class="mx-1 h-3 w-px bg-[var(--color-border-strong)]"></span>
 

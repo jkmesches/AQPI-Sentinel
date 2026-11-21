@@ -17,7 +17,8 @@
 export function runTests(mod, ramps) {
   const {
     invert, parseHex, colorDistance, selfCoverage,
-    MATCH_TOLERANCE, TRANSPARENT_ALPHA, toleranceFor
+    MATCH_TOLERANCE, TRANSPARENT_ALPHA, toleranceFor, toleranceAt,
+    SNAP_BUDGET
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -83,10 +84,62 @@ export function runTests(mod, ramps) {
       // 7 apart, where a flat 12 would match a pixel between them to
       // either one.
       const tol = toleranceFor(ramp);
-      check(`${name}: closest pair ${min} > its tolerance ${tol}`,
-        min > tol, `${min} vs ${tol}`);
+      if (!ramp.built_from) {
+        check(`${name}: closest pair ${min} > its tolerance ${tol}`,
+          min > tol, `${min} vs ${tol}`);
+      }
       check(`${name}: its tolerance is at most the global ${MATCH_TOLERANCE}`,
         tol <= MATCH_TOLERANCE, String(tol));
+    }
+  }
+
+  console.log('\na generated ramp is bounded by value, not by separation:');
+  {
+    // A table quantised from a renderer's colormap has neighbors one
+    // channel step apart by construction, so the closest-pair rule above
+    // returns zero and only an exact pixel reads back. The renderers
+    // resample, so most pixels land between two entries: on the water
+    // level frames that rule read 18% of the painted area where 95% of
+    // it sits within five of a stop.
+    //
+    // The rule for those is that snapping to the nearer entry may not
+    // move the answer by more than SNAP_BUDGET of the ramp's range. That
+    // is what this checks, stop by stop, which is also where it has to
+    // hold: a colormap can be injective over most of its range and turn
+    // back on itself over a little of it, as the water level map does
+    // below zero.
+    const generated = all.filter(([, r]) => !!r.built_from);
+    check('there is a generated ramp to check',
+      generated.length > 0, String(generated.length));
+    for (const [name, ramp] of generated) {
+      const allowed = Math.abs(ramp.max - ramp.min) * SNAP_BUDGET;
+      let worst = 0;
+      let worstAt = '';
+      for (let i = 0; i < ramp.stops.length; i++) {
+        const tol = toleranceAt(ramp, i);
+        for (let j = 0; j < ramp.stops.length; j++) {
+          if (i === j) continue;
+          const d = colorDistance(parseHex(ramp.stops[i].color),
+            parseHex(ramp.stops[j].color));
+          if (d > tol) continue;
+          const gap = Math.abs(ramp.stops[i].value - ramp.stops[j].value);
+          if (gap > worst) {
+            worst = gap;
+            worstAt = `${ramp.stops[i].color} vs ${ramp.stops[j].color}`;
+          }
+        }
+      }
+      check(`${name}: no stop admits a value more than ${allowed.toFixed(3)} away`,
+        worst <= allowed, `worst ${worst.toFixed(4)} ${worstAt}`);
+      // A tolerance of zero everywhere would pass the line above while
+      // reading nothing, which is the state this work started from.
+      const loosest = Math.max(...ramp.stops.map((_, i) => toleranceAt(ramp, i)));
+      check(`${name}: some stop can be matched loosely`,
+        loosest > 0, String(loosest));
+      // And a stop in the region that turns back on itself must not be.
+      const strictest = Math.min(...ramp.stops.map((_, i) => toleranceAt(ramp, i)));
+      check(`${name}: a stop near a repeat stays exact`,
+        strictest === 0, String(strictest));
     }
   }
 
@@ -176,13 +229,32 @@ export function runTests(mod, ramps) {
   console.log('\nthe ramps carry their provenance:');
   {
     for (const [name, ramp] of all) {
-      // A path on the mount for a radar moment, a URL for a composite
-      // product. Both name the image the colors were read out of, which
-      // is what a reader needs to go and check one.
-      check(`${name} names the bar it was read from`,
+      // Where the table came from, so a reader can go and check it.
+      // Two kinds are legal. A colorbar image, named by a path on the
+      // mount for a radar moment or by a URL for a product. Or the
+      // renderer's own colormap definition, which has to name the file
+      // and line it was read at.
+      //
+      // The second kind is the stronger evidence and was added when the
+      // water-level bar turned out to be a hand-made asset with no code
+      // path to the plotter: it verified against its own printed
+      // numbers and explained 0.032% of the pixels in real frames.
+      const fromBar = /(colorbar|colormap)[a-z0-9_-]*\.png$/;
+      const fromCode = /\.py:\d+/;
+      check(`${name} names where its colors came from`,
         typeof ramp.source === 'string'
-          && /(colorbar|colormap)[a-z0-9_-]*\.png$/.test(ramp.source),
+          && (fromBar.test(ramp.source) || fromCode.test(ramp.source)),
         ramp.source);
+      // A ramp built from code has to carry the definition it was built
+      // from, so the file can be rebuilt without going back to the host.
+      if (typeof ramp.source === 'string' && !fromBar.test(ramp.source)) {
+        check(`${name} carries the colormap it was built from`,
+          !!ramp.built_from && Array.isArray(ramp.built_from.anchors)
+            && ramp.built_from.anchors.length > 1
+            && Number.isFinite(ramp.built_from.vmin)
+            && Number.isFinite(ramp.built_from.vmax),
+          JSON.stringify(ramp.built_from?.anchors?.length));
+      }
       check(`${name} carries the date it was read`,
         /^\d{4}-\d{2}-\d{2}$/.test(ramp.read_on), ramp.read_on);
       check(`${name} carries a unit and a label`,

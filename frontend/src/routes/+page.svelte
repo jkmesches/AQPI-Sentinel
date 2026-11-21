@@ -44,6 +44,7 @@
 		shouldStackPanes, panesToShow, maxPanesFor, shouldClosePanel
 	} from '$lib/map/responsive';
 	import { diag } from '$lib/diag';
+	import { PIN_LIMIT, type Pin } from '$lib/map/probe';
 	import {
 		DEFAULT_UI_SCALE, normalizeScale, readScale, writeScale
 	} from '$lib/map/uiScale';
@@ -69,6 +70,10 @@
 	// same place. Two panes showing one spot are comparing it; two
 	// showing a crosshair each under its own pointer are not.
 	let sharedCursor = $state<{ lng: number; lat: number } | null>(null);
+	// The points the reader has pinned. Console-wide, so one pin marks
+	// one place in every pane and each pane reports its own product
+	// there; see $lib/map/probe.
+	let sharedPins = $state<Pin[]>([]);
 	// How large every pane draws the things laid over its map. Console-wide
 	// and persisted per browser: a reader who sized the legend for the
 	// display in front of them meant it for the next visit as well.
@@ -313,13 +318,26 @@
 				exporting={focused?.exporting() ?? false}
 				{probing}
 				{uiScale}
+				pins={sharedPins.length}
+				pinLimit={PIN_LIMIT}
+				onclearpins={() => { sharedPins = []; }}
 				onscale={setScale}
 				onaddpane={() => { panesWanted = Math.min(maxPanes, paneCount + 1); }}
 				onremovepane={() => { panesWanted = Math.max(1, paneCount - 1); }}
 				onmeasure={() => focused?.toggleMeasure()}
 				onprobe={() => { probing = !probing; }}
 				onexport={() => focused?.exportImage()}
-				onreset={() => { for (const c of panes) c?.reset(); }}
+				onreset={() => {
+					for (const c of panes) c?.reset();
+					// Back to one pane too. Reset means the console as it
+					// opens, and it opens with one map; leaving three open
+					// made the one control that promises a known state
+					// the one that did not deliver it.
+					panesWanted = 1;
+					dockPane = 0;
+					sharedPins = [];
+					probing = false;
+				}}
 			/>
 			<div class="flex min-h-0 w-full flex-1">
 			<!-- THE DOCK. Every control a pane has, expanded, beside the
@@ -415,6 +433,7 @@
 							{compare}
 							{probing}
 							{uiScale}
+							bind:sharedPins
 							inDock={dockOpen && dockTarget === i}
 							bind:sharedTime
 							bind:sharedCamera
