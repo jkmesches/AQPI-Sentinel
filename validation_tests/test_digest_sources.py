@@ -449,9 +449,17 @@ async def run_assertions(pool) -> None:
     # the combined signal and the product at 83.7%. XSCR at 97.9% is neither,
     # which is the point: the counts are taken from the configured source of
     # each row, not from one tier for all of them.
+    # The name in front of the counts is whatever the report calls itself,
+    # which is the deployment's own name until an operator sets a title. It
+    # was the bare word "Sentinel" before the custom-title work, so this reads
+    # the title rather than repeating a literal that moves with the profile.
     check("the subject line counts across the mixed sources",
-          D.subject_line(data) == "Sentinel — 1 down, 2 degraded",
+          D.subject_line(data) == f"{D.report_title()} — 1 down, 2 degraded",
           D.subject_line(data))
+    check("...and a configured title replaces the deployment name",
+          D.subject_line(data, "XQPI Daily Report")
+          == "XQPI Daily Report — 1 down, 2 degraded",
+          D.subject_line(data, "XQPI Daily Report"))
 
 
 if __name__ == "__main__":
