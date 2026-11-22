@@ -3,18 +3,18 @@
 	import { rankAlarms } from '$lib/alarmRank';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
-	import StatusLocatorMap from '$lib/components/StatusLocatorMap.svelte';
 	import SectionHeader from '$lib/components/SectionHeader.svelte';
 	import {
 		fmtAge, severityChip, statusText, statusBorder,
 		stageLabel, prettyCheckLabel, productLabel,
 		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
 		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck,
-		arrivalRowOf, radarRowRank, BACKEND_FLEET_CHECK_ID } from '$lib/format';
+		arrivalRowOf, radarRowRank, BACKEND_FLEET_CHECK_ID,
+		readoutMetric, fmtCadence, secondsToNextRun,
+		parseImageQc, qcLabel } from '$lib/format';
 	import { groupByTarget, worstOf, isAlerting } from '$lib/grouping';
 	import { radarVerdicts } from '$lib/radarStatus';
 	import { getSite } from '$lib/site';
-	import GroupRow from '$lib/components/GroupRow.svelte';
 	import { api, type CheckMeta } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -72,23 +72,6 @@
 	const setAllRadars = (open: boolean) => {
 		for (const g of radarGroups) radarOverride[g.target] = open;
 	};
-
-	// What the locator header says it is showing.
-	//
-	// This read "6 radars · 3 NEXRAD" on every deployment, written out, so an
-	// XQPI instance watching one radar said the same thing. Counting the radar
-	// rail's groups instead was wrong in the other direction: that rail holds
-	// radars with a reading, and on a deployment with no backend tier the
-	// three NEXRADs have none, so the header said 6 over nine drawn pins.
-	//
-	// The map reports what it drew, since the header describes the map.
-	let locatorRadars = $state<{ id: string; kind: string }[]>([]);
-	const locatorCount = $derived.by(() => {
-		const n = locatorRadars.length;
-		const nexrad = locatorRadars.filter((r) => r.kind === 'nexrad').length;
-		const radars = `${n} radar${n === 1 ? '' : 's'}`;
-		return nexrad > 0 ? `${radars} · ${nexrad} NEXRAD` : radars;
-	});
 
 	// The DROPS producer row, for the Site rail. Informational by design — see
 	// backend Layer3DropsProducerCheck — so it is shown always rather than only
@@ -298,20 +281,75 @@
 		};
 	});
 
-	const l4XbandByRadar = $derived.by(() => {
-		const out: Record<string, string> = {};
-		for (const r of sentinel.rollup?.stages?.['L4-T1T2'] ?? []) {
-			if (r.check_id.startsWith('layer4.xband.')) out[r.target] = r.status;
-		}
+	// === Image quality stopped being a count ===
+	//
+	// L4 ran nine checks that reached the page as the number 9/9 in the top
+	// strip and a 6px dot on six of the radar rows. Everything it measures was
+	// discarded on the way: the echo coverage, the frame's self-similarity,
+	// and which of its four detectors fired. Six of those nine targets are
+	// radars that already have a row, so the numbers belong on it, and the
+	// other three are mosaics that had nowhere to appear at all.
+	const l4Rows = $derived(
+		(sentinel.rollup?.stages?.['L4-T1T2'] ?? [])
+			.slice().sort((a, b) => a.target.localeCompare(b.target))
+	);
+	const l4ByTarget = $derived.by(() => {
+		const out: Record<string, (typeof l4Rows)[number]> = {};
+		for (const r of l4Rows) out[r.target] = r;
 		return out;
 	});
+	/** The quality rail's own rows: the mosaics, which no other rail carries. */
+	const l4MosaicRows = $derived(
+		l4Rows.filter((r) => !r.check_id.startsWith('layer4.xband.'))
+	);
 
-	function ageFromMetrics(checkId: string, metric: string): number | null {
-		const k = `${checkId}|${metric}`;
-		const arr = sentinel.metrics[k];
+	// L3 compares what the console draws against what the API says, and it had
+	// no row anywhere. One check today, so a rail of its own would be mostly
+	// heading; it sits under the quality rows, which is the same question
+	// asked of the rendered product rather than of the image.
+	const l3Rows = $derived(
+		(sentinel.rollup?.stages?.L3 ?? [])
+			.slice().sort((a, b) => a.target.localeCompare(b.target))
+	);
+
+	/** The newest value of one check's metric, or null when none has landed. */
+	function latestMetric(checkId: string, metric: string | null): number | null {
+		if (!metric) return null;
+		const arr = sentinel.metrics[`${checkId}|${metric}`];
 		if (!arr?.length) return null;
 		return arr[arr.length - 1].value;
 	}
+
+	// Re-read on the same tick as everything else, so a countdown does not sit
+	// frozen at whatever it said when the page loaded.
+	const nowTick = $derived(sentinel.rollup?.at ?? '');
+
+	/**
+	 * How often a check runs, and when it is next due, as one hover line.
+	 *
+	 * An age alone cannot be judged. 55 minutes is a fault on a 2-minute radar
+	 * and routine on a 30-minute forecast, and a row past its cadence is a
+	 * check that is slow or stuck rather than a subject that is stale.
+	 */
+	function cadenceTitle(checkId: string): string {
+		const every = fmtCadence(checksById[checkId]?.cadence_s);
+		if (!every) return '';
+		void nowTick;
+		const row = allRowsById[checkId];
+		const left = secondsToNextRun(row?.finished_at, checksById[checkId]?.cadence_s);
+		if (left === null) return `sampled every ${every}`;
+		return left >= 0
+			? `sampled every ${every} · next in ${fmtAge(left)}`
+			: `sampled every ${every} · overdue by ${fmtAge(-left)}`;
+	}
+	/** Every reading on the page, by check id, for the cadence hover. */
+	const allRowsById = $derived.by(() => {
+		const out: Record<string, { finished_at?: string }> = {};
+		for (const rows of Object.values(sentinel.rollup?.stages ?? {})) {
+			for (const r of rows ?? []) out[r.check_id] = r;
+		}
+		return out;
+	});
 
 	async function ack(id: number) {
 		try {
@@ -407,8 +445,28 @@
 	{/if}
 {/snippet}
 
-<div class="grid h-full grid-cols-12 grid-rows-[1fr_auto] gap-2 p-2">
-	<!-- LEFT RAIL: SITE + RADARS -------------------------------------------------------- -->
+<!--
+  Four rails, no map, one row.
+
+  The locator map was the largest element on the page and, on a healthy
+  deployment, the one carrying the least: nine green pins restating nine green
+  rows. The console at / draws the same geography with the imagery on it, so
+  the dashboard gives the space to the readings instead.
+
+  What the space bought: Radars left a shared column with Site and took one of
+  its own, which is what let its rows carry numbers rather than a bare trace.
+  Image quality and overlay parity got rows at all — ten checks that reached
+  the page only as two counts in the top strip. Alarms moved out of a
+  full-width band at the foot, which held one line of text and cost every rail
+  its last 36vh, into the fourth column under the quality rows.
+-->
+<!-- items-start, so a rail ends where its content does. Stretching them to a
+     common height left Site and Radars as tall empty boxes, which reads as
+     something failing to load rather than as a rail with nothing more to say.
+     Each still takes max-h-full and scrolls, so a long rail is bounded by the
+     viewport rather than by its neighbors. -->
+<div class="grid h-full grid-cols-12 items-start gap-2 p-2">
+	<!-- RAIL 1: SITE ------------------------------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
 	     of most cascading failures, so keeping it at eye level makes
 	     "what's actually broken" the first thing the operator sees.
@@ -422,20 +480,31 @@
 	     scrolling inside a few hundred pixels while a third of the column sat
 	     fixed above it. One scroll region for one column — the expanders are
 	     the reason the old arrangement stopped working. -->
-	<aside class="panel col-span-12 row-span-1 flex flex-col overflow-y-auto lg:col-span-4">
-		<SectionHeader title="Site" right={stageLabel('L0')} />
+	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3">
+		<SectionHeader title="Site" count="{siteRows.filter((r) => r.status === 'pass').length}/{siteRows.length}" right={stageLabel('L0')} />
 		<ul class="shrink-0 divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
 				<!-- The summary is clipped here too, but these are one-line L0
-				     rows in a quarter-width rail and the full text is on the row's
-				     hover title rather than nowhere. Left single-line on purpose:
-				     eleven site rows that each wrap to two would push the radars
-				     below the fold, and the radars are what the column is for. -->
+				     rows in a narrow rail and the full text is on the row's hover
+				     title rather than nowhere. Left single-line on purpose:
+				     eleven site rows that each wrap to two would fill the
+				     column. -->
 				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
-					title={`${prettyCheckLabel(r.check_id, r.target)} · ${r.check_id}${r.summary ? `\n${r.summary}` : ''}`}>
+					title={`${prettyCheckLabel(r.check_id, r.target)} · ${r.check_id}\n${cadenceTitle(r.check_id)}${r.summary ? `\n${r.summary}` : ''}`}>
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
-					<span class="text-[var(--color-default)] num">{prettyCheckLabel(r.check_id, r.target)}</span>
-					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{r.summary}</span>
+					<!-- The label never wraps and the summary gives way instead.
+					     In the narrower column "Sentinel DNS" broke across two
+					     lines while the summary beside it kept its full width,
+					     so the name of the thing was harder to read than its
+					     detail. The summary's full text is on the hover title. -->
+					<span class="num shrink-0 whitespace-nowrap text-[var(--color-default)]">{prettyCheckLabel(r.check_id, r.target)}</span>
+					<span class="num ml-auto min-w-0 truncate text-[10.5px] text-[var(--color-muted)]">{r.summary}</span>
+					<!-- How often this is sampled. The L0 rows carry no age, so
+					     the cadence is the only thing saying whether a summary
+					     from "just now" means thirty seconds or an hour. -->
+					<span class="num w-[1.9rem] shrink-0 text-right text-[9px] text-[var(--color-faint)]">
+						{fmtCadence(checksById[r.check_id]?.cadence_s)}
+					</span>
 				</li>
 			{/each}
 			{#if dropsRow}
@@ -458,7 +527,15 @@
 				</li>
 			{/if}
 		</ul>
+	</aside>
 
+	<!-- RAIL 2: RADARS ----------------------------------------------------------------- -->
+	<!-- Its own column now. In the shared one it had room for a name, a dot
+	     and a 62px trace, so the rail could say that a radar had moved and
+	     not what it had moved to. The width buys four readings per row: the
+	     arrival age, its trace, the frame's echo coverage and which image-QC
+	     detector, if any, fired. -->
+	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3">
 		<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5">
 			<span class="label">Radars</span>
 			<span class="num text-[10.5px] text-[var(--color-faint)]">·  {radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}</span>
@@ -497,69 +574,140 @@
 				</div>
 			</div>
 		{/if}
-		<!-- No flex-1/min-h-0/overflow here: the <aside> above owns the single
-		     scroll region. A nested one would reintroduce the cramped inner
-		     pane that expanding a radar made unusable. -->
-		<ul class="divide-y divide-[var(--color-border)]">
+		<!-- Cards, not rows.
+		     A row gave each radar one line, and a radar now carries five
+		     readings: the arrival age, its trace, the echo coverage, which
+		     image-QC detector fired, and how many checks are behind the
+		     verdict. That is more than a line holds without truncating, which
+		     is how the old row ended up showing a bare sparkline and a 6px dot.
+		     The column also had the height to spare, since the radars are the
+		     shortest rail on the page.
+		     Every card lays its readings out identically and in the same
+		     places, so the eye can still run down the column and compare one
+		     radar's coverage against another's. That vertical scan is what a
+		     card grid usually costs, and the fixed positions are what buy it
+		     back.
+		     Two columns from xl. One column fits six cards in about 750px,
+		     which is taller than the rail at 1366 and put the last radar
+		     behind a scroll; two columns fit all six without one. Below xl
+		     the rail is around 256px, where a second column would leave each
+		     card about 110px and put every number on its own line. -->
+		<ul class="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
 			{#each radarGroups as g (g.target)}
-				{@const imgQc = l4XbandByRadar[g.target]}
+				{@const imgQc = l4ByTarget[g.target] ?? null}
 				{@const open = radarIsOpen(g.target, g.alerting)}
 				{@const worstRow = g.rows.find((r) => r.status === g.worst) ?? g.rows[0]}
 				{@const arrival = arrivalRowOf(g.rows)}
-				<GroupRow
-					label={g.target}
-					worst={g.worst}
-					{open}
-					ontoggle={() => toggleRadar(g.target, g.alerting)}
-					count={g.rows.length}
-					pulseKey={sentinel.pulseTick[arrival?.check_id ?? ''] ?? 0}
-					title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`
-						+ (worstRow?.summary ? `\n${worstRow.summary}` : '')}
+				{@const ageS = arrival ? latestMetric(arrival.check_id, readoutMetric(arrival.check_id)) : null}
+				{@const cov = imgQc ? latestMetric(imgQc.check_id, 'coverage_pct') : null}
+				{@const qc = imgQc ? parseImageQc(imgQc.summary) : []}
+				{@const arrivalMetric = arrival ? sparklineMetric(arrival.check_id) : null}
+				<li
+					class="flex flex-col gap-1.5 rounded border p-2
+					       {g.alerting
+							? 'border-[var(--color-fail)]/40 bg-[var(--color-fail)]/[0.04]'
+							: 'border-[var(--color-border)] bg-[var(--color-canvas)]/30'}"
 				>
-					<!-- No collapsed prose. The summary is written to be read in
-					     full — in an email, the timeline, the detail modal — and
-					     this rail is a quarter of the viewport wide. After the
-					     radar name, the sparkline, the count and the QC dot there
-					     is room for about twenty characters, so it rendered as
-					     "BACKEND SILENT — newest volu…": an arbitrary truncation
-					     that says less than the status dot already did, and can be
-					     misread (that tail looks like the start of a filename).
-					     The information is not superfluous, the PROSE FORM is wrong
-					     for the width.
-					     Three non-redundant signals remain, none of which can
-					     truncate: the dot carries severity (worst-of across the
-					     radar's checks), the sparkline carries magnitude against
-					     the check's own limit on a fixed 0..1 axis, and the count
-					     says how many readings are behind it. The full summary is
-					     the row's hover title, and the expander has every check's
-					     own words untruncated. -->
-					{#snippet trailing()}
-						<span class="flex items-center gap-2">
-							{#if arrival && diag.spark}
-								<!-- Data arrival, specifically: LB2 where it exists. LB3
-								     measures a composite receipt written two steps later
-								     and L2 measures what radarca says, so plotting
-								     whichever came first would make the trace mean a
-								     different thing on different rows. -->
-								{@const metric = sparklineMetric(arrival.check_id)}
-								<Sparkline
-									data={sentinel.metrics[`${arrival.check_id}|${metric ?? 'age_s'}`] ?? []}
-									cadenceS={checksById[arrival.check_id]?.cadence_s ?? 120}
-									width={62}
-									height={14}
-									domain={sparklineDomain(metric)}
-									warnAt={sparklineWarnAt(metric)}
-									showLabel={false}
-								/>
-							{/if}
-							{#if imgQc}
-								<span class="inline-block align-middle" title="image QC">
-									<StatusDot status={imgQc} size={6} />
-								</span>
-							{/if}
+					<!-- The whole header toggles, and it is a real button with
+					     aria-expanded: these rails are read with a keyboard
+					     during an incident. -->
+					<button
+						type="button"
+						class="flex w-full items-center gap-1.5 text-left"
+						aria-expanded={open}
+						onclick={() => toggleRadar(g.target, g.alerting)}
+						title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`
+							+ (worstRow?.summary ? `\n${worstRow.summary}` : '')}
+					>
+						<StatusDot
+							status={g.worst}
+							size={8}
+							pulseKey={sentinel.pulseTick[arrival?.check_id ?? ''] ?? 0}
+						/>
+						<span class="num tracking-wide text-[13px] text-[var(--color-bright)]">{g.target}</span>
+						<span class="num ml-auto text-[9px] text-[var(--color-faint)]">
+							{g.rows.length} check{g.rows.length === 1 ? '' : 's'}
 						</span>
-					{/snippet}
-					{#snippet detail()}
+						<span
+							class="inline-block w-[0.6rem] shrink-0 text-[9px] text-[var(--color-muted)] transition-transform duration-150"
+							style:transform={open ? 'rotate(90deg)' : 'rotate(0deg)'}
+							aria-hidden="true">▶</span
+						>
+					</button>
+
+					<!-- The arrival age, large, because it is the reading that
+					     decides whether anything else on the card matters. The
+					     cadence sits beside it: 55 minutes is a fault on a
+					     2-minute radar and routine on a 30-minute forecast. -->
+					<div
+						class="flex items-baseline gap-1.5"
+						title={arrival ? `${stageLabel(arrival.stage)} · ${cadenceTitle(arrival.check_id)}` : ''}
+					>
+						<span class="num text-[16px] leading-none {statusText(arrival?.status ?? 'skip')}">
+							{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
+						</span>
+						{#if arrival}
+							<span class="num text-[9px] text-[var(--color-faint)]">
+								every {fmtCadence(checksById[arrival.check_id]?.cadence_s)}
+							</span>
+						{/if}
+					</div>
+
+					{#if arrival && diag.spark}
+						<!-- Data arrival, specifically: LB2 where it exists. LB3
+						     measures a composite receipt written two steps later and
+						     L2 measures what radarca says, so plotting whichever came
+						     first would make the trace mean a different thing on
+						     different cards.
+						     Fluid, so the trace is as wide as the card rather than a
+						     62px stub with the rest of the card empty beside it. -->
+						<Sparkline
+							data={sentinel.metrics[`${arrival.check_id}|${arrivalMetric ?? 'age_s'}`] ?? []}
+							cadenceS={checksById[arrival.check_id]?.cadence_s ?? 120}
+							width={180}
+							height={22}
+							domain={sparklineDomain(arrivalMetric)}
+							warnAt={sparklineWarnAt(arrivalMetric)}
+							showLabel={false}
+							fluid
+						/>
+					{/if}
+
+					<!-- Image quality, which the page used to discard. Each
+					     detector gets its own token rather than one word for all
+					     four, so a card says WHICH one fired. -->
+					<!-- Wraps, because the card's width comes from a grid that
+					     reflows: at the narrow end the four chips go to their own
+					     line rather than squeezing the coverage figure out. -->
+					<div class="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-t border-[var(--color-border)]/60 pt-1.5">
+						{#if imgQc}
+							<span
+								class="num text-[10px] text-[var(--color-muted)]"
+								title={`${imgQc.check_id} · ${cadenceTitle(imgQc.check_id)}\n${imgQc.summary}`}
+							>
+								cov {cov !== null ? `${cov.toFixed(1)}%` : '—'}
+							</span>
+							<span class="ml-auto flex items-center gap-1" title={`image QC · ${imgQc.summary}`}>
+								{#each qc as v (v.name)}
+									<span
+										class="num rounded px-[3px] text-[8.5px] leading-[1.6]
+										       {v.ok
+												? 'text-[var(--color-faint)]'
+												: 'bg-[var(--color-fail)]/15 text-[var(--color-fail)]'}"
+										title={`${v.name}=${v.verdict}`}
+									>{v.name}</span>
+								{/each}
+							</span>
+						{:else}
+							<span class="num text-[10px] text-[var(--color-faint)]">no image check</span>
+						{/if}
+					</div>
+
+					{#if open}
+						<!-- Every reading behind the card's verdict, with its own
+						     words untruncated. The card above carries the numbers;
+						     this carries what each check actually said. -->
+						<div class="flex flex-col gap-1 border-t border-[var(--color-border)]/60 pt-1.5">
 						<ul class="flex flex-col gap-1">
 							{#each g.rows as r (r.check_id)}
 								{@const meta = checksById[r.check_id]}
@@ -609,38 +757,15 @@
 								</li>
 							{/each}
 						</ul>
-					{/snippet}
-				</GroupRow>
+						</div>
+					{/if}
+				</li>
 			{/each}
 		</ul>
 	</aside>
 
-	<!-- CENTER: MAP (hero) ----------------------------------------------------------- -->
-	<!-- LOCATOR ------------------------------------------------------------------------ -->
-	<!-- Not the console. The split moved imagery, playback and the layer
-	     panel to /map, and what the dashboard still needs is the one thing a
-	     rail of radar ids cannot answer: where the failing one is. The count
-	     here is derived rather than written, which it was not before: the
-	     header read "6 radars · 3 NEXRAD" on every deployment, including an
-	     XQPI instance watching exactly one radar. -->
-	<section class="panel col-span-12 row-span-1 flex flex-col overflow-hidden lg:col-span-4">
-		<SectionHeader title="Network" count={locatorCount} right="where the radars are" />
-		<div class="min-h-[260px] flex-1">
-			{#if diag.map}
-				<StatusLocatorMap onRadars={(r) => (locatorRadars = r)} />
-			{:else}
-				<div class="flex h-full items-center justify-center text-[12px] text-[var(--color-muted)] uppercase tracking-[0.18em]">
-					map disabled · ?diag=no-map
-				</div>
-			{/if}
-		</div>
-		<a class="border-t border-[var(--color-border)] px-4 py-1.5 text-[10.5px] uppercase
-		          tracking-[0.18em] text-[var(--color-muted)] hover:text-[var(--color-bright)]"
-		   href="/">open the console →</a>
-	</section>
-
-	<!-- RIGHT RAIL: PRODUCTS --------------------------------------------------------- -->
-	<aside class="panel col-span-12 row-span-1 flex flex-col overflow-hidden lg:col-span-4">
+	<!-- RAIL 3: PRODUCTS --------------------------------------------------------------- -->
+	<aside class="panel col-span-12 flex max-h-full flex-col overflow-hidden lg:col-span-4">
 		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
 		{#if pairedProducts}
 			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
@@ -664,7 +789,7 @@
 					<ul class="divide-y divide-[var(--color-border)]">
 						{#each g.rows as p (p.target)}
 							{@const lone = loneOf(p)}
-							{@const ageS = lone ? ageFromMetrics(lone.check_id, 'age_s') : null}
+							{@const ageS = lone ? latestMetric(lone.check_id, 'age_s') : null}
 							<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {pairedProducts ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_4.5rem_auto]'} items-center gap-2 px-3 py-1.5 text-[12px]">
 								<!-- Named off whichever reading exists. prettyCheckLabel
 								     suffixes "· backend" for layer1.backend.*, which is
@@ -672,7 +797,7 @@
 								     the only source, so an unpaired row uses the bare
 								     product label. -->
 								<span class="num truncate text-[var(--color-bright)]"
-									  title={lone ? `${lone.check_id} · ${p.target}` : p.target}>
+									  title={lone ? `${lone.check_id} · ${p.target}\n${cadenceTitle(lone.check_id)}` : p.target}>
 									{pairedProducts && p.primary
 										? prettyCheckLabel(p.primary.check_id, p.target)
 										: productLabel(p.target)}
@@ -713,8 +838,78 @@
 		</div>
 	</aside>
 
-	<!-- BOTTOM: ALARM STREAM --------------------------------------------------------- -->
-	<section class="panel col-span-12 row-span-1 flex max-h-[36vh] flex-col overflow-hidden">
+	<!-- RAIL 4: QUALITY, then ALARMS ---------------------------------------------------- -->
+	<div class="col-span-12 flex max-h-full min-h-0 flex-col gap-2 lg:col-span-2">
+		<!-- The two stages that had no row anywhere. L4 reached the page as
+		     "IMAGE QUALITY 9/9" in the top strip and a dot on six radar rows;
+		     L3 reached it as "MAP OVERLAYS 1/1" and nothing else. Six of L4's
+		     nine targets are radars and their numbers now sit on the radar
+		     rows, so what is left here is the three mosaics, which belong to
+		     no other rail. -->
+		<aside class="panel flex max-h-[45%] min-h-0 shrink-0 flex-col overflow-y-auto">
+			<SectionHeader
+				title="Quality"
+				count="{[...l4Rows, ...l3Rows].filter((r) => r.status === 'pass').length}/{l4Rows.length + l3Rows.length}"
+				right={stageLabel('L4-T1T2')}
+			/>
+			<ul class="divide-y divide-[var(--color-border)]">
+				{#each l4MosaicRows as r (r.check_id)}
+					{@const cov = latestMetric(r.check_id, 'coverage_pct')}
+					{@const qc = parseImageQc(r.summary)}
+					<li
+						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex flex-col gap-0.5 px-3 py-1.5 text-[11px]"
+						title={`${r.check_id} · ${cadenceTitle(r.check_id)}\n${r.summary}`}
+					>
+						<div class="flex items-center gap-1.5">
+							<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
+							<span class="num truncate text-[var(--color-default)]">{productLabel(r.target)}</span>
+							<span class="num ml-auto shrink-0 text-[9.5px] {statusText(r.status)}">{qcLabel(qc)}</span>
+						</div>
+						<div class="flex items-center gap-1.5 pl-[13px]">
+							<span class="num text-[10px] text-[var(--color-muted)]">
+								{cov !== null ? `${cov.toFixed(1)}%` : '—'}
+							</span>
+							{#if diag.spark}
+								<span class="ml-auto shrink-0">
+									<Sparkline
+										data={sentinel.metrics[`${r.check_id}|coverage_pct`] ?? []}
+										cadenceS={checksById[r.check_id]?.cadence_s ?? 300}
+										width={56}
+										height={12}
+										domain={null}
+										warnAt={null}
+										showLabel={false}
+									/>
+								</span>
+							{/if}
+						</div>
+					</li>
+				{/each}
+				{#each l3Rows as r (r.check_id)}
+					<!-- Overlay parity: what the console drew against what the API
+					     says it should have. A different question from the image
+					     checks above, and the only stage with no rail of its own. -->
+					<li
+						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex items-center gap-1.5 px-3 py-1.5 text-[11px]"
+						title={`${r.check_id} · ${cadenceTitle(r.check_id)}\n${r.summary}`}
+					>
+						<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
+						<span class="num truncate text-[var(--color-default)]">{productLabel(r.target)}</span>
+						<span class="num ml-auto shrink-0 text-[9.5px] text-[var(--color-faint)]" title={stageLabel('L3')}>
+							{(r.summary ?? '').includes('verdict=MATCH') ? 'MATCH' : stageLabel('L3')}
+						</span>
+					</li>
+				{/each}
+				{#if l4Rows.length === 0 && l3Rows.length === 0}
+					<li class="px-3 py-2 text-[10.5px] italic text-[var(--color-faint)]">
+						no image or overlay checks on this deployment.
+					</li>
+				{/if}
+			</ul>
+		</aside>
+
+	<!-- ALARM STREAM ------------------------------------------------------------------- -->
+	<section class="panel flex min-h-0 flex-1 flex-col overflow-hidden">
 		<SectionHeader
 			title="Alarms"
 			count="{sentinel.alarms.length} open"
@@ -723,15 +918,20 @@
 				: 'all clear'}
 		/>
 		{#if sentinel.alarms.length}
-			<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-faint)]">
-				<span>most severe first · top {ALARM_ROWS}</span>
+			<!-- One per line. This was a single flex row with three items and a
+			     gap, which fits a full-width band and not a column two twelfths
+			     wide: each item wrapped inside itself, so "show acknowledged
+			     (1)" broke across three lines beside a label that had broken
+			     across two. -->
+			<div class="flex flex-col gap-1 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
+				<span>most severe · top {ALARM_ROWS}</span>
 				{#if ackedCount}
 					<label class="flex cursor-pointer items-center gap-1.5 text-[var(--color-muted)] hover:text-[var(--color-bright)]">
-						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 accent-[var(--color-ok)]" />
-						show acknowledged ({ackedCount})
+						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 shrink-0 accent-[var(--color-ok)]" />
+						<span>acknowledged ({ackedCount})</span>
 					</label>
 				{/if}
-				<span class="ml-auto normal-case tracking-normal">
+				<span class="normal-case tracking-normal">
 					{#if overflowCount}
 						<a class="text-[var(--color-muted)] underline decoration-dotted hover:text-[var(--color-bright)]"
 						   href="/history?tab=alarms">+{overflowCount} more not shown</a>
@@ -820,4 +1020,5 @@
 			{/if}
 		</ul>
 	</section>
+	</div>
 </div>

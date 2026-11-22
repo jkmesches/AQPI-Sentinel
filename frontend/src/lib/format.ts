@@ -211,6 +211,11 @@ export function sparklineMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer3.composite.')) return 'headroom';
 	if (checkId.startsWith('layer3.input.'))     return 'headroom';
 	if (checkId === 'layer3.backend.drops')      return 'headroom';
+	// L4 has no budget to normalize against, so it plots the measurement
+	// itself. Coverage is the one that moves for a reason an operator can act
+	// on: it rises and falls with the weather, and a frame that stops moving
+	// while the others do is the frozen case the check exists to catch.
+	if (checkId.startsWith('layer4.'))           return 'coverage_pct';
 	return null;
 }
 
@@ -275,7 +280,112 @@ export function radarRowRank(row: { stage: string; check_id: string }): number {
 export function readoutMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer1.product.')) return 'age_s';
 	if (checkId.startsWith('layer1.backend.')) return 'age_s';
+	// The radar rows carried a sparkline and no value, so a row said that
+	// something moved without saying what it is. The two stages spell the age
+	// differently: L2 reads radarca's newest scan time as `primary_age_s`,
+	// LB2 reads the newest volume on disk as `age_s`.
+	if (checkId.startsWith('layer2.radar.'))   return 'primary_age_s';
+	if (checkId.startsWith('layer2.backend.')) return 'age_s';
+	// Paired with the coverage trace above, so a quality row carries the
+	// image's self-similarity as its number and its echo coverage as its
+	// shape. Both are fetched because the store asks for each check's
+	// sparkline metric AND its readout metric.
+	if (checkId.startsWith('layer4.'))         return 'autocorr';
 	return null;
+}
+
+/**
+ * How often a check is sampled, in the shortest form that stays exact.
+ *
+ * A row showing an age cannot be read without this. 55 minutes old is a fault
+ * on a 2-minute radar and perfectly normal on a 30-minute forecast, and the
+ * rail had no way to tell the two apart.
+ *
+ * @param seconds The check's cadence.
+ * @returns A token like "30s", "2m" or "1h", or an empty string when the
+ *     cadence is missing or not a positive number.
+ */
+export function fmtCadence(seconds: number | null | undefined): string {
+	if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return '';
+	if (seconds < 60) return `${Math.round(seconds)}s`;
+	if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+	if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+	return `${(seconds / 3600).toFixed(1)}h`;
+}
+
+/**
+ * Seconds until a check is next sampled, from when it last finished.
+ *
+ * Negative when the run is overdue, which is itself worth seeing: a check past
+ * its cadence is either slow or stuck, and both read as a stale row otherwise.
+ *
+ * @param finishedAt The last run's finish time, as the rollup publishes it.
+ * @param cadenceS The check's cadence in seconds.
+ * @param now The clock, for testing.
+ * @returns Seconds remaining, or null when either input is unusable.
+ */
+export function secondsToNextRun(
+	finishedAt: string | null | undefined,
+	cadenceS: number | null | undefined,
+	now: Date = new Date()
+): number | null {
+	if (!finishedAt) return null;
+	if (typeof cadenceS !== 'number' || !Number.isFinite(cadenceS) || cadenceS <= 0) return null;
+	const last = Date.parse(finishedAt);
+	if (!Number.isFinite(last)) return null;
+	return (last + cadenceS * 1000 - now.getTime()) / 1000;
+}
+
+/** One image-QC verdict: the detector's name and what it said. */
+export interface QcVerdict {
+	name: string;
+	verdict: string;
+	ok: boolean;
+}
+
+// The detectors layer4_image writes into its summary, in the order it writes
+// them. Read from the summary rather than the payload because the rollup
+// carries no payload, only the one-line summary each check formats.
+const QC_DETECTORS = ['ext', 'spk', 'ring', 'frozen'] as const;
+
+/**
+ * The image-QC detector verdicts inside an L4 summary.
+ *
+ * A summary reads `cov=31.562% autocorr=0.952 ext=OK spk=OK ring=N/A
+ * frozen=OK`. Anything beginning OK passed, including the qualified forms the
+ * check emits (OK_LOW_COV, OK_SAME_FRAME); N/A means the detector does not
+ * apply to this target, as the range-ring one does not to a mosaic.
+ *
+ * @param summary The check's summary line, which may be empty.
+ * @returns One entry per detector present, in the check's own order.
+ */
+export function parseImageQc(summary: string | null | undefined): QcVerdict[] {
+	if (!summary) return [];
+	const out: QcVerdict[] = [];
+	for (const name of QC_DETECTORS) {
+		const hit = new RegExp(`\\b${name}=([A-Za-z0-9_/]+)`).exec(summary);
+		if (!hit) continue;
+		const verdict = hit[1];
+		out.push({ name, verdict, ok: verdict.startsWith('OK') || verdict === 'N/A' });
+	}
+	return out;
+}
+
+/**
+ * The shortest honest label for a set of QC verdicts.
+ *
+ * "OK" when every detector that applies passed, otherwise the names of the
+ * ones that did not, so a row says which detector fired instead of only that
+ * one did. An empty list reads as a dash, since no verdicts is different from
+ * all of them passing.
+ *
+ * @param verdicts What parseImageQc returned.
+ * @returns A token of at most a few characters.
+ */
+export function qcLabel(verdicts: readonly QcVerdict[]): string {
+	if (verdicts.length === 0) return '—';
+	const bad = verdicts.filter((v) => !v.ok);
+	return bad.length === 0 ? 'OK' : bad.map((v) => v.name).join(' ');
 }
 
 /**

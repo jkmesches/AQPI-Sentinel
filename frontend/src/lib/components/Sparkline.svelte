@@ -46,7 +46,8 @@
 		showLabel = true,
 		tickMs = 5_000,
 		domain = null,
-		warnAt = null
+		warnAt = null,
+		fluid = false
 	}: {
 		data?: { ts: number; value: number }[];
 		cadenceS?: number | null;
@@ -55,6 +56,16 @@
 		stroke?: string;
 		showLabel?: boolean;
 		tickMs?: number;
+		/**
+		 * Stretch to the container instead of drawing at `width` pixels.
+		 *
+		 * `width` still sets the viewBox, so the geometry and the bucket count
+		 * are unchanged and only the drawn size follows the parent. The radar
+		 * cards need this: their width comes from a grid that reflows between
+		 * breakpoints, and a fixed pixel trace either overflows the card or
+		 * leaves a gap down one side of it.
+		 */
+		fluid?: boolean;
 		/** Fixed [min, max] y range. Null autoscales to the window. */
 		domain?: [number, number] | null;
 		/** Draw a dashed rule at this value, in the metric's own units. */
@@ -98,8 +109,15 @@
 	);
 </script>
 
-<span class="inline-flex items-center gap-1.5 align-middle">
-	<svg class="spark" {width} {height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+<span class="{fluid ? 'flex w-full' : 'inline-flex'} items-center gap-1.5 align-middle">
+	<svg
+		class="spark {fluid ? 'w-full' : ''}"
+		width={fluid ? '100%' : width}
+		{height}
+		viewBox={`0 0 ${width} ${height}`}
+		preserveAspectRatio={fluid ? 'none' : 'xMidYMid meet'}
+		aria-hidden="true"
+	>
 		{#if result.warnY !== null}
 			<path
 				class="warn-rule"
