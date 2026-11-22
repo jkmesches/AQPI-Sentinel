@@ -28,11 +28,19 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-22
+
 All eleven slices of `docs/map-console-plan.md`. The Live page becomes a map
 console with measured color ramps, a cursor readout, unit switching, links
 that reproduce a view, two panes locked to each other, keyboard control and
 a measure tool, and its 3,399-line component is decomposed behind a
 28-state structural baseline.
+
+Then two things that cut the external surface and one that rebuilds the
+dashboard around what the checks already measure. radar-display turns out to
+be a directory on the main archive, the stream-gauge series turn out to be rows of files
+there, and the dashboard stops spending its largest panel on a map of nine
+green pins.
 
 ### Security
 
@@ -51,6 +59,54 @@ a measure tool, and its 3,399-line component is decomposed behind a
   `fetch()` to our backend.
 
 ### Changed
+
+- **The dashboard is four rails and no map.** The locator was the largest
+  element on the page and, on a healthy deployment, the one carrying the
+  least: nine green pins restating nine green rows. The console at `/` draws
+  the same geography with the imagery on it, so the space goes to the
+  readings instead. Site, Radars, Products, and Quality with Alarms beneath
+  it. Alarms leave a full-width band at the foot that held one line of text
+  and cost every rail its last 36vh.
+
+  Ten checks that reached the page only as counts now have rows. L4 arrived
+  as "IMAGE QUALITY 9/9" in the top strip and a 6px dot on six radar rows,
+  with everything it measures discarded on the way; L3 arrived as "MAP
+  OVERLAYS 1/1" and nothing else. Six of L4's nine targets are radars, so
+  their numbers go on the radar cards, and the three mosaics plus the one L3
+  row get the Quality rail. All 45 checks on an unmounted deployment, and
+  all 84 on a mounted one, now have a row.
+
+  Rails end where their content does. Stretching them to a common height
+  left Site and Radars as tall empty boxes, which reads as something failing
+  to load rather than as a rail with nothing more to say.
+
+- **Radars are cards.** A row gave each radar one line, and a radar carries
+  five readings: the arrival age, its trace, the echo coverage, which
+  image-QC detector fired, and how many checks sit behind the verdict. A line
+  cannot hold that without truncating, and the old row ended up showing a
+  bare sparkline and a dot. Each card lays its readings out in the
+  same places, so the column can still be read down and compared. Two
+  columns from `xl`; one column stacked six cards past the rail's height at
+  1366 and put the last radar behind a scroll.
+
+- **Every rail row carries a number and a cadence.** `readoutMetric` now
+  answers for L2 (`primary_age_s`), LB2 (`age_s`) and L4 (`autocorr`), and
+  L4 plots `coverage_pct`. The two radar stages spell the age differently,
+  and asking for the wrong one is silent. The series comes back empty and
+  the cell reads a dash. An age cannot be judged without the cadence either.
+  55 minutes is a fault on a 2-minute radar and routine on a 30-minute
+  forecast, and a check past its cadence is slow or stuck rather than a
+  subject that is stale.
+
+- **The data-source line follows the mount.** `DATA_SOURCE` was the literal
+  "radarca.engr.colostate.edu" on the AQPI profile. the AQPI deployment sets
+  `SENTINEL_BACKEND_ROOT`, so `fs_products` serves every product manifest,
+  every product frame and every X-band moment frame off the main archive, leaving the HTTP
+  origin the stream gauges. The navbar and the mobile more-page credited
+  radarca for all of it. Both origins are named where both are read, mount
+  first; a deployment with no mount keeps the profile's own answer. The
+  frontend's three hard-coded pre-paint defaults are blank now, because a
+  blank credit says nothing where the wrong hostname says something false.
 
 - **MapView is decomposed into tested modules behind a structural
   baseline.** The component held 3,399 lines and no test of any kind,
@@ -108,6 +164,47 @@ a measure tool, and its 3,399-line component is decomposed behind a
   `validation_tests/js/test_radar_status.mjs`.
 
 ### Added
+
+- **Tilt imagery reads the mount instead of radar-display.**
+  `radardisplay.engr.colostate.edu` serves
+  ``backend_root`/htdocs/` verbatim: the URL path
+  `/<RADAR>/images/el_<n>/<moment>_<frame>.png` is the path on disk. Two
+  frames fetched over HTTP on 2026-11-21 matched the files byte for byte.
+  All five X-band radars and FLOW are live there on the 2-minute cadence,
+  with `json/el_<n>/radar_plot_<n>.json` beside them.
+
+  `tilt_steps` and `tilt_image` read the tree where one resolves and fall
+  back to HTTP where none does. The archive key is unchanged either way, so
+  the LRU, the single-flight, the negative cache and every captured frame
+  carry over. One `tilt_steps` call stops being seven JSON fetches against
+  an origin whose certificate has already lapsed once.
+
+  `SENTINEL_TILT_ROOT` and `SENTINEL_TILT_HOST_PATH` are new, for a
+  deployment whose tilts are not under `SENTINEL_BACKEND_ROOT`. AQPI leaves
+  both unset: the tree is `htdocs/` inside the main archive mount, so the path
+  derives. XQPI needs them, because FLOW's frames sit under the AQPI root on
+  the main archive while an XQPI stack mounts only the secondary archive.
+
+- **The stream-gauge site list ships with Sentinel.** It was fetched from
+  `radarca/data/stream_data.csv` on every cold start. The two per-COMID
+  series are rows of files on the main archive, under `PRODUCTS/National_Water_Model` and
+  `PRODUCTS/StreamGauge_Obs`, and were matched value for value against the
+  live API; the site list is on no share reachable from either deployment. A
+  grep for its `LatSite` column across `the main archive root` and
+  `the QPE staging root` found nothing, and
+  `web-files/streamgauge_data/{forecast,observation}` is empty.
+
+  At 16.7 KB with a Last-Modified of 2026-01-09, carrying it costs less than
+  reaching for it. `backend/reference/stream_sites.csv`, deliberately not
+  under any directory named `data`, since `.gitignore` carries an unanchored
+  `data/` that drops a file under one at any depth.
+  `scripts/fetch_stream_sites.py` refreshes it and refuses to write a
+  shorter list over a longer one without `--force`.
+
+- **The daily report takes a custom title.** The subject line and the email
+  heading both read "AQPI Sentinel" on every deployment, so an XQPI instance
+  sent reports signed as AQPI. Settable from the digest admin page, capped at
+  48 characters, falling back to the deployment's own name.
 
 - **The color ramps are measured from the producers' own colorbars.** A
   legend and a cursor readout both rest on knowing which value each painted
@@ -251,6 +348,40 @@ a measure tool, and its 3,399-line component is decomposed behind a
   under it uncounted, so with every overlay on the header read "2 on" above
   a list showing eight. The expression was also duplicated in the open panel
   and its collapsed badge. Found while reading a baseline screenshot.
+
+- **`x-sentinel-cache` stops crediting the mount for network reads.** The
+  header read `mount` whenever a fetcher was passed. The tilt routes have
+  passed one for radar-display over HTTP since they were written, so every
+  tilt frame crossing the network was labeled a local read, in the one
+  header whose job is to say whether a deployment is still reaching out.
+  `origin_url` separates them: a caller reading a file names no origin.
+
+- **Three places printed a separator belonging to a value that could be
+  empty.** The navbar read "AQPI SENTINEL ·" with nothing after it, the
+  mobile more-page trailed a dash, and an export taken before `/api/version`
+  answered carried "AQPI Sentinel ·  · XSCV" into a thread.
+
+- **HTTP 500 on Velocity, Zdr and PhiDP for every radar.** `latest_xband_scan`
+  handed `_serve_source` a filesystem fetcher whether or not a tree was
+  mounted. Reflectivity hid it by being the one archived moment.
+
+- **A malformed step manifest no longer scrubs backwards.** `fcst_temp`
+  published 131 steps holding 75 distinct times, one run out to the 27th and
+  then a jump back 4.4 days over the same ground. The console orders and
+  deduplicates, keeping the later entry for a repeated time and reporting
+  what it dropped. A step whose time cannot be read stops the sort rather
+  than being lost from it.
+
+### Removed
+
+- **`StatusLocatorMap.svelte`.** Nothing referenced it once the dashboard's
+  map came out. Recoverable from git if the locator is wanted on a page of
+  its own.
+
+- **The two explanatory notes under the sheet-altitude slider.** They
+  printed caveats where a console should show state. Both facts still hold
+  the code to its shape, so they live in the comment above the slider, and
+  the slider keeps its title for a reader who wants them.
 
 ## [0.14.1] - 2026-11-20
 
