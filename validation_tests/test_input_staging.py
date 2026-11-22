@@ -64,7 +64,7 @@ os.environ.setdefault("SENTINEL_SSCB_ROOT", "/nonexistent-for-tests/sscb")
 # Its OWN root, and these checks do not exist without it. Deliberately not
 # derived from SENTINEL_BACKEND_ROOT here either: a test that quietly accepts
 # the backend root would pass against exactly the misconfiguration that shipped.
-os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/the secondary archive")
+os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/secondary")
 
 import backend.checks as _all                                   # noqa: E402,F401
 from backend.checks import layer3_backend_processing as lb3     # noqa: E402

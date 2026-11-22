@@ -6,7 +6,7 @@ Why this exists
 The test deployment has no backend mount, so three of the dashboard's layouts
 never run on it: the paired product rail with its the main archive and RC columns, radar
 cards carrying several checks instead of one, and the composite-input and
-fleet rows that only exist when LB1/LB2/LB3 are registered. the AQPI deployment has all
+fleet rows that only exist when LB1/LB2/LB3 are registered. The AQPI deployment has all
 of them, and it runs 84 checks across eight stages where the test deployment
 runs 45 across five.
 
@@ -29,6 +29,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -44,7 +45,8 @@ except ImportError:  # pragma: no cover - environment check, not a code path
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 # The dashboard paints from the REST snapshot and then takes live updates over
 # the socket. Long enough for the snapshot, the check catalog and the first
@@ -163,7 +165,7 @@ async def run(out: Path, base: str, payloads: dict[str, Any],
                 "spill": await worst_spill(page),
                 # The paired rail is the layout under test, and its column
                 # header is the one element that exists only in that branch.
-                "paired_header": await page.get_by_text("the main archive / the secondary archive").count(),
+                "paired_header": await page.get_by_text("Filesystem").count(),
                 "radar_cards": await page.locator("button[aria-expanded]").count(),
                 "dash_cells": await page.get_by_text("—", exact=True).count(),
                 "overflow": await page.evaluate(

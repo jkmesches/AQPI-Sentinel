@@ -5,7 +5,8 @@ Why this exists
 Every other L1 product verdict is derived from ``{SETTINGS.base}/api/productDetail``,
 i.e. from what radarca is *serving*. That conflates two different failures: the product
 not being produced, and the display tier not showing it. Operators repeatedly reported
-"Sentinel says X, but when I checked the products in the main archive...", and the main archive is ground truth.
+"Sentinel says X, but when I checked the products in the archive...", and the
+archive is ground truth.
 
 This check reads the published file directly over the AQPI deployment's existing read-only NFS
 mount of the main archive. It is the PRIMARY indicator for "is this product being produced".
@@ -226,9 +227,9 @@ class Layer1BackendProductCheck(Check):
     def __init__(self, product_id: str):
         cfg = PRODUCTS[product_id]
         self.product_id = product_id
-        # Whichever tree THIS profile publishes to — the main archive for AQPI, the secondary archive for
-        # XQPI. Hardcoding "the main archive" was right for one deployment and silently
-        # wrong for the other. See config.BACKEND_SOURCE and Check.source_*.
+        # Whichever tree THIS profile publishes to. A tag baked in here was
+        # right for one deployment and silently wrong for the other. See
+        # config.BACKEND_SOURCE and Check.source_*.
         self.source_tag, self.source_label = BACKEND_SOURCE
 
         self.cfg = cfg
@@ -351,8 +352,8 @@ def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,
 # Register one instance per product
 # --------------------------------------------------------------------------
 
-# Gated on SENTINEL_BACKEND_ROOT. Unset (the test deployment dev deployment, which has no VPN
-# and mounts neither the main archive nor the secondary archive) means these checks are never registered at all --
+# Gated on SENTINEL_BACKEND_ROOT. Unset (the test deployment, which has no VPN
+# and mounts neither tree) means these checks are never registered at all,
 # not skipped, not silent, absent. Same image, different .env; the established pattern
 # here, as with SENTINEL_ARCHIVE_ENABLED.
 if SETTINGS.backend_root:

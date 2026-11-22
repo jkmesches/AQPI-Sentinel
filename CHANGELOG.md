@@ -132,7 +132,7 @@ green pins.
   subject that is stale.
 
 - **The data-source line follows the mount.** `DATA_SOURCE` was the literal
-  "radarca.engr.colostate.edu" on the AQPI profile. the AQPI deployment sets
+  "radarca.engr.colostate.edu" on the AQPI profile. The AQPI deployment sets
   `SENTINEL_BACKEND_ROOT`, so `fs_products` serves every product manifest,
   every product frame and every X-band moment frame off the main archive, leaving the HTTP
   origin the stream gauges. The navbar and the mobile more-page credited
@@ -187,7 +187,7 @@ green pins.
   thing Sentinel observes about them. A radar with no backend row anywhere
   reads unknown rather than borrowing radarca's opinion.
 
-  the test deployment has no mount and keeps painting from radarca, and
+  The test deployment has no mount and keeps painting from radarca, and
   the tier is decided by rows rather than by a stage key, so a
   present-but-empty LB2 falls back instead of graying the fleet.
 
@@ -450,7 +450,7 @@ Something finally opens a product frame on the deployment where nothing did.
 
 - **Layer 4 image QC runs against the mount.** LB1 answers whether a file
   arrived and never opens it, so a producer writing truncated or empty PNGs
-  stayed green. the XQPI deployment showed that live: requests for the newest composite
+  stayed green. The XQPI deployment showed that live: requests for the newest composite
   frame returned 502 from the PNG signature check while LB1 called the
   product healthy, because no check on that deployment read a frame's bytes
   at all. It registered no L4 stage, since `layer4_image` sat in
@@ -509,7 +509,7 @@ FLOW's radar overlay works for the first time.
   front of every scrub.
 
   The choice is keyed on whether the tree is mounted, never on the profile.
-  the test deployment runs the aqpi profile with no
+  The test deployment runs the aqpi profile with no
   `SENTINEL_BACKEND_ROOT`, so it has no tree to read and keeps RadarCA as
   its only origin. Keying on the profile would have passed on both CSU
   deployments and left the test deployment with an empty radar overlay.
@@ -570,7 +570,7 @@ stopped".
   that component uses to report a dead upstream, the signal it was
   rewritten to carry after the 2026-05-19 outage.
 
-  Only production was ever large enough to cross the cap. the test deployment registers
+  Only production was ever large enough to cross the cap. The test deployment registers
   45 checks and the XQPI deployment registers 10, so this survived four releases
   unseen. Raising the cap was the alternative and was dropped, because it
   moves the cliff rather than removing it.
@@ -616,7 +616,7 @@ at. Where it lands comes from its corner coordinates.
   arrived, which cost a 404 on every XQPI page load.
 
   Verified by running the frontend against both CSU deployments' real
-  backends through a local proxy, with nothing deployed. the XQPI deployment selects
+  backends through a local proxy, with nothing deployed. The XQPI deployment selects
   `composite_ref` with a populated 31-step scrubber and no 404s, and
   the AQPI deployment is unchanged with reflectivity painted and 31/31 steps.
 
@@ -1393,7 +1393,7 @@ them.
   `COMPOSITE_EXPECTED_RADARS` and have staging checks. They had been excluded
   on the grounds that "the three NEXRAD directories do not exist and their
   trees hold zero files" — a true observation of an 18-day outage, recorded as
-  though it were design intent. the composite owner, 2026-10-12: acquisition stopped
+  though it were design intent. The composite owner, 2026-10-12: acquisition stopped
   when the main archive was rebooted on 2026-09-17, `ldm` never restarted, and it was fixed
   manually around 2026-10-06. Measured since: each is in the published
   composite at **720 of 720** timesteps across 2026-10-11.
@@ -2350,7 +2350,7 @@ default is AQPI, and the AQPI registry is byte-identical before and after.
   not start.
 
 - **Published-tree layout is profile data.** The two trees do not share one.
-  the main archive nests products under `realtime/product_images/`; the secondary archive's XQPI tree puts
+  The main archive nests products under `realtime/product_images/`; the secondary archive's XQPI tree puts
   them directly under `PRODUCT_IMAGES/`, and FLOW's volumes are
   date-partitioned (UTC) where AQPI's are flat under `PRODUCTS/DROPS`. Carrying
   the wrong prefix over does not raise — every LB check reports a missing
@@ -2359,7 +2359,7 @@ default is AQPI, and the AQPI registry is byte-identical before and after.
 ### Changed
 
 - **XQPI derives freshness from the observation time the data declares, not
-  from mtime.** A root gzip sweep walks the secondary archive archive daily around
+  from mtime.** A root gzip sweep walks the secondary archive daily around
   07:25 UTC and rewrites files, so mtime there does not mean "when this
   observation happened". Verified on the host: the last file of `2026/09/25`
   and of `2026/09/30` both carry mtime `2026-10-03 01:25` local — the same
@@ -2455,8 +2455,8 @@ default is AQPI, and the AQPI registry is byte-identical before and after.
 
 ### Fixed
 
-- **Every backend row was labelled "the main archive", which is false for CBAND.** It reads
-  the secondary archive — the reason `SENTINEL_SSCB_ROOT` is a separate setting pointing at a
+- **Every backend row carried the main tree's label, which is false for CBAND.** It reads
+  its own tree, the reason `SENTINEL_SSCB_ROOT` is a separate setting pointing at a
   separate mount. `/api/checks` served nothing that distinguished a share, so
   the dashboard guessed and was wrong for one radar in six; the timeline hedged
   it as "the main archive / the secondary archive", which is never both and never says which.
@@ -2506,7 +2506,7 @@ default is AQPI, and the AQPI registry is byte-identical before and after.
 
 - **The home-page rails pair each target's two sources on one row.** With the
   backend tree mounted, a radar or product is one row carrying two readings —
-  `the main archive` (the filesystem; the secondary archive for CBAND) and `RC` (RadarCA, the scraped
+  `FS` (the filesystem, or `CB` for CBAND) and `RC` (RadarCA, the scraped
   upstream) — each tagged where it sits, under spelled-out column headers.
   Previously the two were separate rows sorted together, which rendered
   `XEBY` immediately above `XEBY · backend` and read as a duplicate.

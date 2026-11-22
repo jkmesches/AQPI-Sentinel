@@ -164,7 +164,7 @@ async def main() -> None:
     # that guesses from a string would silence a stage nobody had classified.
     # The parity assertion above is what stops a stage being absent at all.
     check("a stage missing from the map is audible, however it is spelled",
-          stage_tier("LBX-new") == "frontend" and stage_tier("the main archive") == "frontend",
+          stage_tier("LBX-new") == "frontend" and stage_tier("ARCHIVE") == "frontend",
           f'LBX-new -> {stage_tier("LBX-new")}')
 
     # --- resolution, which must fail open --------------------------------

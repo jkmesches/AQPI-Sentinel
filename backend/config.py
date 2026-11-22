@@ -42,7 +42,7 @@ class Settings:
     prewarm_interval_s: int                # seconds between sweeps of all streams
     prewarm_concurrency: int               # simultaneous in-flight prewarm fetches
     # Backend (filesystem) monitoring, stages LB1/LB2. None == disabled, and those
-    # checks are then never registered. The test deployment deployment has no VPN and mounts
+    # checks are then never registered. The test deployment has no VPN and mounts
     # neither the main archive nor the secondary archive, so it leaves both unset and runs an identical image with
     # no new checks at all. These are CONTAINER paths, not host paths.
     profile: str                           # "aqpi" (default) or "xqpi" — see backend/profiles
@@ -643,7 +643,7 @@ def image_path(product_id: str, image_name: str,
 # ==========================================================================
 #
 # Everything above describes AQPI. A second deployment — XQPI, monitoring the
-# FLOW radar on the secondary archive — watches a different radar and a different product
+# FLOW radar on its own tree, watching a different radar and a different product
 # set, so it swaps these tables wholesale rather than adding to them.
 #
 # Rebinding here rather than branching at every use site: `PRODUCTS`,
@@ -657,11 +657,22 @@ def image_path(product_id: str, image_name: str,
 # dependency runs one way only.
 #
 # `BACKEND_SOURCE` is the (tag, label) a backend-reading check reports when it
-# has no more specific answer. AQPI publishes to the main archive; XQPI publishes to
-# the secondary archive. Hardcoding "the main archive" in the check modules was right for one profile and
-# silently wrong for the other — the same class of error as labelling CBAND's
-# row "the main archive" before v0.5.6.
-BACKEND_SOURCE: tuple[str, str] = ("the main archive", "the main archive")
+# has no more specific answer. AQPI and XQPI publish to different filesystem
+# trees, so a tag baked into the check modules is right for one deployment and
+# silently wrong for the other, the same class of error as giving CBAND's row
+# the main tree's label before v0.5.6.
+#
+# The default names the role rather than the site, because this repo is
+# public. A deployment puts its own name on the column with
+# SENTINEL_SOURCE_TAG and SENTINEL_SOURCE_LABEL, applied below after the
+# profile has had its say. Keep the tag two characters wide, as "RC" is, so
+# the sparkline column stays aligned.
+BACKEND_SOURCE: tuple[str, str] = ("FS", "Archive")
+
+# The (tag, label) for a radar whose data sits in a tree other than the
+# profile's default, which on AQPI is CBAND reading the SSCB tree. Same
+# reasoning as BACKEND_SOURCE: the committed value is the role.
+SPECIAL_TREE_SOURCE: tuple[str, str] = ("CB", "C-band")
 
 # Does this deployment have a radarca-style HTTP display tier in front of the
 # data? AQPI does, and most of the check stack is built on scraping it. XQPI
@@ -764,7 +775,7 @@ RADARCA_ONLY_MODULES: tuple[str, ...] = (
     "layer3_overlay",          # 1 Playwright overlay parity check
 )
 
-# Published-image tree layout, relative to SETTINGS.backend_root. the main archive nests the
+# Published-image tree layout, relative to SETTINGS.backend_root. The main archive nests the
 # products under realtime/product_images/; the secondary archive's XQPI tree puts them
 # directly under PRODUCT_IMAGES/. Getting this wrong does not raise -- LB1
 # reports "product directory does not exist" for every product, which reads
@@ -826,7 +837,7 @@ RADAR_DATED_TREE: dict[str, str] = {
 # product (both unit subtrees), same medians to a hundredth. That is a fixed
 # publish latency, not re-touching — anything re-touching would leave the
 # older frames with large, scattered offsets the way XQPI's do (119, 121, 149
-# minutes), and would put the NEWEST near zero while the rest scattered. the main archive's
+# minutes), and would put the NEWEST near zero while the rest scattered. The main archive's
 # newest-frame offsets are 2.30 / 2.32 / 2.25 against rest-medians of 2.39 /
 # 2.35 / 2.28 — flat. The two signatures differ in a direction nothing else
 # produces, which is what makes this test discriminating rather than merely
@@ -834,7 +845,7 @@ RADAR_DATED_TREE: dict[str, str] = {
 #
 # TO RE-MEASURE: iterate the MANIFEST's steps and look up each imageName. Do
 # not glob the images directory. The orphans these trees accumulate never age
-# out, so a directory walk picks up deployment-day residue — on the main archive that is a
+# out, so a directory walk picks up deployment-day residue. On the archive that is a
 # pocket of 2026-09-17 files which drag the observed spread from 0.21-0.82 out
 # to 19.76 minutes and invite widening a threshold on the strength of stale
 # files. The manifest is the sampling frame for the same reason it is the
@@ -1045,7 +1056,7 @@ COMPOSITE_RECEIPT_ALT: str | None = None
 # grounds that "the three NEXRAD directories under web-files/NEXRAD_L2 do not
 # exist at all, and their recentfiles trees hold zero files". That observation
 # was true and the conclusion drawn from it was wrong: it was an OUTAGE, not a
-# design. the composite owner, 2026-10-12: NEXRAD acquisition stopped when the main archive was
+# design. The composite owner, 2026-10-12: NEXRAD acquisition stopped when the main archive was
 # rebooted on 2026-09-17, the ldm process never restarted, and someone brought
 # it back manually around 2026-10-06 00Z. The composite driver's own arrays
 # have always intended nine inputs.
@@ -1339,7 +1350,7 @@ L4_MOMENT: str = "Reflectivity"
 # either. [M] 2026-10-12
 #
 # The one measured case, and the reason this check ships: it would have caught
-# the NEXRAD outage on its first tick. the composite owner reports
+# the NEXRAD outage on its first tick. The composite owner reports
 # the KBBX/KDAX/KMUX feeds stopped when the main archive was rebooted on 2026-09-17 and did
 # not restart until ~2026-10-06 00Z, and their recentfiles trees held zero
 # files throughout. Eighteen days, found by eye.
@@ -1414,7 +1425,7 @@ COMPOSITE_INPUT_DIR: dict[str, str] = {
 # staged". See Layer3InputStagingCheck.
 COMPOSITE_INPUT_TS_RE: str = r"(\d{8})[-_](\d{6})"
 
-# How much history this tree holds. the composite owner: "I think the last hour of data is
+# How much history this tree holds. The composite owner: "I think the last hour of data is
 # retained"; measured 2026-10-12, oldest file 0.9-1.0 h in every populated
 # directory. [M]
 #
@@ -1509,15 +1520,30 @@ if SETTINGS.profile not in ("aqpi", "xqpi"):
     )
 
 # The source line follows the mount, because the profile constant alone is a
-# claim about a deployment it cannot see. the AQPI deployment sets SENTINEL_BACKEND_ROOT,
+# claim about a deployment it cannot see. The AQPI deployment sets SENTINEL_BACKEND_ROOT,
 # so fs_products serves every product manifest, every product frame and every
 # X-band moment frame off the main archive and the HTTP origin is left with the stream gauges.
 # The navbar and the mobile more-page still credited radarca for all of it.
 #
 # Both names when both are read, the mount first because it carries almost
 # everything. A deployment with no mount keeps the profile's own answer, which
-# is what the test deployment runs on. XQPI names the secondary archive in DATA_SOURCE already and has
-# no HTTP origin at all, so HAS_RADARCA keeps it from being named twice.
+# is what the test deployment runs on. XQPI names its tree in DATA_SOURCE
+# already and has no HTTP origin at all, so HAS_RADARCA keeps it from being
+# named twice.
+
+# Last word on the source labels, after the profile block above has set its
+# own. A deployment names its trees here rather than in source, so the public
+# repo carries roles and the operator still reads the name they know.
+_tag = os.environ.get("SENTINEL_SOURCE_TAG", "").strip()
+_label = os.environ.get("SENTINEL_SOURCE_LABEL", "").strip()
+if _tag or _label:
+    BACKEND_SOURCE = (_tag or BACKEND_SOURCE[0], _label or BACKEND_SOURCE[1])
+_sscb_tag = os.environ.get("SENTINEL_SSCB_SOURCE_TAG", "").strip()
+_sscb_label = os.environ.get("SENTINEL_SSCB_SOURCE_LABEL", "").strip()
+if _sscb_tag or _sscb_label:
+    SPECIAL_TREE_SOURCE = (_sscb_tag or SPECIAL_TREE_SOURCE[0],
+                           _sscb_label or SPECIAL_TREE_SOURCE[1])
+
 if SETTINGS.backend_root and HAS_RADARCA:
     DATA_SOURCE = f"{BACKEND_SOURCE[1]} · {DATA_SOURCE}"
 

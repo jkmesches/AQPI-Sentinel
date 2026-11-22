@@ -192,7 +192,7 @@
 			const rows = pairRows(primary, backend);
 			// Label is the primary stage alone even when the block holds both.
 			// "Product Freshness + Backend Products" wraps and clips in a 22px
-			// separator at 208px, and the per-row RC/the main archive tags already say both
+			// separator at 208px, and the per-row source tags already say both
 			// sources are present — as does the stage strip above the grid,
 			// which still counts them separately.
 			const label = stageLabel(s);

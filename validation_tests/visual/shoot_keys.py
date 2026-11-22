@@ -28,6 +28,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -48,7 +49,8 @@ except ImportError:  # pragma: no cover - environment check
 
 from capture import open_dock  # noqa: E402  sibling module, loaded by path
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 # The console polls every 5 s and holds a websocket, so networkidle never
 # settles. Same waits capture.py measured.

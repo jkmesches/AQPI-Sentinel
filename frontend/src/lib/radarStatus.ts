@@ -117,7 +117,7 @@ function worstFor(rows: RadarReading[], target: string): string | undefined {
  * claim the second.
  *
  * A deployment with no backend row at all keeps reading `L2`.
- * the test deployment is that case, and graying out every pin there would
+ * The test deployment is that case, and graying out every pin there would
  * answer a different question. The tier is decided by rows rather than by a
  * stage key, so an empty `LB2` falls back instead of graying the fleet.
  *

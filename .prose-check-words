@@ -6,7 +6,6 @@ Svelte
 SvelteKit
 esbuild
 prefs
-the test deployment
 cira
 aqpi
 xqpi
@@ -41,9 +40,6 @@ HUC
 NHD
 CoSMoS
 DROPS
-the secondary archive
-the C-band producer host
-the QPE tooling host
 chivo
 Mesonet
 PhiDP

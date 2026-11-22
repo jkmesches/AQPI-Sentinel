@@ -1,4 +1,4 @@
-"""XQPI — the FLOW radar (JPL), published to the secondary archive.
+"""XQPI, the FLOW radar (JPL), published to its own filesystem tree.
 
 Surveyed by the laptop session on 2026-10-03 and recorded in
 the XQPI backend survey §6; every value below comes
@@ -381,7 +381,7 @@ L4_MOSAIC_TARGETS: tuple[str, ...] = (
 RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")   # [V] both extensions seen in flow/
 
 # Published composites sit directly under PRODUCT_IMAGES/, undated, as a
-# rolling window — NOT under the main archive's realtime/product_images/. Different case,
+# rolling window, NOT under the archive's realtime/product_images/. Different case,
 # different depth, no date partition. See 16-§1.
 PRODUCT_IMAGES_PREFIX = ("PRODUCT_IMAGES",)   # [M] observed on the live tree
 
@@ -538,8 +538,10 @@ SITE_NAME = "XQPI Sentinel"
 # everything is read off the secondary archive mount.
 DATA_SOURCE = "the secondary archive · /projects/xqpi"
 
-SOURCE_TAG = "TR"
-SOURCE_LABEL = "the secondary archive"
+# Role words, as in config.BACKEND_SOURCE. This deployment names its own tree
+# with SENTINEL_SOURCE_TAG and SENTINEL_SOURCE_LABEL.
+SOURCE_TAG = "FS"
+SOURCE_LABEL = "Archive"
 
 # NOTE: this profile does NOT list the radarca-only check modules. That list
 # is config.RADARCA_ONLY_MODULES, canonical in one place because it describes

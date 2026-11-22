@@ -138,7 +138,7 @@ def run_resolution(root: str) -> None:
     check("a deployment with no mount falls back to HTTP",
           not fs.tilt_available(), str(fs.tilt_root()))
 
-    # XQPI mounts only the secondary archive. FLOW's tilts are under the AQPI root on the main archive, so
+    # XQPI mounts only its own tree. FLOW's tilts sit under the AQPI root, so
     # a path derived from its own mount would be a decoy: it would resolve,
     # read nothing, and report every frame missing instead of using HTTP.
     fs = load("xqpi", root, None)

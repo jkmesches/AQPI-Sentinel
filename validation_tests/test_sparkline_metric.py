@@ -37,7 +37,7 @@ os.environ.setdefault("SENTINEL_SSCB_ROOT", "/sscb")
 # Its own root — the layer3.input.* checks do not register without it, and
 # deliberately do not fall back to the backend root. See
 # config.COMPOSITE_INPUT_TREE for what that fallback cost.
-os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/the secondary archive")
+os.environ.setdefault("SENTINEL_RECENTFILES_DIR", "/nonexistent-for-tests/secondary")
 
 # checks first: backend.registry imports backend.checks.base, and every check
 # module imports backend.registry back. Importing registry first catches it
@@ -135,27 +135,28 @@ def main() -> int:
     check("the backend-reading checks declare a source",
           len(tagged) >= 13, f"{len(tagged)} tagged")
 
-    # CBAND is the whole reason this field exists. It reads the secondary archive while every
-    # other backend row reads the main archive, and the dashboard cannot know that -- it was
-    # labelled "the main archive" until someone noticed. SENTINEL_SSCB_ROOT being a separate
-    # setting and a separate mount is the same fact stated in the compose file.
+    # CBAND is the whole reason this field exists. It reads its own tree while
+    # every other backend row reads the profile's main one, and the dashboard
+    # cannot know that. It carried the main tree's label until someone noticed.
+    # SENTINEL_SSCB_ROOT being a separate setting and a separate mount is the
+    # same fact stated in the compose file.
     cb = registry.CHECKS.get("layer2.backend.CBAND")
     check("CBAND's backend check exists (needs SENTINEL_SSCB_ROOT)", cb is not None)
     if cb is not None:
-        check("...and says it read the secondary archive, not the main archive",
-              cb.source_label == "the secondary archive" and cb.source_tag == "TR",
+        check("...and says it read its own tree rather than the main one",
+              cb.source_label == "C-band" and cb.source_tag == "CB",
               f"{cb.source_tag}/{cb.source_label}")
         check("...consistent with _special_trees(), which is what it actually read",
               "CBAND" in _lb2._special_trees())
 
     others = [c for cid, c in tagged.items()
               if cid.startswith("layer2.backend.") and cid != "layer2.backend.CBAND"]
-    check("every other radar says the main archive",
-          bool(others) and all(c.source_label == "the main archive" for c in others),
+    check("every other radar says the profile's main tree",
+          bool(others) and all(c.source_label == "Archive" for c in others),
           f"{len(others)} radars")
     prods = [c for cid, c in tagged.items() if cid.startswith("layer1.backend.")]
-    check("every product says the main archive (nothing under product_images is on the secondary archive)",
-          bool(prods) and all(c.source_label == "the main archive" for c in prods),
+    check("every product says the main tree (nothing under product_images is elsewhere)",
+          bool(prods) and all(c.source_label == "Archive" for c in prods),
           f"{len(prods)} products")
 
     # The tag's width sets where every sparkline in that rail column starts.

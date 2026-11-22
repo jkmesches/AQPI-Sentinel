@@ -535,7 +535,7 @@ def main() -> int:
         "radars":   [row(f"XR{i:02d}", "radar") for i in range(6)],
         "products": [row(f"product_number_{i:02d}", "product") for i in range(13)],
     }
-    worst_size = len(render_html(worst, "https://the test deployment"))
+    worst_size = len(render_html(worst, "https://sentinel.example.org"))
     check("even an everything-is-broken report stays under Gmail's clip",
           worst_size < 95_000, f"{worst_size:,} bytes (clip at ~102,400)")
 
@@ -562,7 +562,7 @@ def main() -> int:
         products=[dict(r, buckets=_bins(1 if i < 3 else 0))
                   for i, r in enumerate(worst["products"])],
     )
-    typical_size = len(render_html(typical, "https://the test deployment"))
+    typical_size = len(render_html(typical, "https://sentinel.example.org"))
     # Size alone stopped being the useful guard once render_html gained its
     # automatic compact fallback: nothing can ship above _COMPACT_ABOVE_BYTES
     # any more, so "is it small" is now true by construction. What can still
@@ -573,8 +573,8 @@ def main() -> int:
     # Production on 2026-09-14 rendered 71.0 KB stacked. This fixture is
     # harsher (every bin a full mix, every description at full length), so it
     # sits higher; the assertion is that it still stays on the stacked side.
-    typical_auto = render_html(typical, "https://the test deployment")
-    typical_stacked = render_html(typical, "https://the test deployment", compact=False)
+    typical_auto = render_html(typical, "https://sentinel.example.org")
+    typical_stacked = render_html(typical, "https://sentinel.example.org", compact=False)
     check("a typical day keeps its proportional bins",
           len(typical_auto) == len(typical_stacked),
           f"auto {len(typical_auto):,} vs stacked {len(typical_stacked):,}")
@@ -586,7 +586,7 @@ def main() -> int:
     # is the property the whole fallback exists for, so it is asserted on the
     # thing that actually ships rather than on the HTML it is made from.
     for label, payload in (("typical", typical), ("worst", worst), ("all-mixed", big)):
-        w = _wire_len(render_html(payload, "https://the test deployment"))
+        w = _wire_len(render_html(payload, "https://sentinel.example.org"))
         check(f"the {label} report fits on the wire", w < _GMAIL_CLIP_BYTES,
               f"{w:,} bytes encoded")
 

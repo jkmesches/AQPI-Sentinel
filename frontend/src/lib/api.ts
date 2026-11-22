@@ -24,10 +24,11 @@ export interface CheckMeta {
 	target: string;
 	cadence_s: number;
 	depends_on: string[];
-	/** Which published tree a backend-reading check read — e.g. "the main archive" or "TR".
-	 *  Null for everything that does not read one. CBAND is the reason this
-	 *  exists: it comes off the secondary archive while every other backend row comes off
-	 *  the main archive, and the UI cannot know that. */
+	/** Which published tree a backend-reading check read, as a two-character
+	 *  tag such as "FS" or "CB". Null for everything that does not read one.
+	 *  CBAND is the reason this exists. It comes off its own tree while every
+	 *  other backend row comes off the profile's main one, and the UI cannot
+	 *  know that. The deployment sets the text, see config.BACKEND_SOURCE. */
 	source_tag?: string | null;
 	/** The full name of the same thing, for row labels and tooltips. */
 	source_label?: string | null;
@@ -68,7 +69,7 @@ export const METRICS_SERIES_MAX = 64;
  * Split a series list into requests the endpoint will accept.
  *
  * The sparkline refresh sent every series in one request, which is fine until
- * a deployment registers more checks than the cap. the AQPI deployment has 84 against a
+ * a deployment registers more checks than the cap. The AQPI deployment has 84 against a
  * cap of 64, so every poll returned 400 and no sample reached the browser
  * after the initial seed. The two smaller deployments sit under the cap at 45
  * and 10, so only production was ever large enough to cross it.

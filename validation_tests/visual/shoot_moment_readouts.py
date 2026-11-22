@@ -28,6 +28,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -55,7 +56,8 @@ except ImportError:  # pragma: no cover - environment check
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 VIEWPORT = {"width": 1500, "height": 950}
 LOAD_SETTLE_MS = 15_000

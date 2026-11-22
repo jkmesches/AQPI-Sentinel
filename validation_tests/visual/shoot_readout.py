@@ -27,6 +27,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -43,7 +44,8 @@ except ImportError:  # pragma: no cover - environment check
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 # The console polls every 5 s and holds a websocket, so networkidle never
 # settles. Measured the same way capture.py's waits were.

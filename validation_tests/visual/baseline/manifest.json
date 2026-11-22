@@ -1,5 +1,5 @@
 {
- "base": "https://the test deployment",
+ "base": "http://localhost:5173",
  "failed": [],
  "retried": [],
  "states": [

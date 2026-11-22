@@ -17,9 +17,9 @@ same day fixed something a test would have caught in seconds:
 Both are cheap to pin and neither needs a filesystem: the first is a type
 error in pure path construction, the second is a key in a dict.
 
-What is NOT covered here: real NFS behaviour. A hung mount, a dangling
-symlink, a directory of 100k entries — those need the actual shares and
-belong in a probe run on the AQPI deployment, not in the offline suite.
+What is NOT covered here: real NFS behavior. A hung mount, a dangling
+symlink or a directory of 100k entries needs the actual shares, so those
+belong in a probe run against a mounted deployment.
 
 Run:  python3 validation_tests/test_backend_checks.py
 """

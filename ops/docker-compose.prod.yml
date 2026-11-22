@@ -113,6 +113,12 @@ services:
       # paths and must match the mounts below.
       SENTINEL_BACKEND_ROOT: ${SENTINEL_BACKEND_ROOT:-}
       SENTINEL_SSCB_ROOT:    ${SENTINEL_SSCB_ROOT:-}
+      # What the dashboard calls each tree. The image ships role words, so a
+      # deployment names its own trees here. Tags stay two characters wide.
+      SENTINEL_SOURCE_TAG:        ${SENTINEL_SOURCE_TAG:-}
+      SENTINEL_SOURCE_LABEL:      ${SENTINEL_SOURCE_LABEL:-}
+      SENTINEL_SSCB_SOURCE_TAG:   ${SENTINEL_SSCB_SOURCE_TAG:-}
+      SENTINEL_SSCB_SOURCE_LABEL: ${SENTINEL_SSCB_SOURCE_LABEL:-}
       # Where radar-display's document root is mounted, when it is not
       # htdocs/ under SENTINEL_BACKEND_ROOT. Unset is the AQPI case and
       # derives the path; the tilt routes fall back to HTTP when neither

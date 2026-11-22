@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 # Register the backend checks too, so their stages are in scope even on a
 # deployment that does not mount the shares. Without this the test would pass
-# on the test deployment and fail only on the AQPI deployment — i.e. exactly where it is not run.
+# without a mount and fail only on a mounted one, exactly where it is not run.
 os.environ.setdefault("SENTINEL_BACKEND_ROOT", "/nonexistent-for-registration")
 os.environ.setdefault("SENTINEL_SSCB_ROOT", "/nonexistent-for-registration")
 

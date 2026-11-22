@@ -165,7 +165,7 @@
 
 	// One row per target, carrying whichever of the two sources reported it.
 	// Both halves are optional on purpose:
-	//   - no mount at all (the test deployment deployment) → every `backend` is null
+	//   - no mount at all (the test deployment) → every `backend` is null
 	//     and the rails collapse to a single column
 	//   - CBAND is skipped when SENTINEL_SSCB_ROOT is unset even though the
 	//     rest of the tree is mounted, so one radar can lack a backend row
@@ -398,7 +398,7 @@
   The tag is the point of the paired layout. A column header only works while
   it is on screen — it is gone the moment the rail scrolls, and gone again
   when someone pastes a screenshot of three rows into a thread. Two characters
-  welded to the trace survive both. the main archive = the backend tree (the main archive, or the secondary archive for
+  welded to the trace survive both. The main archive = the backend tree (the main archive, or the secondary archive for
   CBAND); RC = radarca, the scraped upstream.
 
   A null `row` means this source does not cover this target on this
@@ -419,8 +419,8 @@
 		{@const spark = sentinel.metrics[`${row.check_id}|${metric ?? 'age_s'}`] ?? []}
 		{@const meta = checksById[row.check_id]}
 		{@const cadenceS = meta?.cadence_s ?? 120}
-		<!-- The check says which tree it read. Hardcoding "the main archive" was wrong for
-		     CBAND, which comes off the secondary archive — see Check.source_tag. -->
+		<!-- The check says which tree it read. A tag baked in here was wrong
+		     for CBAND, which comes off its own tree. See Check.source_tag. -->
 		{@const tag = meta?.source_tag || fallbackTag}
 		<span
 			class="flex min-w-0 items-center gap-1.5 {statusText(row.status)}"
@@ -782,7 +782,7 @@
 		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
 		{#if pairedProducts}
 			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
-				<span></span><span>the main archive / the secondary archive</span><span>RadarCA</span>
+				<span></span><span>Filesystem</span><span>RadarCA</span>
 			</div>
 		{/if}
 		<div class="overflow-y-auto">
@@ -816,7 +816,7 @@
 										: productLabel(p.target)}
 								</span>
 								{#if pairedProducts}
-									{@render sourceCell(p.backend, 'the main archive', true, 64)}
+									{@render sourceCell(p.backend, 'FS', true, 64)}
 									{@render sourceCell(p.primary, 'RC', true, 64)}
 								{:else}
 									<!-- Unpaired: keep the age readout this rail has always

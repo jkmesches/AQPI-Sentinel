@@ -155,7 +155,7 @@ export interface HomeView {
 const FALLBACK_NAME = 'AQPI Sentinel';
 // Empty, because a source line is a claim about where the bytes came from and
 // nothing here can check it. The old default named radarca on every
-// deployment, including the AQPI deployment, which reads almost everything off the main archive, and
+// deployment, including AQPI, which reads almost everything off its mount, and
 // XQPI, which never contacts radarca at all. A blank credit says nothing;
 // the wrong hostname says something false.
 const FALLBACK_SOURCE = '';

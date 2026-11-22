@@ -159,7 +159,7 @@ A guided tour, top to bottom:
   and an empty one is silent.
 
   On a deployment with the backend tree mounted, each radar is **one
-  row with two readings**: `the main archive` (the filesystem, or the secondary archive for CBAND)
+  row with two readings**: `FS` (the filesystem, or `CB` for CBAND's own tree)
   and `RC` (RadarCA, the scraped upstream). Both divide by the same
   per-radar threshold, so when the two traces disagree that is the two
   sources disagreeing — the usual shape of a RadarCA scraping problem
@@ -196,10 +196,10 @@ The home page reads this off `/api/checks` and lays itself out to
 match:
 
 - **Both mounted** — each radar and product is one row with two
-  readings, `the main archive` and `RC`, each tagged.
+  readings, `FS` and `RC`, each tagged.
 - **Neither mounted** (the dev deployment, no VPN) — one column, no
   tags, no second header. Identical to the pre-v0.5.4 rail.
-- **Backend but no SSCB** — CBAND's `the main archive` cell reads *not mounted*
+- **Backend but no SSCB**. CBAND's `CB` cell reads *not mounted*
   while its neighbours have one. The same wording covers the
   vector/stream feeds in the Products rail, which have no backend
   counterpart on any deployment.

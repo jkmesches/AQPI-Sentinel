@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-Sentinel was written for one deployment. the project owner asked for a second
+Sentinel was written for one deployment. The project owner asked for a second
 one -- "XQPI Sentinel", watching the FLOW radar -- and FLOW is not like AQPI in
 the one way that matters most: nothing serves it over HTTP. There is no radarca
 in front of it. The products land on a filesystem tree and that is all.
@@ -187,7 +187,7 @@ def main() -> int:
     check("no SENTINEL_PROFILE means aqpi",
           load_default_profile() == "aqpi")
     check("aqpi declares a display tier", aqpi["has_radarca"] is True)
-    check("aqpi publishes to the main archive", aqpi["backend_source"] == ["the main archive", "the main archive"],
+    check("aqpi reports a role-word source pair", aqpi["backend_source"] == ["FS", "Archive"],
           str(aqpi["backend_source"]))
     for st in ("L0", "L1", "L2", "L3", "L4-T1T2", "LB1", "LB2"):
         present = any(c["stage"] == st for c in aqpi["checks"])
@@ -198,14 +198,14 @@ def main() -> int:
                 "layer0.net.radardisplay_tls", "layer0.origin.alive"):
         check(f"aqpi still registers {cid}", cid in a_ids)
     cband = [c for c in aqpi["checks"] if c["id"] == "layer2.backend.CBAND"]
-    check("aqpi keeps the CBAND-on-the secondary archive source override",
-          bool(cband) and cband[0]["source_label"] == "the secondary archive",
+    check("aqpi keeps CBAND's separate-tree source override",
+          bool(cband) and cband[0]["source_label"] == "C-band",
           cband[0]["source_label"] if cband else "CBAND check not registered")
 
     # ---- XQPI watches FLOW, off the secondary archive, and nothing else ----------------
     print("\nxqpi watches the FLOW radar and its four products:")
     check("xqpi declares no display tier", xqpi["has_radarca"] is False)
-    check("xqpi publishes to the secondary archive", xqpi["backend_source"] == ["TR", "the secondary archive"],
+    check("xqpi reports a role-word source pair", xqpi["backend_source"] == ["FS", "Archive"],
           str(xqpi["backend_source"]))
     check("the only radar is FLOW", xqpi["radars"] == ["FLOW"], str(xqpi["radars"]))
     check("four products are configured", len(xqpi["products"]) == 4,
@@ -215,8 +215,8 @@ def main() -> int:
         UNIVERSAL_L0
         | {f"layer1.backend.{p}" for p in xqpi["products"]}
         | {f"layer2.backend.{r}" for r in xqpi["radars"]}
-        # LB3 composite participation. xqpi DOES write a receipt — verified on
-        # the secondary archive, with FLOW, KSOX and KVTX in it — so FLOW's participation is
+        # LB3 composite participation. xqpi DOES write a receipt, verified on
+        # its own tree with FLOW, KSOX and KVTX in it, so FLOW's participation is
         # observable here. The DROPS producer check is NOT expected: that tree
         # is Gen_X-band_QPE.py's output and the profile sets DROPS_TREE = "".
         | {f"layer3.composite.{r}" for r in xqpi["radars"]}
@@ -488,7 +488,7 @@ def main() -> int:
           str(aqpi["composite_expected"].get("CBAND")))
     # NEXRAD was excluded until 2026-10-12 on the strength of "the three
     # directories hold zero files". That was true, and it was an 18-day ldm
-    # outage after a main archive reboot, not the design — the composite driver's own
+    # outage after an archive reboot rather than the design. The driver's own
     # arrays have always intended nine inputs, and KBBX/KDAX/KMUX are each in
     # the published composite at 720 of 720 timesteps across 2026-10-11.
     #
@@ -582,8 +582,8 @@ def main() -> int:
         tagged = [c for c in prof["checks"] if c["source_tag"] is not None]
         check(f"{name}: a tag always comes with a label",
               all(c["source_label"] for c in tagged))
-    check("xqpi labels every backend check the secondary archive",
-          all(c["source_label"] == "the secondary archive" for c in xqpi["checks"]
+    check("xqpi gives every backend check the same source label",
+          all(c["source_label"] == "Archive" for c in xqpi["checks"]
               if c["source_tag"] is not None))
 
     print("\nan unknown profile refuses to start:")

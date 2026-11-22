@@ -773,7 +773,7 @@ async def _xband_frames(radar: str, moment: str, ctx: CheckContext,
     the map degrades to slightly behind rather than to dark.
 
     Without a mount the old chain stands, archive first and radarca behind
-    it. the test deployment is that case: it runs the aqpi profile with
+    it. The test deployment is that case: it runs the aqpi profile with
     no ``SENTINEL_BACKEND_ROOT``, so there is no tree to read and radarca
     remains its only origin.
 

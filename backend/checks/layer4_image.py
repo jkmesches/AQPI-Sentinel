@@ -140,7 +140,7 @@ class Layer4ImageCheck(Check):
         """The newest frame off the mount, for a deployment that has one.
 
         LB1 answers whether a file arrived and never opens it, so a producer
-        writing truncated or empty PNGs stayed green there. the XQPI deployment showed
+        writing truncated or empty PNGs stayed green there. The XQPI deployment showed
         that live: requests for the newest composite frame returned 502 from
         the PNG signature check while LB1 called the product healthy, because
         no check on that deployment read a frame's bytes at all.

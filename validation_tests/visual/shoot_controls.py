@@ -28,6 +28,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -49,7 +50,8 @@ except ImportError:  # pragma: no cover - environment check
 from capture import (  # noqa: E402  sibling module, loaded by path
     open_dock, open_settings)
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 LOAD_SETTLE_MS = 7000
 ACTION_SETTLE_MS = 1500

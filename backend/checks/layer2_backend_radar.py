@@ -16,9 +16,10 @@ Two trees, because the radars do not all arrive the same way:
   than "is this radar delivering". When the generator stopped at 04:07 UTC all
   five checks failed for 12 hours while three of the radars were arriving
   within a minute throughout. See ``config.RADAR_DATED_TREE``.
-* CBAND (SSCB)  — lands on the secondary archive at ``the secondary archive/aqpi/sscb/YYYY/MM/DD``, not in
-  the X-band trees. It has no ACCEPT entry in iris's ldmd.conf and no
-  file_process_sscb.sh on the C-band producer host, so it does not arrive by the X-band push path.
+* CBAND (SSCB) lands on its own dated tree, ``<sscb_root>/YYYY/MM/DD``, rather
+  than in the X-band trees. It has no ACCEPT entry in iris's ldmd.conf and no
+  SSCB processor on the C-band producer, so it does not arrive by the X-band
+  push path.
   Monitored here because a C-band outage was previously undetectable.
 
   .. warning:: **Unresolved:** this docstring has said since v0.5.0 that CBAND
@@ -42,9 +43,9 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ..config import (BACKEND_SOURCE, LB2_FRESHNESS,  # noqa: F401
+from ..config import (BACKEND_SOURCE, LB2_FRESHNESS,  # noqa: TID252  module uses relative imports
                       RADAR_DATED_TREE, RADAR_FOLDER, RAW_VOLUME_TS_RE,
-                      RADAR_SILENT_FAIL_S, SETTINGS)
+                      RADAR_SILENT_FAIL_S, SETTINGS, SPECIAL_TREE_SOURCE)
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
@@ -55,9 +56,10 @@ FS_TIMEOUT_S = 5.0
 
 # Radars whose data does not land in the DROPS tree. Value is a strftime template
 # evaluated in UTC, matching how the writer dates its directories.
-# NOTE: these are paths INSIDE the container, which differ from the host. the AQPI deployment
-# mounts /the secondary archive on the host, but sentinel-backend sees only what the compose file
-# bind-mounts. Hence a setting, not a literal.
+# NOTE: these are paths INSIDE the container, which differ from the host. The
+# AQPI deployment mounts the SSCB tree at its own host path, and
+# sentinel-backend sees only what the compose file bind-mounts. Hence a
+# setting rather than a literal.
 def _special_trees() -> dict[str, str]:
     # str() first: SETTINGS.sscb_root is a Path (config._opt_path), and Path has no
     # .rstrip. Calling it raised AttributeError on every LB2 run in v0.5.0.
@@ -79,7 +81,7 @@ def _radar_path(radar_id: str, now) -> str:
 
     A radar in neither table fell through to the flat
     `backend_root/PRODUCTS/DROPS/<folder>` layout. Measured 2026-10-12, that
-    tree on the AQPI deployment is 7.6 days stale — an abandoned copy, like the
+    tree on the AQPI deployment is 7.6 days stale, an abandoned copy like the
     `recentfiles` one that produced eight false passes the same day. [M]
 
     No registered radar used it: all five X-bands are in RADAR_DATED_TREE and
@@ -401,11 +403,11 @@ class Layer2BackendRadarCheck(Check):
     def __init__(self, radar_id: str):
         self.radar_id = radar_id
         # A radar in _special_trees() lives somewhere other than the profile's
-        # default tree — on AQPI that is CBAND on the secondary archive while the rest are on
-        # the main archive. Otherwise it is wherever this profile publishes, which is the main archive for
-        # AQPI and the secondary archive for XQPI. See config.BACKEND_SOURCE.
+        # default tree, which on AQPI means CBAND on the SSCB tree while the
+        # rest sit on the main one. Otherwise it is wherever this profile
+        # publishes. See config.BACKEND_SOURCE and config.SPECIAL_TREE_SOURCE.
         if radar_id in _special_trees():
-            self.source_tag, self.source_label = "TR", "the secondary archive"
+            self.source_tag, self.source_label = SPECIAL_TREE_SOURCE
         else:
             self.source_tag, self.source_label = BACKEND_SOURCE
 

@@ -238,4 +238,4 @@ This is the only realistic path to detecting the specific artifact you described
 2. **Where in the cluster** to host this and how to expose alerts (email, Slack, custom).
 3. **Storage budget** for the image archive (~200 GB/yr at full retention; can downsample old data).
 4. **Coordinate with the CSU team** before deploying — especially before Tier 5 training and any high-rate polling. They may also be able to supply ground-truth labels and known-bad exemplars.
-5. **Seed examples** of the specific "broken-radar" artifact from the radar group / yourself — Tier 5 can't start without 5–10 to begin labeling against.
+5. **Seed examples** of the specific "broken-radar" artifact from the radar group or yourself — Tier 5 can't start without 5–10 to begin labeling against.

@@ -257,8 +257,8 @@
 									</span>
 									{#if m.role !== 'solo'}
 										<!-- Which tree this reading came from. The check
-										     says so itself; hardcoding "the main archive" was wrong for
-										     CBAND, which comes off the secondary archive. -->
+										     says so itself. A tag baked in here was wrong
+										     for CBAND, which comes off its own tree. -->
 										<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[9px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">
 											{isSecondary ? (meta?.source_tag ?? 'BK') : 'RC'}
 										</span>

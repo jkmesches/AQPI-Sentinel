@@ -37,6 +37,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -56,7 +57,8 @@ except ImportError:  # pragma: no cover - environment check, not a code path
 
 Json: TypeAlias = "str | int | float | bool | list[Json] | dict[str, Json] | None"
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 PREFS_KEY = "sentinel-map-prefs"
 PREFS_VERSION = 1
 VIEWPORT = {"width": 1600, "height": 950}

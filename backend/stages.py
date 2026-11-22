@@ -16,7 +16,7 @@ _STAGE_LABELS = {
     "L2":      "Radar Scans",
     "L3":      "Map Overlays",
     "L4-T1T2": "Image Quality",
-    # Read from the main archive/the secondary archive directly rather than through radarca. Separate stages so
+    # Read from the filesystem trees directly rather than through radarca. Separate stages so
     # alerts.yaml can route them as authoritative while the radarca-derived stages
     # stay informational.
     "LB1":     "Backend Products",

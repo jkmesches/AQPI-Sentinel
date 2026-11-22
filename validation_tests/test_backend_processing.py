@@ -5,8 +5,8 @@ The parser is the risky part of this stage, so it is tested against the
 receipt EXACTLY as it exists on the AQPI deployment, double slash and all:
 
     Radar files for composite:
-    /the secondary archive/.../recentfiles//XSCR/XSCR_volume_20261005-163823_drops.nc
-    /the secondary archive/.../recentfiles//SSCB/AQPI.SSCB_20261005_163719_drops.nc
+    /staging/.../recentfiles//XSCR/XSCR_volume_20261005-163823_drops.nc
+    /staging/.../recentfiles//SSCB/AQPI.SSCB_20261005_163719_drops.nc
 
 Three things in that one file would each break a plausible parser:
 
@@ -55,7 +55,7 @@ def check(label: str, cond: bool, detail: str = "") -> None:
         failures.append(label)
 
 
-PREFIX = "the QPE staging root/PRODUCTS/Radar_processed/recentfiles/"
+PREFIX = "/staging/PRODUCTS/Radar_processed/recentfiles/"
 
 
 def line(rdir: str, name: str) -> str:

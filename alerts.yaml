@@ -97,7 +97,7 @@ routes:
 
   # --- Backend (filesystem-read) stages: authoritative -------------------
   #
-  # These read the main archive/the secondary archive directly rather than through radarca, which is why
+  # These read the filesystem trees directly rather than through radarca, which is why
   # they are separate stages at all — see backend/stages.py. Until now they
   # had no route and fell through to the catch-all at 4h, so the AUTHORITATIVE
   # observation repeated four times less often than the radarca-derived one it

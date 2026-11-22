@@ -160,7 +160,7 @@ export function runTests(mod, grouping) {
       sourceOf(stages, 'XEBY'));
   }
   {
-    // The hazard in deciding the tier by a stage key. the test deployment
+    // The hazard in deciding the tier by a stage key. The test deployment
     // has no mount, and a present-but-empty LB2 must not gray out its fleet.
     const stages = { L2: [R('layer2.radar.XEBY', 'XEBY', 'pass')], LB2: [], LB3: [] };
     check('an empty LB2 falls back to radarca', statusOf(stages, 'XEBY') === 'pass',

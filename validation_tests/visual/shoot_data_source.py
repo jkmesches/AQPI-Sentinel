@@ -4,7 +4,7 @@
 Why this exists
 ---------------
 ``DATA_SOURCE`` was the literal string "radarca.engr.colostate.edu" on the
-AQPI profile. the AQPI deployment sets ``SENTINEL_BACKEND_ROOT``, so fs_products serves
+AQPI profile. The AQPI deployment sets ``SENTINEL_BACKEND_ROOT``, so fs_products serves
 every product manifest, every product frame and every X-band moment frame off
 the main archive and radarca is left with the stream gauges. The navbar and the mobile
 more-page credited radarca for all of it.
@@ -23,6 +23,7 @@ Usage
 """
 from __future__ import annotations
 
+import os
 import argparse
 import asyncio
 import json
@@ -37,7 +38,8 @@ except ImportError:  # pragma: no cover - environment check, not a code path
           "&& playwright install chromium", file=sys.stderr)
     raise SystemExit(2) from None
 
-DEFAULT_BASE = "https://the test deployment"
+DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
+                              "http://localhost:5173")
 
 # How long to let the page settle before reading the header. The source line
 # arrives from /api/version, which the layout fetches on mount.

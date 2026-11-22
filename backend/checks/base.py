@@ -64,18 +64,18 @@ class Check:
     # Which published tree this check actually read, for checks that read one.
     #
     # Not cosmetic and not derivable by the frontend. The backend-reading
-    # checks do NOT all read the same share: the X-band radars and every
-    # product come off the main archive, but CBAND comes off the secondary archive -- which is exactly why
-    # SENTINEL_SSCB_ROOT is a separate setting and a separate mount from
-    # SENTINEL_BACKEND_ROOT. Labelling CBAND's backend row "the main archive" is simply
-    # false, and the dashboard has no way to know better unless the check that
-    # did the reading says so.
+    # checks do NOT all read the same share. The X-band radars and every
+    # product come off the profile's main tree, while CBAND comes off the
+    # SSCB tree. SENTINEL_SSCB_ROOT is therefore a separate setting and a
+    # separate mount from SENTINEL_BACKEND_ROOT. Giving CBAND's backend row
+    # the main tree's label is simply false, and the dashboard has no way to
+    # know better unless the check that did the reading says so.
     #
-    # `source_tag` is the compact form the rails show beside each trace;
+    # `source_tag` is the compact form the rails show beside each trace, and
     # `source_label` is the full name for row labels and tooltips. Two fields
-    # rather than one plus a truncation rule, because abbreviating "the secondary archive"
-    # to "TR" is a judgement the source owner should make, not a string
-    # operation the UI invents.
+    # rather than one plus a truncation rule, because shortening a tree's
+    # name to two characters is a judgment the source owner should make, not
+    # a string operation the UI invents. See config.BACKEND_SOURCE.
     #
     # === source_tag is EXACTLY two characters ===
     #
@@ -83,7 +83,7 @@ class Check:
     # sparkline in the home rails, so its width sets where every trace in that
     # column begins. A three-character tag on one row shifts that row's
     # sparkline right and the column stops being scannable, which is most of
-    # what a column of sparklines is for. "RC", "the main archive" and "TR" are all two.
+    # what a column of sparklines is for. "RC", "FS" and "CB" are all two.
     # test_sparkline_metric.py asserts it.
     source_tag: str | None = None
     source_label: str | None = None

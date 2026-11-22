@@ -123,13 +123,13 @@ export function runTests(mod) {
 
     console.log('\nthe deployment identifies itself:');
     {
-      const r = await run({ site_name: 'XQPI Sentinel', data_source: 'the secondary archive',
+      const r = await run({ site_name: 'XQPI Sentinel', data_source: 'Archive',
                             has_radarca: false,
                             composite_product: 'composite_ref',
                             products: [{ id: 'composite_ref', label: 'Reflectivity' },
                                        { id: 'junk' }] });
       check('name', r.name === 'XQPI Sentinel', r.name);
-      check('data source', r.dataSource === 'the secondary archive', r.dataSource);
+      check('data source', r.dataSource === 'Archive', r.dataSource);
       check('has_radarca false is honoured', r.hasRadarca === false);
       check('malformed product entries are dropped',
         r.products?.length === 1 && r.products[0].id === 'composite_ref',
@@ -143,7 +143,7 @@ export function runTests(mod) {
         r.name);
       // The name is cosmetic and a wrong one is obvious. The source line is a
       // claim about where the bytes came from, and the old fallback made it on
-      // every deployment: the AQPI deployment reads almost everything off the main archive, and XQPI
+      // every deployment: AQPI reads almost everything off its mount, and XQPI
       // never contacts radarca. A payload with no data_source means the
       // backend did not say, so neither does the header.
       check('...and guesses no data source', r.dataSource === '',
