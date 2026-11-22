@@ -1478,6 +1478,19 @@ if SETTINGS.profile not in ("aqpi", "xqpi"):
         f"unknown SENTINEL_PROFILE {SETTINGS.profile!r} — expected 'aqpi' or 'xqpi'"
     )
 
+# The source line follows the mount, because the profile constant alone is a
+# claim about a deployment it cannot see. the AQPI deployment sets SENTINEL_BACKEND_ROOT,
+# so fs_products serves every product manifest, every product frame and every
+# X-band moment frame off the main archive and the HTTP origin is left with the stream gauges.
+# The navbar and the mobile more-page still credited radarca for all of it.
+#
+# Both names when both are read, the mount first because it carries almost
+# everything. A deployment with no mount keeps the profile's own answer, which
+# is what the test deployment runs on. XQPI names the secondary archive in DATA_SOURCE already and has
+# no HTTP origin at all, so HAS_RADARCA keeps it from being named twice.
+if SETTINGS.backend_root and HAS_RADARCA:
+    DATA_SOURCE = f"{BACKEND_SOURCE[1]} · {DATA_SOURCE}"
+
 if COMPOSITE_PRODUCT not in PRODUCTS:
     # A product id the rail will never find, so the composite's participation
     # row would be dropped without a word. Caught at import, where it is a

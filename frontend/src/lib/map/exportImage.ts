@@ -139,10 +139,14 @@ export function exportCaption(view: ExportView): ExportCaption {
 	const radars = view.radars.length > 0
 		? view.radars.join(', ')
 		: 'no radar overlays';
+	// The source is dropped when empty rather than printed as a gap. It is
+	// blank until /api/version answers, and an export taken in that window
+	// used to carry "AQPI Sentinel ·  · XSCV" into a thread.
+	const credit = [view.site, view.source, radars].filter((p) => p.trim() !== '');
 	return {
 		title: parts.join(' · '),
 		when: view.stepLabel.trim() || 'frame time unknown',
-		credit: `${view.site} · ${view.source} · ${radars}`
+		credit: credit.join(' · ')
 	};
 }
 

@@ -3,7 +3,8 @@
 	// including one that never contacts it. Both now come from /api/version.
 	import { getSite } from '$lib/site';
 	let siteName = $state('AQPI Sentinel');
-	let dataSource = $state('radarca.engr.colostate.edu');
+	// Blank until /api/version answers. See the note on FALLBACK_SOURCE.
+	let dataSource = $state('');
 	$effect(() => {
 		getSite().then((s) => { siteName = s.name; dataSource = s.dataSource; });
 	});
@@ -241,7 +242,7 @@
 <section>
 	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">about</div>
 	<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 text-[12px] text-[var(--color-muted)]">
-		<div class="num">{siteName} — {dataSource}</div>
+		<div class="num" data-site-line>{dataSource ? `${siteName} · ${dataSource}` : siteName}</div>
 		<div class="num mt-1 text-[var(--color-faint)]">v0.1.0 · mobile</div>
 	</div>
 </section>

@@ -5,7 +5,8 @@
 	// memoised, so this shares one request with the map.
 	import { getSite } from '$lib/site';
 	let siteName = $state('AQPI Sentinel');
-	let dataSource = $state('radarca.engr.colostate.edu');
+	// Blank until /api/version answers. See the note on FALLBACK_SOURCE.
+	let dataSource = $state('');
 	$effect(() => {
 		getSite().then((s) => { siteName = s.name; dataSource = s.dataSource; });
 	});
@@ -106,8 +107,14 @@
 			<span
 				class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]"
 			>{siteName.toUpperCase()}</span>
-			<span class="text-[var(--color-faint)] text-[11px]">·</span>
-			<span class="text-[11px] text-[var(--color-muted)] num">{dataSource}</span>
+			<!-- The separator goes with the source. A deployment whose backend
+			     does not name one left the header reading "AQPI SENTINEL ·". -->
+			{#if dataSource}
+				<span class="text-[var(--color-faint)] text-[11px]">·</span>
+				<span
+					class="text-[11px] text-[var(--color-muted)] num"
+					data-data-source>{dataSource}</span>
+			{/if}
 		</div>
 
 		<nav class="flex flex-wrap items-center gap-1 border-l border-[var(--color-border)] pl-3">

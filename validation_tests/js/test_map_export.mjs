@@ -135,6 +135,16 @@ export function runTests(mod) {
     const none = exportCaption({ ...VIEW, radars: [] });
     check('no radars says so rather than trailing a comma',
       none.credit.includes('no radar overlays'), none.credit);
+    // The source is blank until /api/version answers, and an export taken
+    // in that window used to read "AQPI Sentinel ·  · XSCV".
+    const nosrc = exportCaption({ ...VIEW, source: '' });
+    check('no data source leaves no gap in the credit',
+      !nosrc.credit.includes('·  ·') && !/·\s*$/.test(nosrc.credit),
+      nosrc.credit);
+    check('...and the rest of the credit survives',
+      nosrc.credit.includes('AQPI Sentinel') && nosrc.credit.includes('XSCV'),
+      nosrc.credit);
+
     const bare = exportCaption({ ...VIEW, moment: null, unit: null });
     check('a product with no moment still has a title',
       bare.title === VIEW.product, bare.title);

@@ -139,8 +139,15 @@ export function runTests(mod) {
     }
     {
       const r = await run({ version: '0.6.1' });
-      check('an older payload keeps the AQPI identity',
-        r.name === 'AQPI Sentinel' && r.dataSource === 'radarca.engr.colostate.edu');
+      check('an older payload keeps the AQPI name', r.name === 'AQPI Sentinel',
+        r.name);
+      // The name is cosmetic and a wrong one is obvious. The source line is a
+      // claim about where the bytes came from, and the old fallback made it on
+      // every deployment: the AQPI deployment reads almost everything off the main archive, and XQPI
+      // never contacts radarca. A payload with no data_source means the
+      // backend did not say, so neither does the header.
+      check('...and guesses no data source', r.dataSource === '',
+        JSON.stringify(r.dataSource));
       check('...and assumes a display tier exists, as AQPI has one',
         r.hasRadarca === true);
       check('...with no product override', r.products === null);

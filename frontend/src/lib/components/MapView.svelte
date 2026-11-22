@@ -1318,7 +1318,8 @@
 	// What this deployment is. Drives the header, the page title and the tilt
 	// control, which were all hard-coded to AQPI.
 	let siteName = $state('AQPI Sentinel');
-	let dataSource = $state('radarca.engr.colostate.edu');
+	// Blank until /api/version answers. See the note on FALLBACK_SOURCE.
+	let dataSource = $state('');
 	/**
 	 * What the tilt picker calls the display tier.
 	 *
