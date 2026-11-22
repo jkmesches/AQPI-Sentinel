@@ -895,7 +895,7 @@ routes:                                # first match wins
     repeat_interval: 12h
 
 silences:                              # static; runtime silences via API
-  - id: csu-maintenance-2026-05-20
+  - id: csu-maintenance-2026-05-20   <!-- public-ok: a silence id, not a host -->
     matchers: {stage: L1}
     starts: 2026-05-20T09:00:00Z
     ends:   2026-05-20T13:00:00Z
