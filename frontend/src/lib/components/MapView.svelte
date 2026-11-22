@@ -431,22 +431,72 @@
 	// fetch that started before it must not attach to the new one.
 	let overlayPass = 0;
 
-	async function applyOverlays(t: 'light' | 'dark'): Promise<void> {
+	/**
+	 * What each overlay was last built with.
+	 *
+	 * `applyLayer` tears a module down and rebuilds it, and the rebuild is
+	 * asynchronous, so a module reapplied for no reason disappears and
+	 * comes back a moment later. Running the whole set on every toggle
+	 * made turning Watersheds on flicker the reservoirs, the terrain, the
+	 * gauges and the burn scars, which is what Joseph saw.
+	 */
+	const overlayBuiltWith = new Map<string, string>();
+
+	/** How many passes each overlay has been through, for the probe. */
+	let overlayBuilds = $state<Record<string, number>>({});
+
+	/**
+	 * Build the overlays whose inputs changed, and leave the rest alone.
+	 *
+	 * @param t The theme to draw in.
+	 * @param all True to rebuild every module, for a new style whose
+	 *     layers are gone whatever this cache remembers.
+	 */
+	async function applyOverlays(
+		t: 'light' | 'dark', all = false
+	): Promise<void> {
 		if (!map || !styleReady) return;
 		const m = map;
 		const pass = ++overlayPass;
 		const alive = () => pass === overlayPass && map === m && styleReady;
-		const outcomes = await applyLayers(OVERLAY_MODULES, (mod) => ({
+		if (all) overlayBuiltWith.clear();
+		const wantOf = (id: string) => `${t}:${overlayEnabled(id) ? 'on' : 'off'}`;
+		const todo = OVERLAY_MODULES.filter(
+			(mod) => overlayBuiltWith.get(mod.id) !== wantOf(mod.id));
+		if (todo.length === 0) return;
+		// Recorded before the build rather than after it, so a second
+		// toggle during the await does not queue a duplicate pass. A pass
+		// that loses the `alive` race clears what it claimed below.
+		for (const mod of todo) overlayBuiltWith.set(mod.id, wantOf(mod.id));
+		// Untracked, both here and for the errors below. This runs inside
+		// the effect that watches the overlay toggles, so reading state it
+		// goes on to write would make that effect depend on its own
+		// output. Svelte reruns such an effect until it gives up, which
+		// was 1,002 rebuild passes of all five overlays from one click.
+		const counts = { ...untrack(() => overlayBuilds) };
+		for (const mod of todo) counts[mod.id] = (counts[mod.id] ?? 0) + 1;
+		overlayBuilds = counts;
+		const outcomes = await applyLayers(todo, (mod) => ({
 			map: m,
 			theme: t,
 			enabled: overlayEnabled(mod.id),
 			before: vectorBefore,
 			alive
 		}));
-		if (!alive()) return;
-		const errors: Record<string, string> = {};
+		if (!alive()) {
+			for (const mod of todo) overlayBuiltWith.delete(mod.id);
+			return;
+		}
+		const errors: Record<string, string> = { ...untrack(() => overlayErrors) };
 		for (const o of outcomes) {
-			if (o.error) errors[o.id] = o.error;
+			if (o.error) {
+				errors[o.id] = o.error;
+				// A module that failed is not built, whatever was recorded
+				// above, so the next pass tries it again.
+				overlayBuiltWith.delete(o.id);
+			} else {
+				delete errors[o.id];
+			}
 		}
 		overlayErrors = errors;
 	}
@@ -3232,7 +3282,10 @@
 		refreshNexrad();
 		refreshRadarOverlays();
 		refreshTilt();
-		void applyOverlays(t);
+		// Everything, because this runs on a style that has just replaced
+		// the one the overlays were attached to. Their layers are gone
+		// regardless of what the cache last recorded.
+		void applyOverlays(t, true);
 		refreshTerrain3D();
 	}
 
@@ -3675,6 +3728,14 @@
 				stepIdx, stepCount: steps.length, stepsFor, playing,
 				mapDead, prefsReady,
 				overlayErrors: { ...overlayErrors },
+				// How many times each overlay has been torn down and built.
+				// A rebuild removes the module's source and re-adds it, and
+				// MapLibre re-tiles a GeoJSON source on a worker, so the
+				// features blink even though the layer and the source are
+				// back in the style within the frame. That blink is
+				// invisible to anything sampling the style, which is why
+				// this counts the cause instead.
+				overlayBuilds: { ...overlayBuilds },
 				frameErrors: { ...frameErrors },
 				profile: siteProfile, hasRadarca
 			}

@@ -266,6 +266,58 @@ async def check_dock(page: Page, rep: Report) -> None:
         "()=>!document.querySelector('[data-dock-slot] [data-opacity]')"))
 
 
+#: Each geography toggle, a substring of the layers it draws, and the id
+#: its module is registered under. The last two differ for Terrain, whose
+#: module is "terrain" and whose layer is "hillshade-layer", so one key
+#: for both counted that module's own rebuild as a stranger's.
+GEOGRAPHY = (
+    ("Watersheds", "watershed", "watersheds"),
+    ("Reservoirs", "reservoir", "reservoirs"),
+    ("Terrain", "hillshade", "terrain"),
+    ("Stream gauges", "gauge", "streamGauges"),
+    ("Burn scars", "burn", "burnScars"),
+)
+
+
+async def check_geography(page: Page, rep: Report) -> None:
+    """Each geography toggle draws its own layers and disturbs no others.
+
+    Joseph saw the other geography features flicker when he clicked one.
+    The cause was that every toggle re-applied all five modules, and
+    applying one tears its source down and re-adds it, which makes
+    MapLibre re-tile the data on a worker. The layer and the source are
+    back in the style inside the frame, so nothing that samples the
+    style can see it, and the rebuild count is what this reads instead.
+
+    Args:
+        page: The loaded console.
+        rep: Collects the results.
+    """
+    builds = ("()=>{const s=window.__sentinelProbe();"
+              " return s.state.overlayBuilds || {}; }")
+    for label, key, module in GEOGRAPHY:
+        before = await page.evaluate(builds)
+        await page.locator(
+            "[data-dock-slot] button", has_text=label).first.click()
+        await page.wait_for_timeout(3500)
+        after = await page.evaluate(builds)
+        ids = await page.evaluate("()=>window.__sentinelProbe().layerOrder")
+        drew = [i for i in ids if key in i.lower()]
+        rep.check(f"{label} draws its own layers", len(drew) > 0,
+                  json.dumps(drew[:3]))
+        moved = {k: after.get(k, 0) - before.get(k, 0)
+                 for k in set(before) | set(after)}
+        rep.check(f"{label} rebuilds itself once", moved.get(module) == 1,
+                  json.dumps(moved, sort_keys=True))
+        others = {k: n for k, n in moved.items() if n and k != module}
+        rep.check(f"{label} rebuilds nothing else", not others,
+                  json.dumps(moved, sort_keys=True))
+    errors = await page.evaluate(
+        "()=>window.__sentinelProbe().state.overlayErrors")
+    rep.check("every geography overlay built without error", not errors,
+              json.dumps(errors))
+
+
 async def check_compass(page: Page, rep: Report) -> None:
     """The compass is top right, legible, and a way back to north.
 
@@ -488,6 +540,7 @@ async def run(base: str, outdir: Path) -> Report:
         try:
             page = await open_console(browser, base, stop["rgb"])
             await check_dock(page, rep)
+            await check_geography(page, rep)
             await check_compass(page, rep)
             await check_legend_and_probe(page, rep, stop["reads"])
             await check_size_control(page, rep)
