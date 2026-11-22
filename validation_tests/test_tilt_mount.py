@@ -180,6 +180,19 @@ def run_reads(root: str) -> None:
     check("...and the stamp the archive keys on",
           (doc or {}).get("Time", {}).get("Value") == PLOT_JSON["Time"]["Value"])
 
+    # The name cap once stopped at 16 characters, which refused
+    # copolarcorrelation (18) as a traversal attempt and broke that tilt in
+    # v0.15.0 and v0.15.1. Every moment the route accepts must read here.
+    from backend.api.routes.upstream import _TILT_MOMENTS
+    for moment in sorted(_TILT_MOMENTS):
+        try:
+            got = asyncio.run(fs.read_tilt_image("XSCV", 2, moment, 0))
+        except ValueError as exc:
+            check(f"the {moment} tilt reads", False, str(exc))
+        else:
+            check(f"the {moment} tilt reads", got.status_code == 200,
+                  str(got.status_code))
+
     print("\na frame that is not there is a 404:")
     gone = asyncio.run(fs.read_tilt_image("XSCV", 2, "reflectivity", 9))
     check("a frame past the window", gone.status_code == 404,

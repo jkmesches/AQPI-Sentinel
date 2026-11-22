@@ -339,8 +339,9 @@ async def read_moment_image(radar: str, moment: str, name: str,
 # these functions from query parameters, so both are checked before they are
 # joined into a path. The product path is confined with ``realpath`` because
 # its source string is free-form; these are confined by vocabulary, which is
-# stricter and says so at the call.
-_TILT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,15}$")
+# stricter and says so at the call. The cap fits the longest moment name the
+# renderer writes, copolarcorrelation at 18 characters, with room to spare.
+_TILT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
 _TILT_EL_RANGE = (1, 4)
 
 
