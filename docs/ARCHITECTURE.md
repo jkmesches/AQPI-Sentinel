@@ -537,8 +537,9 @@ empty cells during a partial fill are normal.
 | `GET /api/history/runs` | Full payload + artifacts for one (check_id, target) window |
 | `GET /api/history/export.csv` | Detail-row CSV honouring every filter |
 | `GET /api/history/report.csv` | Long-format bucketed CSV — Timeline → Export Report dialog |
-| `GET /api/upstream/{product_steps,product_image.png,radar_steps,xband_scan.png,image_by_source.png}` | Thin proxy to radarca with archive fall-through |
-| `GET /api/upstream/{tilt_steps,tilt_image.png}` | Per-elevation PPI stack from **radar-display**, a second origin. Same LRU → archive → upstream ladder; `tilt_image.png?time=` resolves from the archive, which reaches back past radar-display's own 7-frame (~16 min) window |
+| `GET /api/upstream/{product_steps,product_image.png,radar_steps,xband_scan.png,image_by_source.png}` | Mount first where one is configured, radarca otherwise, with archive fall-through either way |
+| `GET /api/upstream/{tilt_steps,tilt_image.png}` | Per-elevation PPI stack. Reads radar-display's document root off the mount where one resolves (`SENTINEL_TILT_ROOT`, or `TILT_TREE` under `SENTINEL_BACKEND_ROOT`), and falls back to the **radar-display** HTTP origin otherwise. Same LRU → archive → origin ladder; `tilt_image.png?time=` resolves from the archive, which reaches back past radar-display's own 7-frame (~16 min) window |
+| `GET /api/upstream/stream_gauges` | The USGS site list, served from `backend/reference/stream_sites.csv`, which ships with Sentinel. radarca is the fallback when the file is absent, cached in process for an hour |
 | `GET /api/silences` / `POST` / `PUT /{sid}` / `DELETE /{sid}` | Silence CRUD; PUT for edit |
 | `GET /api/admin/groups` etc. | Full group CRUD + `/preview` (next on-windows) |
 | `GET/PUT /api/admin/thresholds` | Threshold blob editor |

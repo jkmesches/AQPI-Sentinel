@@ -28,7 +28,10 @@ You'll need:
 - **Outbound network access** to:
     - `ghcr.io` — to pull the published container images.
     - `radarca.engr.colostate.edu` — the upstream Sentinel monitors.
-    - `tiles.stadiamaps.com` — basemap tiles for the dashboard map.
+    - `tiles.stadiamaps.com`, for the map console's basemap tiles.
+    - `radardisplay.engr.colostate.edu`, for the per-elevation tilt
+      imagery on a deployment with no mounted copy of its document
+      root. See `SENTINEL_TILT_ROOT` in [`91-env-vars.md`](91-env-vars.md).
 - (Optional) A domain name + a reverse proxy in front. Caddy, nginx,
   and Traefik all work; the only requirement is forwarding the
   WebSocket upgrade headers. Without TLS the stack still works fine

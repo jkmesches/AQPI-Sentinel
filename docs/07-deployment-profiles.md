@@ -24,9 +24,10 @@ therefore decides which checks exist at all, not merely what they point at.
 
 | | `aqpi` | `xqpi` |
 |---|---|---|
-| checks registered | 64 | 9 |
+| checks registered | 84 | 9 |
 | stages | L0, L1, L2, L3, L4, LB1, LB2, LB3 | L0, LB1, LB2, LB3 |
 | display tier | radarca + radar-display | none |
+| tilt tree (`TILT_TREE`) | `htdocs` under `SENTINEL_BACKEND_ROOT` | none; needs `SENTINEL_TILT_ROOT` |
 | products | 13 | 4 |
 | radars | 6 monitored (9 drawn) | FLOW |
 | freshness basis (products, LB1) | file mtime | the observation time the data declares |

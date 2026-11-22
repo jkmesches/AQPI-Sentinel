@@ -200,6 +200,41 @@ A guessed path is worse than an absent check, which is why this one has no
 default and no fallback. Same reasoning as `SENTINEL_SSCB_ROOT`: a tree on a
 different share gets its own setting.
 
+### `SENTINEL_TILT_ROOT`
+
+> **New in v0.15.0.**
+
+Where radar-display's document root is mounted, as a CONTAINER path. Pair it
+with `SENTINEL_TILT_HOST_PATH`, the host path to bind-mount there.
+
+`radardisplay.engr.colostate.edu` serves that root verbatim: the URL path
+`/<RADAR>/images/el_<n>/<moment>_<frame>.png` is the path on disk under it,
+and `json/el_<n>/radar_plot_<n>.json` sits beside each frame. Two frames
+fetched over HTTP on 2026-11-21 matched the files byte for byte. So
+`/api/upstream/tilt_steps` and `/api/upstream/tilt_image.png` read files
+where a tree resolves, and fall back to HTTP where none does.
+
+```bash
+SENTINEL_TILT_HOST_PATH=`backend_root`/htdocs
+SENTINEL_TILT_ROOT=/tilt
+```
+
+**Leave both unset on AQPI.** That tree is `htdocs/` inside the main archive mount
+`SENTINEL_BACKEND_ROOT` already names, so the path derives from `TILT_TREE`
+under it and setting these would give one directory a second name.
+
+Set them where the tilts are on a share the deployment does not already
+mount. XQPI is that case: FLOW's per-elevation frames sit beside the five
+AQPI radars under the AQPI root on the main archive, and an XQPI stack mounts only
+the secondary archive, so a path derived from its own `SENTINEL_BACKEND_ROOT` would name a
+directory that does not exist. Unset there leaves the tilt routes on HTTP,
+which for XQPI means no tilts at all, since nothing serves FLOW over HTTP.
+
+A profile declares whether it has a derivable tree at all through
+`TILT_TREE`, which is `"htdocs"` on AQPI and empty on XQPI. Empty resolves to
+no tree rather than to a plausible-looking wrong one, for the same reason
+`SENTINEL_RECENTFILES_DIR` above has no default.
+
 ## What's NOT an env var
 
 Some configuration deliberately lives in code or DB, not env:

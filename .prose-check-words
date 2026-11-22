@@ -81,3 +81,8 @@ homelab
 geocoder
 unprojection
 typeahead
+acked
+unack
+unacked
+htdocs
+autocorr
