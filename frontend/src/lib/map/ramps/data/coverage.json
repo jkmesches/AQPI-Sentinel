@@ -319,7 +319,7 @@
 			"pixels": 0,
 			"colors": "0/0",
 			"covered": true,
-			"note": "Covered from this radar's own colorbar at f75aab2c00ab, for the same reason as XSCV above, and with the same frame check outstanding. Run it when there is rain over Santa Cruz."
+			"note": "Covered from this radar's own colorbar at f75aab2c00ab, for the same reason as XSCV above. The frame check has since run and found one frame in the rolling hour carrying any paint at all, holding a single color, which read back correctly. That is corroboration rather than a measurement of the table, so the basis stays the colorbar. Run it again when enough rain reaches Santa Cruz to exercise the ramp."
 		},
 		{
 			"radar": "CBAND",

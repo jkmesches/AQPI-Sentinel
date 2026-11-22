@@ -316,6 +316,76 @@ async def check_geography(page: Page, rep: Report) -> None:
         "()=>window.__sentinelProbe().state.overlayErrors")
     rep.check("every geography overlay built without error", not errors,
               json.dumps(errors))
+    await check_rings(page, rep)
+
+
+#: The two ground layers the range rings used to be drawn as.
+DRAPED_RINGS = ("range-fill", "range-stroke")
+
+
+async def check_rings(page: Page, rep: Report) -> None:
+    """The range rings leave the ground when the mesh comes on.
+
+    A ring bounds the imagery, and the imagery floats, so a ring draped
+    on the terrain mesh followed the hillsides across its own scan.
+    The elevated replacement is a custom layer, which MapLibre leaves
+    out of `getStyle`, so its presence cannot be read off the style.
+    What can be read is that the draped pair goes quiet, and that the
+    picture changes when the altitude does.
+
+    Args:
+        page: The loaded console.
+        rep: Collects the results.
+    """
+    # The mesh is its own toggle. "Terrain" in the geography list is
+    # the hillshade, which drapes a raster and leaves the rings alone.
+    await page.locator("[data-dock-slot] button",
+                       has_text="3D terrain").first.click()
+    await page.wait_for_timeout(6000)
+    vis = await page.evaluate(
+        "()=>{const s=window.__sentinelProbe();"
+        " return Object.fromEntries(Object.entries(s.layers||{})"
+        " .filter(([k])=>k.startsWith('range-'))"
+        " .map(([k,v])=>[k,(v.layout&&v.layout.visibility)||'visible'])); }")
+    on = await page.evaluate("()=>window.__sentinelProbe().state.terrain3DOn")
+    rep.check("the mesh is on for this part", on is True, json.dumps(on))
+    rep.check("the draped rings go quiet under the mesh",
+              all(vis.get(k) == "none" for k in DRAPED_RINGS),
+              json.dumps(vis))
+    # The sheet slider moves every elevated thing. With no radar on
+    # there is no imagery, so whatever moves is the rings.
+    await page.locator("[data-dock-slot] button",
+                       has_text="CLEAR").first.click()
+    await page.wait_for_timeout(2500)
+    # By name. The last range input in the dock is the burn-scar year
+    # slider, whose range is a handful of years, so filling it with an
+    # altitude in meters is refused as a malformed value.
+    slider = page.locator("[data-sheet-altitude]").first
+    shots = []
+    for metres in ("250", "12000"):
+        await slider.fill(metres)
+        await slider.dispatch_event("input")
+        await page.wait_for_timeout(2500)
+        shots.append(await page.locator("[data-view]").first.screenshot())
+    moved = sum(1 for a, b in zip(shots[0], shots[1], strict=False) if a != b)
+    rep.check("and the elevated ones move with the sheet altitude",
+              moved > 0, f"{moved} bytes of the render differ")
+    await slider.fill("2000")
+    await slider.dispatch_event("input")
+    await page.wait_for_timeout(1500)
+    # The mesh back off, so the checks after this see the flat console
+    # they were written against.
+    await page.locator("[data-dock-slot] button",
+                       has_text="3D terrain").first.click()
+    await page.wait_for_timeout(4000)
+    back = await page.evaluate(
+        "()=>{const s=window.__sentinelProbe();"
+        " return Object.fromEntries(Object.entries(s.layers||{})"
+        " .filter(([k])=>k.startsWith('range-'))"
+        " .map(([k,v])=>[k,(v.layout&&v.layout.visibility)||'visible'])); }")
+    rep.check("and the draped ones come back when the mesh goes off",
+              all(back.get(k) == "visible" for k in DRAPED_RINGS),
+              json.dumps(back))
 
 
 async def check_compass(page: Page, rep: Report) -> None:
