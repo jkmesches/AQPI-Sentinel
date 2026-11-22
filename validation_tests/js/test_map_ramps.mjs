@@ -281,8 +281,16 @@ export function runTests(mod, ramps) {
       }
       check(`${name} carries the date it was read`,
         /^\d{4}-\d{2}-\d{2}$/.test(ramp.read_on), ramp.read_on);
+      // A unit, or a declared absence of one. The correlation
+      // coefficient is a ratio and has none, and requiring a truthy
+      // string would have had it carry an invented "ratio" or "-".
+      // `dimensionless` makes the empty string deliberate, so a unit
+      // somebody forgot still fails here.
       check(`${name} carries a unit and a label`,
-        !!ramp.unit && !!ramp.label, `${ramp.unit} / ${ramp.label}`);
+        !!ramp.label
+        && (!!ramp.unit || ramp.dimensionless === true),
+        `${JSON.stringify(ramp.unit)} / ${ramp.label} / `
+        + `dimensionless=${ramp.dimensionless}`);
     }
   }
 

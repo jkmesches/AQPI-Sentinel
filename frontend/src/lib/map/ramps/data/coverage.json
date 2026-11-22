@@ -26,12 +26,12 @@
 			"radar": "CBAND",
 			"folder": "sscb",
 			"moment": "CorrDifferentialReflectivity",
-			"ramp": null,
-			"frames": 3,
-			"pixels": 1052597,
-			"colors": "0/253",
-			"covered": false,
-			"note": "The C-band paints ZDR from a different colormap. Not one of the 253 colors in a million opaque pixels is within tolerance of the X-band ZDR ramp. sscb publishes no colorbar, so its own bounds cannot be read, and the readout stays off."
+			"ramp": "aqpi-cband-differential-reflectivity",
+			"frames": 1,
+			"pixels": 264788,
+			"colors": "253/253",
+			"covered": true,
+			"note": "The C-band paints ZDR from its own colormap, which is why it read 0 of 253 against the X-band table. Its renderer gives from_list(\"zdr\", 13 anchors, N=256) over Normalize(-1, 5), where the X-band uses HomeyerRainbow over (-2, 4), so both the map and the range differ. Read from c_band_plotting.py on the C-band producer host 2026-11-21 and measured here at 253/253. The 253 is the count the renderer's own colormap collapses to, and it is the same 253 the earlier rejection reported, which is what confirms this is the right source. sscb still publishes no colorbar; the table came from the code."
 		},
 		{
 			"radar": "CBAND",
@@ -47,12 +47,12 @@
 			"radar": "CBAND",
 			"folder": "sscb",
 			"moment": "PhiDP",
-			"ramp": null,
-			"frames": 3,
-			"pixels": 196595,
-			"colors": "0/256",
-			"covered": false,
-			"note": "Same as the C-band's ZDR. Its prefix is PhiDP rather than FilteredPhiDP, which moment_to_prefix() already special-cases, and the colors are a different map."
+			"ramp": "aqpi-cband-differential-phase",
+			"frames": 1,
+			"pixels": 264788,
+			"colors": "256/256",
+			"covered": true,
+			"note": "Its own colormap, like the C-band's ZDR: from_list(\"phidp_grad\", 10 colors, N=256) over Normalize(-180, 180), against the X-band's HomeyerRainbow over the same range. Read from c_band_plotting.py on the C-band producer host 2026-11-21 and measured at 256/256, the same 256 the earlier rejection counted. The renderer writes the colors at explicit positions, which come out uniform at k/9 because its value array steps by 40 the whole way across, so the stored ramp is the plain uniform list; the two forms were compared over all 256 triples. Its prefix is PhiDP rather than FilteredPhiDP, unfiltered, which moment_to_prefix() already special-cases."
 		},
 		{
 			"radar": "CBAND",
@@ -325,12 +325,12 @@
 			"radar": "CBAND",
 			"folder": "sscb",
 			"moment": "RhoHV",
-			"ramp": null,
+			"ramp": "aqpi-cband-rhohv",
 			"frames": 1,
-			"pixels": 0,
-			"colors": "0/0",
-			"covered": false,
-			"note": "The only radar that publishes RhoHV at all: the five X-band folders carry Reflectivity, Zdr, FilteredPhiDP and Velocity, and the route answers 404 for RhoHV on every one of them. The C-band publishes no colorbar, and its Zdr and PhiDP already fail against the X-band tables at 0/253 and 0/256, so it paints these from a colormap nothing here has read. Reading RhoHV's needs the renderer's source on the CoSMoS host rather than anything on this side."
+			"pixels": 2477028,
+			"colors": "254/254",
+			"covered": true,
+			"note": "The only radar that publishes RhoHV at all: the five X-band folders carry Reflectivity, Zdr, FilteredPhiDP and Velocity, and the route answers 404 for RhoHV on every one of them. Plain matplotlib viridis over Normalize(0.0, 1.0), with both bounds literal in c_band_plotting.py on the C-band producer host rather than taken from the 0-to-1 convention, which is what makes the scale a reading instead of a guess. Measured at 254/254, and 254 is viridis's own distinct count out of 256 entries. The frame is 2.9 MB against 0.2 to 0.6 for the others because the renderer applies its (ncp > 0.7) and (snr > 5) mask to dbz, zdr, vel and phidp and writes rhohv raw, so the speckle is the data."
 		}
 	],
 	"shared_colorbars": {

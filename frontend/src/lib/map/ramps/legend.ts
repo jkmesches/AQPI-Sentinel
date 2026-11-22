@@ -626,10 +626,16 @@ export interface BarLayout {
 /**
  * The bar and its ticks, sized to fit the labels inside the available width.
  *
- * Two passes, because the side padding depends on the end labels and those
- * depend on the step the remaining width allows. The second pass can only
- * coarsen the step, so its labels are no wider than the first's and its
- * padding no larger, which makes the result safe rather than merely close.
+ * The side padding depends on the end labels and those depend on the step
+ * the remaining width allows, so this settles the two against each other.
+ *
+ * It used to take two passes and return the padding from the first with
+ * the ticks from the second, on the reasoning that a narrower bar only
+ * coarsens the step and a coarser step has no wider labels. The second
+ * half of that is false. The C-band's ZDR bar runs -1 to 5, and at 300 px
+ * it lands on a step of 0.5, whose end labels "-1.0" and "5.0" are twice
+ * the width of the "-1" and "5" the padding had been reserved for, so the
+ * end label hung off the bar by a character.
  *
  * @param ramp The table.
  * @param widthPx Everything the legend has to draw in.
@@ -652,18 +658,31 @@ export function barLayout(
 		ticks[0].label.length,
 		ticks[ticks.length - 1].label.length) * charPx / 2;
 
+	const noRoom = (p: number): RangeError => new RangeError(
+		`${widthPx} px leaves no bar once ${p} px of label room is ` +
+		`taken from each end`);
+
 	let pad = 0;
 	let bar = widthPx;
 	let ticks = fitTicks(ramp, bar, charPx, gapChars);
-	for (let pass = 0; pass < 2; pass++) {
-		pad = padFor(ticks);
+	// Bounded, and it settles rather than runs out: the padding only ever
+	// grows, which only ever narrows the bar, which only ever coarsens the
+	// step, and the steps come from a finite ladder. Six rounds is far
+	// more than any ramp here needs.
+	for (let pass = 0; pass < 6; pass++) {
+		const want = padFor(ticks);
+		if (want <= pad) break;
+		pad = want;
 		bar = widthPx - 2 * pad;
-		if (bar <= charPx) {
-			throw new RangeError(
-				`${widthPx} px leaves no bar once ${pad} px of label room is ` +
-				`taken from each end`);
-		}
+		if (bar <= charPx) throw noRoom(pad);
 		ticks = fitTicks(ramp, bar, charPx, gapChars);
+	}
+	// The padding has to hold the labels being returned, not the ones some
+	// earlier round produced, and the bar has to still fit them.
+	if (padFor(ticks) > pad || !fitsLabels(ticks, bar, charPx, gapChars)) {
+		throw new RangeError(
+			`${widthPx} px did not settle: ${ticks.length} ticks ending ` +
+			`"${ticks[ticks.length - 1].label}" against ${pad} px of pad`);
 	}
 	return { padPx: pad, barPx: bar, ticks };
 }

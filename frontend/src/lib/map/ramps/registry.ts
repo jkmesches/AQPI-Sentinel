@@ -38,6 +38,12 @@ import aqpiXReflectivity from './data/aqpi-xband-reflectivity.json';
 import aqpiXVelocity from './data/aqpi-xband-velocity.json';
 import aqpiXZdr from './data/aqpi-xband-differential-reflectivity.json';
 import aqpiXPhidp from './data/aqpi-xband-differential-phase.json';
+// The C-band's own three. It shares the X-band's reflectivity and
+// velocity tables, which its renderer defines identically, and paints
+// the other three from custom ramps of its own.
+import aqpiCZdr from './data/aqpi-cband-differential-reflectivity.json';
+import aqpiCPhidp from './data/aqpi-cband-differential-phase.json';
+import aqpiCRhohv from './data/aqpi-cband-rhohv.json';
 
 /** Every checked-in ramp, by the name coverage.json refers to it by. */
 export const RAMPS: Readonly<Record<string, Ramp>> = {
@@ -49,6 +55,9 @@ export const RAMPS: Readonly<Record<string, Ramp>> = {
 	'aqpi-xband-velocity': aqpiXVelocity as Ramp,
 	'aqpi-xband-differential-reflectivity': aqpiXZdr as Ramp,
 	'aqpi-xband-differential-phase': aqpiXPhidp as Ramp,
+	'aqpi-cband-differential-reflectivity': aqpiCZdr as Ramp,
+	'aqpi-cband-differential-phase': aqpiCPhidp as Ramp,
+	'aqpi-cband-rhohv': aqpiCRhohv as Ramp,
 	// The composite products. These come from radarca's own colormap
 	// images rather than from the mount, since the publisher writes a
 	// colorbar per radar moment and nothing per product.

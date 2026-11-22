@@ -40,8 +40,17 @@ export function runTests(mod, coverage, products) {
   {
     // The rule the plan states outright: anything short of full coverage
     // means the ramp is wrong for that product, and the readout stays off.
-    check('there is at least one rejected pair to check', rejected.length > 0,
-      `${rejected.length}`);
+    //
+    // This used to demand that at least one pair be rejected, so the loop
+    // below was never testing nothing. That made a record with no
+    // failures left in it fail, which is a rule that punishes the work
+    // going well. What it was really after is that every pair lands in
+    // one bucket or the other, and that holds whichever is empty.
+    check('every pair is either covered or rejected, with none adrift',
+      covered.length + rejected.length === coverage.pairs.length
+      && coverage.pairs.length > 0,
+      `${covered.length} covered, ${rejected.length} rejected, `
+      + `${coverage.pairs.length} pairs`);
     for (const p of rejected) {
       check(`${p.radar}/${p.moment} has no ramp`,
         rampFor(p.radar, p.moment) === null,
@@ -60,18 +69,37 @@ export function runTests(mod, coverage, products) {
     check('the C-band reflectivity reads',
       rampFor('CBAND', 'CorrReflectivity') !== null);
     check('the C-band velocity reads', rampFor('CBAND', 'Velocity') !== null);
-    check('the C-band ZDR does not',
-      rampFor('CBAND', 'CorrDifferentialReflectivity') === null);
-    check('the C-band PhiDP does not', rampFor('CBAND', 'PhiDP') === null);
+    // Asked as "its own table", not as "no table". These two read 0 of
+    // 253 and 0 of 256 against the X-band's until the renderer was read
+    // and their real colormaps checked in, and a rule that demanded the
+    // gap would have failed on the gap closing. What has to stay true is
+    // that nothing hands the C-band an X-band table for a moment it
+    // paints differently, which is the fault those counts were catching.
+    check('the C-band ZDR has a table of its own',
+      rampFor('CBAND', 'CorrDifferentialReflectivity') !== null
+      && rampFor('CBAND', 'CorrDifferentialReflectivity')
+         !== rampFor('XEBY', 'CorrDifferentialReflectivity'));
+    check('the C-band PhiDP has a table of its own',
+      rampFor('CBAND', 'PhiDP') !== null
+      && rampFor('CBAND', 'PhiDP') !== rampFor('XEBY', 'FilteredPhiDP'));
+    check('and its ZDR range is the renderer\'s, not the X-band\'s',
+      rampFor('CBAND', 'CorrDifferentialReflectivity')?.min === -1
+      && rampFor('CBAND', 'CorrDifferentialReflectivity')?.max === 5,
+      `${rampFor('CBAND', 'CorrDifferentialReflectivity')?.min} to `
+      + `${rampFor('CBAND', 'CorrDifferentialReflectivity')?.max}`);
     // Asked as "has no table", not as "has no row". The row appeared the
     // day someone looked, and a rule that demanded its absence would have
     // failed on the record getting better rather than on anything breaking.
-    const rhohv = coverageFor('CBAND', 'RhoHV');
-    check('the C-band RhoHV has no table',
-      rampFor('CBAND', 'RhoHV') === null);
-    check('and if it has been looked at, the record says why not',
-      rhohv === null || (rhohv.covered === false && !!rhohv.note),
-      rhohv ? `covered=${rhohv.covered} note=${!!rhohv.note}` : 'no row');
+    // The C-band is the only radar that publishes RhoHV, so whatever
+    // table it has cannot be shared with anyone, and the question is
+    // whether it reads at all and on its own scale.
+    const rhohv = rampFor('CBAND', 'RhoHV');
+    check('the C-band RhoHV reads', rhohv !== null);
+    check('on the renderer\'s own 0 to 1', rhohv?.min === 0 && rhohv?.max === 1,
+      `${rhohv?.min} to ${rhohv?.max}`);
+    check('and no X-band radar is offered it',
+      ['XEBY', 'XSCV', 'XSCW', 'XSCR', 'XSWR']
+        .every((r) => rampFor(r, 'RhoHV') === null));
     check('the C-band reflectivity is the same object XEBY gets',
       rampFor('CBAND', 'CorrReflectivity')
       === rampFor('XEBY', 'CorrReflectivity'));

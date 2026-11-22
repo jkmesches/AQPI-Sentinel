@@ -217,6 +217,20 @@ export function readoutHint(ramp: Ramp): string | null {
 		+ 'number here would be precision the picture does not carry.';
 }
 
+/**
+ * A number with its unit, or the bare number for a dimensionless one.
+ *
+ * The correlation coefficient has no unit, and appending an empty one
+ * left a trailing space inside the readout chip.
+ *
+ * @param n The formatted number.
+ * @param unit The ramp's unit, which may be empty.
+ * @returns What the chip shows.
+ */
+function withUnit(n: string, unit: string): string {
+	return unit ? `${n} ${unit}` : n;
+}
+
 export function readoutText(ramp: Ramp, reading: Reading | null): string | null {
 	if (!reading) return null;
 	if (rampKind(ramp) === 'continuous') {
@@ -226,8 +240,9 @@ export function readoutText(ramp: Ramp, reading: Reading | null): string | null 
 		// carry, and a velocity reported as -10.57 m/s off a bar that
 		// resolves to about one is a number with two invented digits.
 		const step = Math.abs(ramp.max - ramp.min) / ramp.stops.length;
-		return `${reading.value.toFixed(bandDecimals(step))} ${ramp.unit}`;
+		return withUnit(reading.value.toFixed(bandDecimals(step)), ramp.unit);
 	}
 	const d = bandDecimals(reading.hi - reading.lo);
-	return `${reading.lo.toFixed(d)} to ${reading.hi.toFixed(d)} ${ramp.unit}`;
+	return withUnit(
+		`${reading.lo.toFixed(d)} to ${reading.hi.toFixed(d)}`, ramp.unit);
 }

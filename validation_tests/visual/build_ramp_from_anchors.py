@@ -407,6 +407,10 @@ def assemble(args: argparse.Namespace, anchors: list[tuple[int, int, int]],
     ramp: dict[str, Any] = {
         "moment": args.moment,
         "unit": args.unit,
+        # Said out loud, because an empty unit otherwise reads as a
+        # field somebody forgot. The correlation coefficient is a ratio
+        # and has none, and inventing one for it would be worse.
+        **({"dimensionless": True} if not args.unit else {}),
         "label": args.label,
         "min": round(edges[0], PLACES),
         "max": round(edges[-1], PLACES),

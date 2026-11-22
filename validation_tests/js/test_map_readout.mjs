@@ -203,6 +203,23 @@ export function runTests(mod, ramps) {
       readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 }));
   }
 
+  console.log('\na dimensionless ramp prints no unit and no gap:');
+  {
+    // The correlation coefficient is a ratio. Appending an empty unit
+    // left "0.52 " with a trailing space inside the readout chip, which
+    // shows as an off-center number against the chip's padding.
+    const rho = ramps['aqpi-cband-rhohv'];
+    const r = rho.stops[128];
+    const text = readoutText(rho, {
+      value: r.value, lo: r.lo, hi: r.hi, distance: 0
+    });
+    check('it has no unit to print', rho.unit === '', JSON.stringify(rho.unit));
+    check('and says that is deliberate', rho.dimensionless === true);
+    check('so the reading ends in a digit', /\d$/.test(text), text);
+    check('and carries no trailing space', text === text.trim(),
+      JSON.stringify(text));
+  }
+
   console.log('\na continuous ramp reports one value:');
   {
     const vel = ramps['aqpi-xband-velocity'];
