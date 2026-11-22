@@ -33,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 from backend.digest import (                                   # noqa: E402
-    DEFAULTS, DigestTask, Subject, avail_color, bar_cells, describe,
+    DEFAULTS, DigestTask, Subject, avail_color, bar_cells, default_title,
+    describe, report_title,
     evidence_url, render_text, spark, subject_line, subject_name, subject_title,
     bar_bands, blend_color, render_html, _wire_len, _BAR_PX,
     _GMAIL_CLIP_BYTES, _COMPACT_ABOVE_WIRE_BYTES,
@@ -231,13 +232,27 @@ def main() -> int:
     down = {"key": "XEBY", "availability": 0.0}
     deg = {"key": "XSWR", "availability": 58.3}
     ok = {"key": "CBAND", "availability": 99.9}
+    # The rule: the report names itself, then says what it found. Each
+    # half is asked for separately, and the title is passed in, so these
+    # read the same on AQPI, on XQPI and on a profile nobody has added
+    # yet.
+    name = "Test Report"
     check("all-clear says so",
-          subject_line({"radars": [ok], "products": []}) == "Sentinel — all nominal")
+          subject_line({"radars": [ok], "products": []}, name)
+          == f"{name} — all nominal")
     check("a down subject leads the subject line",
-          "1 down" in subject_line({"radars": [down, ok], "products": []}))
+          "1 down" in subject_line({"radars": [down, ok], "products": []}, name))
     check("down and degraded are both counted",
-          subject_line({"radars": [down, deg], "products": []})
-          == "Sentinel — 1 down, 1 degraded")
+          subject_line({"radars": [down, deg], "products": []}, name)
+          == f"{name} — 1 down, 1 degraded")
+    check("the report names itself before its verdict",
+          subject_line({"radars": [down], "products": []}, name).startswith(name))
+    check("and names the deployment when nothing is configured",
+          subject_line({"radars": [ok], "products": []})
+          .startswith(default_title()),
+          default_title())
+    check("a title of spaces is the same as none",
+          report_title({"title": "   "}) == default_title())
 
     print("evidence links:")
     u = evidence_url("https://x.test", "layer2.radar.XSWR", "XSWR",

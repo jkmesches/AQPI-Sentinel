@@ -158,9 +158,25 @@ async def daily(request: Request, since: str | None = None,
 
 
 @admin_router.get("")
-async def get_config(request: Request,
-                     user: Annotated[dict, Depends(require_admin)]):
-    return await load_config(request.app.state.store.pool)
+async def get_config(
+    request: Request,
+    user: Annotated[dict, Depends(require_admin)],  # noqa: ARG001  auth gate
+) -> dict:
+    """The stored digest config, plus the title an empty one falls back to.
+
+    Args:
+        request: The request, for the connection pool.
+        user: The admin the dependency resolved, which gates the route.
+
+    Returns:
+        The config as the admin page edits it.
+    """
+    cfg = await load_config(request.app.state.store.pool)
+    # The name an empty title falls back to, so the admin page shows it as
+    # the placeholder rather than deriving the profile's name a second time
+    # and disagreeing with the mail that goes out.
+    cfg["title_default"] = _digest.default_title()
+    return cfg
 
 
 @admin_router.put("")
@@ -169,7 +185,7 @@ async def put_config(request: Request,
                      body: dict = Body(...)):
     cfg = dict(_digest.DEFAULTS)
     cfg.update(await load_config(request.app.state.store.pool))
-    for k in ("enabled", "recipients", "hour", "tz", "products",
+    for k in ("enabled", "recipients", "hour", "tz", "products", "title",
               "default_source", "subjects"):
         if k in body:
             cfg[k] = body[k]
@@ -193,6 +209,14 @@ async def put_config(request: Request,
     cfg["recipients"] = [str(x).strip() for x in cfg["recipients"] if str(x).strip()]
     if cfg.get("enabled") and not cfg["recipients"]:
         raise HTTPException(400, "enable the digest only once it has a recipient")
+
+    # Empty is how a deployment asks for its own name, so an empty title is
+    # stored rather than rejected. A newline would split the subject header.
+    title = " ".join(str(cfg.get("title") or "").split())
+    if len(title) > _digest.TITLE_LIMIT:
+        raise HTTPException(
+            400, f"title must be {_digest.TITLE_LIMIT} characters or fewer")
+    cfg["title"] = title
 
     cfg["default_source"] = _clean_default_source(cfg.get("default_source"))
     cfg["subjects"] = _clean_subjects(cfg.get("subjects"))
@@ -242,9 +266,10 @@ async def send_test(request: Request,
                                  tz=cfg.get("tz") or "UTC",
                                  products=bool(cfg.get("products", True)),
                                  cfg=cfg)
-    subject = "[TEST] " + _digest.subject_line(data)
-    text = _digest.render_text(data, SETTINGS.public_url)
-    html = _digest.render_html(data, SETTINGS.public_url)
+    title = _digest.report_title(cfg)
+    subject = "[TEST] " + _digest.subject_line(data, title)
+    text = _digest.render_text(data, SETTINGS.public_url, title)
+    html = _digest.render_html(data, SETTINGS.public_url, title=title)
 
     from ...auth.email import send_transactional
     ok, err = await send_transactional(pool, to=to, subject=subject,

@@ -150,6 +150,13 @@ DEFAULTS: dict[str, Any] = {
     # nothing happened is the quietest kind of failure this module has. Keyed
     # on the capability flag, not the profile name, so a third profile has to
     # answer the question. See config.HAS_RADARCA.
+    # What the report calls itself, in the subject line and at the top of
+    # the page. Empty means the deployment's own name, worked out by
+    # `report_title`. Three places carried the literal "AQPI Sentinel",
+    # so the XQPI deployment mailed a daily report about a network it
+    # does not watch, under another project's name, to people who work
+    # on both.
+    "title":      "",
     "default_source": {"radar": _DEFAULT_SOURCE, "product": _DEFAULT_SOURCE},
     # Per-subject overrides, keyed "<kind>:<key>" — e.g. "radar:XEBY".
     #
@@ -1100,10 +1107,21 @@ def _rows(data: dict, kind: str) -> list[dict]:
     return data["radars"] if kind == "radar" else data["products"]
 
 
-def render_text(data: dict, public_url: str = "") -> str:
+def render_text(data: dict, public_url: str = "", title: str = "") -> str:
+    """Render the plain-text part, shown by clients that cannot do HTML.
+
+    Args:
+        data: The computed report.
+        public_url: The dashboard to link to, or empty to omit links.
+        title: What the report calls itself, or empty for the default.
+
+    Returns:
+        The text body.
+    """
     since, until = data["since"], data["until"]
     L: list[str] = []
-    L.append(f"AQPI Sentinel — 24 h to {data['window_label']}")
+    L.append(f"{title.strip() or default_title()} — 24 h to "
+             f"{data['window_label']}")
     L.append("")
 
     for kind, heading, prefix in (("radar", "RADARS", "layer2.radar."),
@@ -1148,19 +1166,60 @@ def render_text(data: dict, public_url: str = "") -> str:
     return "\n".join(L)
 
 
-def subject_line(data: dict) -> str:
-    """Verdict first, so the report is readable without opening it."""
+#: How long a title may be, in characters.
+#:
+#: Gmail shows roughly the first 70 characters of a subject on a phone,
+#: and the verdict comes after the title, so a long one would push the
+#: part that matters off the end of the line it is there to lead.
+TITLE_LIMIT = 48
+
+
+def default_title() -> str:
+    """What this deployment calls its report when nothing is configured.
+
+    Returns:
+        The profile's name and the product, e.g. "AQPI Sentinel".
+    """
+    from .config import SETTINGS as _S
+    name = (_S.profile or "").strip().upper()
+    return f"{name} Sentinel" if name else "Sentinel"
+
+
+def report_title(cfg: dict | None = None) -> str:
+    """The name the report goes out under.
+
+    Args:
+        cfg: The digest config, or None for the deployment's own name.
+
+    Returns:
+        The configured title, or the deployment's name when none is set.
+    """
+    want = str((cfg or {}).get("title") or "").strip()
+    return want or default_title()
+
+
+def subject_line(data: dict, title: str = "") -> str:
+    """Verdict first, so the report is readable without opening it.
+
+    Args:
+        data: The computed report.
+        title: What the report calls itself, or empty for the default.
+
+    Returns:
+        The subject line.
+    """
+    who = title.strip() or default_title()
     rows = data["radars"] + data["products"]
     down = [r for r in rows if r["availability"] is not None and r["availability"] <= 0.5]
     degraded = [r for r in rows
                 if r["availability"] is not None and 0.5 < r["availability"] < 95]
     if down and degraded:
-        return (f"Sentinel — {len(down)} down, {len(degraded)} degraded")
+        return f"{who} — {len(down)} down, {len(degraded)} degraded"
     if down:
-        return f"Sentinel — {len(down)} down"
+        return f"{who} — {len(down)} down"
     if degraded:
-        return f"Sentinel — {len(degraded)} degraded"
-    return "Sentinel — all nominal"
+        return f"{who} — {len(degraded)} degraded"
+    return f"{who} — all nominal"
 
 
 # ---------------------------------------------------------------------------
@@ -1375,7 +1434,8 @@ def _wire_len(html: str) -> int:
     return len(quopri.encodestring(html.encode("utf-8")))
 
 
-def render_html(data: dict, public_url: str = "", compact: bool | None = None) -> str:
+def render_html(data: dict, public_url: str = "", compact: bool | None = None,
+                title: str = "") -> str:
     """Render the report.
 
     `compact` draws each bin as one solid swatch instead of a proportional
@@ -1388,6 +1448,15 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None) -
     Losing proportional detail is a real cost. Losing the tail of the report,
     silently, is a worse one, so detail is what gives way. Passing True or
     False overrides the automatic choice for tests and previews.
+
+    Args:
+        data: The computed report.
+        public_url: The dashboard to link to, or empty to omit links.
+        compact: Override the automatic choice made above.
+        title: What the report calls itself, or empty for the default.
+
+    Returns:
+        The HTML body.
     """
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from pathlib import Path as _P
@@ -1415,7 +1484,8 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None) -
         return env.get_template("digest.html").render(
             d=data, sections=sections, public_url=public_url,
             compact=is_compact,
-            subject=subject_line(data),
+            title=title.strip() or default_title(),
+            subject=subject_line(data, title),
         # Web-safe stack on purpose. Email clients are inconsistent about
         # system-font keywords, and the long -apple-system stack cost ~3 KB
         # repeated across every row for a difference nobody would notice.
@@ -1607,9 +1677,10 @@ class DigestTask:
                              tz=str(self.cfg.get("tz") or "UTC"),
                              products=bool(self.cfg.get("products", True)),
                              cfg=self.cfg)
-        subject = subject_line(data)
-        text = render_text(data, _S.public_url)
-        html = render_html(data, _S.public_url)
+        title = report_title(self.cfg)
+        subject = subject_line(data, title)
+        text = render_text(data, _S.public_url, title)
+        html = render_html(data, _S.public_url, title=title)
         sent, failed = [], []
         for to in recipients:
             ok, err = await send_transactional(pool, to=to, subject=subject,

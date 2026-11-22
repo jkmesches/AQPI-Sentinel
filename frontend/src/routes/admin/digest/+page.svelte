@@ -23,6 +23,10 @@
 		hour: number;
 		tz: string;
 		products: boolean;
+		/** What the report calls itself, or '' for this deployment's name.
+		 *  Empty is the normal state and is stored as empty, so a
+		 *  deployment that is renamed follows without an edit here. */
+		title: string;
 		default_source: Record<string, Source>;
 		/** Keyed "<kind>:<id>", and holding only DEVIATIONS from the default.
 		 *  An absent entry means "shown, from the default source" — the server
@@ -33,7 +37,7 @@
 
 	let v = $state<DigestConfig>({
 		enabled: false, recipients: [], hour: 7,
-		tz: 'America/Denver', products: true,
+		tz: 'America/Denver', products: true, title: '',
 		default_source: { radar: 'frontend', product: 'frontend' },
 		subjects: {}
 	});
@@ -54,6 +58,8 @@
 	 *  <details> element. Same reasoning as GroupRow on the home page. */
 	let openPanel = $state<Record<string, boolean>>({ radar: false, product: false });
 	let recipientsText = $state('');
+	/** What an empty title falls back to, as the server works it out. */
+	let defaultTitle = $state('Sentinel');
 	let loading = $state(true);
 	let saving = $state(false);
 	let testing = $state(false);
@@ -75,7 +81,12 @@
 		try {
 			const r = await fetch('/api/admin/digest');
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			v = { ...v, ...(await r.json()) };
+			const got = await r.json();
+			// Kept out of `v`, so it is never sent back as if it were an
+			// edit and never counts toward the dirty check.
+			defaultTitle = String(got.title_default ?? 'Sentinel');
+			delete got.title_default;
+			v = { ...v, ...got, title: String(got.title ?? '') };
 			recipientsText = (v.recipients ?? []).join('\n');
 			testTo = auth.user?.email ?? '';
 
@@ -346,6 +357,23 @@
 				<input id="dg-enabled" type="checkbox" bind:checked={v.enabled} />
 				enabled
 			</label>
+
+			<label for="dg-title" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">title</label>
+			<div>
+				<input
+					id="dg-title"
+					type="text"
+					maxlength="48"
+					bind:value={v.title}
+					placeholder={defaultTitle}
+					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
+				/>
+				<div class="text-[11px] text-[var(--color-muted)] pt-1">
+					Leads the subject line and heads the email. Leave it empty for
+					<span class="num text-[var(--color-default)]">{defaultTitle}</span>,
+					which follows this deployment rather than being typed in.
+				</div>
+			</div>
 
 			<label for="dg-to" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">recipients</label>
 			<div>
