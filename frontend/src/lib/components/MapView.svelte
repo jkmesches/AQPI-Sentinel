@@ -37,6 +37,7 @@
 	import MapCompass from '$lib/components/MapCompass.svelte';
 	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
 	import { portal } from '$lib/map/portal';
+	import { orderSteps } from '$lib/map/steps';
 	import { ElevatedSheet } from '$lib/map/layers/elevatedLayer';
 	import {
 		ElevatedRings, type RingSpec
@@ -1829,6 +1830,9 @@
 		stepIdx = same >= 0 ? same : 0;
 	}
 
+	/** How many steps the last list lost to a repeated timestamp. */
+	let stepsDropped = $state(0);
+
 	/**
 	 * Replace the step list and say which composite it describes.
 	 *
@@ -1840,7 +1844,14 @@
 	 *     source (radars, NEXRAD, tilt).
 	 */
 	function setSteps(next: Step[], forProduct: string): void {
-		steps = next;
+		const tidy = orderSteps(next);
+		stepsDropped = tidy.dropped;
+		if (tidy.dropped > 0) {
+			console.warn(
+				`${forProduct || 'this source'} published ${next.length} steps `
+				+ `holding ${tidy.steps.length} distinct times`);
+		}
+		steps = tidy.steps;
 		stepsFor = forProduct;
 		// A link asked for a time, not a step. Matched once, against the
 		// first list that arrives, and then forgotten, so a later refresh
@@ -3802,6 +3813,11 @@
 				watershedsOn, reservoirsOn, terrainOn, terrain3DOn,
 				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
 				stepIdx, stepCount: steps.length, stepsFor, playing,
+				// How many of the published steps repeated a time that
+				// another already held. Nonzero means the manifest is
+				// malformed, which no banner says and a reader would
+				// otherwise meet as a scrubber with dead positions.
+				stepsDropped,
 				mapDead, prefsReady,
 				overlayErrors: { ...overlayErrors },
 				// How many times each overlay has been torn down and built.
