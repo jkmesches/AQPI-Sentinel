@@ -29,7 +29,7 @@ const RAMP = {
 
 const VIEW = {
   site: 'AQPI Sentinel',
-  product: 'Total Precip · 1 h QPE',
+  product: 'Rain Accumulation · 1 hour',
   moment: 'Reflectivity',
   unit: 'in',
   stepLabel: 'SAT 21-Nov-2026  04:52:00',
@@ -113,7 +113,10 @@ export function runTests(mod) {
   console.log('\nthe caption never loses the time:');
   {
     const c = exportCaption(VIEW);
-    check('the title names the product', c.title.includes('1 h QPE'),
+    // Read from the fixture. A literal label here made renaming a
+    // product in the picker fail a test about captions, which is a
+    // rule standing in the way of what it does not cover.
+    check('the title names the product', c.title.includes(VIEW.product),
       c.title);
     check('...and the moment', c.title.includes('Reflectivity'));
     check('...and the unit', c.title.includes('in'));

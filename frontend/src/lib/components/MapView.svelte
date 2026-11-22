@@ -4164,23 +4164,39 @@
 				{ key: 'none', label: 'Off' }
 			]
 		},
+		// Every label is unique across the whole list, not only inside
+		// its group. The pane's own corner shows the selected one with
+		// no group beside it, so two products called "Precip Rate",
+		// which is what the radar's and the forecast's were, left the
+		// map saying something true of either.
+		//
+		// The windows below are measured off each product's own
+		// manifest rather than assumed. The two QPE products publish
+		// every 2 minutes and differ in the window baked into each
+		// image. The two forecast accumulations share one timebase out
+		// to 5 days and differ in whether a frame carries its own rain
+		// or the running total, which is the publisher's own
+		// distinction: radarca's accordion calls them "Hourly
+		// Accumulation" and "Total Precipitation". Hourly is its word
+		// and not a reading of the manifest, whose steps widen from 60
+		// to 120 and 180 minutes further out.
 		{
 			label: 'Radar Data',
 			options: [
-				{ key: 'qpe_15min',         label: 'Total Precip · 15 min QPE' },
-				{ key: 'qpe_1hr',           label: 'Total Precip · 1 h QPE' },
-				{ key: 'precip_rate_radar', label: 'Precip Rate' },
-				{ key: 'comp_ref',          label: 'Reflectivity' },
-				{ key: 'comp_now',          label: 'Reflectivity Nowcast' }
+				{ key: 'qpe_15min',         label: 'Rain Accumulation · 15 min' },
+				{ key: 'qpe_1hr',           label: 'Rain Accumulation · 1 hour' },
+				{ key: 'precip_rate_radar', label: 'Rain Rate' },
+				{ key: 'comp_ref',          label: 'Reflectivity · Composite' },
+				{ key: 'comp_now',          label: 'Reflectivity · Nowcast' }
 			]
 		},
 		{
 			label: 'Atmospheric Forecast',
 			options: [
-				{ key: 'fcst_total_precip',     label: 'Total Precip' },
-				{ key: 'fcst_total_precip_cum', label: 'Total Precip (cumulative)' },
-				{ key: 'fcst_precip_rate',      label: 'Precip Rate' },
-				{ key: 'fcst_temp',             label: 'Temperature' }
+				{ key: 'fcst_total_precip',     label: 'Forecast Rain · hourly' },
+				{ key: 'fcst_total_precip_cum', label: 'Forecast Rain · cumulative' },
+				{ key: 'fcst_precip_rate',      label: 'Forecast Rain Rate' },
+				{ key: 'fcst_temp',             label: 'Forecast Temperature' }
 			]
 		},
 		{
@@ -4188,11 +4204,15 @@
 			// these render in a smaller bounding box than the radar /
 			// forecast composites, and the picker handles that via
 			// COMP_EXTENT.
+			// Depth and level were the pair readers mixed up most, and
+			// their own scales say which is which: depth runs 0 to 5 m,
+			// the water standing on the ground, while level runs -4 to
+			// 10 m, the elevation of its surface against a datum.
 			label: 'CoSMoS (Bay)',
 			options: [
-				{ key: 'water_depth',     label: 'Water Depth' },
+				{ key: 'water_depth',     label: 'Flood Depth' },
 				{ key: 'water_level',     label: 'Water Level' },
-				{ key: 'max_water_depth', label: 'Max Water Depth' },
+				{ key: 'max_water_depth', label: 'Max Flood Depth' },
 				{ key: 'max_water_level', label: 'Max Water Level' }
 			]
 		}

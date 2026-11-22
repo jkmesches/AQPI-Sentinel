@@ -358,20 +358,24 @@ export function stageTooltip(s: string): string {
 //
 // Anything not in this map falls through to a title-cased
 // underscore-replaced version of the id — fine for one-off products.
+// These match the map's own picker, in $lib/components/MapView.svelte,
+// so a product reads the same in a check name, a push-routing filter
+// and the corner of the pane showing it. They differ from the picker's
+// only in carrying their group, since nothing groups them here.
 const PRODUCT_LABELS: Record<string, string> = {
-	qpe_15min:             'Total Precip · 15 min QPE',
-	qpe_1hr:               'Total Precip · 1 hour QPE',
-	precip_rate_radar:     'Precip Rate (radar)',
-	comp_ref:              'Composite Reflectivity',
-	comp_now:              'Reflectivity Nowcast',
-	fcst_total_precip:     'Forecast · Total Precip',
-	fcst_total_precip_cum: 'Forecast · Total Precip (cumulative)',
-	fcst_precip_rate:      'Forecast · Precip Rate',
-	fcst_temp:             'Forecast · Temperature',
-	water_level:           'Water Level',
-	water_depth:           'Water Depth',
-	max_water_level:       'Max Water Level',
-	max_water_depth:       'Max Water Depth'
+	qpe_15min:             'Rain Accumulation · 15 min',
+	qpe_1hr:               'Rain Accumulation · 1 hour',
+	precip_rate_radar:     'Rain Rate (radar)',
+	comp_ref:              'Reflectivity · Composite',
+	comp_now:              'Reflectivity · Nowcast',
+	fcst_total_precip:     'Forecast Rain · hourly',
+	fcst_total_precip_cum: 'Forecast Rain · cumulative',
+	fcst_precip_rate:      'Forecast Rain Rate',
+	fcst_temp:             'Forecast Temperature',
+	water_level:           'Water Level (CoSMoS)',
+	water_depth:           'Flood Depth (CoSMoS)',
+	max_water_level:       'Max Water Level (CoSMoS)',
+	max_water_depth:       'Max Flood Depth (CoSMoS)'
 };
 
 // Friendly names for L0 site checks + L1 vector overlays + L1 streams.
