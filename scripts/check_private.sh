@@ -19,23 +19,32 @@
 # or for markdown `<!-- public-ok -->`.
 set -euo pipefail
 
-# Host names and paths that exist only inside the CSU and JPL networks.
-# radarca.engr.colostate.edu is deliberately absent: it is a public website
-# and the whole project is about monitoring it.
+# Shapes rather than names. An earlier version listed every internal host
+# here, which made this file the one place in a public repo where the whole
+# vocabulary could be read off in order. These match the form such a name
+# takes without spelling any of them out.
+#
+# radarca.engr.colostate.edu is deliberately absent, since it is a public
+# website and monitoring it is the point of the project.
 PATTERNS=(
-  '\bthe C-band producer host\b'
-  '\bthe CIRA deployment\b'
-  '\bthe CIRA deployment\b'
-  '\bthe CIRA deployment\b'
-  '\bthe QPE tooling host\b'
-  'the main archive/projects'
-  '\bthe access helper\b'
-  '\bthe access helper\b'
-  '\bthe access helper\b'
-  '\bthe test deployment\b'
-  '10\.25\.[0-9]'
-  'CHILL/wiki'
+  '\bcira-[a-z0-9]+\b'                       # the deployment hosts
+  '10\.(25|0|1)\.[0-9]+\.[0-9]+'             # RFC1918 addresses
+  '\b[a-z0-9-]+\.local\.[a-z0-9-]+\.(com|net|org)\b'   # internal domains
+  '\bcsu-(run|ssh|git|[a-z]+)\b'             # access helpers
+  'CHILL/(wiki|backend|records|Agents)'      # paths in the private tree
 )
+
+# Names that have no general shape (a machine called after a mountain cannot
+# be matched by a pattern) live outside this repo, one extended regex per
+# line. Without the file the checks above still run, so a fresh clone is not
+# unprotected, it is only less specific.
+PRIVATE_PATTERNS="${SENTINEL_PRIVATE_PATTERNS:-$(dirname "$0")/private-patterns.txt}"
+if [[ -r "$PRIVATE_PATTERNS" ]]; then
+  while IFS= read -r _line; do
+    [[ -z "$_line" || "$_line" == \#* ]] && continue
+    PATTERNS+=("$_line")
+  done < "$PRIVATE_PATTERNS"
+fi
 
 # Binary and vendored trees carry no prose and would only produce noise.
 SKIP_RE='^(frontend/node_modules|\.venv|frontend/static|.*\.(png|jpg|svg|pdf|ico|woff2?))'

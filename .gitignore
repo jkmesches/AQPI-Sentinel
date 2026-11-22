@@ -53,3 +53,6 @@ Thumbs.db
 
 # --- MkDocs build output ---
 site/
+
+# Internal host names the leak check matches, kept out of this public repo.
+scripts/private-patterns.txt
