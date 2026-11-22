@@ -4,7 +4,7 @@
 Why this exists
 ---------------
 A legend that lies and a readout that lies confidently are the same fault,
-and both look correct. The plan for slice 5 of ``docs/map-console-plan.md``
+and both look correct. The plan for slice 5 of the map console plan
 assumed the ramps would be transcribed from radarca's site; the authoritative
 ones turned out to be on the mount already, one ``<prefix>_colorbar.png`` per
 moment directory, written by the same code that paints the frames.

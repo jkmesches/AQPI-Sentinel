@@ -1,6 +1,6 @@
 # sourced by the other scripts — shared constants + helpers.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Prefer a venv inside SentinelProject; fall back to one directory up (dev
+# Prefer a venv inside the repo; fall back to one directory up (dev
 # layouts where the venv was created alongside the project).
 if [ -x "$ROOT/.venv/bin/python" ]; then
   VENV_PY="$ROOT/.venv/bin/python"

@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-Slice 3 of ``docs/map-console-plan.md`` moves 3,277 lines of MapView into
+Slice 3 of the map console plan moves 3,277 lines of MapView into
 modules. The claim it has to support is "nothing user-visible changed", and
 the map had no test of any kind, because its logic lives inside a ``.svelte``
 file where no ``.mjs`` runner can reach it.

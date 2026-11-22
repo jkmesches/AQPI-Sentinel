@@ -3,7 +3,7 @@
 
 Six of AQPI's products publish a second unit, as ``details_<unit>.json``
 beside the canonical one and ``images/<unit>/`` beside the canonical frames.
-Offering a toggle over those is slice 7 of ``docs/map-console-plan.md``.
+Offering a toggle over those is slice 7 of the map console plan.
 
 Reading the mount on 2026-11-21 turned up two reasons a plain toggle would
 lie. Three of the six stopped writing their millimeter subtree on

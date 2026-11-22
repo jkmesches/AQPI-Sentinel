@@ -4,7 +4,7 @@
 
 The map console's structure, as 28 states captured from
 `the test deployment` on 2026-11-20. Slice 3 of
-`docs/map-console-plan.md` is moving `MapView.svelte` into modules, and this
+The map console plan is moving `MapView.svelte` into modules, and this
 is what the moves have to preserve.
 
 It has been replaced once since it was first taken. The vector overlays were

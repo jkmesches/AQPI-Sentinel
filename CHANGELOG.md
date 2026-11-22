@@ -63,7 +63,7 @@ never produces.
 
 ## [0.15.0] - 2026-11-22
 
-All eleven slices of `docs/map-console-plan.md`. The Live page becomes a map
+All eleven slices of the map console plan. The Live page becomes a map
 console with measured color ramps, a cursor readout, unit switching, links
 that reproduce a view, two panes locked to each other, keyboard control and
 a measure tool, and its 3,399-line component is decomposed behind a

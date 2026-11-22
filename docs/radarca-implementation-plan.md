@@ -518,7 +518,7 @@ No skeleton loaders. If data is missing, show the previous value with a `stale` 
 
 **Goal:** `make dev` brings up backend + frontend; the UI shows real data from radarca within 30 s of launch.
 
-### 7.1 Repo layout (under `SentinelProject/`)
+### 7.1 Repo layout (under `sentinel/`)
 
 ```
 backend/

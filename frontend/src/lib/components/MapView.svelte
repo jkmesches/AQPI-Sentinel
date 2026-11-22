@@ -3722,7 +3722,7 @@
 	// ---- visual baseline probe (?diag=probe) -----------------------------
 	//
 	// Publishes what the map is actually showing, for the comparison in
-	// `validation_tests/visual`. Slice 3 of docs/map-console-plan.md moves
+	// `validation_tests/visual`. Slice 3 of the map console plan moves
 	// this file's layers into modules, and what has to hold fixed is the
 	// structure: which sources exist, which layers they feed, in what order,
 	// and with what paint. A screenshot cannot see a layer inserted at the

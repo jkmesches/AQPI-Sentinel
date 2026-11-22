@@ -1,7 +1,7 @@
 """XQPI — the FLOW radar (JPL), published to the secondary archive.
 
 Surveyed by the laptop session on 2026-10-03 and recorded in
-``COSMOS/Documentation/16-xqpi-backend-survey.md`` §6; every value below comes
+the XQPI backend survey §6; every value below comes
 from that survey rather than from the AQPI tables, because almost none of the
 AQPI numbers transfer.
 
