@@ -300,26 +300,22 @@
 			"folder": "scv",
 			"moment": "FilteredPhiDP",
 			"ramp": "aqpi-xband-differential-phase",
-			"basis": "colorbar",
-			"colorbar_md5": "f75aab2c00ab",
-			"frames": 8,
-			"pixels": 0,
-			"colors": "0/0",
+			"frames": 3,
+			"pixels": 351204,
+			"colors": "87/87",
 			"covered": true,
-			"note": "Covered from this radar's own colorbar, not from its frames. The ramp is extracted from <radar>_FilteredPhiDP_colorbar.png, and XSCV publishes that file byte-identical to the other four X-band radars, re-hashed off the AQPI deployment on 2026-11-21 at f75aab2c00ab. So the table here is the one XSCV itself publishes rather than a sibling's borrowed. The frame check is the separate question of whether the frames are painted with it, and it could not run: every FilteredPhiDP frame in the rolling hour is fully transparent, which the filter explains, since it masks PhiDP where the correlation or the signal is low. Run it when there is rain over Coyote Valley."
+			"note": "Measured 2026-11-22 against three frames from 2026-11-19 read off the dated tree on the AQPI deployment, since the scan route serves only a rolling hour and this radar's filtered PhiDP is transparent through all of it on a quiet day. 87 colors over 351,204 pixels, which is the fullest exercise this ramp has had on any radar. A 2026-04-16 frame from the same tree reads 0 of 48: the renderer's PhiDP colormap changed between April and November, and the colorbar on disk changed with it, from d694c2c4 to today's f75aab2c. The shipped ramp is built from the current bar, so it reads current frames and refuses older ones, which fails safe rather than quietly: an unmatched color reports 'not on this scale' instead of a wrong number."
 		},
 		{
 			"radar": "XSCR",
 			"folder": "scrz",
 			"moment": "FilteredPhiDP",
 			"ramp": "aqpi-xband-differential-phase",
-			"basis": "colorbar",
-			"colorbar_md5": "f75aab2c00ab",
-			"frames": 8,
-			"pixels": 0,
-			"colors": "0/0",
+			"frames": 3,
+			"pixels": 867370,
+			"colors": "69/69",
 			"covered": true,
-			"note": "Covered from this radar's own colorbar at f75aab2c00ab, for the same reason as XSCV above. The frame check has since run and found one frame in the rolling hour carrying any paint at all, holding a single color, which read back correctly. That is corroboration rather than a measurement of the table, so the basis stays the colorbar. Run it again when enough rain reaches Santa Cruz to exercise the ramp."
+			"note": "Measured 2026-11-22 against frames from 2026-11-13, 11-18 and 11-19 read off the dated tree on the AQPI deployment, for the same reason as XSCV above: the scan route serves a rolling hour and this radar's filtered PhiDP is transparent through all of it on a quiet day. 69 colors over 867,370 pixels. Every X-band pair is now measured on frames and none rests on its colorbar alone."
 		},
 		{
 			"radar": "CBAND",
