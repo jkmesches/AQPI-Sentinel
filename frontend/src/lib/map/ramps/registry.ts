@@ -72,6 +72,20 @@ export interface CoveragePair {
 	pixels: number;
 	/** Matched over distinct, as the tool printed it. */
 	colors: string;
+	/**
+	 * What the coverage rests on.
+	 *
+	 * "frames" is the default and the stronger evidence: every distinct
+	 * color in this radar's own frames read back through the table.
+	 * "colorbar" means the table was extracted from this radar's own
+	 * published colorbar and the frame check has not run, which is the
+	 * case for a moment whose frames are empty. A radar whose filtered
+	 * PhiDP is masked to nothing on a quiet day still publishes the bar
+	 * that says what its colors mean.
+	 */
+	basis?: 'frames' | 'colorbar';
+	/** The colorbar's md5 prefix, where the basis is that bar. */
+	colorbar_md5?: string;
 	covered: boolean;
 	note?: string;
 }

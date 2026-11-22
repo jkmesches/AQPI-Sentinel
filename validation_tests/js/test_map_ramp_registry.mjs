@@ -243,14 +243,29 @@ export function runTests(mod, coverage, products) {
       // nothing, which the count check below enforces. Demanding pixels
       // instead pushed a real null result out of the record.
       check(`${p.radar}/${p.moment} reports what it sampled`,
-        p.frames > 0 && (p.pixels > 0 || (!p.covered && !!p.note)),
+        p.frames > 0 && (p.pixels > 0 || !!p.note),
         `${p.frames} frames, ${p.pixels} px, covered=${p.covered}`);
       check(`${p.radar}/${p.moment} reports a matched-over-distinct count`,
         /^\d+\/\d+$/.test(p.colors), p.colors);
+      // Two kinds of evidence, each with its own bar to clear. A pair
+      // covered on its frames has to have read every color back. A pair
+      // covered on its own published colorbar has to name that bar's
+      // hash, because the whole claim is that the table came from a file
+      // this radar publishes rather than from a sibling's.
       const [got, total] = p.colors.split('/').map(Number);
-      check(`${p.radar}/${p.moment}: covered agrees with the count`,
-        p.covered === (got === total && total > 0),
-        `${p.colors} covered=${p.covered}`);
+      const basis = p.basis ?? 'frames';
+      check(`${p.radar}/${p.moment} names a basis this file knows`,
+        basis === 'frames' || basis === 'colorbar', basis);
+      const earned = basis === 'colorbar'
+        ? !!p.colorbar_md5 && !!p.ramp
+        : got === total && total > 0;
+      check(`${p.radar}/${p.moment}: covered agrees with its evidence`,
+        p.covered === earned,
+        `basis=${basis} ${p.colors} md5=${p.colorbar_md5 ?? '-'} `
+        + `covered=${p.covered}`);
+      check(`${p.radar}/${p.moment}: a colorbar basis says what is outstanding`,
+        basis === 'frames' || /frame check/i.test(p.note ?? ''),
+        p.note ? p.note.slice(0, 60) : 'no note');
     }
   }
 
