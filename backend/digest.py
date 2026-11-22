@@ -1107,7 +1107,8 @@ def _rows(data: dict, kind: str) -> list[dict]:
     return data["radars"] if kind == "radar" else data["products"]
 
 
-def render_text(data: dict, public_url: str = "", title: str = "") -> str:
+def render_text(data: dict[str, Any], public_url: str = "",
+                title: str = "") -> str:
     """Render the plain-text part, shown by clients that cannot do HTML.
 
     Args:
@@ -1185,7 +1186,7 @@ def default_title() -> str:
     return f"{name} Sentinel" if name else "Sentinel"
 
 
-def report_title(cfg: dict | None = None) -> str:
+def report_title(cfg: dict[str, Any] | None = None) -> str:
     """The name the report goes out under.
 
     Args:
@@ -1198,7 +1199,7 @@ def report_title(cfg: dict | None = None) -> str:
     return want or default_title()
 
 
-def subject_line(data: dict, title: str = "") -> str:
+def subject_line(data: dict[str, Any], title: str = "") -> str:
     """Verdict first, so the report is readable without opening it.
 
     Args:
@@ -1434,8 +1435,8 @@ def _wire_len(html: str) -> int:
     return len(quopri.encodestring(html.encode("utf-8")))
 
 
-def render_html(data: dict, public_url: str = "", compact: bool | None = None,
-                title: str = "") -> str:
+def render_html(data: dict[str, Any], public_url: str = "", *,
+                compact: bool | None = None, title: str = "") -> str:
     """Render the report.
 
     `compact` draws each bin as one solid swatch instead of a proportional
@@ -1480,8 +1481,10 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None,
             "kind":    kind,
             "rows":    rows,
         })
-    def _render(is_compact: bool) -> str:
-        return env.get_template("digest.html").render(
+    def _render(*, is_compact: bool) -> str:
+        # Annotated because jinja2 ships no stubs here, so `render` is Any and
+        # the declared `-> str` would otherwise go unchecked.
+        out: str = env.get_template("digest.html").render(
             d=data, sections=sections, public_url=public_url,
             compact=is_compact,
             title=title.strip() or default_title(),
@@ -1491,8 +1494,9 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None,
         # repeated across every row for a difference nobody would notice.
             F="Helvetica,Arial,sans-serif",
         )
+        return out
 
-    html = _render(bool(compact))
+    html = _render(is_compact=bool(compact))
     # === Load-bearing: Gmail CLIPS a message body over ~102 KB ===
     #
     # It truncates mid-document and appends a "View entire message" link, so
@@ -1515,7 +1519,7 @@ def render_html(data: dict, public_url: str = "", compact: bool | None = None,
             log.warning("digest: %d bytes on the wire with stacked bins (%d of "
                         "HTML), past the %d limit — re-rendering compact",
                         wire, len(html), _COMPACT_ABOVE_WIRE_BYTES)
-            html = _squeeze(_render(True))
+            html = _squeeze(_render(is_compact=True))
     return html
 
 

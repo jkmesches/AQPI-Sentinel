@@ -157,8 +157,9 @@ def lookup_table(anchors: list[tuple[int, int, int]],
         frac = pos - lo
         a = anchors[lo]
         b = anchors[lo + 1]
-        out.append(tuple(a[c] + (b[c] - a[c]) * frac  # type: ignore[misc]
-                         for c in range(3)))
+        out.append((a[0] + (b[0] - a[0]) * frac,
+                    a[1] + (b[1] - a[1]) * frac,
+                    a[2] + (b[2] - a[2]) * frac))
     return out
 
 

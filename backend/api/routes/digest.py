@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -160,8 +160,8 @@ async def daily(request: Request, since: str | None = None,
 @admin_router.get("")
 async def get_config(
     request: Request,
-    user: Annotated[dict, Depends(require_admin)],  # noqa: ARG001  auth gate
-) -> dict:
+    user: Annotated[dict[str, Any], Depends(require_admin)],  # noqa: ARG001  auth gate
+) -> dict[str, Any]:
     """The stored digest config, plus the title an empty one falls back to.
 
     Args:

@@ -169,7 +169,7 @@ async def pane_box(page: Page, index: int) -> dict[str, float]:
     box = await page.locator("[data-view]").nth(index).bounding_box()
     if not box:
         raise RuntimeError(f"pane {index} has no box")
-    return box
+    return {k: float(box[k]) for k in ("x", "y", "width", "height")}
 
 
 async def click_in_pane(page: Page, index: int,
