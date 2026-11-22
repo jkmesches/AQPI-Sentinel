@@ -39,6 +39,9 @@
 	import { portal } from '$lib/map/portal';
 	import { ElevatedSheet } from '$lib/map/layers/elevatedLayer';
 	import {
+		ElevatedRings, type RingSpec
+	} from '$lib/map/layers/elevatedRingLayer';
+	import {
 		DEFAULT_ALTITUDE_M, MAX_ALTITUDE_M, MIN_ALTITUDE_M, clampAltitude,
 		type Beam, type Corners
 	} from '$lib/map/layers/elevatedRaster';
@@ -3452,6 +3455,77 @@
 	});
 	/** One sheet per overlay that is drawn in the air. */
 	const sheets = new Map<string, ElevatedSheet>();
+	/** The range rings, all of them in one layer. */
+	const RINGS_LAYER = 'range-elevated';
+	let elevatedRings: ElevatedRings | null = null;
+
+	/**
+	 * A hex color as the ring shader's three channels.
+	 *
+	 * @param hex A `#rrggbb` string, as the paint table gives them.
+	 * @returns Red, green and blue from 0 to 1, black for anything
+	 *     that does not parse, since a ring is better dim than absent.
+	 */
+	function ringColor(hex: string): [number, number, number] {
+		const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+		if (!m) return [0, 0, 0];
+		const n = Number.parseInt(m[1], 16);
+		return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255,
+			(n & 255) / 255];
+	}
+
+	/**
+	 * Every range ring, at the height of the imagery it bounds.
+	 *
+	 * A ring whose radar has a tilt engaged goes at that beam's height
+	 * at the ring's own radius, which is where the tilt's imagery ends.
+	 * Every other ring goes at the nominal sheet altitude, like the
+	 * composite.
+	 *
+	 * @returns One spec per selectable radar.
+	 */
+	function ringSpecs(): RingSpec[] {
+		const tiltOn = tiltRadarMeta?.id ?? null;
+		return selectableRadars.map((r) => {
+			const paint = radarPaint(radarStatusOf(radarStatus, r.id));
+			const on = isActive(r.id);
+			return {
+				ring: {
+					lng: r.lon, lat: r.lat, radiusM: r.range_m,
+					siteM: 0,
+					elevationDeg: r.id === tiltOn ? tiltAngleDeg : null
+				},
+				color: ringColor(paint.verdict),
+				// The draped pair this replaces, so the mesh changes the
+				// ring's height and nothing about how it reads.
+				opacity: on ? 0.9 : 0.35,
+				fillOpacity: 0.05,
+				widthPx: on ? 1.6 : 1
+			};
+		});
+	}
+
+	/** Put the rings in the air, or take them back to the ground. */
+	function refreshRings(): void {
+		if (!map || !styleReady) return;
+		const want = terrain3DOn;
+		if (want && !elevatedRings) {
+			elevatedRings = new ElevatedRings(RINGS_LAYER);
+			addOverlayBelowMarkers(map, elevatedRings);
+		}
+		if (!want && elevatedRings) {
+			if (map.getLayer(RINGS_LAYER)) map.removeLayer(RINGS_LAYER);
+			elevatedRings = null;
+		}
+		elevatedRings?.setRings(ringSpecs(), clampAltitude(sheetAltitudeM));
+		// Hidden rather than removed, like the draped rasters, so the
+		// mesh going off brings them back without rebuilding a source.
+		for (const layer of ['range-fill', 'range-stroke']) {
+			if (!map.getLayer(layer)) continue;
+			map.setLayoutProperty(layer, 'visibility',
+				want ? 'none' : 'visible');
+		}
+	}
 
 	/** What one overlay needs to be drawn in the air. */
 	interface SheetDraw {
@@ -3570,7 +3644,9 @@
 		void terrain3DOn; void composite; void paintedTs; void activeRadars;
 		void layerOpacity; void sheetAltitudeM; void styleReady;
 		void _tiltShown; void tiltEngaged; void tiltAngleDeg;
+		void radarStatus; void radars;
 		refreshSheets();
+		refreshRings();
 	});
 
 	/**
