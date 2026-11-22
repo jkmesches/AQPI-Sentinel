@@ -4907,11 +4907,12 @@
 			</span>
 		</button>
 		{#if terrain3DOn}
-			<!-- How high the imagery floats. Nominal and said to be: a
+			<!-- How high the imagery floats. The height is nominal, because a
 			     composite is a column maximum or a lowest unblocked tilt
-			     depending on the product, so it has no one height, and a
-			     number presented without that caveat would be read as the
-			     measurement's altitude. -->
+			     depending on the product and so has no one altitude. A single
+			     tilt is drawn on its own 4/3-earth beam instead and ignores
+			     this. Both facts used to be printed under the slider; they
+			     read as hedging in a panel, so they live here. -->
 			<div class="flex items-center gap-2 px-3 pb-1 pt-0.5">
 				<span class="w-[4.2rem] shrink-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)]">
 					sheet
@@ -4935,24 +4936,6 @@
 					{(sheetAltitudeM / 1000).toFixed(2)} km
 				</span>
 			</div>
-			<p
-				data-sheet-note
-				class="px-3 pb-2 text-[9px] leading-tight text-[var(--color-faint)]"
-			>
-				Nominal height. The imagery floats rather than draping, because a
-				composite is measured aloft; it has no single altitude of its own.
-			</p>
-		{/if}
-		{#if terrain3DOn && tiltEngaged && tiltAngleDeg !== null}
-			<!-- A single tilt has a real surface, so it is drawn on it and
-			     the nominal sheet does not apply to it. -->
-			<p
-				data-beam-note
-				class="num border-t border-[var(--color-border)] px-3 py-1.5 text-[9px] leading-tight text-[var(--color-ok)]"
-			>
-				{tiltAngleDeg}° sweep drawn on its own beam, 4/3 earth, from the
-				radar's ground height.
-			</p>
 		{/if}
 		{#if hasOverlay('stream_gauges')}
 		<button
