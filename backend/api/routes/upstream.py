@@ -6,6 +6,8 @@ import json
 import datetime as _dt
 import time as _time_mod
 from collections.abc import Awaitable, Callable
+from pathlib import Path as _Path
+from typing import Any
 from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -575,7 +577,16 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
     # "upstream" meant radarca when this was written and now usually means a
     # local read, which made x-sentinel-cache misleading in devtools at the
     # moment it became the most useful thing in that header.
-    return body, ct, "mount" if fetcher is not None else "upstream"
+    #
+    # A fetcher alone no longer means the mount. The tilt routes pass one for
+    # radar-display over HTTP too, and did from the start, so every tilt frame
+    # has been labeled "mount" while crossing the network. What separates
+    # them is origin_url: a caller reading a file names no origin.
+    if fetcher is None:
+        prov = "upstream"          # radarca's imageData
+    else:
+        prov = "upstream" if origin_url else "mount"
+    return body, ct, prov
 
 
 async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,
@@ -905,41 +916,54 @@ import csv as _csv
 import io as _io2
 import time as _time
 
-# Module-level cache for the parsed site list. radarca's CSV ships a
-# `Last-Modified: Wed, 07 Jan 2026` per the public characterization —
-# the list is effectively static, but we re-fetch hourly so any
-# additions don't sit stale for a day.
-_GAUGES_CACHE: dict[str, object] = {"data": None, "fetched_at": 0.0}
+# Module-level cache for the parsed site list, used by the HTTP fallback
+# below. radarca's copy last changed on 2026-01-09, so an hour of staleness
+# costs at most a late addition.
+# Empty until the fallback has fetched once, then one (fetched_at, payload).
+# A dict of object lost both types, so the TTL compare and the return each
+# needed a cast to get past mypy.
+_GAUGES_CACHE: list[tuple[float, dict[str, object]]] = []
 _GAUGES_TTL_S = 3600
 
+# === The site list ships with Sentinel ===
+#
+# It was fetched from radarca's /data/stream_data.csv on every cold start.
+# The two per-COMID series are rows of files on the mount, and this one is on
+# no share we can reach: a search for its LatSite column across
+# the main archive root and the QPE staging root on 2026-11-21 found
+# nothing. At 16.7 KB and a Last-Modified of 2026-01-09, carrying it costs
+# less than reaching for it.
+#
+# Refresh it with scripts/fetch_stream_sites.py, which records what it got.
+_SITES_FILE = _Path(__file__).resolve().parents[2] / "reference" / "stream_sites.csv"
 
-@router.get("/stream_gauges")
-async def stream_gauges(request: Request):
-    """Return the parsed USGS site list from /data/stream_data.csv.
+# Read once. The file cannot change while the process runs, so the read is
+# done when this holds an entry, and that entry may itself be None for a
+# deployment with no file. Empty is "not looked yet", which a plain
+# `None` sentinel could not say without a second flag.
+_SITES_CACHE: list[list[dict[str, object]] | None] = []
 
-    Shape:
-        {count: int,
-         sites: [{comid: str, lat: float, lon: float, status: 'B'|'R'}]}
 
-    `status` is 'B' (basic — site exists upstream) or 'R' (real-time —
-    has live data). Cached in-process for an hour.
+def _parse_sites(text: str) -> list[dict[str, object]]:
+    """Parse the site list into the shape the map's marker layer wants.
+
+    A row missing a column or carrying an unreadable coordinate is dropped.
+    The HTTP path has always done that, so neither origin fails a whole list
+    over one bad row.
+
+    29 of the 468 rows name a COMID that another row already names, at
+    coordinates a few hundred meters away. Both are kept, because they are two
+    real gauge sites sharing one forecast reach, and collapsing them would
+    move a marker off its own gauge.
+
+    Args:
+        text: The CSV as published.
+
+    Returns:
+        One entry per usable row, in file order.
     """
-    now = _time.time()
-    if (
-        _GAUGES_CACHE["data"] is not None
-        and now - _GAUGES_CACHE["fetched_at"] < _GAUGES_TTL_S
-    ):
-        return _GAUGES_CACHE["data"]
-    ctx = request.app.state.context
-    try:
-        r = await ctx.http.get(f"{SETTINGS.base}/data/stream_data.csv")
-    except Exception as e:
-        raise HTTPException(502, f"Upstream unavailable: {humanize_error(e)}")
-    if r.status_code != 200:
-        raise HTTPException(502, f"Upstream returned HTTP {r.status_code}")
-    sites = []
-    reader = _csv.DictReader(_io2.StringIO(r.text))
-    for row in reader:
+    sites: list[dict[str, object]] = []
+    for row in _csv.DictReader(_io2.StringIO(text)):
         try:
             sites.append({
                 "comid": row["COMID"],
@@ -947,11 +971,60 @@ async def stream_gauges(request: Request):
                 "lon": float(row["LonSite"]),
                 "status": row["Status"],
             })
-        except (KeyError, ValueError):
+        except (KeyError, TypeError, ValueError):
             continue
-    payload = {"count": len(sites), "sites": sites}
-    _GAUGES_CACHE["data"] = payload
-    _GAUGES_CACHE["fetched_at"] = now
+    return sites
+
+
+def _read_sites_blocking() -> list[dict[str, object]] | None:
+    """The vendored site list, or None when the file is missing or empty."""
+    try:
+        text = _SITES_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return _parse_sites(text) or None
+
+
+@router.get("/stream_gauges")
+async def stream_gauges(request: Request) -> dict[str, object]:
+    """The USGS site list the map draws its stream-gauge markers from.
+
+    Served from the copy that ships with Sentinel. A deployment whose file is
+    missing falls back to radarca, cached in process for an hour, so an image
+    built without the file still draws markers instead of an empty layer.
+
+    Args:
+        request: The request, for the HTTP client on the fallback path.
+
+    Returns:
+        {count: int, sites: [{comid, lat, lon, status}]}, where status is
+        'B' for a site that exists upstream and 'R' for one with live data.
+
+    Raises:
+        HTTPException: 502 when the file is absent and radarca cannot be
+            reached or answers with something unusable.
+    """
+    if not _SITES_CACHE:
+        _SITES_CACHE.append(await _asyncio.to_thread(_read_sites_blocking))
+    vendored = _SITES_CACHE[0]
+    if vendored is not None:
+        return {"count": len(vendored), "sites": vendored}
+
+    now = _time.time()
+    if _GAUGES_CACHE and now - _GAUGES_CACHE[0][0] < _GAUGES_TTL_S:
+        return _GAUGES_CACHE[0][1]
+    ctx = request.app.state.context
+    try:
+        r = await ctx.http.get(f"{SETTINGS.base}/data/stream_data.csv")
+    except Exception as e:
+        raise HTTPException(
+            502, f"Upstream unavailable: {humanize_error(e)}") from e
+    if r.status_code != 200:
+        raise HTTPException(502, f"Upstream returned HTTP {r.status_code}")
+    sites = _parse_sites(r.text)
+    payload: dict[str, object] = {"count": len(sites), "sites": sites}
+    _GAUGES_CACHE.clear()
+    _GAUGES_CACHE.append((now, payload))
     return payload
 
 
@@ -1160,17 +1233,34 @@ async def _tilt_steps_raw(radar: str, el: int, moment: str) -> list[dict]:
     if hit is not None and hit[0] > now:
         return hit[1]
 
-    async def _fetch(frame: int):
+    async def _fetch_http(frame: int) -> dict[str, Any] | None:
         url = f"{_RD_BASE}/{radar}/json/el_{el}/radar_plot_{frame}.json"
         try:
             async with _RD_SEM:
                 r = await _rd_client().get(url)
             if r.status_code != 200:
                 return None
-            return r.json()
-        except Exception:
+            doc = r.json()
+        # Was a blind `except Exception`. Narrowed to what this can actually
+        # raise: httpx for the transport and ValueError for a body that is
+        # not JSON, which json.JSONDecodeError subclasses.
+        except (_httpx.HTTPError, ValueError):
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    async def _fetch_fs(frame: int) -> dict[str, Any] | None:
+        # Same failure shape as the HTTP path: a frame that cannot be read is
+        # None and drops out of the list, rather than failing the whole call.
+        try:
+            return await _fs.read_tilt_json(radar, el, frame)
+        except (ValueError, TimeoutError, OSError):
             return None
 
+    # The mount wins when there is one. radar-display serves this tree
+    # verbatim, so the two paths return the same object, and reading it off
+    # disk takes 7 JSON fetches per call off an origin whose certificate has
+    # already lapsed once.
+    _fetch = _fetch_fs if _fs.tilt_available() else _fetch_http
     results = await _asyncio.gather(*[_fetch(f) for f in range(_TILT_FRAMES)])
     steps = []
     for f, j in enumerate(results):
@@ -1281,16 +1371,37 @@ async def tilt_image(radar: str, el: int, moment: str, request: Request,
     source = _tilt_source_key(radar, el, moment, ts_utc)
     url = f"{_RD_BASE}/{radar}/images/el_{el}/{moment}_{frame}.png"
 
-    async def _fetch():
+    async def _fetch_http() -> _httpx.Response:
         async with _RD_SEM:
             try:
                 return await _rd_client().get(url)
-            except Exception as e:
+            # Was a blind `except Exception`. httpx.HTTPError covers the
+            # transport, and RuntimeError is what a closed client raises.
+            except (_httpx.HTTPError, RuntimeError) as e:
                 raise HTTPException(
-                    502, f"radar-display unavailable: {humanize_error(e)}")
+                    502,
+                    f"radar-display unavailable: {humanize_error(e)}") from e
 
+    async def _fetch_fs() -> _fs.FsResponse:
+        try:
+            return await _fs.read_tilt_image(radar, el, moment, frame)
+        except TimeoutError as e:
+            raise HTTPException(
+                502,
+                f"tilt mount read timed out after {_fs.FS_TIMEOUT_S:g}s") from e
+        except (ValueError, OSError) as e:
+            raise HTTPException(
+                502, f"tilt mount unreadable: {humanize_error(e)}") from e
+
+    # The mount wins when there is one, the same way _product_fetcher does.
+    # The source key is unchanged either way, so the archive, the LRU, the
+    # single-flight and the negative cache all carry over and a deployment
+    # that gains the mount keeps every frame it already captured.
+    on_disk = _fs.tilt_available()
     body, ct, prov = await _serve_source(
-        request.app, ctx, source, fetcher=_fetch, origin_url=url,
+        request.app, ctx, source,
+        fetcher=_fetch_fs if on_disk else _fetch_http,
+        origin_url=None if on_disk else url,
         archive_only=archive_only,
     )
     return Response(

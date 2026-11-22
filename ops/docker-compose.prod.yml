@@ -113,6 +113,13 @@ services:
       # paths and must match the mounts below.
       SENTINEL_BACKEND_ROOT: ${SENTINEL_BACKEND_ROOT:-}
       SENTINEL_SSCB_ROOT:    ${SENTINEL_SSCB_ROOT:-}
+      # Where radar-display's document root is mounted, when it is not
+      # htdocs/ under SENTINEL_BACKEND_ROOT. Unset is the AQPI case and
+      # derives the path; the tilt routes fall back to HTTP when neither
+      # resolves. Named here because this file has no `env_file:`, so a
+      # variable set in .env.prod and not listed here reaches interpolation
+      # and never reaches the container.
+      SENTINEL_TILT_ROOT: ${SENTINEL_TILT_ROOT:-}
       # The composite's input staging share. Its own mount: it is NOT under
       # SENTINEL_BACKEND_ROOT, and v0.8.0 assumed it was — see
       # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
@@ -139,6 +146,12 @@ services:
       - ${SENTINEL_BACKEND_HOST_PATH:-sentinel_backend_unset}:/backend:ro
       - ${SENTINEL_SSCB_HOST_PATH:-sentinel_sscb_unset}:/sscb:ro
       - ${SENTINEL_RECENTFILES_HOST_PATH:-sentinel_recentfiles_unset}:/recentfiles:ro
+      # radar-display's document root, for the per-elevation tilts. AQPI needs
+      # nothing here: that tree is htdocs/ inside the main archive mount above, so
+      # SENTINEL_TILT_ROOT stays unset and the path derives from backend_root.
+      # A deployment whose tilts are on a different share, as XQPI's FLOW is,
+      # points SENTINEL_TILT_HOST_PATH at it and SENTINEL_TILT_ROOT at /tilt.
+      - ${SENTINEL_TILT_HOST_PATH:-sentinel_tilt_unset}:/tilt:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     logging: *default-logging
@@ -188,6 +201,7 @@ volumes:
   sentinel_backend_unset:
   sentinel_sscb_unset:
   sentinel_recentfiles_unset:
+  sentinel_tilt_unset:
 
 networks:
   sentinel:

@@ -48,6 +48,13 @@ class Settings:
     profile: str                           # "aqpi" (default) or "xqpi" — see backend/profiles
     backend_root: Path | None              # the main archive web-files root, read-only bind mount
     sscb_root: Path | None                 # C-band tree on the secondary archive, read-only
+    # radar-display's document root, when this deployment mounts it. Its own
+    # setting rather than a subpath of backend_root, because the tree lives on
+    # the main archive under the AQPI web-files root while XQPI mounts only the secondary archive, so one
+    # derived path would be right for one profile and a decoy for the other.
+    # Unset falls back to TILT_TREE under backend_root, which is correct on
+    # AQPI, and to HTTP when neither resolves.
+    tilt_root: Path | None
     # The composite's INPUT staging DIRECTORY — the `recentfiles` directory
     # itself, with only a per-radar name appended. Its own setting, with NO
     # default and no fallback, because it is not under backend_root and
@@ -113,6 +120,7 @@ def _load() -> Settings:
         profile=os.environ.get("SENTINEL_PROFILE", "aqpi").strip().lower() or "aqpi",
         backend_root=_opt_path("SENTINEL_BACKEND_ROOT"),
         sscb_root=_opt_path("SENTINEL_SSCB_ROOT"),
+        tilt_root=_opt_path("SENTINEL_TILT_ROOT"),
             recentfiles_dir=_opt_path("SENTINEL_RECENTFILES_DIR"),
         data_dir=data_dir,
         api_host=os.environ.get("SENTINEL_API_HOST", "127.0.0.1"),
@@ -1243,6 +1251,27 @@ RADAR_PLOTS_NAME: str = "{folder}_{prefix}_{ts}.png"
 RADAR_PLOTS_TS_RE: str = r"\d{8}-\d{4}"
 RADAR_PLOTS_TS_FMT: str = "%Y%m%d-%H%M"
 
+# === radar-display is a directory on the main archive, not only a website ===
+#
+# radardisplay.engr.colostate.edu serves this tree verbatim: the URL path
+# /<RADAR>/images/el_<n>/<moment>_<frame>.png is the path on disk under here.
+# Two frames fetched over HTTP on 2026-11-21 matched the files byte for byte.
+#
+# So the per-elevation tilts need a path rather than a renderer, and the tilt
+# routes read them the way every product already does, with the HTTP origin
+# left as the fallback for a deployment that mounts nothing.
+#
+# Relative to backend_root, which on AQPI is the web-files root that holds it.
+# Empty means this profile has no mounted copy; XQPI mounts only the secondary archive, and
+# FLOW's tilts live under the AQPI root on the main archive, so XQPI needs SENTINEL_TILT_ROOT
+# pointed at a main archive mount rather than a path derived from its own.
+TILT_TREE: str = "htdocs"
+
+# Where one tilt's frames and metadata sit inside that tree. `{radar}` is the
+# uppercase id as the URL spells it, which is also how the directory is named.
+TILT_IMAGE_DIR: str = "{radar}/images/el_{el}"
+TILT_JSON_DIR: str = "{radar}/json/el_{el}"
+
 # ---------------------------------------------------------------------------
 # Layer 4 image QC targets
 # ---------------------------------------------------------------------------
@@ -1466,6 +1495,7 @@ if SETTINGS.profile == "xqpi":
     RADAR_PLOTS_NAME = _xqpi.RADAR_PLOTS_NAME
     RADAR_PLOTS_TS_RE = _xqpi.RADAR_PLOTS_TS_RE
     RADAR_PLOTS_TS_FMT = _xqpi.RADAR_PLOTS_TS_FMT
+    TILT_TREE = _xqpi.TILT_TREE
     MOMENT_TO_PREFIX_DEFAULT = _xqpi.MOMENT_TO_PREFIX
     X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)
     L4_XBAND_TARGETS = _xqpi.L4_XBAND_TARGETS

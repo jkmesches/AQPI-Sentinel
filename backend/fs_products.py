@@ -29,10 +29,10 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .config import (PRODUCT_IMAGES_PREFIX, PRODUCTS, RADAR_FOLDER,
-                     RADAR_PLOTS_NAME, RADAR_PLOTS_TREE, RADAR_PLOTS_TS_FMT,
-                     RADAR_PLOTS_TS_RE, SETTINGS, manifest_rel,
-                     moment_to_prefix)
+from .config import (PRODUCT_IMAGES_PREFIX, RADAR_FOLDER, RADAR_PLOTS_NAME,
+                     RADAR_PLOTS_TREE, RADAR_PLOTS_TS_FMT, RADAR_PLOTS_TS_RE,
+                     SETTINGS, TILT_IMAGE_DIR, TILT_JSON_DIR, TILT_TREE,
+                     manifest_rel, moment_to_prefix)
 
 # Matches layer1_backend_product.FS_TIMEOUT_S. A mount that does not answer in
 # five seconds is wedged, and failing is better than holding the connection.
@@ -318,5 +318,128 @@ async def read_moment_image(radar: str, moment: str, name: str,
     if _frame_re(radar, moment).match(name) is None:
         return FsResponse(404)
     path = os.path.join(plots_dir(radar, moment, day), name)
+    return await asyncio.wait_for(
+        asyncio.to_thread(_read_image_blocking, path), FS_TIMEOUT_S)
+
+
+# ---------------------------------------------------------------------------
+# Per-elevation tilt frames (radar-display's document root)
+# ---------------------------------------------------------------------------
+#
+# radardisplay.engr.colostate.edu serves this tree verbatim, so the URL path
+# and the path on disk are the same string under a different root. Two frames
+# fetched over HTTP on 2026-11-21 matched the files byte for byte.
+#
+# Its own root rather than a subpath of ``backend_root``: the tree sits under
+# the AQPI web-files root on the main archive and carries FLOW alongside the five AQPI
+# radars, while the XQPI deployment mounts only the secondary archive. One derived path
+# would be right for one profile and a decoy for the other.
+
+# What a tilt directory name may contain. The radar and the elevation reach
+# these functions from query parameters, so both are checked before they are
+# joined into a path. The product path is confined with ``realpath`` because
+# its source string is free-form; these are confined by vocabulary, which is
+# stricter and says so at the call.
+_TILT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,15}$")
+_TILT_EL_RANGE = (1, 4)
+
+
+def tilt_root() -> str | None:
+    """The mounted radar-display root, or None when this deployment has none.
+
+    Returns:
+        An absolute path, or None to leave the tilt routes on HTTP.
+    """
+    if SETTINGS.tilt_root:
+        return str(SETTINGS.tilt_root)
+    if SETTINGS.backend_root and TILT_TREE:
+        return os.path.join(str(SETTINGS.backend_root), TILT_TREE)
+    return None
+
+
+def tilt_available() -> bool:
+    """Can this deployment read tilts off the filesystem at all?"""
+    return tilt_root() is not None
+
+
+def _tilt_path(template: str, radar: str, el: int, name: str) -> str:
+    """Absolute path to one file in a tilt directory.
+
+    Args:
+        template: ``TILT_IMAGE_DIR`` or ``TILT_JSON_DIR``.
+        radar: Radar id as the directory names it.
+        el: Elevation index, 1 to 4.
+        name: The file inside that directory.
+
+    Returns:
+        An absolute path, which may not exist.
+
+    Raises:
+        RuntimeError: If no tilt root is configured; call ``tilt_available``.
+        ValueError: If the radar or the elevation is outside its vocabulary.
+    """
+    root = tilt_root()
+    if root is None:
+        raise RuntimeError("no tilt root; call tilt_available() first")
+    if _TILT_NAME_RE.match(radar) is None:
+        raise ValueError(f"not a radar id: {radar!r}")
+    if not _TILT_EL_RANGE[0] <= el <= _TILT_EL_RANGE[1]:
+        raise ValueError(f"elevation out of range: {el}")
+    return os.path.join(root, template.format(radar=radar, el=el), name)
+
+
+def _read_json_blocking(path: str) -> dict[str, Any] | None:
+    """One radar_plot JSON, or None when it is missing or not an object."""
+    try:
+        with open(path, "rb") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+async def read_tilt_json(radar: str, el: int,
+                         frame: int) -> dict[str, Any] | None:
+    """Metadata for one tilt frame, in the shape radar-display serves.
+
+    Args:
+        radar: Radar id as the directory names it.
+        el: Elevation index, 1 to 4.
+        frame: Position in the rolling window, 0 being newest.
+
+    Returns:
+        The parsed object, or None when the file is absent or unreadable.
+        The HTTP path returns None for those same conditions.
+
+    Raises:
+        ValueError: If the radar or the elevation is outside its vocabulary.
+        TimeoutError: If the mount does not answer within FS_TIMEOUT_S.
+    """
+    path = _tilt_path(TILT_JSON_DIR, radar, el, f"radar_plot_{frame}.json")
+    return await asyncio.wait_for(
+        asyncio.to_thread(_read_json_blocking, path), FS_TIMEOUT_S)
+
+
+async def read_tilt_image(radar: str, el: int, moment: str,
+                          frame: int) -> FsResponse:
+    """One tilt frame, as a response ``_fetch_image_upstream`` can consume.
+
+    Args:
+        radar: Radar id as the directory names it.
+        el: Elevation index, 1 to 4.
+        moment: Moment name as the filename spells it.
+        frame: Position in the rolling window, 0 being newest.
+
+    Returns:
+        The frame, or a 404 response when it is missing.
+
+    Raises:
+        ValueError: If the radar, elevation or moment is outside its
+            vocabulary.
+        TimeoutError: If the mount does not answer within FS_TIMEOUT_S.
+    """
+    if _TILT_NAME_RE.match(moment) is None:
+        raise ValueError(f"not a moment name: {moment!r}")
+    path = _tilt_path(TILT_IMAGE_DIR, radar, el, f"{moment}_{frame}.png")
     return await asyncio.wait_for(
         asyncio.to_thread(_read_image_blocking, path), FS_TIMEOUT_S)

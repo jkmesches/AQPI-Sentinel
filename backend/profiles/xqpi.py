@@ -351,6 +351,16 @@ RADAR_PLOTS_NAME = "{radar}_{prefix}_" + str(ELEVATION_PUBLISHED) + "_{ts}.png"
 RADAR_PLOTS_TS_RE = r"\d{8}-\d{6}"
 RADAR_PLOTS_TS_FMT = "%Y%m%d-%H%M%S"
 
+# No tilt tree under this profile's own mount. FLOW's per-elevation frames do
+# exist, in radar-display's document root at
+# `backend_root`/htdocs/FLOW/images/el_<1..4>/ alongside the
+# five AQPI radars, live on the 2-minute cadence (read 2026-11-21). That is on
+# the main archive, and this deployment mounts only the XQPI product root, so the path
+# cannot be derived from backend_root. Point SENTINEL_TILT_ROOT at a main archive mount
+# of that directory to turn FLOW tilts on; an empty default leaves them off
+# rather than resolving to a path that does not exist.
+TILT_TREE = ""
+
 # FLOW's moment directories and filenames use the moment name unchanged,
 # where AQPI renames four of its five. Identity rather than a copied table,
 # so adding a moment to MOMENTS above needs no second edit here.

@@ -136,6 +136,7 @@ def main() -> int:
         "SENTINEL_BACKUP_HOST_PATH":  "volume source for /data/backups",
         "SENTINEL_BACKEND_HOST_PATH": "volume source for /backend",
         "SENTINEL_SSCB_HOST_PATH":    "volume source for /sscb",
+        "SENTINEL_TILT_HOST_PATH":    "volume source for /tilt",
         "SENTINEL_TAG":               "selects the image tag, not process env",
     }
     documented = set(re.findall(r"^#?((?:SENTINEL|POSTGRES)_[A-Z0-9_]+)=",
@@ -179,8 +180,13 @@ def main() -> int:
     # It is a THIRD share, not a subtree of /backend, and the release that
     # assumed otherwise reported eight radars healthy against a copy of the
     # tree abandoned in March 2026.
+    # /tilt is radar-display's document root, for the per-elevation frames.
+    # AQPI leaves it on the empty fallback volume, because that tree is
+    # htdocs/ inside the /backend mount and the path derives from it. XQPI is
+    # the deployment that needs the bind: FLOW's frames sit under the AQPI
+    # root on the main archive, which an XQPI stack does not otherwise mount.
     EXPECTED_BACKEND_MOUNTS = {"/data/archive", "/data/cold", "/data/backups",
-                               "/backend", "/sscb", "/recentfiles"}
+                               "/backend", "/sscb", "/recentfiles", "/tilt"}
     for label, doc in (("prod.yml", prod), ("ghcr.yml", ghcr)):
         got = volume_targets(doc["services"]["backend"])
         check(f"{label}: backend mounts parse to real container paths",
