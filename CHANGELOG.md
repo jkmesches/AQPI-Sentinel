@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-11-22
+
+Three things the radar cards got wrong at a width the test deployment
+never produces.
+
+### Fixed
+
+- **A card's sparkline was drawn outside the card.** The expander's rows
+  gave both the stage label and the 62px trace `shrink-0`, so in a 222px
+  card "BACKEND RADAR ARRIVAL" plus a dot, a source tag and the trace needed
+  228px and the trace hung 28px past the border the card is wearing.
+
+  The label truncates now and the trace shrinks with the row. The card also
+  takes `min-w-0` and `overflow-hidden` as a backstop, because a grid item
+  defaults to `min-width: auto` and one child that refuses to shrink widens
+  the card past its own track.
+
+  It did not show on the test deployment, where each radar has one check and
+  the stage name is short enough to fit. `shoot_dashboard_paired.py` rendered
+  it against the AQPI deployment's payload and the screenshot went unmeasured, so the
+  harness now expands a card and returns the worst overhang in pixels
+  instead of leaving that to the eye.
+
+- **The alarm band goes back to the full width.** An alarm row is a severity
+  chip, a stage, an id, the subject, the time it opened, its age, the message
+  and an ack control: eight columns wanting about 500px. v0.15.0 moved it
+  into the 2/12 rail beside Quality, where it had 310px, and the ack control
+  was what gave way.
+
+- **The alarm row's stage ran into its id.** "Connectivity" needs about 70px
+  and its column was 51px, so the row read "Connectivi#28200". The column is
+  wide enough for the longest stage name and the cell truncates.
+
 ## [0.15.0] - 2026-11-22
 
 All eleven slices of `docs/map-console-plan.md`. The Live page becomes a map

@@ -75,6 +75,38 @@ async def serve_captures(page: Page, payloads: dict[str, Any]) -> None:
     await page.route("**/api/version", answer("version"))
 
 
+async def worst_spill(page: Page) -> int:
+    """How far the worst sparkline reaches outside its own card, in pixels.
+
+    A card wears a border, and a trace drawn past it reads as a broken
+    component rather than as a wide reading. The first version of the radar
+    cards did exactly that: the detail rows gave both the stage label and the
+    62px trace `shrink-0`, so "BACKEND RADAR ARRIVAL" plus a dot, a tag and
+    the trace needed 228px inside a 222px card and the trace hung 28px out.
+
+    Measured rather than looked at. The screenshots showed it and the first
+    reading of them missed it, which is the reason this returns a number.
+
+    Args:
+        page: A rendered dashboard with at least one card expanded.
+
+    Returns:
+        The largest overhang in pixels, or 0 when every trace is inside.
+    """
+    return int(await page.evaluate("""() => {
+      let worst = 0;
+      document.querySelectorAll('ul.grid > li').forEach((li) => {
+        const lb = li.getBoundingClientRect();
+        li.querySelectorAll('svg.spark').forEach((s) => {
+          const sb = s.getBoundingClientRect();
+          worst = Math.max(worst, Math.round(sb.right - lb.right),
+                                  Math.round(lb.left - sb.left));
+        });
+      });
+      return worst;
+    }"""))
+
+
 def summarize(payload: dict[str, Any]) -> str:
     """One line naming what the captured snapshot holds.
 
@@ -120,10 +152,15 @@ async def run(out: Path, base: str, payloads: dict[str, Any],
             await page.goto(f"{base}/dashboard", wait_until="domcontentloaded",
                             timeout=45000)
             await page.wait_for_timeout(SETTLE_MS)
+            # Expanded, because the detail rows are where a card's width is
+            # actually tested: they carry the longest stage labels.
+            await page.locator("button[aria-expanded]").first.click()
+            await page.wait_for_timeout(1500)
             shot = out / f"paired_{width}.png"
             await page.screenshot(path=str(shot))
             findings.append({
                 "width": width,
+                "spill": await worst_spill(page),
                 # The paired rail is the layout under test, and its column
                 # header is the one element that exists only in that branch.
                 "paired_header": await page.get_by_text("the main archive / the secondary archive").count(),
@@ -166,12 +203,14 @@ def main() -> int:
 
     bad = 0
     for f in found:
-        ok = bool(f["paired_header"]) and not f["errors"] and not f["overflow"]
+        ok = (bool(f["paired_header"]) and not f["errors"]
+              and not f["overflow"] and f["spill"] == 0)
         print(f"  {'ok  ' if ok else 'FAIL'}  {f['width']}px: "
               f"paired rail={bool(f['paired_header'])} "
               f"radar cards={f['radar_cards']} "
               f"empty cells={f['dash_cells']} "
-              f"overflow={f['overflow']}")
+              f"page overflow={f['overflow']} "
+              f"trace outside its card={f['spill']}px")
         if f["errors"]:
             print(f"        page errors: {f['errors']}")
         print(f"        {f['shot']}")

@@ -602,8 +602,12 @@
 				{@const cov = imgQc ? latestMetric(imgQc.check_id, 'coverage_pct') : null}
 				{@const qc = imgQc ? parseImageQc(imgQc.summary) : []}
 				{@const arrivalMetric = arrival ? sparklineMetric(arrival.check_id) : null}
+				<!-- min-w-0 and overflow-hidden are the backstop. A grid item
+				     defaults to min-width:auto, so one child that refuses to
+				     shrink widens the card past its track, and anything drawn
+				     at that width crosses the border the card is wearing. -->
 				<li
-					class="flex flex-col gap-1.5 rounded border p-2
+					class="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded border p-2
 					       {g.alerting
 							? 'border-[var(--color-fail)]/40 bg-[var(--color-fail)]/[0.04]'
 							: 'border-[var(--color-border)] bg-[var(--color-canvas)]/30'}"
@@ -726,8 +730,16 @@
 									class="flex flex-col gap-0.5 text-[11px]"
 									title={`${r.check_id}${meta?.source_label ? ` · read from ${meta.source_label}` : ''}`}
 								>
-									<div class="flex items-center gap-2">
-										<span class="num shrink-0 text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
+									<!-- Nothing in this row may refuse to shrink. Both the
+									     label and the trace were shrink-0, and in a 222px
+									     card "BACKEND RADAR ARRIVAL" plus a dot, a source
+									     tag and a 62px trace needs 228px, so the trace was
+									     drawn 28px outside the card's own border. The rail
+									     on the test deployment has one check per radar with
+									     a short stage name, which is why it fitted there
+									     and nowhere else. -->
+									<div class="flex min-w-0 items-center gap-1.5">
+										<span class="num min-w-0 truncate text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
 											{stageLabel(r.stage)}
 										</span>
 										<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
@@ -735,7 +747,7 @@
 											<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{meta.source_tag}</span>
 										{/if}
 										{#if diag.spark}
-											<span class="ml-auto shrink-0">
+											<span class="ml-auto w-[62px] min-w-0 shrink">
 												<Sparkline
 													data={sentinel.metrics[`${r.check_id}|${metric ?? 'age_s'}`] ?? []}
 													cadenceS={meta?.cadence_s ?? 120}
@@ -744,6 +756,7 @@
 													domain={sparklineDomain(metric)}
 													warnAt={sparklineWarnAt(metric)}
 													showLabel={false}
+													fluid
 												/>
 											</span>
 										{/if}
@@ -838,15 +851,14 @@
 		</div>
 	</aside>
 
-	<!-- RAIL 4: QUALITY, then ALARMS ---------------------------------------------------- -->
-	<div class="col-span-12 flex max-h-full min-h-0 flex-col gap-2 lg:col-span-2">
-		<!-- The two stages that had no row anywhere. L4 reached the page as
-		     "IMAGE QUALITY 9/9" in the top strip and a dot on six radar rows;
-		     L3 reached it as "MAP OVERLAYS 1/1" and nothing else. Six of L4's
-		     nine targets are radars and their numbers now sit on the radar
-		     rows, so what is left here is the three mosaics, which belong to
-		     no other rail. -->
-		<aside class="panel flex max-h-[45%] min-h-0 shrink-0 flex-col overflow-y-auto">
+	<!-- RAIL 4: QUALITY ----------------------------------------------------------------- -->
+	<!-- The two stages that had no row anywhere. L4 reached the page as
+	     "IMAGE QUALITY 9/9" in the top strip and a dot on six radar rows;
+	     L3 reached it as "MAP OVERLAYS 1/1" and nothing else. Six of L4's
+	     nine targets are radars and their numbers now sit on the radar
+	     cards, so what is left here is the three mosaics, which belong to
+	     no other rail. -->
+	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-2">
 			<SectionHeader
 				title="Quality"
 				count="{[...l4Rows, ...l3Rows].filter((r) => r.status === 'pass').length}/{l4Rows.length + l3Rows.length}"
@@ -906,10 +918,16 @@
 					</li>
 				{/if}
 			</ul>
-		</aside>
+	</aside>
 
-	<!-- ALARM STREAM ------------------------------------------------------------------- -->
-	<section class="panel flex min-h-0 flex-1 flex-col overflow-hidden">
+	<!-- ALARM STREAM, full width under the rails ---------------------------------------- -->
+	<!-- An alarm row is a severity chip, a stage, an id, the subject, the
+	     time it opened, its age, the message and an ack button: eight
+	     columns needing around 500px before anything truncates. It spent one
+	     release in the 2/12 rail beside Quality, where it had 310px, and the
+	     ack control was the part that gave way. A row this shape wants the
+	     page's width, so it takes the full span below the four rails. -->
+	<section class="panel col-span-12 flex max-h-[36vh] flex-col overflow-hidden">
 		<SectionHeader
 			title="Alarms"
 			count="{sentinel.alarms.length} open"
@@ -918,20 +936,15 @@
 				: 'all clear'}
 		/>
 		{#if sentinel.alarms.length}
-			<!-- One per line. This was a single flex row with three items and a
-			     gap, which fits a full-width band and not a column two twelfths
-			     wide: each item wrapped inside itself, so "show acknowledged
-			     (1)" broke across three lines beside a label that had broken
-			     across two. -->
-			<div class="flex flex-col gap-1 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
-				<span>most severe · top {ALARM_ROWS}</span>
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-faint)]">
+				<span>most severe first · top {ALARM_ROWS}</span>
 				{#if ackedCount}
 					<label class="flex cursor-pointer items-center gap-1.5 text-[var(--color-muted)] hover:text-[var(--color-bright)]">
 						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 shrink-0 accent-[var(--color-ok)]" />
-						<span>acknowledged ({ackedCount})</span>
+						<span>show acknowledged ({ackedCount})</span>
 					</label>
 				{/if}
-				<span class="normal-case tracking-normal">
+				<span class="ml-auto normal-case tracking-normal">
 					{#if overflowCount}
 						<a class="text-[var(--color-muted)] underline decoration-dotted hover:text-[var(--color-bright)]"
 						   href="/history?tab=alarms">+{overflowCount} more not shown</a>
@@ -955,12 +968,16 @@
 					: opened.toISOString().slice(11, 19) + 'Z'}
 				{@const isAcked = !!a.ack}
 				<li
-					class="row-hover sev-bar grid grid-cols-[2.5rem_3.2rem_3rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
+					class="row-hover sev-bar grid grid-cols-[2.5rem_6.5rem_3.5rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
 						''}"
 					title={isAcked ? `acked by ${a.ack?.acked_by} at ${a.ack?.acked_at}${a.ack?.note ? ' — ' + a.ack.note : ''}` : ''}
 				>
 					<span class={severityChip(a.severity)}>{a.severity}</span>
-					<span class="num text-[10.5px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
+					<!-- truncate, and a column wide enough for the longest stage
+					     name. "Connectivity" needs about 70px and the column was
+					     51px, so it ran into the id beside it and the row read
+					     "Connectivi#28200". -->
+					<span class="num truncate text-[10.5px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 					<span class="num text-[var(--color-bright)]">#{a.id}</span>
 					<span class="text-[var(--color-default)] truncate" title={a.target}>{prettyCheckLabel(a.check_id, a.target)}</span>
 					<span
@@ -1020,5 +1037,4 @@
 			{/if}
 		</ul>
 	</section>
-	</div>
 </div>
