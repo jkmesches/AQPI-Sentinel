@@ -74,6 +74,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from typing_extensions import override
+
 from ..config import (BACKEND_SOURCE, COMPOSITE_CONTRIB_FAIL_S,
                       COMPOSITE_CONTRIB_OVERRIDE_S, COMPOSITE_CONTRIB_WARN_S,
                       COMPOSITE_EXPECTED_RADARS, COMPOSITE_INPUT_DIR,
@@ -516,6 +518,7 @@ class Layer3CompositeParticipationCheck(Check):
         # witness for this check the way it does for arrival.
         self.source_tag, self.source_label = BACKEND_SOURCE
 
+    @override
     async def run(self, ctx: Any) -> CheckResult:  # noqa: ANN401  the scheduler's context
         """Judge participation, then let NOAA's archive vouch for a NEXRAD gap.
 
@@ -1118,6 +1121,7 @@ class Layer3InputStagingCheck(Check):
         return os.path.join(SETTINGS.recentfiles_dir,
                             COMPOSITE_INPUT_DIR[self.radar_id])
 
+    @override
     async def run(self, ctx: Any) -> CheckResult:  # noqa: ANN401  the scheduler's context
         """Judge staging, then let NOAA's archive vouch for a NEXRAD gap.
 
@@ -1306,12 +1310,22 @@ class Layer3InputStagingCheck(Check):
         # Removing the unjustified band is what let the wrong root through, so
         # the lesson is not "keep guessed bands", it is that switching off a
         # judgement can take an unrelated guarantee with it.
-        if age_s > COMPOSITE_INPUT_RETENTION_S:
+        #
+        # Judged on when the file was WRITTEN, because that is what the tree
+        # prunes by. A volume is written minutes after its declared scan
+        # (524 s for KMUX on 2026-11-23), so in every NEXRAD outage the last
+        # one outlived its declared hour by that much. Judged on declared age,
+        # KMUX read "not a live staging tree" from 18:31 to 18:39 and KBBX
+        # from 20:07 to 20:13. The declared age stands in only when the stat
+        # failed.
+        written_s = (t0.timestamp() - float(got["newest_mtime"])
+                     if got["newest_mtime"] is not None else age_s)
+        if written_s > COMPOSITE_INPUT_RETENTION_S:
             return CheckResult(
                 check_id=self.id, target=self.target, stage=self.stage,
                 status="error", started_at=t0, finished_at=utcnow(),
-                summary=(f"newest staged file is {age_s / 86400:.1f} days old, "
-                         f"older than this tree's entire "
+                summary=(f"newest staged file was written {written_s / 86400:.1f} "
+                         f"days ago, longer than this tree's entire "
                          f"{COMPOSITE_INPUT_RETENTION_S / 3600:.0f} h retention "
                          f"— {path} is not a live staging tree"),
                 payload={**payload, "beyond_retention": True},

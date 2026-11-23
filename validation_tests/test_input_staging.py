@@ -235,7 +235,9 @@ def main() -> int:
     # "20 staged, newest 298254.8 min old" as a PASS on every one of them.
     # Needs no fitted band: 202 days against a 1 h retention window is a
     # contradiction, not a close call.
-    d = stage_dir(tmp, "XEBY_decoy", {declared(202 * 86400, rid="XEBY"): 0})
+    # Written when it was declared, as the March copy was.
+    decoy = declared(202 * 86400, rid="XEBY")
+    d = stage_dir(tmp, "XEBY_decoy", {decoy: 0}, mtimes={decoy: 202 * 86400})
     r = run("XEBY", d)
     check("an age past the whole retention window is an ERROR",
           r.status == "error", f"{r.status}: {r.summary}")
@@ -251,6 +253,16 @@ def main() -> int:
     r = run("XEBY", d)
     check("a file inside the retention window is untouched by it",
           r.status == "pass", f"{r.status}: {r.summary}")
+    # Prod's layer3.input.KMUX at 18:31:43 on 2026-11-23, during the radar's
+    # maintenance: newest declared 3607 s old, written 524 s after its scan.
+    # The tree had not pruned it yet, because it prunes by write time, and
+    # the check called the live tree dead for eight minutes.
+    lingering = declared(3607, rid="KMUX")
+    d = stage_dir(tmp, "KMUX_outage", {lingering: 0}, mtimes={lingering: 3607 - 524})
+    r = run("KMUX", d)
+    check("a volume past its declared hour but written inside it is no error",
+          r.status != "error" and not r.payload.get("beyond_retention"),
+          f"{r.status}: {r.summary}")
 
     print("\nwith no band, the age is recorded and not judged")
     # Shipped as a uniform 900 s for about an hour. Measured the same
