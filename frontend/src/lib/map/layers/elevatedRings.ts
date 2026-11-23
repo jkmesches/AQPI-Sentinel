@@ -48,6 +48,13 @@ export interface Ring {
 	 * then goes at the nominal sheet altitude like the imagery does.
 	 */
 	elevationDeg: number | null;
+	/**
+	 * Draw a circle in Web Mercator about the dish, so the ring follows a
+	 * frame centered that way (the NEXRAD frames, see frameExtent in
+	 * $lib/radarGeo). The small-angle circle misses that frame's edge by
+	 * 2.5 km at 200 km.
+	 */
+	mercator?: boolean;
 }
 
 /**
@@ -82,6 +89,19 @@ export function ringPoints(
 	const dLat = (ring.radiusM / EARTH_RADIUS_M) / rad;
 	const dLng = dLat / Math.max(0.01, Math.cos(ring.lat * rad));
 	const out: [number, number][] = [];
+	if (ring.mercator) {
+		const y0 = Math.log(Math.tan(Math.PI / 4 + (ring.lat * rad) / 2));
+		const r = dLng * rad;
+		// Bounded by n, which is clamped above.
+		for (let i = 0; i < n; i++) {
+			const a = (2 * Math.PI * i) / n;
+			const y = y0 + r * Math.cos(a);
+			out.push([ring.lng + dLng * Math.sin(a),
+				(2 * Math.atan(Math.exp(y)) - Math.PI / 2) / rad]);
+		}
+		out.push([out[0][0], out[0][1]]);
+		return out;
+	}
 	// Bounded by n, which is clamped above.
 	for (let i = 0; i <= n; i++) {
 		const a = (2 * Math.PI * i) / n;

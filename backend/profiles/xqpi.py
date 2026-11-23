@@ -78,9 +78,10 @@ RADAR_FOLDER = {"FLOW": "flow"}
 #
 # Explicit profile data rather than derived from RADAR_META, because deriving
 # it would move AQPI. Fitting AQPI's nine radars plus their rings puts the
-# centre near 38.5N 121.9W — the three NEXRADs at 100 km drag it ~85 km
-# north-east of the tuned [-122.6, 37.95] the map has always opened at, and
-# changing a live deployment's startup view is not a side effect worth having.
+# center near 38.5N 121.9W. The three NEXRAD rings (100 km when this was
+# measured, 200 km since 2026-11-23) drag it ~85 km or more north-east of
+# the tuned [-122.6, 37.95] the map has always opened at, and changing a
+# live deployment's startup view is not a side effect worth having.
 #
 # Zoom 9.5 frames FLOW's 40.35 km ring: at latitude 34.2 that is
 # 156543*cos(lat)/2^9.5 = 179 m/px, so the 80.7 km ring spans ~450 px — about

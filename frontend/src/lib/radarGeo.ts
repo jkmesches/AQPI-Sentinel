@@ -82,7 +82,46 @@ export function rangeSpanDeg(lat: number, rangeM: number): { dLat: number; dLon:
 }
 
 /**
+ * A radar's position in Web Mercator and one distance at the scale there.
+ *
+ * @param site The radar.
+ * @param distanceM A ground distance from the radar in meters.
+ * @returns x and y in radians of the unit sphere, and the distance in the
+ *     same units at the radar's latitude.
+ */
+function mercatorAt(site: RadarSite, distanceM: number): { x0: number; y0: number; r: number } {
+	const phi = (site.lat * Math.PI) / 180;
+	return {
+		x0: (site.lon * Math.PI) / 180,
+		y0: Math.log(Math.tan(Math.PI / 4 + phi / 2)),
+		r: distanceM / 1000 / EARTH_RADIUS_KM / Math.cos(phi)
+	};
+}
+
+/** Web Mercator y in radians back to latitude in degrees. */
+function latOfY(y: number): number {
+	return ((2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180) / Math.PI;
+}
+
+/** A box of half width `halfM` centered on a radar in Web Mercator. */
+function mercatorBox(site: RadarSite, halfM: number): {
+	west: number; east: number; south: number; north: number;
+} {
+	const { x0, y0, r } = mercatorAt(site, halfM);
+	return {
+		west: ((x0 - r) * 180) / Math.PI, east: ((x0 + r) * 180) / Math.PI,
+		south: latOfY(y0 - r), north: latOfY(y0 + r)
+	};
+}
+
+/**
  * A closed ring approximating one radar's coverage.
+ *
+ * A radar whose frame is placed in Web Mercator (one with `frame_half_m`)
+ * gets a circle in Mercator too, so the ring follows the edge of the frame
+ * as drawn. A ring drawn true to the ground would miss that edge by up to
+ * 2.5 km at the north and south of a 200 km NEXRAD frame, because the frame
+ * itself cannot be placed true to the ground at its edges (see frameExtent).
  *
  * @param site The radar.
  * @param segments How many segments to draw. Must be at least 3.
@@ -93,8 +132,18 @@ export function rangeRingCoords(site: RadarSite, segments = 64): number[][] {
 	if (!Number.isInteger(segments) || segments < 3) {
 		throw new RangeError(`segments must be an integer of at least 3, got ${segments}`);
 	}
-	const { dLat, dLon } = rangeSpanDeg(site.lat, site.range_m);
 	const coords: number[][] = [];
+	if (site.frame_half_m !== undefined) {
+		const { x0, y0, r } = mercatorAt(site, site.range_m);
+		for (let i = 0; i < segments; i++) {
+			const a = (i / segments) * 2 * Math.PI;
+			coords.push([((x0 + r * Math.cos(a)) * 180) / Math.PI, latOfY(y0 + r * Math.sin(a))]);
+		}
+		// sin(2*pi) is not exactly zero, so the closing point is copied.
+		coords.push([...coords[0]]);
+		return coords;
+	}
+	const { dLat, dLon } = rangeSpanDeg(site.lat, site.range_m);
 	for (let i = 0; i <= segments; i++) {
 		const a = (i / segments) * 2 * Math.PI;
 		coords.push([site.lon + dLon * Math.cos(a), site.lat + dLat * Math.sin(a)]);
@@ -106,11 +155,12 @@ export function rangeRingCoords(site: RadarSite, segments = 64): number[][] {
  * The bounding box of one radar's range, for fitting a camera.
  *
  * @param site The radar.
- * @returns West, east, south and north in degrees.
+ * @returns West, east, south and north in degrees, the box of its ring.
  */
 export function radarExtent(site: RadarSite): {
 	west: number; east: number; south: number; north: number;
 } {
+	if (site.frame_half_m !== undefined) return mercatorBox(site, site.range_m);
 	const { dLat, dLon } = rangeSpanDeg(site.lat, site.range_m);
 	return {
 		west: site.lon - dLon, east: site.lon + dLon,
@@ -129,6 +179,14 @@ export function radarExtent(site: RadarSite): {
  * width at KDAX. Centered in Mercator, the middle pixel sits on the radar and
  * the scale there is the true one.
  *
+ * Away from the middle, four corners cannot carry the plotter's azimuthal
+ * equidistant grid exactly. A point d from the radar lands up to
+ * tan(lat) * d^2 / (2R) from its true ground: 0.6 km at 100 km and 2.5 km at
+ * the 200 km edge at KDAX, pointing a different way at each bearing. The
+ * drift averages to zero around any circle, so centering is the best a
+ * four-corner placement can do. Removing it needs the frame warped to
+ * Mercator before it is drawn.
+ *
  * @param site The radar.
  * @returns West, east, south and north in degrees.
  * @raises RangeError If `frame_half_m` is not a positive finite number.
@@ -141,16 +199,7 @@ export function frameExtent(site: RadarSite): {
 	if (!Number.isFinite(half) || half <= 0) {
 		throw new RangeError(`frame_half_m must be positive, got ${half}`);
 	}
-	const phi = (site.lat * Math.PI) / 180;
-	// Arc of the half width, stretched by the Mercator scale at the radar.
-	const span = half / 1000 / EARTH_RADIUS_KM / Math.cos(phi);
-	const y0 = Math.log(Math.tan(Math.PI / 4 + phi / 2));
-	const latOf = (y: number) => ((2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180) / Math.PI;
-	const dLon = (span * 180) / Math.PI;
-	return {
-		west: site.lon - dLon, east: site.lon + dLon,
-		south: latOf(y0 - span), north: latOf(y0 + span)
-	};
+	return mercatorBox(site, half);
 }
 
 /**

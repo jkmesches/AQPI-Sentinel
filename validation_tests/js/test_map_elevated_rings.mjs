@@ -138,6 +138,30 @@ export function runTests(mod) {
       ringPoints(r, Number.NaN).length === RING_SEGMENTS + 1);
   }
 
+  console.log('\na ring around a frame placed in Mercator is a Mercator circle:');
+  {
+    // KDAX at its 200 km range. The NEXRAD frame is a square centered in
+    // Web Mercator, so its ring has to be a circle there to meet its edge.
+    const merc = { lng: -121.67783, lat: 38.50111, radiusM: 200_000, siteM: 0,
+                   elevationDeg: null, mercator: true };
+    const y = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+    const pts = ringPoints(merc);
+    const x0 = (merc.lng * Math.PI) / 180;
+    const radii = pts.map(([lng, lat]) => Math.hypot((lng * Math.PI) / 180 - x0,
+                                                       y(lat) - y(merc.lat)));
+    const spread = Math.max(...radii) - Math.min(...radii);
+    check('every point is one Mercator distance from the dish', spread < 1e-12,
+      spread.toExponential(2));
+    check('...and that distance is the range at the dish\'s scale',
+      Math.abs(radii[0] - 200 / 6371 / Math.cos((merc.lat * Math.PI) / 180)) < 1e-12);
+    check('it closes exactly', pts[0][0] === pts.at(-1)[0] && pts[0][1] === pts.at(-1)[1]);
+    const flat = ringPoints({ ...merc, mercator: false });
+    const northKm = (Math.max(...pts.map((p) => p[1]))
+                     - Math.max(...flat.map((p) => p[1]))) * 111.19;
+    check('the small-angle circle would sit 2.5 km off its north edge',
+      Math.abs(Math.abs(northKm) - 2.5) < 0.05, `${northKm.toFixed(2)} km`);
+  }
+
   if (failures.length) {
     console.log(`\n${failures.length} FAILED: ${failures.join(', ')}`);
     return 1;

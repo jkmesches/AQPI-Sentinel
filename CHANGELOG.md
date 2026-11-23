@@ -28,6 +28,18 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The NEXRAD range rings stopped halfway out.** They were drawn at 100 km,
+  the ring radarca's own bundle carries, while the NEXRAD frames draw echo
+  out to 200 km (200.4 km at the farthest in 39 frames across the three
+  sites). The rings are now 200 km, and both the flat ring and the 3D one
+  are drawn as circles in Web Mercator to match the frames' placement. A
+  ring true to the ground would miss the frame's north and south
+  edges by 2.5 km, since a frame placed by its four corners drifts that far
+  from true ground at its edge. The NEXRAD preset now frames the whole
+  200 km.
+
 ## [0.15.3] - 2026-11-23
 
 ### Added

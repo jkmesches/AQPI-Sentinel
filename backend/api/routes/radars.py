@@ -32,8 +32,12 @@ router = APIRouter(prefix="/api/radars")
 # The NEXRAD positions are the ones in each site's Level II volume header,
 # which is the point the NEXRAD plotter centers its frames on. The rounded
 # values these replaced sat 5 to 73 m off it. `frame_half_m` is half the
-# side of that plotter's square frame (693 px over 400 km, north up), which
-# is larger than `range_m` because the frame is not cropped to the ring.
+# side of that plotter's square frame (693 px over 400 km, north up). Its
+# `range_m` is the circle inscribed in that frame, where the plotter stops
+# drawing: echo in 39 frames from all three sites reached 200.4 km and no
+# further. The 100 km these sites carried before is the ring radarca draws,
+# from the radarCoordinates table in its bundle, and says nothing about
+# these frames.
 RADAR_META = {
     "XSCV":  {"lat": 37.3989, "lon": -121.8334, "range_m":  40_000, "kind": "xband", "name": "Coyote Valley", "elevations": [2.0, 3.0, 4.0, 5.0]},
     "XSCW":  {"lat": 38.5216, "lon": -122.8022, "range_m":  40_000, "kind": "xband", "name": "Sonoma", "elevations": [1.5, 2.5, 3.5, 4.5]},
@@ -41,11 +45,11 @@ RADAR_META = {
     "XEBY":  {"lat": 37.8156, "lon": -122.0620, "range_m":  40_000, "kind": "xband", "name": "East Bay", "elevations": [0.0, 1.0, 2.0, 3.0]},
     "XSWR":  {"lat": 37.5742867, "lon": -122.4229867, "range_m":  40_000, "kind": "xband", "name": "Sawyer Ridge", "elevations": [2.5, 3.5, 4.5, 5.5]},
     "CBAND": {"lat": 38.0277, "lon": -122.7161, "range_m": 100_000, "kind": "cband", "name": "Mt Barnabe", "elevations": None},
-    "KBBX":  {"lat": 39.49564, "lon": -121.63161, "range_m": 100_000,
+    "KBBX":  {"lat": 39.49564, "lon": -121.63161, "range_m": 200_000,
               "frame_half_m": 200_000, "kind": "nexrad", "name": "KBBX", "elevations": None},
-    "KDAX":  {"lat": 38.50111, "lon": -121.67783, "range_m": 100_000,
+    "KDAX":  {"lat": 38.50111, "lon": -121.67783, "range_m": 200_000,
               "frame_half_m": 200_000, "kind": "nexrad", "name": "KDAX", "elevations": None},
-    "KMUX":  {"lat": 37.15522, "lon": -121.89845, "range_m": 100_000,
+    "KMUX":  {"lat": 37.15522, "lon": -121.89845, "range_m": 200_000,
               "frame_half_m": 200_000, "kind": "nexrad", "name": "KMUX", "elevations": None},
 }
 

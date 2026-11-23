@@ -11,10 +11,11 @@
  * profile supplies a home view over /api/version and the components fall back
  * to their own tuned constants when it does not. Deliberately NOT derived from
  * the radar list: fitting AQPI's nine radars plus their range rings centres
- * near 38.5N 121.9W, because the three 100 km NEXRADs drag it ~85 km
- * north-east of the view AQPI has always opened at. Deriving would have been
- * self-maintaining and would also have moved a live deployment's startup view
- * as a side effect of adding a second profile.
+ * near 38.5N 121.9W, because the three NEXRAD rings (100 km when this was
+ * measured, 200 km since 2026-11-23) drag it ~85 km or more north-east of
+ * the view AQPI has always opened at. Deriving would have been
+ * self-maintaining and would also have moved a live deployment's startup
+ * view as a side effect of adding a second profile.
  */
 
 /**

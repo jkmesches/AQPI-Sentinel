@@ -3592,7 +3592,8 @@
 				ring: {
 					lng: r.lon, lat: r.lat, radiusM: r.range_m,
 					siteM: 0,
-					elevationDeg: r.id === tiltOn ? tiltAngleDeg : null
+					elevationDeg: r.id === tiltOn ? tiltAngleDeg : null,
+					mercator: r.frame_half_m !== undefined
 				},
 				color: ringColor(paint.verdict),
 				// The draped pair this replaces, so the mesh changes the

@@ -154,6 +154,32 @@ export function runTests(mod) {
 	check('...and less latitude north of the radar than south (Mercator stretches poleward)',
 	      fe.north - KDAX_EXACT.lat < KDAX_EXACT.lat - fe.south,
 	      `${(fe.north - KDAX_EXACT.lat).toFixed(5)} vs ${(KDAX_EXACT.lat - fe.south).toFixed(5)}`);
+	// --- 8. the ring around a Mercator-placed frame ----------------------
+	// The plotter draws out to the circle inscribed in its square, so the
+	// ring has to be that circle as placed, not one true to the ground.
+	const KDAX_RING = { ...KDAX_EXACT, range_m: 200000 };
+	const kr = rangeRingCoords(KDAX_RING);
+	check('a NEXRAD ring has one point per segment plus the closing one', kr.length === 65,
+	      String(kr.length));
+	check('...and closes exactly', kr[0][0] === kr[64][0] && kr[0][1] === kr[64][1]);
+	const x0 = (KDAX_RING.lon * Math.PI) / 180;
+	const y0 = lat2y(KDAX_RING.lat);
+	const radii = kr.map(([lon, lat]) => Math.hypot((lon * Math.PI) / 180 - x0, lat2y(lat) - y0));
+	const spread = Math.max(...radii) - Math.min(...radii);
+	check('...a circle in Mercator about the radar', spread < 1e-12, spread.toExponential(2));
+	check('...touching the frame\'s four edges',
+	      Math.abs(Math.max(...kr.map((c) => c[0])) - fe.east) < 1e-9
+	      && Math.abs(Math.min(...kr.map((c) => c[0])) - fe.west) < 1e-9
+	      && Math.abs(Math.max(...kr.map((c) => c[1])) - fe.north) < 1e-9
+	      && Math.abs(Math.min(...kr.map((c) => c[1])) - fe.south) < 1e-9);
+	const kre = radarExtent(KDAX_RING);
+	check('its extent is the frame\'s box when the range is the frame\'s half width',
+	      ['west', 'east', 'south', 'north'].every((k) => Math.abs(kre[k] - fe[k]) < 1e-12));
+	const half = frameExtent({ ...KDAX_RING, range_m: 100000 });
+	const inner = radarExtent({ ...KDAX_RING, range_m: 100000 });
+	check('...and half as wide for a 100 km range in the same frame',
+	      Math.abs((inner.east - inner.west) * 2 - (half.east - half.west)) < 1e-9);
+
 	const xe = frameExtent(XEBY);
 	const re = radarExtent(XEBY);
 	check('an X-band frame keeps its range box',
