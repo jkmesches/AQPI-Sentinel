@@ -28,6 +28,14 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **"hide NEXRAD" on the Timeline.** Beside "hide RadarCA" in the Timeline
+  header, it takes the checks that watch a NEXRAD radar off the grid and out
+  of the tab counts, kept per browser like the dashboard's. Both pages now
+  hide by the same rule, and the box appears only where the backend flags
+  NEXRAD checks.
+
 ## [0.15.8] - 2026-11-23
 
 ### Added

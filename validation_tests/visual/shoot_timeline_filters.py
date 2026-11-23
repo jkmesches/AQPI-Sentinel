@@ -20,6 +20,16 @@ with or without a backend tier:
 4. "show failing" leaves only warn, fail and error runs, and clearing it
    restores the full list.
 
+Joseph added "hide NEXRAD" beside it the same day. The test deployment
+watches no NEXRAD radar, so where its own catalog flags none the box must
+not be offered, and the NEXRAD steps run against a catalog that flags every
+XEBY check as NEXRAD, the stand-in the dashboard probe uses:
+
+5. With it on, no stand-in row is on the Radars tab and every other row
+   that was there still is.
+6. The choice survives a reload.
+7. Clearing it brings every row back.
+
 Usage
 -----
 ::
@@ -38,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from playwright.async_api import Page, async_playwright
+    from playwright.async_api import Browser, Page, Route, async_playwright
 except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
@@ -50,6 +60,10 @@ SETTLE_MS = 4000
 BAD = {"warn", "fail", "error"}
 #: The Website tab's stages, as TABS in the timeline page lists them.
 WEBSITE_STAGES = {"L0"}
+RADARS_STAGES = {"L2", "LB2", "LB3", "L3", "L4-T1T2"}
+#: The radar this probe pretends is NEXRAD, since the test deployment
+#: watches none.
+STAND_IN = "XEBY"
 CHECK_ID_RE = re.compile(r"Check ID:\s+(\S+)")
 #: How many bad cells step 4 opens looking for one with mixed runs.
 MAX_CELLS_TRIED = 12
@@ -62,12 +76,70 @@ async def row_ids(page: Page) -> set[str]:
     return {m.group(1) for t in titles if (m := CHECK_ID_RE.search(t))}
 
 
-async def open_timeline(page: Page, base: str) -> None:
-    """Load the timeline on its Website tab and wait for the grid."""
+async def open_timeline(page: Page, base: str, tab: str = "website") -> None:
+    """Load the timeline on one tab and wait for the grid."""
     await page.goto(f"{base}/timeline", wait_until="load", timeout=60_000)
     await page.wait_for_timeout(SETTLE_MS)
-    await page.get_by_role("button", name=re.compile("website", re.I)).first.click()
+    await page.get_by_role("button", name=re.compile(tab, re.I)).first.click()
     await page.wait_for_timeout(1000)
+
+
+async def stand_in_catalog(route: Route) -> None:
+    """Serve the real check catalog with the stand-in radar's checks as NEXRAD."""
+    resp = await route.fetch()
+    rows: list[dict[str, Any]] = await resp.json()
+    for r in rows:
+        r["nexrad"] = r.get("target") == STAND_IN
+    await route.fulfill(response=resp, json=rows)
+
+
+async def check_nexrad(page: Page, base: str, checks: list[dict[str, Any]],
+                       problems: list[str]) -> dict[str, Any]:
+    """Steps 5 to 7, on the Radars tab with the stand-in flagged as NEXRAD.
+
+    Args:
+        page: A fresh page, with the stand-in catalog routed.
+        base: The deployment's origin.
+        checks: /api/checks as the deployment serves it, unrouted.
+        problems: Collects one message per defect.
+
+    Returns:
+        What each step saw.
+    """
+    nexrad = {c["id"] for c in checks if c.get("target") == STAND_IN}
+    keep = {c["id"] for c in checks
+            if c["stage"] in RADARS_STAGES and c.get("target") != STAND_IN}
+    await open_timeline(page, base, "radars")
+    before = await row_ids(page)
+    if not await page.locator("[data-hide-nexrad]").count():
+        problems.append("hide NEXRAD is not offered, though the catalog flags "
+                        f"{len(nexrad)} checks as NEXRAD")
+        return {"before": len(before), "offered": False}
+    await page.locator("[data-hide-nexrad] input").check()
+    await page.wait_for_timeout(800)
+    hidden = await row_ids(page)
+    await page.reload(wait_until="load")
+    await page.wait_for_timeout(SETTLE_MS)
+    await page.get_by_role("button", name=re.compile("radars", re.I)).first.click()
+    await page.wait_for_timeout(1000)
+    kept_on = await page.locator("[data-hide-nexrad] input").is_checked()
+    after_reload = await row_ids(page)
+    await page.locator("[data-hide-nexrad] input").uncheck()
+    await page.wait_for_timeout(800)
+    restored = await row_ids(page)
+    if hidden & nexrad:
+        problems.append(f"NEXRAD rows stayed: {sorted(hidden & nexrad)}")
+    if (keep & before) - hidden:
+        problems.append(f"rows that are not NEXRAD vanished: {sorted((keep & before) - hidden)}")
+    if not kept_on or after_reload != hidden:
+        problems.append("the NEXRAD filter did not survive a reload")
+    if restored != before:
+        problems.append("clearing the NEXRAD filter did not bring every row back")
+    if not before & nexrad:
+        problems.append("the Radars tab showed no stand-in rows to begin with, so "
+                        "step 5 tested nothing")
+    return {"before": len(before), "hidden": len(hidden), "kept_on": kept_on,
+            "restored": len(restored), "nexrad_on_tab": len(before & nexrad)}
 
 
 async def check_radarca(page: Page, base: str, checks: list[dict[str, Any]],
@@ -132,7 +204,14 @@ async def check_failing(page: Page, problems: list[str]) -> dict[str, Any]:
     cell = page.locator(
         "[data-cell-status=warn], [data-cell-status=fail], [data-cell-status=error]")
     every: list[str] = []
+    close = page.locator('button[aria-label="close"]')
     for i in range(min(await cell.count(), MAX_CELLS_TRIED)):
+        # The previous cell's panel covers the grid with a backdrop, which
+        # took every click after the first whenever the first cell's runs
+        # were not mixed.
+        if await close.count():
+            await close.first.click()
+            await page.wait_for_timeout(300)
         await cell.nth(i).click()
         await page.wait_for_timeout(2500)
         every = await page.eval_on_selector_all(
@@ -174,24 +253,47 @@ async def run(base: str) -> dict[str, Any]:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         try:
-            ctx = await browser.new_context(viewport=VIEWPORT)
-            page = await ctx.new_page()
-            await page.add_init_script(
-                "window.__errs=[];"
-                "window.addEventListener('error',"
-                "e=>window.__errs.push(String(e.message)));")
-            await page.add_init_script(
-                "if (!sessionStorage.getItem('probe-cleared')) {"
-                " localStorage.clear(); sessionStorage.setItem('probe-cleared','1'); }")
+            page = await fresh_page(browser)
             resp = await page.request.get(f"{base}/api/checks")
             checks: list[dict[str, Any]] = await resp.json()
             radarca = await check_radarca(page, base, checks, problems)
+            # The deployment's own catalog: where no check is NEXRAD the box
+            # is not offered at all.
+            offered = await page.locator("[data-hide-nexrad]").count()
+            if not any(c.get("nexrad") is True for c in checks) and offered:
+                problems.append("hide NEXRAD is offered where no check is NEXRAD")
             failing = await check_failing(page, problems)
             errs: list[str] = await page.evaluate("()=>window.__errs||[]")
+            # Its own context, so the routed catalog cannot reach the steps above.
+            stand_in = await fresh_page(browser)
+            await stand_in.route("**/api/checks", stand_in_catalog)
+            nexrad = await check_nexrad(stand_in, base, checks, problems)
+            errs += await stand_in.evaluate("()=>window.__errs||[]")
         finally:
             await browser.close()
-    return {"base": base, "radarca": radarca, "failing": failing,
-            "errors": errs, "problems": problems}
+    return {"base": base, "radarca": radarca, "failing": failing, "nexrad": nexrad,
+            "nexrad_offered_unrouted": offered, "errors": errs, "problems": problems}
+
+
+async def fresh_page(browser: Browser) -> Page:
+    """A page in its own context, recording errors, with storage cleared once.
+
+    Args:
+        browser: The running chromium.
+
+    Returns:
+        The new page.
+    """
+    ctx = await browser.new_context(viewport=VIEWPORT)
+    page = await ctx.new_page()
+    await page.add_init_script(
+        "window.__errs=[];"
+        "window.addEventListener('error',"
+        "e=>window.__errs.push(String(e.message)));")
+    await page.add_init_script(
+        "if (!sessionStorage.getItem('probe-cleared')) {"
+        " localStorage.clear(); sessionStorage.setItem('probe-cleared','1'); }")
+    return page
 
 
 def main() -> int:
@@ -208,7 +310,8 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     report = asyncio.run(run(args.base))
     _ = (outdir / "timeline_filters.json").write_text(json.dumps(report, indent=1))
-    print(json.dumps({k: report[k] for k in ("radarca", "failing")}, indent=1))
+    print(json.dumps({k: report[k] for k in ("radarca", "failing", "nexrad",
+                                             "nexrad_offered_unrouted")}, indent=1))
     for p in report["problems"]:
         print(f"  FAIL  {p}")
     print("all timeline filter steps passed" if not report["problems"]

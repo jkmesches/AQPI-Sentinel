@@ -4,6 +4,7 @@
 	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
 	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES, backendStageOf, isBackendStage } from '$lib/format';
 	import { pairByTarget, endsPairGroup, type Paired } from '$lib/pairing';
+	import { hiddenCheckIds, sourceCounts } from '$lib/checkFilter';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
 	import ReportExportModal from '$lib/components/ReportExportModal.svelte';
@@ -97,14 +98,21 @@
 		try { return localStorage.getItem(key) === '1'; } catch { return false; }
 	};
 	let hideRadarca = $state(storedFlag('sentinel.timeline.hideRadarca'));
+	// Hides the checks that watch a NEXRAD radar, by the backend's `nexrad`
+	// flag, the same set whose alarms never notify. Offered only where the
+	// backend flags at least one, as on the dashboard.
+	let hideNexrad = $state(storedFlag('sentinel.timeline.hideNexrad'));
 	const radarcaIds = $derived(new Set(
 		columns.filter((c) => c.reads_radarca === true).map((c) => c.id)));
 	// A backend older than the field reports nothing, and the toggle would
 	// silently hide nothing, so it is disabled until one check carries it.
 	const radarcaKnown = $derived(
 		columns.some((c) => typeof c.reads_radarca === 'boolean'));
+	const nexradCount = $derived(sourceCounts(columns).nexrad);
+	// One rule for both filters, shared with the dashboard ($lib/checkFilter).
+	const hiddenIds = $derived(hiddenCheckIds(columns, { hideRadarca, hideNexrad }));
 	const shownColumns = $derived(
-		hideRadarca ? columns.filter((c) => !radarcaIds.has(c.id)) : columns);
+		hiddenIds.size ? columns.filter((c) => !hiddenIds.has(c.id)) : columns);
 
 	// Narrows the detail panel's run list to warn, fail and error.
 	let failingOnly = $state(storedFlag('sentinel.timeline.failingOnly'));
@@ -163,7 +171,7 @@
 			for (const s of t.stages) {
 				for (const r of sentinel.rollup?.stages?.[s] ?? []) {
 					// The pie counts what the grid shows.
-					if (hideRadarca && radarcaIds.has(r.check_id)) continue;
+					if (hiddenIds.has(r.check_id)) continue;
 					const st = (r.status ?? 'skip') as keyof StatusCounts;
 					if (st in c) c[st] += 1;
 					else c.skip += 1;
@@ -333,6 +341,7 @@
 	$effect(() => {
 		try {
 			localStorage.setItem('sentinel.timeline.hideRadarca', hideRadarca ? '1' : '0');
+			localStorage.setItem('sentinel.timeline.hideNexrad', hideNexrad ? '1' : '0');
 			localStorage.setItem('sentinel.timeline.failingOnly', failingOnly ? '1' : '0');
 		} catch { /* */ }
 	});
@@ -941,6 +950,17 @@
 			<span>hide RadarCA{radarcaKnown && hideRadarca ? ` (${radarcaIds.size})` : ''}</span>
 		</label>
 
+		{#if nexradCount > 0}
+			<label
+				data-hide-nexrad
+				class="flex items-center gap-1 uppercase tracking-wider text-[var(--color-muted)]"
+				title={`Hide the ${nexradCount} checks that watch a NEXRAD radar. Their alarms never notify either way.`}
+			>
+				<input type="checkbox" bind:checked={hideNexrad} class="accent-[var(--color-ok)]" />
+				<span>hide NEXRAD{hideNexrad ? ` (${nexradCount})` : ''}</span>
+			</label>
+		{/if}
+
 		<button
 			type="button"
 			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
@@ -982,9 +1002,10 @@
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">loading timeline…</div>
 		{:else if !buckets.length}
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">no data in this window.</div>
-		{:else if hideRadarca && !groupedColumns.length}
+		{:else if hiddenIds.size && !groupedColumns.length}
 			<div data-radarca-empty class="px-4 py-8 text-[12px] text-[var(--color-muted)]">
-				Every check on this tab reads RadarCA. Clear "hide RadarCA" to see them.
+				The source filters hide every check on this tab. Clear "hide
+				RadarCA"{nexradCount > 0 ? ' or "hide NEXRAD"' : ''} to see them.
 			</div>
 		{:else}
 			<!--
