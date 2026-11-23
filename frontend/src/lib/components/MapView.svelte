@@ -65,6 +65,12 @@
 		pane?: number;
 		/** Whether a second pane is on screen. */
 		compare?: boolean;
+		/**
+		 * Whether the panes move as one and mark one cursor. False lets each
+		 * pane pan and zoom on its own with only its own pointer drawn. Time
+		 * and pins stay shared either way.
+		 */
+		linked?: boolean;
 		/** The time both panes show. Written by the primary pane. */
 		sharedTime?: string | null;
 		/** The camera both panes share. Written by whichever moved last. */
@@ -130,6 +136,7 @@
 	let {
 		pane = 0,
 		compare = false,
+		linked = true,
 		sharedTime = $bindable(null),
 		sharedCamera = $bindable(null),
 		timeStrip = $bindable(null),
@@ -2729,6 +2736,9 @@
 	// publishing reads, and without them each pane would answer the other
 	// forever.
 	let _applyingShared = false;
+	// Whether this pane shares its camera and cursor right now. Time is
+	// shared on `compare` alone, since one strip drives every pane.
+	const locked = $derived(compare && linked);
 	// This pane's camera once a move settles, published for the harness.
 	// Set from moveend rather than from every frame of a drag, so it
 	// changes once per gesture instead of sixty times a second.
@@ -2822,7 +2832,7 @@
 	 * each product's own number beside it.
 	 */
 	function followCursor(): void {
-		if (!map || !compare || !sharedCursor || hovering) {
+		if (!map || !locked || !sharedCursor || hovering) {
 			followAt = null;
 			followValue = null;
 			return;
@@ -2839,7 +2849,7 @@
 	}
 
 	$effect(() => {
-		void sharedCursor; void compare; void hovering; void paintedTs;
+		void sharedCursor; void locked; void hovering; void paintedTs;
 		followCursor();
 	});
 
@@ -2895,7 +2905,7 @@
 
 	/** Publish this pane's camera, so the other pane can match it. */
 	function publishCamera(): void {
-		if (!compare || _applyingShared || !map) return;
+		if (!locked || _applyingShared || !map) return;
 		const c = linkCamera();
 		if (!c) return;
 		const same = sharedCamera
@@ -2915,7 +2925,7 @@
 	 * pictures rather than the motion.
 	 */
 	function followCamera(): void {
-		if (!compare || !map || !sharedCamera) return;
+		if (!locked || !map || !sharedCamera) return;
 		const c = linkCamera();
 		if (!c) return;
 		const d = sharedCamera;
@@ -2957,7 +2967,7 @@
 		followTime();
 	});
 	$effect(() => {
-		void sharedCamera; void compare;
+		void sharedCamera; void locked;
 		followCamera();
 	});
 
@@ -3096,6 +3106,10 @@
 		if (!prefsReady) return;
 		untrack(() => { loadComposite(); });
 	});
+	// Untracked, because refreshNexrad tears the source down and rebuilds
+	// it, and it reads the opacity and the frame time on the way. Tracked,
+	// those reads re-ran this on every opacity input and every playback
+	// step. Opacity has applyOpacity and time has syncNexradTime.
 	$effect(() => {
 		void nexradEnabled;
 		untrack(refreshNexrad);
@@ -3106,10 +3120,6 @@
 	});
 	// Opacity slider — cheap setPaintProperty per layer, no source churn.
 	$effect(() => {
-	// Untracked, because refreshNexrad tears the source down and rebuilds
-	// it, and it reads the opacity and the frame time on the way. Tracked,
-	// those reads re-ran this on every opacity input and every playback
-	// step. Opacity has applyOpacity and time has syncNexradTime.
 		void layerOpacity;
 		applyOpacity();
 	});
@@ -4365,7 +4375,8 @@
 			// toolbar sees the state at the moment it asks instead of
 			// whatever it was when this effect last ran.
 			measuring: () => measuring,
-			exporting: () => exporting
+			exporting: () => exporting,
+			camera: linkCamera
 		};
 	});
 

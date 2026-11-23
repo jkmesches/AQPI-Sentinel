@@ -33,8 +33,12 @@
 		pinLimit?: number;
 		/** The size every pane draws its overlays at. */
 		uiScale?: number;
+		/** Whether the panes share one camera and one cursor. */
+		linked?: boolean;
 		onaddpane: () => void;
 		onremovepane: () => void;
+		/** Called to link the panes, or to let each move on its own. */
+		onlink?: () => void;
 		onmeasure: () => void;
 		onprobe: () => void;
 		onexport: () => void;
@@ -48,8 +52,9 @@
 		panes, maxPanes, measuring, exporting, probing, pins = 0,
 		pinLimit = 0,
 		uiScale = DEFAULT_UI_SCALE,
+		linked = true,
 		onaddpane, onremovepane, onmeasure, onprobe, onexport, onreset, onscale,
-		onclearpins
+		onclearpins, onlink = () => {}
 	}: Props = $props();
 
 	let settingsOpen = $state(false);
@@ -163,11 +168,27 @@
 	<button
 		data-pane-add
 		class="{base} {off}"
-		title="open another pane, locked to the others in time and view"
+		title={linked
+			? 'open another pane, locked to the others in time and view'
+			: 'open another pane, locked to the others in time only'}
 		aria-label="open another pane"
 		disabled={panes >= maxPanes}
 		onclick={onaddpane}
 	>+</button>
+	<!-- Only with more than one pane, since one pane has nothing to link.
+	     Named for what a press will do, and pressed-looking while the
+	     panes are apart, so the state reads off the button either way. -->
+	{#if panes > 1}
+		<button
+			data-pane-link={linked ? 'linked' : 'unlinked'}
+			class="{base} {linked ? off : on} ml-1"
+			aria-pressed={!linked}
+			title={linked
+				? 'Unlink the panes: each pans and zooms on its own and draws only its own cursor. Time stays shared.'
+				: 'Link the panes again: every pane moves to the view of the pane the dock is driving, and the cursor shows in each.'}
+			onclick={onlink}
+		>{linked ? 'unlink panes' : 'link panes'}</button>
+	{/if}
 
 	<!-- Settings, at the far end. The console's own preferences rather
 	     than one pane's display, so they belong here and not on a pane's

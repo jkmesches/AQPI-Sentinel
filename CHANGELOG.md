@@ -41,6 +41,11 @@ unknown`.
   narrows the runs in the bucket to warn, fail and error, and says how many
   of the bucket's runs that leaves.
 
+- **Panes can be unlinked.** With more than one pane open, "unlink panes"
+  beside the pane count lets each pane pan and zoom on its own and draw only
+  its own cursor. Time and pins stay shared. "link panes" gathers every pane
+  on the view of the pane the dock is driving.
+
 - **The X-band and C-band reflectivity readout was wrong by up to 9.5
   dBZ.** Its ramp was read off the published colorbar, 22 linear bins over
   -20 to 80 dBZ. The frames are painted through a BoundaryNorm over -25 to
@@ -86,7 +91,23 @@ unknown`.
   The end bands read as open ("80.0 dBZ or more"), since the renderer
   paints everything past either limit in the end colors.
 
+- **"100%" slid under the opacity slider's thumb.** A range input keeps its
+  intrinsic width in a flex row, so the value label shrank instead. The
+  label no longer shrinks, and the slider gives way.
+
+- **NEXRAD was rebuilt on every opacity change and every playback step.**
+  The effect that adds the layer read the opacity and the frame time while
+  building it, so Svelte re-ran it on both. It now runs only when NEXRAD is
+  turned on or off. Every overlay layer also sets `raster-fade-duration` to
+  0, as MapLibre advises for an image that is swapped in place. Neither
+  change was confirmed against the flicker reported on 2026-11-23, which a
+  headless browser did not reproduce.
+
 ### Changed
+
+- **The CoSMoS products read "Water Depth" and "Max Water Depth" again.**
+  v0.15.0 renamed them "Flood Depth", which broke the rule the other
+  product labels follow of keeping the publisher's words.
 
 - **The tilt picker's first option reads "Processed scan".** It read
   "Default (RadarCA)", which suggested the imagery came from radarca on a

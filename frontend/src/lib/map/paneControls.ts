@@ -12,6 +12,7 @@
  */
 
 import type { FrameApply } from './layers/registry';
+import type { Camera } from './permalink';
 
 /** How a pane hands its frame swaps to the page's rendezvous. */
 export interface PaneGate {
@@ -62,6 +63,12 @@ export interface PaneControls {
 	measuring: () => boolean;
 	/** Whether a save is running, so a second press cannot start another. */
 	exporting: () => boolean;
+	/**
+	 * Where this pane is looking, or null before its map exists. Read when
+	 * unlinked panes are linked again, so they gather on this pane's view
+	 * rather than on the last view they shared.
+	 */
+	camera: () => Camera | null;
 }
 
 /**

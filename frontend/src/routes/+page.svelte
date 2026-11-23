@@ -70,6 +70,11 @@
 	// same place. Two panes showing one spot are comparing it; two
 	// showing a crosshair each under its own pointer are not.
 	let sharedCursor = $state<{ lng: number; lat: number } | null>(null);
+	// Whether the panes move as one and mark one cursor. Unlinked, each pane
+	// pans and zooms on its own and draws only its own pointer, while time
+	// and pins stay shared. Back to linked whenever one pane is left, so a
+	// pane opened later is locked as the + button says.
+	let panesLinked = $state(true);
 	// The points the reader has pinned. Console-wide, so one pin marks
 	// one place in every pane and each pane reports its own product
 	// there; see $lib/map/probe.
@@ -133,6 +138,26 @@
 	// point at nothing, so it falls back to the first.
 	const dockTarget = $derived(dockPane < paneCount ? dockPane : 0);
 	const stacked = $derived(compare && shouldStackPanes(pageWidth));
+	$effect(() => {
+		if (paneCount <= 1) panesLinked = true;
+	});
+
+	/**
+	 * Link the panes, or let each move on its own.
+	 *
+	 * Linking gathers every pane on the view of the pane the dock drives.
+	 * The shared camera stopped moving while they were apart, and jumping
+	 * them all back to it would undo whatever the reader just looked at.
+	 * The cursor is cleared both ways, so no pane keeps a mark from before.
+	 */
+	function toggleLink(): void {
+		if (!panesLinked) {
+			const here = paneSlots[dockTarget]?.camera() ?? null;
+			if (here) sharedCamera = here;
+		}
+		sharedCursor = null;
+		panesLinked = !panesLinked;
+	}
 
 	// The frame rendezvous. Each pane already swaps its own layers
 	// together; without this the pane that loads first paints the new
@@ -322,6 +347,8 @@
 				pinLimit={PIN_LIMIT}
 				onclearpins={() => { sharedPins = []; }}
 				onscale={setScale}
+				linked={panesLinked}
+				onlink={toggleLink}
 				onaddpane={() => { panesWanted = Math.min(maxPanes, paneCount + 1); }}
 				onremovepane={() => { panesWanted = Math.max(1, paneCount - 1); }}
 				onmeasure={() => focused?.toggleMeasure()}
@@ -334,6 +361,7 @@
 					// made the one control that promises a known state
 					// the one that did not deliver it.
 					panesWanted = 1;
+					panesLinked = true;
 					dockPane = 0;
 					sharedPins = [];
 					probing = false;
@@ -431,6 +459,7 @@
 						<MapView
 							pane={i}
 							{compare}
+							linked={panesLinked}
 							{probing}
 							{uiScale}
 							bind:sharedPins
