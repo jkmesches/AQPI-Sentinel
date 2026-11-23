@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.7] - 2026-11-23
+
 ### Added
 
 - **Dashboard filters for RadarCA and NEXRAD checks.** Two checkboxes above
@@ -62,6 +64,9 @@ unknown`.
   many decimals as it needs, up to six, so 0.010 to 0.011 in no longer reads
   "0.01 to 0.01 in". An open band's threshold is printed to a hundredth of
   its width.
+- **The deploy compose file mounts the backup directory once.** It listed
+  the read-only backup mount twice, which the compose schema rejects and an
+  older Docker refuses at `up`.
 
 ### Changed
 
