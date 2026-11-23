@@ -289,8 +289,8 @@ def main() -> int:
         [sys.executable, "-c",
          "import backend.config as c; print(c.LB1_FRESHNESS, c.LB2_FRESHNESS)"],
         cwd=str(ROOT), capture_output=True, text=True,
-        env=dict(os.environ, SENTINEL_DB_URL="postgresql://unused/unused",
-                 **{k: v for k, v in os.environ.items() if k != "SENTINEL_PROFILE"}))
+        env={**{k: v for k, v in os.environ.items() if k != "SENTINEL_PROFILE"},
+             "SENTINEL_DB_URL": "postgresql://unused/unused"})
     basis = out.stdout.strip().splitlines()[-1] if out.returncode == 0 else out.stderr
     # LB1 stays on mtime: the main archive's product tree writes each frame once, 2.25-2.48
     # min after its own declared time, with 0.04-0.18 min of spread.
