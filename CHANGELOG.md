@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-11-23
+
 ### Changed
 
 - **NEXRAD range rings show only while their imagery is on.** The three
