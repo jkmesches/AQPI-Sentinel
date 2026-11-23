@@ -465,7 +465,12 @@
      something failing to load rather than as a rail with nothing more to say.
      Each still takes max-h-full and scrolls, so a long rail is bounded by the
      viewport rather than by its neighbors. -->
-<div class="grid h-full grid-cols-12 items-start gap-2 p-2">
+<!-- The rails take whatever height the alarm band leaves, and the band sits
+     below them at the foot of the page. In one grid with the rails, the band
+     followed the tallest rail's content up and down the page as rows
+     expanded and collapsed. -->
+<div class="flex h-full flex-col gap-2 p-2">
+<div data-rails class="grid min-h-0 flex-1 grid-cols-12 items-start gap-2 overflow-y-auto">
 	<!-- RAIL 1: SITE ------------------------------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
 	     of most cascading failures, so keeping it at eye level makes
@@ -920,14 +925,17 @@
 			</ul>
 	</aside>
 
-	<!-- ALARM STREAM, full width under the rails ---------------------------------------- -->
+</div>
+	<!-- ALARM STREAM, full width at the foot of the page --------------------------------- -->
 	<!-- An alarm row is a severity chip, a stage, an id, the subject, the
 	     time it opened, its age, the message and an ack button: eight
 	     columns needing around 500px before anything truncates. It spent one
 	     release in the 2/12 rail beside Quality, where it had 310px, and the
 	     ack control was the part that gave way. A row this shape wants the
-	     page's width, so it takes the full span below the four rails. -->
-	<section class="panel col-span-12 flex max-h-[36vh] flex-col overflow-hidden">
+	     page's width, so it takes the full span below the four rails.
+	     It is as tall as its rows, up to 36vh, so a quiet page gives the
+	     rails everything but a header's height. -->
+	<section data-alarm-band class="panel flex max-h-[36vh] shrink-0 flex-col overflow-hidden">
 		<SectionHeader
 			title="Alarms"
 			count="{sentinel.alarms.length} open"
