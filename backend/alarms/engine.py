@@ -13,8 +13,9 @@ Two responsibilities, kept in one class so the lifecycle is obvious:
 from __future__ import annotations
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..registry import CHECKS
 
@@ -31,6 +32,9 @@ from .sinks import build_sinks
 
 log = logging.getLogger(__name__)
 TICK_S = 15
+
+#: An alarm event's receiver: (event_type, payload), awaited by _emit.
+Listener = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 def _utcnow() -> datetime:
@@ -59,7 +63,7 @@ class AlarmEngine:
         self._stop = asyncio.Event()
         self._ticker_task: asyncio.Task | None = None
         # listeners notified on alarm/run events (P1.5 WebSocket)
-        self._listeners: list = []
+        self._listeners: list[Listener] = []
         # last time we ran the stale-ACKed auto-close sweep
         self._last_autoclose: datetime | None = None
 
@@ -131,7 +135,7 @@ class AlarmEngine:
         if wh and hasattr(wh, "aclose"):
             await wh.aclose()
 
-    def add_listener(self, fn):
+    def add_listener(self, fn: Listener) -> None:
         """Register a callable(event_type, payload) -> awaitable for WS push.
         ``event_type`` ∈ {alarm_open, alarm_close, alarm_promote, run}."""
         self._listeners.append(fn)
