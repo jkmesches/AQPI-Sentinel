@@ -33,6 +33,7 @@
 	import { OFF_SCALE, overlayFraction, overlayPixel,
 	         readoutFor, readoutHint } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
+	import { firstReading, topFirst } from '$lib/map/readoutOrder';
 	import MapLegend from '$lib/components/MapLegend.svelte';
 	import MapCompass from '$lib/components/MapCompass.svelte';
 	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
@@ -1001,6 +1002,8 @@
 	let tiltFrame = $state<
 		{ extent: Extent; radar: string; moment: string } | null>(null);
 	let readoutValue = $state<string | null>(null);
+	/** The table the reading was taken through, for the chip's hint. */
+	let readoutRamp = $state<Ramp | null>(null);
 	let readoutAt = $state<{ x: number; y: number } | null>(null);
 
 	/**
@@ -1018,9 +1021,10 @@
 		lngLat: { lng: number; lat: number },
 		point: { x: number; y: number }
 	): void {
-		const text = valueAt(lngLat);
-		readoutValue = text;
-		readoutAt = text ? point : null;
+		const got = readingAt(lngLat);
+		readoutValue = got?.text ?? null;
+		readoutRamp = got?.ramp ?? null;
+		readoutAt = got ? point : null;
 	}
 
 	/**
@@ -1036,64 +1040,74 @@
 	function valueAt(
 		lngLat: { lng: number; lat: number }
 	): string | null {
-		const ramp = activeRamp;
-		if (!ramp) return null;
-		// A composite sits in the same raster band as the radar overlays
-		// and covers far more ground, so where the two overlap the reader
-		// is looking at the composite and it is the one to report.
-		// Before 2026-11-21 no product had a measured ramp and this
-		// reported nothing at all while one was showing, which is the
-		// view the console opens on.
-		if (composite !== 'none' && compFrame) {
-			return sampleAt(ramp, compSampler, compFrame.extent, lngLat);
-		}
-		// A tilt replaces its radar's overlay, so it is the only frame to
-		// read there. A held frame for another radar or moment answers
-		// nothing, since activeRamp has already moved to the new one.
-		const tiltRadar = tiltOverlayRadarId();
-		const tiltMoment = tiltSourceFor(currentMoment);
-		if (tiltRadar && tiltMoment) {
-			if (!tiltFrame || tiltFrame.radar !== tiltRadar
-				|| tiltFrame.moment !== tiltMoment) {
-				return null;
-			}
-			return sampleAt(ramp, tiltSampler, tiltFrame.extent, lngLat);
-		}
-		// Otherwise every radar that is on, nearest first. The legend
-		// draws one scale for radars that share a table, so the readout
-		// has to answer across all of them; asking only the lone-radar
-		// sampler left the legend promising a number that never came.
-		// Nearest first because where two scans overlap, the closer
-		// radar resolved that ground better.
-		void radarFramesAt;
-		// The X-bands before any NEXRAD, because they draw on top of it
-		// and the reading has to be the pixel the reader is looking at.
-		const near = [...radarSamplers.entries()].sort(
-			(a, b) => Number(isNexrad(a[0])) - Number(isNexrad(b[0]))
-				|| extentGap(a[1].extent, lngLat) - extentGap(b[1].extent, lngLat));
-		for (const [, held] of near) {
-			const got = sampleAt(ramp, held.sampler, held.extent, lngLat);
-			if (got) return got;
-		}
-		return null;
+		return readingAt(lngLat)?.text ?? null;
+	}
+
+	/** One overlay the readout can read, with the table its colors mean. */
+	interface ReadableOverlay {
+		layerId: string;
+		ramp: Ramp;
+		from: FrameSampler;
+		extent: Extent;
 	}
 
 	/**
-	 * How far a point is from the middle of an extent, in degrees.
+	 * Every overlay with a held frame and a measured ramp, in no order.
 	 *
-	 * Rough on purpose. It only orders overlapping scans, and at this
-	 * network's spacing a great-circle distance would order them the
-	 * same way for the cost of a trigonometric call per radar per
-	 * pointer move.
+	 * Each carries its own ramp, since a radar drawn over the composite is
+	 * painted from the radar's table, not the composite's. An overlay at
+	 * zero opacity is not on screen and is left out.
 	 *
-	 * @param e The extent.
-	 * @param at The point.
-	 * @returns The separation, with no units a caller should read.
+	 * @returns The candidates for `topFirst` to order.
 	 */
-	function extentGap(e: Extent, at: { lng: number; lat: number }): number {
-		const cx = (e.west + e.east) / 2;
-		const cy = (e.south + e.north) / 2;
-		return Math.abs(at.lng - cx) + Math.abs(at.lat - cy);
+	function readableOverlays(): ReadableOverlay[] {
+		void radarFramesAt;
+		const out: ReadableOverlay[] = [];
+		const compRamp = composite !== 'none' ? rampForProduct(composite, currentUnit) : null;
+		if (compRamp && compFrame && layerOpacity.composite > 0) {
+			out.push({ layerId: 'comp-overlay-layer', ramp: compRamp, from: compSampler,
+				extent: compFrame.extent });
+		}
+		if (overlayOpacity <= 0) return out;
+		// A held tilt frame for another radar or moment says nothing about
+		// what is on screen now.
+		const tiltRadar = tiltOverlayRadarId();
+		const tiltMoment = tiltSourceFor(currentMoment);
+		const tiltRamp = tiltRadar && tiltMoment ? tiltRampFor(tiltRadar, tiltMoment) : null;
+		if (tiltRamp && tiltFrame && tiltFrame.radar === tiltRadar
+			&& tiltFrame.moment === tiltMoment) {
+			out.push({ layerId: 'tilt-overlay-layer', ramp: tiltRamp, from: tiltSampler,
+				extent: tiltFrame.extent });
+		}
+		for (const [id, held] of radarSamplers) {
+			const prefix = drawsMoment(id) ? prefixFor(momentPrefixes, id, currentMoment) : null;
+			const ramp = prefix ? rampFor(id, prefix) : null;
+			if (ramp) {
+				out.push({ layerId: radarLayerId(id), ramp, from: held.sampler,
+					extent: held.extent });
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * What the topmost painted overlay says at one ground point.
+	 *
+	 * Walks the overlays in the map's own paint order (see
+	 * $lib/map/readoutOrder), so the reading is the pixel the reader is
+	 * looking at. A transparent pixel lets the layer below show through, and
+	 * the walk goes on to it.
+	 *
+	 * @param lngLat The ground to read.
+	 * @returns The text and the ramp it was read through, or null.
+	 */
+	function readingAt(
+		lngLat: { lng: number; lat: number }
+	): { text: string; ramp: Ramp } | null {
+		if (!map) return null;
+		const got = firstReading(topFirst(readableOverlays(), map.getLayersOrder()),
+			(o) => sampleAt(o.ramp, o.from, o.extent, lngLat));
+		return got ? { text: got.reading, ramp: got.layer.ramp } : null;
 	}
 
 	/**
@@ -4663,7 +4677,7 @@
 					? 'The frame is painted here and the paint is not on this '
 						+ 'scale. The composite images carry their own basemap '
 						+ 'linework and background, which are not data.'
-					: (activeRamp ? readoutHint(activeRamp) ?? '' : '')}
+					: (readoutRamp ? readoutHint(readoutRamp) ?? '' : '')}
 			>
 				<span
 					class="num {readoutValue === OFF_SCALE

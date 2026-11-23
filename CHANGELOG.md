@@ -41,6 +41,13 @@ unknown`.
 
 ### Fixed
 
+- **The cursor readout reads a radar drawn over a composite.** With a
+  composite on, the readout read only the composite, through the
+  composite's scale. A radar turned on after it draws on top, and over that
+  radar the chip said nothing where the composite was clear and named the
+  composite's value where it was not. The readout now reads the overlays in
+  the order the map paints them, each through its own scale, and looks
+  through a clear pixel to the layer under it.
 - **Forecast accumulation readouts name the band the frame was painted in.**
   The two accumulation ramps were read off radarca's published colorbars,
   whose colors are not the ones the renderer paints, and they read 57 to 62%
