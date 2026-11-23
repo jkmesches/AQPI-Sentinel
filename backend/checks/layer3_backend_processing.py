@@ -94,6 +94,7 @@ from .. import thresholds as _thresholds
 from ..registry import CHECKS, register
 from .base import Check, CheckResult, utcnow
 from .helpers import first_resolvable, headroom, worst_of
+from .nexrad_upstream import second_opinion
 
 FS_TIMEOUT_S = 8.0
 
@@ -515,7 +516,24 @@ class Layer3CompositeParticipationCheck(Check):
         # witness for this check the way it does for arrival.
         self.source_tag, self.source_label = BACKEND_SOURCE
 
-    async def run(self, ctx) -> CheckResult:
+    async def run(self, ctx: Any) -> CheckResult:  # noqa: ANN401  the scheduler's context
+        """Judge participation, then let NOAA's archive vouch for a NEXRAD gap.
+
+        The composite drops a radar whose input is older than its 15 min
+        guard, which COMPOSITE_CONTRIB_FAIL_S records, so that is the window
+        NOAA's archive is held to.
+
+        Args:
+            ctx: The scheduler's context, unused here.
+
+        Returns:
+            The check's result.
+        """
+        _ = ctx
+        return await second_opinion(await self._verdict(),
+                                    window_s=COMPOSITE_CONTRIB_FAIL_S, ours_newest=None)
+
+    async def _verdict(self) -> CheckResult:
         t0 = utcnow()
         sub: dict[str, str] = {}
         metrics: dict[str, float] = {}
@@ -1100,7 +1118,27 @@ class Layer3InputStagingCheck(Check):
         return os.path.join(SETTINGS.recentfiles_dir,
                             COMPOSITE_INPUT_DIR[self.radar_id])
 
-    async def run(self, ctx) -> CheckResult:
+    async def run(self, ctx: Any) -> CheckResult:  # noqa: ANN401  the scheduler's context
+        """Judge staging, then let NOAA's archive vouch for a NEXRAD gap.
+
+        Nothing staged means nothing within the tree's retention, so that is
+        the window NOAA's archive is held to. Our newest volume's declared
+        scan time also gives `behind_noaa_s` on every run.
+
+        Args:
+            ctx: The scheduler's context, unused here.
+
+        Returns:
+            The check's result.
+        """
+        _ = ctx
+        result = await self._verdict()
+        declared = result.payload.get("newest_declared")
+        ours = datetime.fromisoformat(declared) if isinstance(declared, str) else None
+        return await second_opinion(result, window_s=COMPOSITE_INPUT_RETENTION_S,
+                                    ours_newest=ours)
+
+    async def _verdict(self) -> CheckResult:
         t0 = utcnow()
         sub: dict[str, str] = {}
         metrics: dict[str, float] = {}

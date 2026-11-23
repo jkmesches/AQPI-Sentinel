@@ -1,0 +1,14 @@
+{
+    "@context": {
+        "@version": "1.1",
+        "@vocab": "https://api.weather.gov/ontology#"
+    },
+    "@id": "https://api.weather.gov/products/510fbc1b-87b6-4d42-8fec-73ad22ef60fa",
+    "id": "510fbc1b-87b6-4d42-8fec-73ad22ef60fa",
+    "wmoCollectiveId": "NOUS66",
+    "issuingOffice": "KMTR",
+    "issuanceTime": "2026-11-23T13:42:00+00:00",
+    "productCode": "FTM",
+    "productName": "WSR-88D Radar Outage Notification / Free Text Message",
+    "productText": "\n000\nNOUS66 KMTR 231342\nFTMMUX\nMessage Date:  Nov 23 2026 13:42:44\n\nRadar will be unavailable from 0900-1300 (local time) for preventative maintenan\nce.                                                                             \n\n"
+}

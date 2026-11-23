@@ -1,0 +1,17 @@
+{
+    "@context": {
+        "@version": "1.1",
+        "@vocab": "https://api.weather.gov/ontology#"
+    },
+    "@graph": [
+        {
+            "@id": "https://api.weather.gov/products/b771e28b-56a4-4bed-88c5-3237732dc633",
+            "id": "b771e28b-56a4-4bed-88c5-3237732dc633",
+            "wmoCollectiveId": "NOUS66",
+            "issuingOffice": "KSTO",
+            "issuanceTime": "2026-11-23T19:16:00+00:00",
+            "productCode": "FTM",
+            "productName": "WSR-88D Radar Outage Notification / Free Text Message"
+        }
+    ]
+}

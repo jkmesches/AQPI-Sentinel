@@ -74,6 +74,23 @@ from backend.config import (COMPOSITE_INPUT_DIR,                # noqa: E402
                             COMPOSITE_INPUT_TS_RE, RADAR_FOLDER)
 from backend.registry import CHECKS                             # noqa: E402
 from backend.stages import stage_tier                           # noqa: E402
+from backend import nexrad_notices as _nn
+
+
+# These tests run with no network. The NEXRAD second opinion would list
+# NOAA's archive, so here it reads as unreadable, which leaves each verdict
+# as the check itself made it. test_nexrad_notices.py covers the rule.
+async def _offline_scans(site: str, since: datetime, now: datetime) -> _nn.Listing:
+    _ = (site, since, now)
+    return None, "offline in tests"
+
+
+async def _offline_notice(site: str, now: datetime) -> None:
+    _ = (site, now)
+
+
+_nn.fetch_scans = _offline_scans
+_nn.fetch_notice = _offline_notice
 
 failures: list[str] = []
 

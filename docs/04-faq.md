@@ -135,6 +135,19 @@ a directory nothing in Sentinel looked at. `layer3.input.<radar>` watches it
 now, for all nine composite inputs including the three NEXRAD sites, which
 have no other coverage anywhere in Sentinel.
 
+A NEXRAD radar also goes down for reasons outside our feed, such as the
+maintenance NWS announces. So when a NEXRAD check on `LB3` would fail,
+Sentinel lists NOAA's public Level II archive for that site. If NOAA has no
+volume within the check's own window either, the radar itself is down, and
+the check reports `warn` with NOAA's newest scan and the site's NWS notice
+from the last day, when there is one. If NOAA's archive is current, the gap
+is ours and the check stays `fail`, and it stays `fail` when the archive
+cannot be read. A notice alone never changes a verdict. After the radar
+returns, the `warn` holds for 20 minutes from NOAA's first new scan while our
+feed catches up. Every run also records how far our newest volume trails
+NOAA's (`behind_noaa_s`), so that 20 minutes can later be set from a measured
+distribution.
+
 `LB3` also watches the QPE producer, and that one is deliberately non-paging:
 nothing in the live product chain reads the tree it writes, so a stall there
 is worth seeing and not worth waking anyone for.
@@ -289,6 +302,12 @@ appears on the timeline and in the daily report, and records where the message
 *would* have gone, so "what did Sentinel not tell me, and when" stays
 answerable. It never gates evaluation: a tier that stopped recording would
 leave a hole in the history that nothing could see later.
+
+Alarms on the three NEXRAD radars (KBBX, KDAX and KMUX) follow the same rule
+at all times. They open, escalate and show on the dashboard, the timeline and
+the daily report, but never send email, webhook or push, because nobody here
+can act on a NEXRAD radar. Each step they would have sent is logged as
+`record-only`. The set is `NEXRAD_RADARS` in `config.py`.
 
 **To stop being paged for something you already know about, acknowledge it.**
 An ack stops every channel for that alarm — email, console, webhook, and any
