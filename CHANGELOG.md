@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.8] - 2026-11-23
+
 ### Added
 
 - **NOAA's archive vouches for a NEXRAD outage.** When a NEXRAD check on LB3
@@ -39,10 +41,21 @@ unknown`.
   is current the gap is ours and the check stays fail, as it does when the
   archive cannot be read or returns anything Sentinel cannot account for. A
   composite that is not running stays fail whatever the radar is doing, and a
-  notice alone never changes a verdict. After the radar returns, the warn holds for 20 minutes from
-  NOAA's first new scan while our feed catches up. Every run records how
-  far our newest volume trails NOAA's as `behind_noaa_s`, so that hold can
-  be set from a measured distribution later.
+  notice alone never changes a verdict. After the radar returns, the warn
+  holds for 20 minutes from NOAA's first new scan while our feed catches up.
+  Every run records how far our newest volume trails NOAA's as
+  `behind_noaa_s`, so that hold can be set from a measured distribution
+  later.
+
+### Fixed
+
+- **A NEXRAD outage no longer reads as a dead staging tree.** The staging
+  check judged the tree's 1 h retention against the newest file's scan time,
+  but the tree deletes files by when they were written, minutes later. In
+  each outage the last volume outlived its scan-time hour, and the check
+  spent about 8 minutes in error saying the tree "is not a live staging
+  tree" (KMUX 18:31 to 18:39 and KBBX 20:07 to 20:13 on 2026-11-23). It now
+  judges by write time.
 
 ### Changed
 
