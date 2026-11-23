@@ -4254,15 +4254,15 @@
 			// these render in a smaller bounding box than the radar /
 			// forecast composites, and the picker handles that via
 			// COMP_EXTENT.
-			// Depth and level were the pair readers mixed up most, and
-			// their own scales say which is which: depth runs 0 to 5 m,
-			// the water standing on the ground, while level runs -4 to
-			// 10 m, the elevation of its surface against a datum.
+			// The publisher's names. Depth and level are the pair readers
+			// mix up, and their legends tell them apart: depth runs 0 to
+			// 5 m, the water standing on the ground, while level runs -4
+			// to 10 m, the elevation of its surface against a datum.
 			label: 'CoSMoS (Bay)',
 			options: [
-				{ key: 'water_depth',     label: 'Flood Depth' },
+				{ key: 'water_depth',     label: 'Water Depth' },
 				{ key: 'water_level',     label: 'Water Level' },
-				{ key: 'max_water_depth', label: 'Max Flood Depth' },
+				{ key: 'max_water_depth', label: 'Max Water Depth' },
 				{ key: 'max_water_level', label: 'Max Water Level' }
 			]
 		}

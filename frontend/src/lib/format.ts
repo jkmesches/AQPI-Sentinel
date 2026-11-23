@@ -483,9 +483,9 @@ const PRODUCT_LABELS: Record<string, string> = {
 	fcst_precip_rate:      'Forecast Rain Rate',
 	fcst_temp:             'Forecast Temperature',
 	water_level:           'Water Level (CoSMoS)',
-	water_depth:           'Flood Depth (CoSMoS)',
+	water_depth:           'Water Depth (CoSMoS)',
 	max_water_level:       'Max Water Level (CoSMoS)',
-	max_water_depth:       'Max Flood Depth (CoSMoS)'
+	max_water_depth:       'Max Water Depth (CoSMoS)'
 };
 
 // Friendly names for L0 site checks + L1 vector overlays + L1 streams.
