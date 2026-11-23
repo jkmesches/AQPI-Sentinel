@@ -14,15 +14,18 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ..registry import CHECKS
+
+if TYPE_CHECKING:
+    from ..checks.base import CheckResult  # noqa: TID252  the package imports relatively throughout
 from ..stages import stage_tier
 from . import silences as silence_lib
 from . import suppression as sup_lib
 from . import tiers as tier_lib
 from .models import AlertsConfig
-from .router import Router, severity_for_status, _SEV_RANK
+from .router import Router, flatten_alarm, severity_for_status, _SEV_RANK
 from .sinks import build_sinks
 
 log = logging.getLogger(__name__)
@@ -142,7 +145,12 @@ class AlarmEngine:
     # ------------------------------------------------------------------
     # State machine — called on every CheckResult
     # ------------------------------------------------------------------
-    async def evaluate(self, result):
+    async def evaluate(self, result: CheckResult) -> None:
+        """Open, close or reopen the alarm for one check result.
+
+        Args:
+            result: The run to judge.
+        """
         existing = await self.store.find_open_alarm(result.check_id, result.target)
         # An INCONCLUSIVE skip is not news. The scheduler demotes fail/error
         # to skip when an upstream dependency is unhealthy (or our own DNS /
@@ -165,40 +173,26 @@ class AlarmEngine:
                 await self.store.close_alarm(existing["id"], when=result.finished_at)
                 await self._emit("alarm_close", {**dict(existing), "closed_at": result.finished_at.isoformat()})
             return
-        if existing:
+        # An alarm takes its route once, from the status it opened on, and
+        # keeps it. Where warns go to a silent policy, as they do on AQPI, an
+        # alarm that opened on a warn would carry a later fail silently for
+        # the rest of its life: an explained CoSMoS gap that turns into a
+        # failed publish would never page. So a warn alarm whose check has
+        # worsened to fail or error is closed and a new one opened on the
+        # worse status, which routes as that status does (Joseph, 2026-11-23).
+        reopen = (existing is not None and result.status in ("fail", "error")
+                  and flatten_alarm(existing).get("status_at_open") == "warn")
+        if existing and not reopen:
             # alarm already open — let the ticker handle promotions; no new row
             return
-
-        # === Hold-down: has this actually persisted? ===
-        #
-        # Route is resolved from the result rather than from an alarm row,
-        # because there is no alarm row yet — that is the decision being made.
-        hold_s = self.cfg.hold_down_for(
-            self.router.match(
-                {"check_id": result.check_id, "target": result.target,
-                 "stage": result.stage, "status_at_open": result.status},
-                {},
-            )
-        )
-        if hold_s > 0:
-            try:
-                started = await self.store.non_pass_streak_start(
-                    result.check_id, result.target
-                )
-            except Exception:
-                # Never let a hold-down lookup swallow a real alarm. Failing
-                # open here means at worst the old, noisier behavior.
-                log.exception("hold-down lookup failed for %s; opening anyway",
-                              result.check_id)
-                started = None
-            if started is not None:
-                persisted = (result.finished_at - started).total_seconds()
-                if persisted < hold_s:
-                    log.debug(
-                        "hold-down: %s non-pass for %.0fs (< %ds) — not opening yet",
-                        result.check_id, persisted, hold_s,
-                    )
-                    return
+        if await self._held_down(result, broken_only=reopen):
+            return
+        if existing:
+            await self.store.close_alarm(existing["id"], when=result.finished_at)
+            await self._emit("alarm_close", {**dict(existing),
+                                             "closed_at": result.finished_at.isoformat()})
+            log.info("alarm %s opened on warn and is now %s: closed and reopened",
+                     result.check_id, result.status)
 
         # open a new one
         sev = severity_for_status(result.status)
@@ -228,6 +222,51 @@ class AlarmEngine:
             log.info("alarm %s opened SUPPRESSED by %s", result.check_id, suppressed_by)
         else:
             log.info("alarm %s opened (severity=%s)", result.check_id, sev)
+
+    async def _held_down(self, result: CheckResult, *, broken_only: bool) -> bool:
+        """Whether a result has not yet persisted long enough to open an alarm.
+
+        The route is resolved from the result rather than from an alarm row,
+        because there is no alarm row yet; that is the decision being made.
+        Fails open: a lookup that raises lets the alarm open, since a
+        hold-down must never swallow a real alarm.
+
+        Args:
+            result: The CheckResult being evaluated.
+            broken_only: Measure the run of fail and error results alone, for
+                a warn alarm being reopened, instead of the run of non-pass
+                results.
+
+        Returns:
+            True to hold the alarm back for now.
+        """
+        hold_s = self.cfg.hold_down_for(
+            self.router.match(
+                {"check_id": result.check_id, "target": result.target,
+                 "stage": result.stage, "status_at_open": result.status},
+                {},
+            )
+        )
+        if hold_s <= 0:
+            return False
+        streak = (self.store.broken_streak_start if broken_only
+                  else self.store.non_pass_streak_start)
+        try:
+            started = await streak(result.check_id, result.target)
+        except Exception:
+            # Failing open here means at worst the old, noisier behavior.
+            log.exception("hold-down lookup failed for %s; opening anyway",
+                          result.check_id)
+            return False
+        if started is None:
+            return False
+        persisted = (result.finished_at - started).total_seconds()
+        if persisted < hold_s:
+            log.debug("hold-down: %s %s for %.0fs (< %ds) — not opening yet",
+                      result.check_id, "broken" if broken_only else "non-pass",
+                      persisted, hold_s)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Ticker — drives escalation + repeats + duration-promotion

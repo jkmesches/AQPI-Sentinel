@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -301,6 +302,51 @@ class Store:
             check_id, target, list(INCONCLUSIVE_SKIP_REASONS),
         )
         return row["started"] if row else None
+
+    async def broken_streak_start(self, check_id: str, target: str) -> datetime | None:
+        """When the current unbroken run of fail and error results began.
+
+        The hold-down for an alarm that opened on a warn and has since gone
+        to fail. Measured from the first fail rather than the first non-pass,
+        because the warn period before it would otherwise count toward the
+        hold-down and one transient fail run would reopen the alarm at once.
+        A pass, a warn or an intrinsic skip ends the run, and an inconclusive
+        skip does not, as in non_pass_streak_start. The run starts at its
+        first fail or error, so inconclusive skips before it do not count
+        toward the hold-down either.
+
+        Args:
+            check_id: The check.
+            target: Its target.
+
+        Returns:
+            The first fail or error of the current run, or None when the
+            newest result is neither.
+
+        Raises:
+            RuntimeError: If the store is not connected.
+        """
+        if self.pool is None:
+            raise RuntimeError("store is not connected")
+        row = await self.pool.fetchrow(
+            """
+            SELECT min(finished_at) AS started
+            FROM check_runs
+            WHERE check_id = $1 AND target = $2
+              AND status IN ('fail', 'error')
+              AND finished_at > coalesce(
+                    (SELECT max(finished_at) FROM check_runs
+                     WHERE check_id = $1 AND target = $2
+                       AND (status IN ('pass', 'warn')
+                            OR (status = 'skip'
+                                AND coalesce(payload->>'reason', '')
+                                      <> ALL($3::text[])))),
+                    '-infinity'::timestamptz)
+            """,
+            check_id, target, list(INCONCLUSIVE_SKIP_REASONS),
+        )
+        started: datetime | None = row["started"] if row else None
+        return started
 
     async def find_open_alarm(self, check_id: str, target: str) -> dict | None:
         assert self.pool is not None
