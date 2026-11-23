@@ -82,68 +82,11 @@ async def lifespan(app: FastAPI):
         await ws.broadcast({"type": event_type, "alarm": payload})
     engine.add_listener(_push_alarm)
 
-    # alarm events → mobile PWA Web Push subscriptions. Only on
-    # alarm_open (treats severity at-open; later promotions don't
-    # re-page). Failures are non-fatal — push is a best-effort channel.
-    #
-    # IMPORTANT: respects active silences. The engine's escalation
-    # tick checks silences before dispatching email/console/webhook,
-    # but listeners attached via add_listener fire INDEPENDENTLY of
-    # that path (alarm_open events come from engine.evaluate, which
-    # doesn't know about silences). Without this check, a "silence
-    # everything" rule would still let push notifications through.
-    from .. import push as _push
-    from ..alarms import silences as _silences
-
-    async def _web_push(event_type, payload):
-        if event_type != "alarm_open":
-            return
-        try:
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
-            active = await store.list_active_silences(now)
-            if _silences.find_active_silence(active, payload, now):
-                log.info("push suppressed by active silence: %s/%s",
-                         payload.get("check_id"), payload.get("target"))
-                return
-            sev = (payload.get("severity") or "warn").lower()
-            stage = payload.get("stage") or ""
-            target = payload.get("target") or ""
-            check = payload.get("check_id") or ""
-            msg = (payload.get("message") or "").split("\n")[0][:140]
-            # Push titles surface the descriptor name; canonical stage ID
-            # rides in `data` for downstream click routing/debug.
-            from ..stages import stage_descriptor
-            stage_label = stage_descriptor(stage) if stage else ""
-            title = f"[{sev.upper()}] {stage_label}/{target or check.split('.')[-1]}"
-            body = msg or f"{check} fired"
-            # Embed `stage`, `check_id`, `severity` as first-class fields
-            # so the per-device filter can read them directly instead of
-            # regex'ing the title — the filter uses these to always-pass
-            # L0/canary alarms past pattern allowlists.
-            result = await _push.dispatch_push(store.pool, {
-                "title":    title,
-                "body":     body,
-                "tag":      f"{check}|{target}",
-                "url":      "/m/alarms",
-                "stage":    stage,
-                "check_id": check,
-                "severity": sev,
-                # Carried through to _send_delayed so a deferred push
-                # can re-check whether the alarm is still open + unacked
-                # by the time the delay window elapses. Without this
-                # the smart-delay can't decide whether to suppress.
-                "alarm_id": payload.get("id"),
-            })
-            log.info(
-                "web-push %s/%s: sent=%d failed=%d expired=%d filtered=%d deferred=%d",
-                check, target,
-                result["sent"], result["failed"], result["expired"],
-                result["filtered"], result["deferred"],
-            )
-        except Exception:
-            log.exception("web-push dispatch failed for alarm %s", payload.get("id"))
-    engine.add_listener(_web_push)
+    # Web Push fires from the listener list, outside the escalation tick,
+    # so the listener applies the silence and record-only rules itself.
+    from .. import push as _push  # noqa: TID252  package convention
+    from ..alarms.web_push import make_listener as _make_push_listener  # noqa: TID252  package convention
+    engine.add_listener(_make_push_listener(store, _push.dispatch_push))
 
     await engine.start()
 

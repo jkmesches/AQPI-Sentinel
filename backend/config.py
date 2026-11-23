@@ -1345,6 +1345,12 @@ RADAR_PLOTS_TS_FMT: str = "%Y%m%d-%H%M"
 # Listing these sites there would register radar checks the NEXRAD feed has
 # no data for.
 NEXRAD_SITES: tuple[str, ...] = ("KBBX", "KDAX", "KMUX")
+# Every NEXRAD radar a check here may target, which today means the LB3
+# composite checks. Their alarms open and are recorded but never notify
+# anyone (Joseph, 2026-11-23: users must not receive warnings about the
+# NEXRAD radars). Kept apart from NEXRAD_SITES, which says whose frames
+# the map can draw, so the two can change independently.
+NEXRAD_RADARS: frozenset[str] = frozenset({"KBBX", "KDAX", "KMUX"})
 NEXRAD_PLOTS_TREE: str = "PRODUCTS/Chivo/nexrad/%Y/%m/%d/{radar}/{prefix}"
 NEXRAD_PLOTS_NAME: str = "{radar}_{prefix}_0.5_{ts}.png"
 NEXRAD_PLOTS_TS_RE: str = r"\d{8}-\d{6}"
@@ -1598,6 +1604,7 @@ if SETTINGS.profile == "xqpi":
     RADAR_PLOTS_TS_RE = _xqpi.RADAR_PLOTS_TS_RE
     RADAR_PLOTS_TS_FMT = _xqpi.RADAR_PLOTS_TS_FMT
     NEXRAD_SITES = _xqpi.NEXRAD_SITES
+    NEXRAD_RADARS = _xqpi.NEXRAD_RADARS
     TILT_TREE = _xqpi.TILT_TREE
     MOMENT_TO_PREFIX_DEFAULT = _xqpi.MOMENT_TO_PREFIX
     X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)

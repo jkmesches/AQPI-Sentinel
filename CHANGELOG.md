@@ -28,6 +28,17 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Alarms on the NEXRAD radars are recorded and never sent.** The LB3
+  composite checks watch KBBX, KDAX and KMUX, and their alarms paged people
+  about radars nobody here runs. They still open, escalate and show on the
+  dashboard, the timeline and the daily report, but no email, webhook or Web
+  Push goes out. Each step that would have sent is logged as `record-only`
+  in the alarm's notification history. The admin "send a test" button says
+  the same for a route that matches one of these radars. The set is
+  `NEXRAD_RADARS` in `config.py`, kept apart from the map's `NEXRAD_SITES`.
+
 ## [0.15.6] - 2026-11-23
 
 ### Changed

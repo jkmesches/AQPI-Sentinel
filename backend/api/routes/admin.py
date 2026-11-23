@@ -18,6 +18,7 @@ from ... import thresholds as _thresholds
 from ... import reprocess_engine as _reproc
 from ... import groups as _groups
 from ...alarms.models import AlertsConfig
+from ...alarms.record_only import record_only  # noqa: TID252  package convention
 from .auth import require_admin
 
 log = logging.getLogger(__name__)
@@ -334,7 +335,15 @@ async def test_alert(
         "payload":        {"test": True},
     }
     results: list[dict] = []
+    # A real alarm on this target would send nothing, so the test sends
+    # nothing either and says why, instead of paging about a NEXRAD radar.
+    quiet = record_only(fake_alarm)
     for receiver_name in step.receivers:
+        if quiet:
+            results.append({"receiver": receiver_name, "channel": None, "ok": False,
+                            "error": f"{fake_alarm['target']} is record-only: "
+                                     "its alarms are recorded and never sent"})
+            continue
         recv = cfg.receiver(receiver_name)
         if recv is None:
             results.append({"receiver": receiver_name, "channel": None,

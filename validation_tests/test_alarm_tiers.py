@@ -37,8 +37,9 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
@@ -77,7 +78,7 @@ CFG = AlertsConfig.model_validate({
 
 class TierStore:
     """Records what the engine dispatched, recorded and promoted."""
-    def __init__(self):
+    def __init__(self) -> None:
         self.dispatched: list = []
         self.written: list[dict] = []
         self.severities: list = []
@@ -105,7 +106,7 @@ class TierStore:
         self.written.append(kw)
 
 
-def make_engine(store):
+def make_engine(store: TierStore) -> AlarmEngine:
     eng = AlarmEngine.__new__(AlarmEngine)
     eng.store = store
     eng.cfg = CFG
@@ -119,7 +120,8 @@ def make_engine(store):
     return eng
 
 
-def alarm_row(now, stage="LB2", check_id="layer2.backend.XEBY"):
+def alarm_row(now: datetime, stage: str = "LB2",
+              check_id: str = "layer2.backend.XEBY") -> dict[str, Any]:
     # Opened three hours ago, so the step at delay 0m is long overdue and a
     # non-dispatch below is the gate's doing and not the clock's.
     return {"id": 7, "check_id": check_id, "target": "XEBY",

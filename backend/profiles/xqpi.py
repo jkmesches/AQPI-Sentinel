@@ -356,6 +356,10 @@ RADAR_PLOTS_TS_FMT = "%Y%m%d-%H%M%S"
 # into this tree, but RADAR_META here lists FLOW alone, so there is no marker
 # to select them from.
 NEXRAD_SITES: tuple[str, ...] = ()
+# The NEXRAD radars here, whose alarms would be recorded and never notify.
+# No check targets either today (see COMPOSITE_EXPECTED_RADARS), so this
+# only matters if one ever does.
+NEXRAD_RADARS: frozenset[str] = frozenset({"KSOX", "KVTX"})
 
 # No tilt tree under this profile's own mount. FLOW's per-elevation frames do
 # exist, in radar-display's document root at

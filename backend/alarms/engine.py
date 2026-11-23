@@ -21,6 +21,7 @@ from ..registry import CHECKS
 if TYPE_CHECKING:
     from ..checks.base import CheckResult  # noqa: TID252  the package imports relatively throughout
 from ..stages import stage_tier
+from . import record_only as record_only_lib
 from . import silences as silence_lib
 from . import suppression as sup_lib
 from . import tiers as tier_lib
@@ -468,6 +469,7 @@ class AlarmEngine:
         # whatever severity they held when they opened and the timeline would
         # misdescribe them for the rest of their lives. See alarms/tiers.py.
         tier_open = tier_lib.may_notify(tier_cfg, alarm.get("stage", ""))
+        quiet = record_only_lib.record_only(alarm)
 
         # Which steps are due AND not yet fired?
         policy = self.cfg.policy(route.policy)
@@ -511,6 +513,18 @@ class AlarmEngine:
                 log.info("alarm %s step %d not dispatched: %s tier disabled",
                          alarm["id"], step_idx,
                          stage_tier(alarm.get("stage", "")))
+                continue
+            if quiet:
+                # Same bookkeeping as a disabled tier, for the same reasons.
+                await self.store.write_notification(
+                    alarm_id=alarm["id"],
+                    receiver=f"(record only: {alarm.get('target', '')})",
+                    channel="none", step_idx=step_idx, template=None,
+                    body_excerpt=None, status=record_only_lib.STATUS,
+                    error="alarms on NEXRAD radars are recorded, never sent",
+                )
+                log.info("alarm %s step %d not dispatched: record-only target %s",
+                         alarm["id"], step_idx, alarm.get("target", ""))
                 continue
             await self._dispatch(alarm, route, step, step_idx)
 
