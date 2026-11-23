@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-11-23
+
 ### Added
 
 - **Two checks read the CoSMoS cycle manifest** that the model driver writes
