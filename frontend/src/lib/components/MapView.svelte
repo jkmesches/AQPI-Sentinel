@@ -1979,7 +1979,11 @@
 					id: 'comp-overlay-layer',
 					type: 'raster',
 					source: 'comp-overlay',
-					paint: { 'raster-opacity': layerOpacity.composite }
+					// MapLibre's ImageSource.updateImage docs: a raster layer
+					// fades a replaced image in unless this is 0. Every
+					// overlay here swaps its image on each step.
+					paint: { 'raster-opacity': layerOpacity.composite,
+						'raster-fade-duration': 0 }
 				});
 			}
 		};
@@ -2212,7 +2216,7 @@
 				id: 'nexrad-layer',
 				type: 'raster',
 				source: 'nexrad',
-				paint: { 'raster-opacity': layerOpacity.nexrad }
+				paint: { 'raster-opacity': layerOpacity.nexrad, 'raster-fade-duration': 0 }
 			},
 			'range-fill'
 		);
@@ -2411,7 +2415,7 @@
 				id: radarLayerId(id),
 				type: 'raster',
 				source: radarSrcId(id),
-				paint: { 'raster-opacity': overlayOpacity }
+				paint: { 'raster-opacity': overlayOpacity, 'raster-fade-duration': 0 }
 			});
 			_addedOverlays.add(id);
 			// Feed the readout too. This path hands the URL to MapLibre and
@@ -2511,7 +2515,7 @@
 				id: 'tilt-overlay-layer',
 				type: 'raster',
 				source: 'tilt-overlay',
-				paint: { 'raster-opacity': overlayOpacity }
+				paint: { 'raster-opacity': overlayOpacity, 'raster-fade-duration': 0 }
 			});
 		}
 	}
@@ -3094,7 +3098,7 @@
 	});
 	$effect(() => {
 		void nexradEnabled;
-		refreshNexrad();
+		untrack(refreshNexrad);
 	});
 	$effect(() => {
 		void nexradTimeIso;
@@ -3102,6 +3106,10 @@
 	});
 	// Opacity slider — cheap setPaintProperty per layer, no source churn.
 	$effect(() => {
+	// Untracked, because refreshNexrad tears the source down and rebuilds
+	// it, and it reads the opacity and the frame time on the way. Tracked,
+	// those reads re-ran this on every opacity input and every playback
+	// step. Opacity has applyOpacity and time has syncNexradTime.
 		void layerOpacity;
 		applyOpacity();
 	});
