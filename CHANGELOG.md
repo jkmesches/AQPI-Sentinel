@@ -28,6 +28,14 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-11-23
+
+Readouts that match their frames, two timeline filters and unlinked panes.
+The X-band and C-band reflectivity readout was wrong by up to 9.5 dBZ
+since v0.15.0, because its ramp came from a colorbar the frames are not
+painted with. Hovering a tilt now reads radar-display's own tables, and
+the RhoHV tilt shows again on deployments that read tilts off the mount.
+
 ### Added
 
 - **The timeline can hide every check that reads RadarCA.** "hide RadarCA"
@@ -104,6 +112,20 @@ unknown`.
   headless browser did not reproduce.
 
 ### Changed
+
+- **A deployment names its own source trees.** The dashboard's source tags
+  and labels were hard-coded to the internal archive names, which this
+  public repository should not carry. The defaults are now `FS` / "Archive"
+  for the main tree and `CB` / "C-band" for the C-band tree. A deployment
+  sets its own with `SENTINEL_SOURCE_TAG`, `SENTINEL_SOURCE_LABEL`,
+  `SENTINEL_SSCB_SOURCE_TAG` and `SENTINEL_SSCB_SOURCE_LABEL`, which
+  `ops/docker-compose.prod.yml` and `ops/docker-compose.ghcr.yml` now pass
+  through. A host keeping an older compose file must update it, or the
+  variables never reach the container and the role words show.
+
+- **The repository refuses internal names.** A pre-commit and CI check
+  rejects added lines shaped like an internal host, address or path, plus
+  a gitignored list of names that have no general shape.
 
 - **The CoSMoS products read "Water Depth" and "Max Water Depth" again.**
   v0.15.0 renamed them "Flood Depth", which broke the rule the other
