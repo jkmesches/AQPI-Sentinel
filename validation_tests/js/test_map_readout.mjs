@@ -183,6 +183,39 @@ export function runTests(mod, ramps) {
     check('NaN does not crash', bandDecimals(NaN) === 1);
   }
 
+  // The forecast accumulation bands run as narrow as 0.001 in, and at two
+  // decimals 0.010 to 0.011 in printed as "0.01 to 0.01 in". Held over
+  // every shipped ramp, since any narrow band anywhere fails the same way.
+  console.log('\nevery discrete band prints two different bounds:');
+  {
+    const bad = [];
+    for (const [name, ramp] of Object.entries(ramps)) {
+      if (ramp.scale !== 'segmented' && !/reflectivity|velocity|copolar/.test(name)) continue;
+      for (const s of ramp.stops) {
+        if (s.open) continue;
+        const text = readoutText(ramp, { value: s.value, lo: s.lo, hi: s.hi, distance: 0 });
+        const m = /^(-?[\d.]+) to (-?[\d.]+)/.exec(text ?? '');
+        if (m && m[1] === m[2]) bad.push(`${name}: ${text}`);
+      }
+    }
+    check('no band prints the same number at both ends', bad.length === 0,
+      bad.slice(0, 4).join('; ') + (bad.length > 4 ? ` (+${bad.length - 4})` : ''));
+    const accum = ramps['aqpi-product-forecast-accum-mm'];
+    if (accum) {
+      const first = accum.stops[0];
+      check('the masked floor prints as itself, not rounded down',
+        readoutText(accum, { value: first.value, lo: first.lo, hi: first.hi, distance: 0 })
+          === '0.075 to 0.125 mm',
+        String(readoutText(accum, { value: first.value, lo: first.lo, hi: first.hi,
+          distance: 0 })));
+      const top = accum.stops[accum.stops.length - 1];
+      const topText = readoutText(accum, { value: top.value, lo: top.lo, hi: top.hi,
+        distance: 0, open: top.open });
+      check('the top band is open, from its own edge and not a rounded one',
+        topText === '230.6 mm or more', String(topText));
+    }
+  }
+
   console.log('\na discrete ramp reports its band, honestly:');
   {
     // AQPI's frames are painted through BoundaryNorm(-25..75 by 5), so a

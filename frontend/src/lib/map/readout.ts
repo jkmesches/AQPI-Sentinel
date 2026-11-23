@@ -156,6 +156,33 @@ export function bandDecimals(width: number): number {
 }
 
 /**
+ * How many decimals a discrete band's two bounds need.
+ *
+ * Starts from `bandDecimals` and adds places until each bound prints within
+ * a twentieth of the band's width, up to six. The forecast accumulation
+ * bands run as narrow as 0.001 in, and at two places 0.010 to 0.011 in
+ * printed as "0.01 to 0.01 in" and the 0.075 mm mask floor as 0.07.
+ *
+ * An open band prints one bound, which is a threshold, so it is held to a
+ * hundredth of the width. At a twentieth the 230.56 mm top band read "231 mm
+ * or more" and left 230.6 to 231 mm out of a band that paints them.
+ *
+ * @param lo The band's low bound.
+ * @param hi The band's high bound.
+ * @param share The largest rounding error allowed, as a share of the width.
+ * @returns A count from 0 to 6.
+ */
+export function boundDecimals(lo: number, hi: number, share = 1 / 20): number {
+	const width = hi - lo;
+	let d = bandDecimals(width);
+	if (!Number.isFinite(width) || width <= 0) return d;
+	const near = (v: number, places: number): boolean =>
+		Math.abs(Number(v.toFixed(places)) - v) <= width * share;
+	while (d < 6 && !(near(lo, d) && near(hi, d))) d += 1;
+	return d;
+}
+
+/**
  * What to print beside the cursor.
  *
  * A discrete ramp reports the band, since that is all the overlay carries. A
@@ -241,7 +268,7 @@ export function readoutText(ramp: Ramp, reading: Reading | null): string | null 
 		const step = Math.abs(ramp.max - ramp.min) / ramp.stops.length;
 		return withUnit(reading.value.toFixed(bandDecimals(step)), ramp.unit);
 	}
-	const d = bandDecimals(reading.hi - reading.lo);
+	const d = boundDecimals(reading.lo, reading.hi, reading.open ? 1 / 100 : 1 / 20);
 	const own: Band = reading.open
 		? { lo: reading.lo, hi: reading.hi, open: reading.open }
 		: { lo: reading.lo, hi: reading.hi };

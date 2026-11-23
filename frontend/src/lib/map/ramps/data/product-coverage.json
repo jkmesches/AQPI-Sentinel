@@ -72,41 +72,41 @@
 			"product": "fcst_total_precip",
 			"unit": "in",
 			"ramp": "aqpi-product-forecast-accum-in",
-			"frames": 3,
-			"pixels": 73.223,
+			"frames": 2,
+			"pixels": 100.0,
 			"exact_common": true,
 			"covered": true,
-			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
+			"note": "Built from accum_tools.py and cumu_accum_tools.py on the forecast host, which the AQPI Backend session read on 2026-11-23. They use forecast rate's 12 anchors through from_list with N=68, under a BoundaryNorm over np.unique of seven linspace segments. Both renders run, and the contourf fill paints each band in one entry. Measured on 2026-11-23 against that day's 19Z frames from imageData, every opaque pixel sits exactly on a stop for both products in both units. The bar-read ramp this replaces read 57 to 62% of the same frames, because only 4 of the bar's 68 colors are colors the code paints. The field is smoothed (gaussian_filter, sigma 1.0) and masked below 0.003 in or 0.075 mm, so the first entry is never painted and the ramp drops it. Past the last edge the pcolormesh shows the last color, so the top band reads as 9.22 in (230.56 mm) or more. No measured frame reached that band."
 		},
 		{
 			"product": "fcst_total_precip",
 			"unit": "mm",
 			"ramp": "aqpi-product-forecast-accum-mm",
-			"frames": 3,
-			"pixels": 69.027,
+			"frames": 2,
+			"pixels": 100.0,
 			"exact_common": true,
 			"covered": true,
-			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
+			"note": "Built from accum_tools.py and cumu_accum_tools.py on the forecast host, which the AQPI Backend session read on 2026-11-23. They use forecast rate's 12 anchors through from_list with N=68, under a BoundaryNorm over np.unique of seven linspace segments. Both renders run, and the contourf fill paints each band in one entry. Measured on 2026-11-23 against that day's 19Z frames from imageData, every opaque pixel sits exactly on a stop for both products in both units. The bar-read ramp this replaces read 57 to 62% of the same frames, because only 4 of the bar's 68 colors are colors the code paints. The field is smoothed (gaussian_filter, sigma 1.0) and masked below 0.003 in or 0.075 mm, so the first entry is never painted and the ramp drops it. Past the last edge the pcolormesh shows the last color, so the top band reads as 9.22 in (230.56 mm) or more. No measured frame reached that band."
 		},
 		{
 			"product": "fcst_total_precip_cum",
 			"unit": "in",
 			"ramp": "aqpi-product-forecast-accum-in",
-			"frames": 3,
-			"pixels": 85.0,
+			"frames": 9,
+			"pixels": 100.0,
 			"exact_common": true,
 			"covered": true,
-			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
+			"note": "Built from accum_tools.py and cumu_accum_tools.py on the forecast host, which the AQPI Backend session read on 2026-11-23. They use forecast rate's 12 anchors through from_list with N=68, under a BoundaryNorm over np.unique of seven linspace segments. Both renders run, and the contourf fill paints each band in one entry. Measured on 2026-11-23 against that day's 19Z frames from imageData, every opaque pixel sits exactly on a stop for both products in both units. The bar-read ramp this replaces read 57 to 62% of the same frames, because only 4 of the bar's 68 colors are colors the code paints. The field is smoothed (gaussian_filter, sigma 1.0) and masked below 0.003 in or 0.075 mm, so the first entry is never painted and the ramp drops it. Past the last edge the pcolormesh shows the last color, so the top band reads as 9.22 in (230.56 mm) or more. No measured frame reached that band."
 		},
 		{
 			"product": "fcst_total_precip_cum",
 			"unit": "mm",
 			"ramp": "aqpi-product-forecast-accum-mm",
-			"frames": 3,
-			"pixels": 65.905,
+			"frames": 9,
+			"pixels": 100.0,
 			"exact_common": true,
 			"covered": true,
-			"note": "The remainder is resampling at the band edges. Measured on fcst_total_precip/in over four frames on 2026-11-21: 2.8% of opaque pixels sit exactly on a stop, 27% within 3, 52% within 5 and 73% within 8, which is where this ramp's tolerance of 7 lands. A block bar puts large color jumps between its stops, so a pixel blended across one of those edges falls far from every stop and is refused, which is the right answer: it is a blend of two bands rather than a reading of either. fcst_total_precip_cum shares these bars and shows the same shape."
+			"note": "Built from accum_tools.py and cumu_accum_tools.py on the forecast host, which the AQPI Backend session read on 2026-11-23. They use forecast rate's 12 anchors through from_list with N=68, under a BoundaryNorm over np.unique of seven linspace segments. Both renders run, and the contourf fill paints each band in one entry. Measured on 2026-11-23 against that day's 19Z frames from imageData, every opaque pixel sits exactly on a stop for both products in both units. The bar-read ramp this replaces read 57 to 62% of the same frames, because only 4 of the bar's 68 colors are colors the code paints. The field is smoothed (gaussian_filter, sigma 1.0) and masked below 0.003 in or 0.075 mm, so the first entry is never painted and the ramp drops it. Past the last edge the pcolormesh shows the last color, so the top band reads as 9.22 in (230.56 mm) or more. No measured frame reached that band."
 		},
 		{
 			"product": "max_water_depth",

@@ -40,6 +40,13 @@ no readout can separate the two from color alone. `--exclude-color` drops
 those entries so the console reports nothing there instead of reporting
 a number that may be nodata.
 
+Masks and open ends
+------------------
+`--mask-below` applies a renderer's `masked_where(field < x)`: bands wholly
+under x are dropped and the band x falls in starts at x. `--open-top` marks
+the last band as open above, for a BoundaryNorm with no clip whose over color
+defaults to the last entry. The forecast accumulation plotters do both.
+
 Usage
 -----
 ::
@@ -311,6 +318,52 @@ def drop_colors(stops: list[dict[str, Any]],
     return kept, len(stops) - len(kept)
 
 
+def apply_mask(stops: list[dict[str, Any]],
+               floor: float | None) -> tuple[list[dict[str, Any]], int]:
+    """Apply the renderer's `np.ma.masked_where(field < floor, field)`.
+
+    A masked value is transparent, so a band wholly under the floor has
+    no pixel to read, and the band the floor falls inside is painted only
+    from the floor up. On the forecast accumulations the floor is 0.003 in
+    against a first band of 0 to 0.0025 in, so that band is never painted
+    and the second reads from 0.003.
+
+    Args:
+        stops: The stops, low to high.
+        floor: The mask's threshold, or None for a renderer with no mask.
+
+    Returns:
+        The stops that can be painted, and how many were dropped.
+    """
+    if floor is None:
+        return stops, 0
+    out: list[dict[str, Any]] = []
+    for stop in stops:
+        if stop["hi"] <= floor:
+            continue
+        out.append(stop if stop["lo"] >= floor else
+                   {**stop, "lo": round(floor, PLACES),
+                    "value": round((floor + stop["hi"]) / 2, PLACES)})
+    return out, len(stops) - len(out)
+
+
+def open_top(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark the last stop as covering everything from its low edge up.
+
+    BoundaryNorm without clip sends a value at or past the last edge to
+    the colormap's over color, which defaults to the last entry. Where a
+    contourf over `levels=edges` leaves those cells unfilled, the
+    pcolormesh under it shows that color, so the top band has no ceiling.
+
+    Args:
+        stops: The stops, low to high, at least one.
+
+    Returns:
+        The same stops with the last one open above.
+    """
+    return [*stops[:-1], {**stops[-1], "open": "above"}]
+
+
 def fraction_of(value: float, edges: list[float]) -> float:
     """Where one value sits along a bar drawn from these bands.
 
@@ -366,11 +419,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     stops, merged = merge_runs(stops)
     stops, ambiguous = drop_ambiguous(stops)
     stops, dropped = drop_colors(stops, list(args.exclude_color or []))
+    stops, masked = apply_mask(stops, args.mask_below)
     if not stops:
         raise ValueError("every stop was excluded")
+    if args.open_top:
+        stops = open_top(stops)
     return assemble(args, anchors, Built(
         edges=edges, stops=stops, levels=levels, merged=merged,
-        ambiguous=ambiguous, dropped=dropped))
+        ambiguous=ambiguous, dropped=dropped, masked=masked))
 
 
 @dataclass(frozen=True)
@@ -389,6 +445,8 @@ class Built:
     ambiguous: list[dict[str, Any]]
     #: How many stops an --exclude-color removed.
     dropped: int
+    #: How many stops lay wholly under --mask-below.
+    masked: int = 0
 
 
 def assemble(args: argparse.Namespace, anchors: list[tuple[int, int, int]],
@@ -457,6 +515,8 @@ def assemble(args: argparse.Namespace, anchors: list[tuple[int, int, int]],
             "stops_dropped": dropped,
             "reason": args.exclude_reason or "ambiguous with nodata"
         }
+    if args.mask_below is not None:
+        ramp["masked_below"] = {"value": args.mask_below, "stops_dropped": built.masked}
     return ramp
 
 
@@ -489,6 +549,11 @@ def main() -> int:
                         help="the numbers the bar prints, comma separated")
     _ = ap.add_argument("--exclude-color", action="append", default=[])
     _ = ap.add_argument("--exclude-reason", default="")
+    _ = ap.add_argument("--mask-below", type=finite, default=None,
+                        help="the threshold of the renderer's masked_where(field < x)")
+    _ = ap.add_argument("--open-top", action="store_true",
+                        help="the renderer paints values past the last edge "
+                             "in the last color")
     _ = ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 

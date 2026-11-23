@@ -39,6 +39,23 @@ unknown`.
   backend classifies each check (`reads_radarca` and the new `nexrad` on
   `/api/checks`), and a check it has not classified is never hidden.
 
+### Fixed
+
+- **Forecast accumulation readouts name the band the frame was painted in.**
+  The two accumulation ramps were read off radarca's published colorbars,
+  whose colors are not the ones the renderer paints, and they read 57 to 62%
+  of real frames. A pixel for 3.78 to 4.56 in read as 3 to 10 in. Both
+  ramps are now built from the renderer's own colormap and its 68 bands.
+  Every pixel in that day's frames reads back exactly, in both units and for
+  both the hourly and cumulative products. Values the renderer masks
+  (under 0.003 in or 0.075 mm) are not on the scale, and the top band reads
+  as "9.22 in or more" because the renderer paints everything past it in that
+  color.
+- **Narrow bands print two different bounds.** A discrete band now gets as
+  many decimals as it needs, up to six, so 0.010 to 0.011 in no longer reads
+  "0.01 to 0.01 in". An open band's threshold is printed to a hundredth of
+  its width.
+
 ### Changed
 
 - **Alarms on the NEXRAD radars are recorded and never sent.** The LB3
