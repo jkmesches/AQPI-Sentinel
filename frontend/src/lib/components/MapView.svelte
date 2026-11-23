@@ -5229,15 +5229,18 @@
 									layerOpacity[key])
 							};
 						}}
-						class="flex-1 accent-[var(--color-ok)]"
+						class="min-w-0 flex-1 accent-[var(--color-ok)]"
 						title="{OPACITY_LABELS[key]} opacity"
 						aria-label="{OPACITY_LABELS[key]} opacity"
 					/>
 					<!-- A layer at zero is still switched on and still
 					     fetching, so say it is hidden rather than leaving a
-					     reader to wonder why it draws nothing. -->
+					     reader to wonder why it draws nothing.
+					     shrink-0 here and min-w-0 on the slider: a range input
+					     keeps its ~129px intrinsic width in a flex row, so this
+					     label gave way instead and "100%" slid under the thumb. -->
 					<span
-						class="num w-[2.8rem] text-right text-[9.5px] {isHidden(layerOpacity[key])
+						class="num w-[2.8rem] shrink-0 text-right text-[9.5px] {isHidden(layerOpacity[key])
 							? 'text-[var(--color-warn)]'
 							: 'text-[var(--color-muted)]'}"
 					>
