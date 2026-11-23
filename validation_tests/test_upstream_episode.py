@@ -316,8 +316,11 @@ async def test_wiring_and_suppression() -> None:
                if EP.EPISODE_CHECK_ID not in (c.alarm_only_depends_on or [])]
 
     check("upstream-facing checks are wired", len(wired) > 20, f"{len(wired)} wired")
-    check("every unwired check is explicitly exempt",
-          all(c.startswith(EP.EXEMPT_PREFIXES) for c in unwired), str(unwired))
+    # Against the shared rule rather than the prefix list alone. The backend
+    # tier is exempt by stage, and this assertion failed on any registry
+    # that had a backend root until it said so.
+    check("every unwired check is one the rule says never talks to radarca",
+          not any(EP.radarca_by_stage(CHECKS[c]) for c in unwired), str(unwired))
     for must_be_exempt in ("layer0.net.internet", "layer0.net.dns", "layer0.self.disk"):
         check(f"{must_be_exempt} can never be excused by upstream",
               must_be_exempt not in wired)
@@ -372,12 +375,51 @@ async def test_wiring_and_suppression() -> None:
           not leaks, str(leaks[:4]))
 
 
+async def test_reads_radarca() -> None:
+    """What /api/checks reports as RadarCA-derived for the timeline filter."""
+    print("\n[5] which checks read radarca — the timeline filter's rule")
+    from unittest.mock import patch
+
+    import backend.checks.layer4_image as layer4
+    from backend import fs_products
+
+    answers = {c.id: EP.reads_radarca(c) for c in CHECKS.values()}
+    check("every check gets a yes or a no",
+          all(isinstance(v, bool) for v in answers.values()))
+    for cid in ("layer0.net.internet", "layer0.net.dns", "layer0.self.disk",
+                EP.EPISODE_CHECK_ID):
+        if cid in answers:
+            check(f"{cid} does not read radarca", answers[cid] is False)
+    for cid in ("layer1.product.qpe_1hr", "layer2.radar.XSCV", "layer0.origin.alive"):
+        if cid in answers:
+            check(f"{cid} reads radarca", answers[cid] is True)
+    backend = [cid for cid, c in CHECKS.items() if c.stage.startswith("LB")]
+    check("no backend-tier check reads radarca",
+          not any(answers[cid] for cid in backend), str(backend[:4]))
+
+    # The one rule that depends on the deployment. L4 reads the mount when
+    # there is one, so the filter must keep it on a mounted deployment.
+    with patch.object(fs_products, "available", return_value=True):
+        mounted = layer4.Layer4ImageCheck(kind="xband", identifier="XSCV")
+    with patch.object(fs_products, "available", return_value=False):
+        unmounted = layer4.Layer4ImageCheck(kind="xband", identifier="XSCV")
+    check("L4 on a mounted deployment does not read radarca",
+          EP.reads_radarca(mounted) is False)
+    check("...and on one without a mount it does",
+          EP.reads_radarca(unmounted) is True)
+    # The alarm wiring keeps judging L4 by stage, since L4 still depends on
+    # L2 and origin reachability wherever it reads its frames.
+    check("...while its alarms stay excusable by an episode either way",
+          EP.radarca_by_stage(mounted) and EP.radarca_by_stage(unmounted))
+
+
 async def main() -> int:
     await test_read_timeout_not_retried()
     await test_episode_detection()
     await test_episode_check_result()
     await test_self_handled_timeouts()
     await test_wiring_and_suppression()
+    await test_reads_radarca()
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall upstream-episode assertions passed")
     return 1 if failures else 0

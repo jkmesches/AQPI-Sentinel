@@ -89,6 +89,8 @@ class Layer4ImageCheck(Check):
     def __init__(self, *, kind: str, identifier: str):
         assert kind in ("xband", "mosaic"), kind
         self.kind = kind
+        # _fetch_image reads the mount whenever there is one.
+        self.radarca_readings = not _fs.available()
         self.id = f"layer4.{kind}.{identifier}"
         self.target = identifier
         self.identifier = identifier

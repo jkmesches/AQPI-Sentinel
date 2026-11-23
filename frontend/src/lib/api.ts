@@ -32,6 +32,10 @@ export interface CheckMeta {
 	source_tag?: string | null;
 	/** The full name of the same thing, for row labels and tooltips. */
 	source_label?: string | null;
+	/** Whether the check's readings come from radarca, decided by the
+	 *  backend's own rule (layer0_episode.reads_radarca). Absent from a
+	 *  backend older than the timeline's RadarCA filter. */
+	reads_radarca?: boolean;
 }
 export interface CheckRun extends StatusRow {
 	id: number;

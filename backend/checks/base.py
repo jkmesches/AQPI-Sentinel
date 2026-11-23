@@ -87,6 +87,10 @@ class Check:
     # test_sparkline_metric.py asserts it.
     source_tag: str | None = None
     source_label: str | None = None
+    # Whether this check's readings come from radarca, or None to judge it
+    # from the stage (layer0_episode.reads_radarca). Set only where the answer
+    # depends on the deployment, as L4's does on whether there is a mount.
+    radarca_readings: bool | None = None
     # Emit a `timed_out` metric (0 on success, 1 on read timeout) so
     # avg(timed_out) over this check is a true truncation rate.
     #

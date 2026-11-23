@@ -28,7 +28,18 @@ unknown`.
 
 ## [Unreleased]
 
-### Fixed
+### Added
+
+- **The timeline can hide every check that reads RadarCA.** "hide RadarCA"
+  in the timeline header leaves the backend's own checks and the network
+  and self-host probes, and a pair keeps its backend half. The backend
+  decides which checks read RadarCA and reports it on `/api/checks` as
+  `reads_radarca`, because L4 reads the mount on a deployment that has one
+  and RadarCA on one that does not. The choice is remembered per browser.
+
+- **A cell's detail panel can show only failing runs.** "show failing"
+  narrows the runs in the bucket to warn, fail and error, and says how many
+  of the bucket's runs that leaves.
 
 - **The X-band and C-band reflectivity readout was wrong by up to 9.5
   dBZ.** Its ramp was read off the published colorbar, 22 linear bins over

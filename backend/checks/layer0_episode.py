@@ -69,6 +69,42 @@ EPISODE_MIN_CHECKS = 4
 # added. The LB3 work added two such families in a week.
 EXEMPT_PREFIXES = ("layer0.net.", "layer0.self.", EPISODE_CHECK_ID)
 
+
+def radarca_by_stage(check: Check) -> bool:
+    """Whether a check talks to radarca, judged from its id and stage alone.
+
+    Args:
+        check: A registered check.
+
+    Returns:
+        False for the L0 network and self-host probes, the episode check and
+        the backend tier, and True for everything else.
+    """
+    if check.id.startswith(EXEMPT_PREFIXES):
+        return False
+    return stage_tier(check.stage) != "backend"
+
+
+def reads_radarca(check: Check) -> bool:
+    """Whether a check's readings come from radarca.
+
+    The timeline's RadarCA filter asks this through /api/checks. It differs
+    from the alarm wiring below in one place on purpose. L4 reads frames off
+    the mount where a deployment has one and says so per instance, but it
+    still depends on L2 and on origin reachability, so a radarca episode can
+    still demote it and its alarms stay excusable by one.
+
+    Args:
+        check: A registered check.
+
+    Returns:
+        The check's own ``radarca_readings`` when it sets one, otherwise
+        ``radarca_by_stage``.
+    """
+    if check.radarca_readings is not None:
+        return check.radarca_readings
+    return radarca_by_stage(check)
+
 # check_id -> when it most recently hit an upstream read timeout. In-process
 # and deliberately not persisted: this answers "is an episode happening right
 # now", and a fresh process has no opinion until it observes one.
@@ -137,9 +173,7 @@ def attach_episode_suppression(checks) -> int:
     """
     n = 0
     for c in checks:
-        if c.id.startswith(EXEMPT_PREFIXES):
-            continue
-        if stage_tier(getattr(c, "stage", "")) == "backend":
+        if not radarca_by_stage(c):
             continue
         deps = list(getattr(c, "alarm_only_depends_on", None) or [])
         if EPISODE_CHECK_ID not in deps:

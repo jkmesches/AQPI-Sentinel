@@ -87,6 +87,29 @@
 	type SortOrder = 'asc' | 'desc';
 	let sortOrder = $state<SortOrder>('asc');
 
+	// Hides every check whose readings come from radarca, leaving the
+	// backend's own view and the probes that never call radarca. The backend
+	// decides which checks those are, because L4 reads the mount on one
+	// deployment and radarca on another. Persisted per browser, and read in
+	// the initializer so the effect that saves it cannot run first and write
+	// the default over the stored choice.
+	const storedFlag = (key: string): boolean => {
+		try { return localStorage.getItem(key) === '1'; } catch { return false; }
+	};
+	let hideRadarca = $state(storedFlag('sentinel.timeline.hideRadarca'));
+	const radarcaIds = $derived(new Set(
+		columns.filter((c) => c.reads_radarca === true).map((c) => c.id)));
+	// A backend older than the field reports nothing, and the toggle would
+	// silently hide nothing, so it is disabled until one check carries it.
+	const radarcaKnown = $derived(
+		columns.some((c) => typeof c.reads_radarca === 'boolean'));
+	const shownColumns = $derived(
+		hideRadarca ? columns.filter((c) => !radarcaIds.has(c.id)) : columns);
+
+	// Narrows the detail panel's run list to warn, fail and error.
+	let failingOnly = $state(storedFlag('sentinel.timeline.failingOnly'));
+	const BAD_RUN = new Set(['warn', 'fail', 'error']);
+
 	const cfg     = $derived(BUCKETS.find((b) => b.key === bucket)!);
 	const tabCfg  = $derived(TABS.find((t) => t.key === tab)!);
 
@@ -139,6 +162,8 @@
 			const c = emptyCounts();
 			for (const s of t.stages) {
 				for (const r of sentinel.rollup?.stages?.[s] ?? []) {
+					// The pie counts what the grid shows.
+					if (hideRadarca && radarcaIds.has(r.check_id)) continue;
 					const st = (r.status ?? 'skip') as keyof StatusCounts;
 					if (st in c) c[st] += 1;
 					else c.skip += 1;
@@ -173,7 +198,7 @@
 	// CoSMoS / NWM / Other). For other stages we keep a single flat list.
 	const groupedColumns = $derived.by(() => {
 		const byStage = new Map<string, CheckMeta[]>();
-		for (const c of columns) {
+		for (const c of shownColumns) {
 			if (!tabCfg.stages.includes(c.stage)) continue;
 			if (!byStage.has(c.stage)) byStage.set(c.stage, []);
 			byStage.get(c.stage)!.push(c);
@@ -305,6 +330,12 @@
 	$effect(() => {
 		try { localStorage.setItem('sentinel.timeline.live', live ? '1' : '0'); } catch { /* */ }
 	});
+	$effect(() => {
+		try {
+			localStorage.setItem('sentinel.timeline.hideRadarca', hideRadarca ? '1' : '0');
+			localStorage.setItem('sentinel.timeline.failingOnly', failingOnly ? '1' : '0');
+		} catch { /* */ }
+	});
 
 	let visHandler: (() => void) | undefined;
 	onMount(() => {
@@ -368,6 +399,8 @@
 		}
 	}
 	function closeDetail() { detail = null; detailRuns = []; detailError = null; }
+	const shownRuns = $derived(
+		failingOnly ? detailRuns.filter((r) => BAD_RUN.has(r.status)) : detailRuns);
 
 	function isImageQc(checkId: string): boolean {
 		return checkId.startsWith('layer4.xband.') || checkId.startsWith('layer4.mosaic.');
@@ -796,6 +829,8 @@
 		{@const onTheHour = new Date(b.ts).getUTCMinutes() === 0}
 		<button
 			type="button"
+			data-cell-check={col.id}
+			data-cell-status={st}
 			class="tl-cell flex items-center justify-center p-0 cursor-pointer bg-transparent {sepB}"
 			style="height:{ROW_H}px;{onTheHour ? ' box-shadow: inset 1px 0 0 var(--color-border);' : ''}"
 			onclick={() => openDetail(b, col)}
@@ -893,6 +928,19 @@
 			<span>live (30s)</span>
 		</label>
 
+		<label
+			data-hide-radarca
+			class="flex items-center gap-1 uppercase tracking-wider {radarcaKnown
+				? 'text-[var(--color-muted)]' : 'text-[var(--color-faint)]'}"
+			title={radarcaKnown
+				? `Hide the ${radarcaIds.size} checks whose readings come from RadarCA, leaving the backend's own checks and the network and self-host probes. Pairs keep their backend half.`
+				: 'This backend does not say which checks read RadarCA, so there is nothing to hide.'}
+		>
+			<input type="checkbox" bind:checked={hideRadarca} disabled={!radarcaKnown}
+				class="accent-[var(--color-ok)]" />
+			<span>hide RadarCA{radarcaKnown && hideRadarca ? ` (${radarcaIds.size})` : ''}</span>
+		</label>
+
 		<button
 			type="button"
 			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
@@ -934,6 +982,10 @@
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">loading timeline…</div>
 		{:else if !buckets.length}
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">no data in this window.</div>
+		{:else if hideRadarca && !groupedColumns.length}
+			<div data-radarca-empty class="px-4 py-8 text-[12px] text-[var(--color-muted)]">
+				Every check on this tab reads RadarCA. Clear "hide RadarCA" to see them.
+			</div>
 		{:else}
 			<!--
 			  Pivoted layout: rows = checks, columns = time buckets.
@@ -1148,22 +1200,36 @@
 			</p>
 
 			<!-- RUNS -->
-			<div class="mt-4 mb-1 flex items-center justify-between text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">
+			<div class="mt-4 mb-1 flex items-center gap-3 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">
 				<span>runs in this bucket</span>
+				{#if failingOnly && detailRuns.length}
+					<span class="num normal-case tracking-normal text-[var(--color-faint)]">
+						{shownRuns.length} of {detailRuns.length}
+					</span>
+				{/if}
 				{#if detailLoading}<span>loading…</span>{/if}
+				<label data-failing-only class="ml-auto flex items-center gap-1"
+					title="Show only the runs that ended in warn, fail or error.">
+					<input type="checkbox" bind:checked={failingOnly} class="accent-[var(--color-fail)]" />
+					<span>show failing</span>
+				</label>
 			</div>
 
 			{#if detailError}
 				<div class="border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[11px] text-[var(--color-fail)]">{detailError}</div>
 			{:else if !detailLoading && !detailRuns.length}
 				<div class="text-[11px] text-[var(--color-faint)] italic">No runs landed in this bucket.</div>
+			{:else if !detailLoading && !shownRuns.length}
+				<div class="text-[11px] text-[var(--color-faint)] italic">
+					None of the {detailRuns.length} run{detailRuns.length === 1 ? '' : 's'} in this bucket ended in warn, fail or error.
+				</div>
 			{/if}
 
-			{#each detailRuns as run (run.id)}
+			{#each shownRuns as run (run.id)}
 				{@const dur = (new Date(run.finished_at).getTime() - new Date(run.started_at).getTime())}
 				{@const explain = explainRun(run)}
 				{@const v = verifyContext(run)}
-				<div class="mt-2 border border-[var(--color-border)] bg-[var(--color-canvas)] p-3">
+				<div data-run-status={run.status} class="mt-2 border border-[var(--color-border)] bg-[var(--color-canvas)] p-3">
 					<!-- Run header line -->
 					<div class="flex items-center gap-2 text-[11px]">
 						<span

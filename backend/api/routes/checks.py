@@ -2,6 +2,7 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
+from ...checks.layer0_episode import reads_radarca  # noqa: TID252  module uses relative imports
 from ...registry import CHECKS
 import datetime as _dt
 
@@ -21,6 +22,7 @@ async def list_checks():
             # is most checks. The dashboard falls back to a neutral label.
             "source_tag":   getattr(c, "source_tag", None),
             "source_label": getattr(c, "source_label", None),
+            "reads_radarca": reads_radarca(c),
         }
         for c in CHECKS.values()
     ]
