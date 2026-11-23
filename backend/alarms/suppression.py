@@ -69,6 +69,7 @@ INCONCLUSIVE_SKIP_REASONS = frozenset({
     "upstream_unhealthy",     # a depends_on ancestor is fail/error
     "local_dns_error",        # our resolver, not their server
     "local_network_offline",  # Sentinel's own uplink is down
+    "source_out_of_window",   # the check's input is too old, or dated ahead of this host
 })
 
 

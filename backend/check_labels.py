@@ -81,6 +81,12 @@ def pretty_check_label(check_id: str | None, target: str = "") -> str:
     # no new entries — only a suffix making the two distinguishable in an email or push
     # payload, where the stage name is not adjacent.
     if cid.startswith("layer1.backend."):       return f"{_product(t)} — backend"
+    # The CoSMoS cycle manifest (wiki plans/74- items 3 and 11). Aspects, never
+    # verdicts, as the composite-input label below explains.
+    if cid == "layer1.model.cycle":
+        return "CoSMoS — cycle outcome"
+    if cid == "layer1.model.manifest":
+        return "CoSMoS — cycle manifest age"
     if cid.startswith("layer1.stream."):        return "Stream Reach canary"
     if cid.startswith("layer1.vector."):        return _VECTORS.get(t) or _title(t)
     if cid.startswith("layer2.radar."):         return t or cid

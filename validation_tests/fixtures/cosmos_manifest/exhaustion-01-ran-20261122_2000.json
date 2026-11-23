@@ -1,0 +1,37 @@
+{
+  "bank_headroom_hours": -20.0,
+  "bank_hours_remaining": -22.39,
+  "bank_last_snapshot": "20261122_000000",
+  "cycle_hh": "20",
+  "file_count": 19,
+  "file_count_expected": 19,
+  "horizon_hours_achieved": 18,
+  "horizon_hours_expected": 18,
+  "metfile": "20261122_2000",
+  "nhrs_passed": 19,
+  "outcome": "ran",
+  "published": {
+    "max_water_depth": {
+      "frames": 1,
+      "newest": "20261122_2000.png",
+      "newest_age_s": 1.6
+    },
+    "max_water_level": {
+      "frames": 1,
+      "newest": "20261122_2000.png",
+      "newest_age_s": 7.3
+    },
+    "water_depth": {
+      "frames": 19,
+      "newest": "20261123_1400.png",
+      "newest_age_s": 12.9
+    },
+    "water_level": {
+      "frames": 19,
+      "newest": "20261123_1400.png",
+      "newest_age_s": 96.4
+    }
+  },
+  "reason": "",
+  "wrote_at": "2026-11-22T22:23:20Z"
+}

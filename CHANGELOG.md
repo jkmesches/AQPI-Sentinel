@@ -28,6 +28,38 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **Two checks read the CoSMoS cycle manifest** that the model driver writes
+  after every cycle. `layer1.model.cycle` (CoSMoS · cycle outcome) passes when
+  the cycle ran, warns when it skipped on purpose (HRRR short, or the
+  warmstart rebuild holding the lock), and fails when it lost or failed to
+  publish a forecast. Once the manifest reaches 150 min of age it declines
+  to judge, rather than report an old pass. `layer1.model.manifest` (CoSMoS · cycle
+  manifest age) warns past 150 min and fails past 240, which is the only
+  signal for a driver that died before writing anything. Both are AQPI only
+  and need the backend mount.
+
+### Changed
+
+- **A late CoSMoS product warns when the cycle manifest explains it.** The
+  four LB1 CoSMoS products used to fail at their limit whatever the cause, so
+  the nightly gap after a short t23z HRRR set and a warmstart stand-down
+  (184 min on 2026-11-23) went red most nights. Past the limit, a product now
+  warns with the manifest's reason when the manifest is under 150 min old,
+  names one of the two skips, and the product is under 240 min old. Anything
+  else, including an unreadable manifest, stays a fail. On that night's 42
+  observed samples the old rule failed 24 times and the new one warns
+  instead. A retroactive reprocess keeps the warn where the manifest vouched.
+
+- **An alarm that opened on a warn reopens when its check fails.** An alarm
+  keeps the route it opened with, and AQPI routes warns to a silent policy,
+  so a warn alarm that worsened to fail never paged. The engine now closes
+  it and opens a new alarm on the fail, once the fail itself has lasted the
+  route's hold-down. The warn period does not count toward that, so a single
+  failed run does not page. This applies to every check, so a failed publish
+  after an explained CoSMoS gap still pages.
+
 ## [0.15.4] - 2026-11-23
 
 ### Fixed

@@ -280,6 +280,7 @@ export function radarRowRank(row: { stage: string; check_id: string }): number {
 export function readoutMetric(checkId: string): string | null {
 	if (checkId.startsWith('layer1.product.')) return 'age_s';
 	if (checkId.startsWith('layer1.backend.')) return 'age_s';
+	if (checkId.startsWith('layer1.model.'))   return 'manifest_age_s';
 	// The radar rows carried a sparkline and no value, so a row said that
 	// something moved without saying what it is. The two stages spell the age
 	// differently: L2 reads radarca's newest scan time as `primary_age_s`,
@@ -589,6 +590,9 @@ export function prettyCheckLabel(checkId: string, target: string): string {
 	if (checkId.startsWith('layer0.'))               return L0_TARGET_LABELS[target] ?? titleCase(tDash);
 	if (checkId.startsWith('layer1.product.'))       return productLabel(target);
 	if (checkId.startsWith('layer1.backend.'))       return `${productLabel(target)} · backend`;
+	// The CoSMoS cycle manifest, mirroring check_labels.py.
+	if (checkId === 'layer1.model.cycle')            return 'CoSMoS · cycle outcome';
+	if (checkId === 'layer1.model.manifest')         return 'CoSMoS · cycle manifest age';
 	if (checkId.startsWith('layer1.stream.'))        return STREAM_TARGET_LABELS[target] ?? `Stream · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer1.vector.'))        return VECTOR_TARGET_LABELS[target] ?? `Overlay · ${titleCase(tDash)}`;
 	if (checkId.startsWith('layer2.radar.'))         return target;            // XSCV / CBAND — keep radar IDs as-is

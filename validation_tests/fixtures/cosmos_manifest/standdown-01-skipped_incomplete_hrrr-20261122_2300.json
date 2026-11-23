@@ -1,0 +1,37 @@
+{
+  "bank_headroom_hours": 22.0,
+  "bank_hours_remaining": 20.0,
+  "bank_last_snapshot": "20261123_210000",
+  "cycle_hh": "23",
+  "file_count": 5,
+  "file_count_expected": 19,
+  "horizon_hours_achieved": null,
+  "horizon_hours_expected": 18,
+  "metfile": "20261122_2300",
+  "nhrs_passed": null,
+  "outcome": "skipped_incomplete_hrrr",
+  "published": {
+    "max_water_depth": {
+      "frames": 1,
+      "newest": "20261122_2200.png",
+      "newest_age_s": 2223.1
+    },
+    "max_water_level": {
+      "frames": 1,
+      "newest": "20261122_2200.png",
+      "newest_age_s": 2228.9
+    },
+    "water_depth": {
+      "frames": 19,
+      "newest": "20261123_1600.png",
+      "newest_age_s": 2234.6
+    },
+    "water_level": {
+      "frames": 19,
+      "newest": "20261123_1600.png",
+      "newest_age_s": 2321.6
+    }
+  },
+  "reason": "Incomplete HRRR set for t23z (5 of 19)",
+  "wrote_at": "2026-11-23T01:00:12Z"
+}

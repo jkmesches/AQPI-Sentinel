@@ -443,6 +443,9 @@ RADAR_DATED_TREE = {"FLOW": "flow/%Y/%m/%d"}  # [M] observed; UTC-partitioned
 LB1_FRESHNESS = "manifest"      # [M] the per-step timestamp the manifest declares
 LB2_FRESHNESS = "filename"      # [M] flow-<YYYYMMDD>-<HHMMSS>_...
 
+# XQPI runs no CoSMoS cycle, so the cycle manifest checks stay unregistered.
+COSMOS_PRODUCTS: tuple[str, ...] = ()
+
 # Anchored at the start and excluding dotfiles upstream, so a gzip temp file
 # cannot match even though its name embeds the same timestamp.
 RAW_VOLUME_TS_RE = {"FLOW": r"^flow-(\d{8})-(\d{6})_"}   # per radar

@@ -33,13 +33,17 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from ..config import (BACKEND_PRODUCT_CADENCE_S, BACKEND_SOURCE, LB1_FRESHNESS,
-                      PRODUCT_IMAGES_PREFIX, PRODUCTS, SETTINGS, image_path)
+# Relative, as the whole package imports.
+from ..config import (BACKEND_PRODUCT_CADENCE_S, BACKEND_SOURCE,  # noqa: TID252
+                      COSMOS_PRODUCTS, LB1_FRESHNESS, PRODUCT_IMAGES_PREFIX, PRODUCTS,
+                      SETTINGS, image_path)
+from ..cosmos_manifest import explained_gap, manifest_age_s  # noqa: TID252
 from ..errors import humanize_error
 from .. import thresholds as _thresholds
 from ..registry import register
 from .base import Check, CheckResult, utcnow
 from .helpers import headroom, worst_of
+from .layer1_cosmos_cycle import manifest_path, read_failure, read_manifest
 
 # A hung NFS mount blocks stat(2) indefinitely. Every existing check is HTTP with a
 # timeout, so the scheduler has never had to survive a blocking syscall; without this
@@ -79,6 +83,16 @@ FS_TIMEOUT_S = 5.0
 #
 # If a "late" state is wanted later, the prerequisite is a way to record a
 # verdict without notifying, not a threshold.
+#
+# Reopened 2026-11-23 for the four CoSMoS products alone, by Joseph. A
+# product past its limit warns when the cycle manifest is under 150 min old,
+# names a skip (HRRR short or the warmstart stand-down) and the product is
+# under 240 min old. Each part of reason 2 is met. AQPI's routing sends an
+# alarm that opens on a warn to a silent policy, so it is recorded and
+# notifies nobody. The alarm engine now closes such an alarm and opens a new
+# one when the check worsens to fail, so a failed publish after a skip still
+# pages. Reason 1 is answered by the reason itself, which the warn carries:
+# the schedule declining to run reads differently from a product that broke.
 DEFAULT_BACKEND_MAX_AGE_S = 1_800
 
 
@@ -328,13 +342,51 @@ class Layer1BackendProductCheck(Check):
         payload["age_s"] = round(age_s, 1)
         payload["max_age_s"] = float(max_age)
 
+        excuse = None
+        if sub["B_freshness"] == "fail" and self.product_id in COSMOS_PRODUCTS:
+            excuse = await _cycle_excuse(t0, age_s, payload)
+            if excuse:
+                sub["B_freshness"] = "warn"
+
         mins = age_s / 60.0
         unit = "steps" if info["basis"] == "manifest" else "files"
         summary = (f"newest {info['newest_name']} {mins:.0f} min old"
                    f"  (limit {max_age / 60:.0f} min, {info['count']} {unit})")
-        if sub["B_freshness"] != "pass":
+        if excuse:
+            summary = f"BACKEND LATE, cycle skipped ({excuse}): " + summary
+        elif sub["B_freshness"] != "pass":
             summary = "BACKEND STALE — " + summary
         return _final(self, t0, sub, payload, metrics, summary)
+
+
+async def _cycle_excuse(now: datetime, age_s: float, payload: dict[str, Any]) -> str | None:
+    """Why a late CoSMoS product is late, when the cycle manifest vouches for it.
+
+    Records what it read under payload["cycle_manifest"], with whether it
+    vouched, for the reprocess engine to re-apply. A manifest that cannot be
+    read excuses nothing, so the product stays failed.
+
+    Args:
+        now: The check's start time.
+        age_s: The product's age.
+        payload: The result payload, written to.
+
+    Returns:
+        The manifest's reason, or None when the gap stays unexplained.
+    """
+    try:
+        m = await read_manifest(manifest_path())
+    except (OSError, ValueError, TimeoutError) as e:
+        payload["cycle_manifest"] = {"error": read_failure(e)[1], "explains_gap": False}
+        return None
+    excuse = explained_gap(m, now, age_s)
+    payload["cycle_manifest"] = {
+        "metfile": m.metfile, "outcome": m.outcome, "manifest_reason": m.reason,
+        "wrote_at": m.wrote_at.isoformat(),
+        "manifest_age_s": round(manifest_age_s(m, now), 1),
+        "explains_gap": excuse is not None,
+    }
+    return excuse
 
 
 def _final(check: Check, t0, sub: dict[str, str], payload: dict, metrics: dict,

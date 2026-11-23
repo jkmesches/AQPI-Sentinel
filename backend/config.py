@@ -893,6 +893,40 @@ RADAR_DATED_TREE: dict[str, str] = {
 LB1_FRESHNESS: str = "newest_mtime"   # newest file's mtime in the images dir
 LB2_FRESHNESS: str = "filename"
 
+# === The CoSMoS cycle manifest ===
+#
+# The CoSMoS driver writes one JSON file after every cycle, whatever the
+# outcome, beside product_images rather than inside it (agreed 2026-11-21,
+# wiki plans/74- §4 item 1). Sentinel reads it for three checks: the cycle's
+# outcome (74- item 3), the manifest's own age (item 11), and the reason an
+# LB1 CoSMoS product is late.
+COSMOS_MANIFEST_REL: tuple[str, ...] = ("realtime", "cosmos_cycle", "manifest.json")
+# The LB1 products the CoSMoS cycle publishes. Empty on a profile without
+# CoSMoS, which leaves the two manifest checks unregistered.
+COSMOS_PRODUCTS: tuple[str, ...] = (
+    "water_level", "water_depth", "max_water_level", "max_water_depth")
+# The outcomes in which a cycle declined to run on purpose. The first is
+# upstream (HRRR short), the second is the warmstart rebuild holding the lock.
+COSMOS_SKIP_OUTCOMES: frozenset[str] = frozenset(
+    {"skipped_incomplete_hrrr", "skipped_warmstart_running"})
+# Item 11's bounds on the manifest's age, and the bound under which it may
+# explain a late product. Joseph's decisions of 2026-11-23 (74- item 3). The
+# driver runs hourly, the widest gap between manifests measured is 83 min
+# (a rebuild-blocked cycle) and the widest the schedule allows is about
+# 105 min (a 50 min rebuild blocking one cycle). Past 150 min the driver has
+# missed a write it should have made, so the manifest no longer vouches for
+# the current gap. Dropping the 01:00Z cron entry (item 9) would make a
+# scheduled gap of about 165 min, and these must move with it.
+COSMOS_MANIFEST_WARN_S: float = 150 * 60
+COSMOS_MANIFEST_FAIL_S: float = 240 * 60
+# The product age past which no manifest reason excuses a late LB1 CoSMoS
+# product. The longest legitimate gap seen is 184 min, on 2026-11-23 (a t23z
+# skip followed by a warmstart stand-down, from 00:21:30Z to the 03:00Z
+# cycle's publish at 03:25:30Z).
+# A third cycle in a row that publishes nothing reaches about 240 min, which
+# the schedule does not explain. Joseph's decision of 2026-11-23.
+COSMOS_GAP_CEILING_S: float = 240 * 60
+
 # How often the LB1 checks STAT the filesystem. Not the publish cadence, and
 # deliberately unrelated to it.
 #
@@ -1543,6 +1577,7 @@ if SETTINGS.profile == "xqpi":
     RADAR_DATED_TREE = _xqpi.RADAR_DATED_TREE
     LB1_FRESHNESS = _xqpi.LB1_FRESHNESS
     LB2_FRESHNESS = _xqpi.LB2_FRESHNESS
+    COSMOS_PRODUCTS = _xqpi.COSMOS_PRODUCTS
     RAW_VOLUME_TS_RE = _xqpi.RAW_VOLUME_TS_RE
     COMPOSITE_EXPECTED_RADARS = _xqpi.COMPOSITE_EXPECTED_RADARS
     COMPOSITE_RECEIPT_ALT = _xqpi.COMPOSITE_RECEIPT_ALT

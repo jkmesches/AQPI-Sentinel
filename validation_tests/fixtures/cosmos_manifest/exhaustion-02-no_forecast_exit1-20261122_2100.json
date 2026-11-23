@@ -1,0 +1,37 @@
+{
+  "bank_headroom_hours": 24.0,
+  "bank_hours_remaining": 21.22,
+  "bank_last_snapshot": "20261123_210000",
+  "cycle_hh": "21",
+  "file_count": 19,
+  "file_count_expected": 19,
+  "horizon_hours_achieved": null,
+  "horizon_hours_expected": 18,
+  "metfile": "20261122_2100",
+  "nhrs_passed": 19,
+  "outcome": "no_forecast_exit1",
+  "published": {
+    "max_water_depth": {
+      "frames": 1,
+      "newest": "20261122_2000.png",
+      "newest_age_s": 4997.1
+    },
+    "max_water_level": {
+      "frames": 1,
+      "newest": "20261122_2000.png",
+      "newest_age_s": 5002.8
+    },
+    "water_depth": {
+      "frames": 19,
+      "newest": "20261123_1400.png",
+      "newest_age_s": 5008.4
+    },
+    "water_level": {
+      "frames": 19,
+      "newest": "20261123_1400.png",
+      "newest_age_s": 5091.9
+    }
+  },
+  "reason": "runTC1D_script.sh produced no forecast (exit 1)",
+  "wrote_at": "2026-11-22T23:46:36Z"
+}

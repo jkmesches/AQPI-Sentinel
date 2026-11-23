@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import thresholds as _thresholds
+from .config import COSMOS_GAP_CEILING_S
 # Imported, not restated: a second copy of this default is how the live
 # path and the reprocess path come to disagree about the same row.
 from .checks.layer1_product import DEFAULT_CADENCE_TOL as _DEFAULT_CADENCE_TOL
@@ -320,7 +321,14 @@ def _reverdict_lb1(row: dict) -> tuple[str, dict] | None:
     if max_age is None:
         return None
 
-    sub["B_freshness"] = "pass" if float(age) <= float(max_age) else "fail"
+    # A CoSMoS gap the cycle manifest vouched for stays a warn under a new
+    # limit, as the live check would have judged it. Only the vouching run
+    # recorded the manifest, so a row that passed then and fails now has no
+    # excuse to re-apply and goes to fail.
+    stale = float(age) > float(max_age)
+    vouched = (payload.get("cycle_manifest") or {}).get("explains_gap") is True
+    excused = stale and vouched and float(age) <= COSMOS_GAP_CEILING_S
+    sub["B_freshness"] = "warn" if excused else "fail" if stale else "pass"
     new_payload = {**payload, "sub_status": sub, "max_age_s": float(max_age)}
     return _worst_of(*sub.values()), new_payload
 
