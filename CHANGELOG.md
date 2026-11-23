@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-11-23
+
 ### Fixed
 
 - **The NEXRAD range rings stopped halfway out.** They were drawn at 100 km,
