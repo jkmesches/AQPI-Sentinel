@@ -105,11 +105,14 @@ export function runTests(mod, coverage, products) {
       === rampFor('XEBY', 'CorrReflectivity'));
   }
 
-  console.log('\nthe two reflectivity ramps are not interchangeable:');
+  console.log('\nthe AQPI reflectivity ramp follows the frames, not the bar:');
   {
-    // Same colors, different range. A single shared reflectivity ramp would
-    // have been wrong by 7.3 dBZ on one of the two deployments, and nothing
-    // on screen would have said so.
+    // v0.15.0 read this ramp off the published colorbar, 22 linear bins
+    // over -20 to 80, and an earlier version of this group asserted that
+    // it therefore meant values 7.3 dBZ away from FLOW's for one color.
+    // The frames are painted through BoundaryNorm(-25..75 by 5, extend
+    // both) and the bar is not, so the readout was off by up to 9.5 dBZ.
+    // Under the frames' own norm the two deployments agree bin for bin.
     const aqpi = rampFor('XEBY', 'CorrReflectivity');
     const flow = rampFor('FLOW', 'Reflectivity');
     check('both exist', aqpi !== null && flow !== null);
@@ -117,12 +120,24 @@ export function runTests(mod, coverage, products) {
     const aColors = aqpi.stops.map((s) => s.color).join();
     const fColors = flow.stops.map((s) => s.color).join();
     check('their colors are identical', aColors === fColors);
-    check('their ranges are not',
-      aqpi.min !== flow.min, `${aqpi.min} vs ${flow.min}`);
-    const i = 5;
-    const drift = Math.abs(aqpi.stops[i].value - flow.stops[i].value);
-    check('so one color means two values, 7.3 dBZ apart',
-      Math.abs(drift - 7.26) < 0.1, drift.toFixed(2));
+    const cyan = aqpi.stops.find((s) => s.color === '#04e8e6');
+    check('#04e8e6 is 5 to 10 dBZ, where the NWS palette puts it',
+      cyan?.lo === 5 && cyan?.hi === 10, `${cyan?.lo} to ${cyan?.hi}`);
+    // FLOW's edges were measured off its bar and sit up to 1.2 dBZ from
+    // the round fives, so the test is that each FLOW center falls in the
+    // AQPI bin of the same color, not that the edges are equal.
+    const inner = aqpi.stops.slice(1, -1).every((s, i) => {
+      const v = flow.stops[i + 1].value;
+      return v >= s.lo && v < s.hi;
+    });
+    check('inside -25 to 75 each color names the same 5 dBZ bin on both', inner);
+    check('the ends are open, below -25 and from 75 up',
+      aqpi.stops[0].open === 'below' && aqpi.stops[0].hi === -25
+      && aqpi.stops[21].open === 'above' && aqpi.stops[21].lo === 75,
+      `${aqpi.stops[0].open} ${aqpi.stops[0].hi}, `
+      + `${aqpi.stops[21].open} ${aqpi.stops[21].lo}`);
+    check('the C-band reads through the same table',
+      rampFor('CBAND', 'CorrReflectivity') === aqpi);
   }
 
   console.log('\nan unknown radar or moment reads nothing:');

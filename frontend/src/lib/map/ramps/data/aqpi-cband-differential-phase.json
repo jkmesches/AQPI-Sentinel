@@ -5,7 +5,7 @@
 	"min": -180.0,
 	"max": 180.0,
 	"scale": "linear",
-	"source": "the C-band producer host:/home/ldm/aishwarya_vishnu/individual_radar_plotting_scripts/c_band_plotting.py cmap_phidp: LinearSegmentedColormap.from_list(\"phidp_grad\", 10 colors, N=256) under norm_phidp = Normalize(vmin=-180, vmax=180); its explicit positions come out uniform at k/9 because the value array steps by 40 throughout, checked over all 256 triples by the AQPI Laptop session 2026-11-21",
+	"source": "the C-band producer host: c_band_plotting.py cmap_phidp: LinearSegmentedColormap.from_list(\"phidp_grad\", 10 colors, N=256) under norm_phidp = Normalize(vmin=-180, vmax=180); its explicit positions come out uniform at k/9 because the value array steps by 40 throughout, checked over all 256 triples by the AQPI Laptop session 2026-11-21",
 	"read_on": "2026-11-22",
 	"built_from": {
 		"kind": "LinearSegmentedColormap.from_list",

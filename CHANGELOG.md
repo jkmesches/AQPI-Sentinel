@@ -30,6 +30,26 @@ unknown`.
 
 ### Fixed
 
+- **The X-band and C-band reflectivity readout was wrong by up to 9.5
+  dBZ.** Its ramp was read off the published colorbar, 22 linear bins over
+  -20 to 80 dBZ. The frames are painted through a BoundaryNorm over -25 to
+  75 in 5 dBZ steps with both ends extended, and the colorbar is drawn
+  without it. So #04e8e6 read as 12.0 to 16.3 dBZ where it means 5 to 10,
+  and the error ran from about 9.5 dBZ at the bottom of the scale to about
+  1 at the top. It shipped in v0.15.0 and v0.15.1, on all five X-band
+  radars and on the C-band, whose script uses the same norm.
+
+  The ramp now comes from the plotting code, and the ends read as open
+  ("below -25.0 dBZ", "75.0 dBZ or more"). A gate-to-pixel check against two
+  DROPS volumes agreed with the code. For example, #0300fc sits over gates
+  with medians of 16.3 and 16.6 dBZ, inside 15 to 20, where the old ramp
+  said 21 to 25.5. A color match cannot catch this kind of error, since
+  both readings use the same 22 colors.
+
+- **Three ramp files named a collaborator in a home-directory path.** The
+  name scrub matched host names and missed it. The leak check now matches
+  collaborators' names as well.
+
 - **The RhoHV tilt showed nothing on any radar.** The mount reader capped a
   moment name at 16 characters, and radar-display names its correlation
   frames `copolarcorrelation`, which is 18. Every request was refused as a

@@ -185,16 +185,16 @@ export function runTests(mod, ramps) {
 
   console.log('\na discrete ramp reports its band, honestly:');
   {
-    // AQPI reuses the 22-color palette over -20 to 80 dBZ, so its bins are
-    // 4.55 wide on bounds like -15.5. Printing "-20 to -15" would be a
-    // tidier band than the producer painted.
+    // AQPI's frames are painted through BoundaryNorm(-25..75 by 5), so a
+    // color is a 5 dBZ bin on round bounds. The bar-derived ramp this
+    // replaced printed "-15.6 to -11.3 dBZ" for #cabfcc, which is -25 to -20.
     const aqpi = ramps['aqpi-xband-reflectivity'];
-    const s = aqpi.stops[0];
+    const s = aqpi.stops[1];
     const text = readoutText(aqpi, { value: s.value, lo: s.lo, hi: s.hi, distance: 0 });
     check('it reads as a range', /to/.test(text), text);
     check('it carries the unit', text.endsWith(' dBZ'), text);
-    check('it keeps the half-dBZ bound',
-      text === '-20.0 to -15.9 dBZ', text);
+    check('it prints the bin the norm painted',
+      text === '-25.0 to -20.0 dBZ', text);
     const flow = ramps['flow-reflectivity'];
     const f = flow.stops[2];
     check("FLOW's bins are the round ones",

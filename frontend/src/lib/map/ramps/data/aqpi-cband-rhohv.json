@@ -6,7 +6,7 @@
 	"min": 0.0,
 	"max": 1.0,
 	"scale": "linear",
-	"source": "the C-band producer host:/home/ldm/aishwarya_vishnu/individual_radar_plotting_scripts/c_band_plotting.py cmap_rhohv: plt.cm.viridis under norm_rhohv = Normalize(vmin=0.0, vmax=1.0), both bounds literal there rather than the 0-to-1 convention; anchors are matplotlib 3.11.2's own 256 viridis entries, which round-trip through from_list exactly; read by the AQPI Laptop session 2026-11-21",
+	"source": "the C-band producer host: c_band_plotting.py cmap_rhohv: plt.cm.viridis under norm_rhohv = Normalize(vmin=0.0, vmax=1.0), both bounds literal there rather than the 0-to-1 convention; anchors are matplotlib 3.11.2's own 256 viridis entries, which round-trip through from_list exactly; read by the AQPI Laptop session 2026-11-21",
 	"read_on": "2026-11-22",
 	"built_from": {
 		"kind": "LinearSegmentedColormap.from_list",

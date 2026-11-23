@@ -17,7 +17,9 @@
 		"Adding a pair means running the tool and pasting its numbers, not editing",
 		"this file by hand.",
 		"",
-		"KBBX, KDAX and KMUX publish a reflectivity bar in the same tree (md5 aad5def3, -30 to 80 dBZ, measured 15/15 over 422,055 px on 2026-07-01 frames). It is left out because the console never paints those frames: they are not selectable radars, and the NEXRAD overlay draws the Iowa State nexrad-n0q-wmst WMS layer, which uses the NWS N0Q ramp instead. A ramp with no display path is one more thing to mistake for the right one."
+		"KBBX, KDAX and KMUX publish a reflectivity bar in the same tree (md5 aad5def3, -30 to 80 dBZ, measured 15/15 over 422,055 px on 2026-07-01 frames). It is left out because the console never paints those frames: they are not selectable radars, and the NEXRAD overlay draws the Iowa State nexrad-n0q-wmst WMS layer, which uses the NWS N0Q ramp instead. A ramp with no display path is one more thing to mistake for the right one.",
+		"",
+		"These rows measure colors, which cannot detect a shift of the scale. The aqpi-xband-reflectivity rows matched at 100% on 2026-11-21 against a ramp read off the bar, 22 linear bins over -20 to 80, and that ramp was wrong by up to 9.5 dBZ: the frames are painted through BoundaryNorm(-25..75 by 5, extend both) and the bar is not. On 2026-11-23 the ramp was rebuilt from the plotting code by build_boundary_ramps.py, with the same 22 colors, so these rows stand for the colors and the code reading stands for the range."
 	],
 	"measured_on": "2026-11-21",
 	"tool": "validation_tests/visual/ramp_coverage.py",

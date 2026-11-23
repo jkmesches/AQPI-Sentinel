@@ -1,143 +1,179 @@
 {
+ "_comment": [
+  "Not the published colorbar, which is drawn without the norm under a linear -20 to 80 and reads up to 9.5 dBZ above the frames.",
+  "Shared by the five X-band radars and the C-band."
+ ],
  "moment": "CorrReflectivity",
  "unit": "dBZ",
  "label": "Z [dBZ]",
- "min": -20.0,
+ "min": -30.0,
  "max": 80.0,
- "source": "the AQPI deployment:`backend_root`/PRODUCTS/Chivo/plots/<radar>/%Y/%m/%d/<radar>_CorrReflectivity_colorbar.png",
- "read_on": "2026-11-21",
+ "source": "aqpi_xband_realtime_volume_plotting.py:87 norm_dbz = BoundaryNorm(dbz_levels, cmap_dbz_custom.N, extend=\"both\"), dbz_levels -25 to 75 by 5 at line 82 and the 22 colors at line 75, passed to the frame's plot_ppi at lines 259 to 267. The C-band's c_band_plotting.py:227 builds the same norm. Read on the producer host by the AQPI Backend session",
+ "read_on": "2026-11-23",
+ "built_from": {
+  "kind": "BoundaryNorm(extend=both, clip=False)",
+  "anchors": [
+   "#ccefff",
+   "#cabfcc",
+   "#987f98",
+   "#643266",
+   "#cccbb3",
+   "#988f66",
+   "#636363",
+   "#04e8e6",
+   "#018ffc",
+   "#0300fc",
+   "#02fc02",
+   "#01c501",
+   "#008d00",
+   "#fcf902",
+   "#e5bb00",
+   "#fd9400",
+   "#fd0000",
+   "#d30000",
+   "#bb0000",
+   "#f700fc",
+   "#9853c5",
+   "#fcfcfc"
+  ],
+  "levels": 22,
+  "vmin": -25.0,
+  "vmax": 75.0
+ },
  "stops": [
   {
    "color": "#ccefff",
-   "value": -17.9508,
-   "lo": -20.0,
-   "hi": -15.9016
+   "value": -27.5,
+   "lo": -30.0,
+   "hi": -25.0,
+   "open": "below"
   },
   {
    "color": "#cabfcc",
-   "value": -13.4426,
-   "lo": -15.6284,
-   "hi": -11.2568
+   "value": -22.5,
+   "lo": -25.0,
+   "hi": -20.0
   },
   {
    "color": "#987f98",
-   "value": -8.7978,
-   "lo": -10.9836,
-   "hi": -6.612
+   "value": -17.5,
+   "lo": -20.0,
+   "hi": -15.0
   },
   {
    "color": "#643266",
-   "value": -4.153,
-   "lo": -6.3388,
-   "hi": -1.9672
+   "value": -12.5,
+   "lo": -15.0,
+   "hi": -10.0
   },
   {
    "color": "#cccbb3",
-   "value": 0.3552,
-   "lo": -1.694,
-   "hi": 2.4044
+   "value": -7.5,
+   "lo": -10.0,
+   "hi": -5.0
   },
   {
    "color": "#988f66",
-   "value": 4.8634,
-   "lo": 2.6776,
-   "hi": 7.0492
+   "value": -2.5,
+   "lo": -5.0,
+   "hi": 0.0
   },
   {
    "color": "#636363",
-   "value": 9.5082,
-   "lo": 7.3224,
-   "hi": 11.694
+   "value": 2.5,
+   "lo": 0.0,
+   "hi": 5.0
   },
   {
    "color": "#04e8e6",
-   "value": 14.153,
-   "lo": 11.9672,
-   "hi": 16.3388
+   "value": 7.5,
+   "lo": 5.0,
+   "hi": 10.0
   },
   {
    "color": "#018ffc",
-   "value": 18.7978,
-   "lo": 16.612,
-   "hi": 20.9836
+   "value": 12.5,
+   "lo": 10.0,
+   "hi": 15.0
   },
   {
    "color": "#0300fc",
-   "value": 23.306,
-   "lo": 21.2568,
-   "hi": 25.3552
+   "value": 17.5,
+   "lo": 15.0,
+   "hi": 20.0
   },
   {
    "color": "#02fc02",
-   "value": 27.8142,
-   "lo": 25.6284,
-   "hi": 30.0
+   "value": 22.5,
+   "lo": 20.0,
+   "hi": 25.0
   },
   {
    "color": "#01c501",
-   "value": 32.459,
-   "lo": 30.2732,
-   "hi": 34.6448
+   "value": 27.5,
+   "lo": 25.0,
+   "hi": 30.0
   },
   {
    "color": "#008d00",
-   "value": 37.1038,
-   "lo": 34.918,
-   "hi": 39.2896
+   "value": 32.5,
+   "lo": 30.0,
+   "hi": 35.0
   },
   {
    "color": "#fcf902",
-   "value": 41.7486,
-   "lo": 39.5628,
-   "hi": 43.9344
+   "value": 37.5,
+   "lo": 35.0,
+   "hi": 40.0
   },
   {
    "color": "#e5bb00",
-   "value": 46.2568,
-   "lo": 44.2077,
-   "hi": 48.306
+   "value": 42.5,
+   "lo": 40.0,
+   "hi": 45.0
   },
   {
    "color": "#fd9400",
-   "value": 50.765,
-   "lo": 48.5792,
-   "hi": 52.9508
+   "value": 47.5,
+   "lo": 45.0,
+   "hi": 50.0
   },
   {
    "color": "#fd0000",
-   "value": 55.4098,
-   "lo": 53.224,
-   "hi": 57.5956
+   "value": 52.5,
+   "lo": 50.0,
+   "hi": 55.0
   },
   {
    "color": "#d30000",
-   "value": 60.0546,
-   "lo": 57.8689,
-   "hi": 62.2404
+   "value": 57.5,
+   "lo": 55.0,
+   "hi": 60.0
   },
   {
    "color": "#bb0000",
-   "value": 64.6995,
-   "lo": 62.5137,
-   "hi": 66.8852
+   "value": 62.5,
+   "lo": 60.0,
+   "hi": 65.0
   },
   {
    "color": "#f700fc",
-   "value": 69.2077,
-   "lo": 67.1585,
-   "hi": 71.2568
+   "value": 67.5,
+   "lo": 65.0,
+   "hi": 70.0
   },
   {
    "color": "#9853c5",
-   "value": 73.7158,
-   "lo": 71.5301,
-   "hi": 75.9016
+   "value": 72.5,
+   "lo": 70.0,
+   "hi": 75.0
   },
   {
    "color": "#fcfcfc",
-   "value": 78.0874,
-   "lo": 76.1749,
-   "hi": 80.0
+   "value": 77.5,
+   "lo": 75.0,
+   "hi": 80.0,
+   "open": "above"
   }
  ]
 }

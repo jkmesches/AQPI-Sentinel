@@ -9,13 +9,14 @@
  * before it ships, and a hand-maintained map would let a ramp reach a readout
  * without that evidence.
  *
- * Two of the measurement's results shape this file. AQPI's X-band
- * reflectivity bar carries the same colors as FLOW's over a different range,
- * -20 to 80 dBZ against -30 to 80, so #988f66 is 4.86 dBZ on one and -2.40 on
- * the other. And the C-band, which publishes no colorbar, shares the
- * X-band reflectivity and velocity ramps while painting ZDR and PhiDP from
- * some other map entirely, with none of its 253 colors matching across a
- * million opaque pixels.
+ * A color match proves the palette and not the scale. AQPI's X-band
+ * reflectivity bar is labeled -20 to 80 dBZ, and the ramp first read off it
+ * was wrong by up to 9.5 dBZ, because the frames are painted through a
+ * BoundaryNorm over -25 to 75 that the bar is not drawn with. Ranges come
+ * from the plotting call where it can be read. The C-band, which publishes
+ * no colorbar, shares the X-band reflectivity and velocity ramps while
+ * painting ZDR and PhiDP from other maps, with none of its 253 colors
+ * matching across a million opaque pixels.
  */
 
 import type { Ramp } from './invert';

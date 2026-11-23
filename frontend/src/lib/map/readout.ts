@@ -141,10 +141,9 @@ export function overlayPixel(
 /**
  * How many decimals a band's bounds need.
  *
- * AQPI's X-band reflectivity reuses a 22-color palette over -20 to 80 dBZ,
- * so its bins are 4.55 wide and sit on bounds like -15.5 rather than -15.
- * Rounding those to whole numbers would print a tidier band than the
- * producer actually painted.
+ * A band narrower than 10 keeps a decimal, since bins measured off a bar,
+ * such as FLOW's reflectivity, sit on bounds like -25.2. Rounding those to
+ * whole numbers would print a tidier band than the measurement supports.
  *
  * @param width The band's width in its own unit.
  * @returns A count from 0 to 2.
