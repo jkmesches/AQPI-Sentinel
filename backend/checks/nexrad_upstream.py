@@ -7,6 +7,7 @@ config.NEXRAD_RADARS comes back unchanged.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ from typing import Any
 
 from .. import nexrad_notices as nn  # noqa: TID252  the package imports relatively throughout
 from ..config import NEXRAD_RADARS  # noqa: TID252  the package imports relatively throughout
-from .base import CheckResult
+from .base import CheckResult, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -54,9 +55,9 @@ def _kept_summary(site: str, opinion: nn.Opinion, ours: str, now: datetime) -> s
 
 
 async def second_opinion(result: CheckResult, *, window_s: float,
-                         ours_newest: datetime | None,
-                         scans: nn.ScanFetcher | None = None,
-                         notice: nn.NoticeFetcher | None = None) -> CheckResult:
+                         ours_newest: datetime | None, excusable: bool,
+                         fetchers: tuple[nn.ScanFetcher, nn.NoticeFetcher] | None = None
+                         ) -> CheckResult:
     """Apply NOAA's archive to one NEXRAD check result.
 
     Args:
@@ -64,21 +65,48 @@ async def second_opinion(result: CheckResult, *, window_s: float,
         window_s: The check's staleness window, which NOAA is judged against.
         ours_newest: The scan time of our newest volume, for `behind_noaa_s`,
             or None where the check has no such time.
-        scans: Lists NOAA's scans. None means nexrad_notices.fetch_scans,
-            looked up at call time so a test can replace it there.
-        notice: Reads the site's newest notice; likewise fetch_notice.
+        excusable: Whether the check failed for want of input, the one cause
+            an upstream outage explains. A composite that is not running, or
+            that opened a file and could not read it, stays a fail.
+        fetchers: (list scans, read notice). None means nexrad_notices'
+            fetch_scans and fetch_notice, looked up at call time so a test
+            can replace them there.
 
     Returns:
         The result, with the archive's reading in its payload, `behind_noaa_s`
         in its metrics when both times are known, and fail turned to warn
         when the archive vouches for the gap.
     """
-    site = result.target
-    if site not in NEXRAD_RADARS:
+    if result.target not in NEXRAD_RADARS:
         return result
-    now = result.finished_at
+    excuse = result.status == "fail" and excusable
+    lag = ours_newest is not None and result.status != "error"
+    if not (excuse or lag):
+        return result
+    try:
+        out = await _apply(result, window_s=window_s, ours_newest=ours_newest,
+                           excuse=excuse,
+                           fetchers=fetchers or (nn.fetch_scans, nn.fetch_notice))
+    # The side channel must never turn the check's own verdict into an
+    # error, so anything it raises leaves the result as the check made it.
+    except Exception as exc:
+        log.exception("NOAA second opinion failed for %s", result.check_id)
+        return replace(result, payload={**result.payload, "upstream": {
+            "verdict": "unreadable", "error": f"{type(exc).__name__}: {exc}"}})
+    return replace(out, finished_at=utcnow())
+
+
+async def _apply(result: CheckResult, *, window_s: float, ours_newest: datetime | None,
+                 excuse: bool, fetchers: tuple[nn.ScanFetcher, nn.NoticeFetcher]
+                 ) -> CheckResult:
+    """The body of second_opinion, inside its guard."""
+    site, now = result.target, result.finished_at
     since = now - timedelta(seconds=nn.LISTING_SPAN_S)
-    listed, error = await (scans or nn.fetch_scans)(site, since, now)
+    try:
+        listed, error = await asyncio.wait_for(fetchers[0](site, since, now),
+                                               nn.NETWORK_DEADLINE_S)
+    except asyncio.TimeoutError:
+        listed, error = None, f"NOAA archive timed out after {nn.NETWORK_DEADLINE_S:g} s"
     opinion = nn.judge(listed, since, now, window_s)
     upstream: dict[str, Any] = {
         "verdict": opinion.verdict, "window_s": window_s, "error": error,
@@ -90,12 +118,18 @@ async def second_opinion(result: CheckResult, *, window_s: float,
     if opinion.newest is not None and ours_newest is not None:
         metrics["behind_noaa_s"] = (opinion.newest - ours_newest).total_seconds()
     payload = {**result.payload, "upstream": upstream}
-    if result.status != "fail":
+    if not excuse:
         return replace(result, payload=payload, metrics=metrics)
     if not opinion.excuses:
         return replace(result, payload=payload, metrics=metrics,
                        summary=_kept_summary(site, opinion, result.summary, now))
-    said = nn.usable_notice(await (notice or nn.fetch_notice)(site, now), now)
+    # A notice only labels, so one that times out or cannot be read leaves
+    # the warn standing without a quote.
+    try:
+        found = await asyncio.wait_for(fetchers[1](site, now), nn.NETWORK_DEADLINE_S)
+    except asyncio.TimeoutError:
+        found = None
+    said = nn.usable_notice(found, now)
     if said:
         upstream["notice"] = {"issued": said["issued"].isoformat(), "text": said["text"],
                               "url": said.get("url")}

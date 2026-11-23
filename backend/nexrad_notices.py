@@ -27,7 +27,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 import httpx
@@ -61,9 +61,18 @@ Listing = tuple[list[datetime] | None, str | None]
 ScanFetcher = Callable[[str, datetime, datetime], Awaitable[Listing]]
 NoticeFetcher = Callable[[str, datetime], Awaitable[dict[str, Any] | None]]
 
+# Past or present tense only. "Will return to service at 22Z" announces an
+# outage and must still label one, so neither "return" nor "will be ..."
+# counts. Lookbehinds are fixed-width in Python, hence the two.
 _RETURN_TO_SERVICE = re.compile(
-    r"return(?:ed|s|ing)?\s+to\s+(?:routine\s+|normal\s+|full\s+)?(?:operation|service)"
-    r"|back\s+(?:in|to)\s+(?:service|operation)", re.IGNORECASE)
+    r"(?<!will )(?<!will be )\b(?:returned|restored)\b"
+    r"|(?<!be )\bback\s+(?:in\s+service|to\s+(?:normal|routine|service|operation)|online)"
+    r"|\bis\s+(?:now\s+)?operational\b|\bresumed\b", re.IGNORECASE)
+#: A day holds 169 to 249 keys per site (2026-11-23), one page of 1,000.
+#: Ten pages only bounds the loop.
+MAX_PAGES = 10
+#: The longest the second opinion may wait on either service in one run.
+NETWORK_DEADLINE_S = 20.0
 
 
 @dataclass(frozen=True)
@@ -80,8 +89,53 @@ class Opinion:
         return self.verdict in ("also_stale", "returned")
 
 
+@dataclass(frozen=True)
+class Page:
+    """One page of an S3 listing."""
+
+    scans: list[datetime]
+    truncated: bool
+    token: str | None
+
+
+def read_page(xml: str, site: str) -> Page:
+    """Read one ListObjectsV2 page, refusing anything it cannot account for.
+
+    A body that parses to no scans would read as "NOAA has nothing either"
+    and excuse every fail, so a captive portal's HTML, an empty body, and a
+    key in a format this does not know are all errors, never empty listings.
+
+    Args:
+        xml: The response body.
+        site: The four-letter site id, e.g. KBBX.
+
+    Returns:
+        The page's volume scan times, whether more pages follow, and the
+        continuation token.
+
+    Raises:
+        ValueError: When the body is not a listing, or a key is not a volume
+            or metadata file for this site.
+    """
+    if "<ListBucketResult" not in xml:
+        raise ValueError("the response is not an S3 listing")
+    volume = re.compile(rf"/{re.escape(site)}(\d{{8}}_\d{{6}})_V\d\d$")
+    scans: list[datetime] = []
+    for key in re.findall(r"<Key>([^<]*)</Key>", xml):
+        m = volume.search(key)
+        if m:
+            # The keys name UTC scan times with no zone of their own.
+            when = datetime.strptime(m.group(1) + "+0000", "%Y%m%d_%H%M%S%z")
+            scans.append(when)
+        elif not re.search(r"_V\d\d_MDM$", key):
+            raise ValueError(f"unrecognized key in NOAA's listing: {key[:80]!r}")
+    token = re.search(r"<NextContinuationToken>([^<]*)</NextContinuationToken>", xml)
+    return Page(scans, "<IsTruncated>true</IsTruncated>" in xml,
+                token.group(1) if token else None)
+
+
 def parse_listing(xml: str, site: str) -> list[datetime]:
-    """Scan times from an S3 ListObjectsV2 response, metadata files skipped.
+    """Scan times from one S3 listing page, metadata files skipped.
 
     Args:
         xml: The response body.
@@ -89,10 +143,11 @@ def parse_listing(xml: str, site: str) -> list[datetime]:
 
     Returns:
         The volume scan times, in UTC, in key order.
+
+    Raises:
+        ValueError: As read_page.
     """
-    pat = re.compile(rf"<Key>[^<]*/{re.escape(site)}(\d{{8}}_\d{{6}})_V\d\d</Key>")
-    return [datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
-            for m in pat.finditer(xml)]
+    return read_page(xml, site).scans
 
 
 def judge(scans: list[datetime] | None, since: datetime, now: datetime,
@@ -232,15 +287,39 @@ async def _list_days(site: str, since: datetime, now: datetime) -> Listing:
     try:
         for day in sorted({since.date(), now.date()}):
             prefix = f"{day:%Y/%m/%d}/{site}/"
-            params = {"list-type": "2", "prefix": prefix}
-            if day == since.date():
-                params["start-after"] = f"{prefix}{site}{since:%Y%m%d_%H%M%S}"
-            resp = await _http().get(ARCHIVE_URL, params=params)
-            _ = resp.raise_for_status()
-            scans += parse_listing(resp.text, site)
-    except httpx.HTTPError as exc:
+            after = f"{prefix}{site}{since:%Y%m%d_%H%M%S}" if day == since.date() else None
+            scans += await _list_prefix(site, prefix, after)
+    except (httpx.HTTPError, ValueError) as exc:
         return None, f"NOAA archive unreadable: {type(exc).__name__}: {exc}"
     return [s for s in scans if s >= since], None
+
+
+async def _list_prefix(site: str, prefix: str, start_after: str | None) -> list[datetime]:
+    """Every page of one day's listing, following continuation tokens.
+
+    Raises:
+        ValueError: When a page cannot be read, or the listing is still
+            truncated after MAX_PAGES. A partial listing would hide the newest
+            scans and read as an outage.
+    """
+    scans: list[datetime] = []
+    token: str | None = None
+    for _ in range(MAX_PAGES):
+        params = {"list-type": "2", "prefix": prefix}
+        if token:
+            params["continuation-token"] = token
+        elif start_after:
+            params["start-after"] = start_after
+        resp = await _http().get(ARCHIVE_URL, params=params)
+        _ = resp.raise_for_status()
+        page = read_page(resp.text, site)
+        scans += page.scans
+        if not page.truncated:
+            return scans
+        if not page.token:
+            raise ValueError("a truncated listing came with no continuation token")
+        token = page.token
+    raise ValueError(f"the listing was still truncated after {MAX_PAGES} pages")
 
 
 async def fetch_notice(site: str, now: datetime) -> dict[str, Any] | None:
@@ -261,8 +340,10 @@ async def fetch_notice(site: str, now: datetime) -> dict[str, Any] | None:
     got: dict[str, Any] | None = None
     try:
         got = await _newest_notice(site, now)
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
-        log.warning("NWS notice for %s unreadable: %s", site, exc)
+    # Each is a shape the response can take that this cannot read: a
+    # non-JSON body, a list where a dict belongs, a missing field.
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        log.warning("NWS notice for %s unreadable: %s: %s", site, type(exc).__name__, exc)
     _notices[site] = (time.monotonic(), got)
     return got
 
@@ -277,6 +358,8 @@ async def _newest_notice(site: str, now: datetime) -> dict[str, Any] | None:
         return None
     newest = max(graph, key=lambda g: str(g.get("issuanceTime", "")))
     issued = datetime.fromisoformat(str(newest["issuanceTime"]))
+    if issued.tzinfo is None:
+        raise ValueError(f"issuanceTime {newest['issuanceTime']!r} names no zone")
     url = str(newest["@id"])
     # The link comes from the response, so it is followed only back to the
     # same API.

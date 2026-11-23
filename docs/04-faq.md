@@ -136,13 +136,14 @@ now, for all nine composite inputs including the three NEXRAD sites, which
 have no other coverage anywhere in Sentinel.
 
 A NEXRAD radar also goes down for reasons outside our feed, such as the
-maintenance NWS announces. So when a NEXRAD check on `LB3` would fail,
-Sentinel lists NOAA's public Level II archive for that site. If NOAA has no
-volume within the check's own window either, the radar itself is down, and
+maintenance NWS announces. So when a NEXRAD check on `LB3` would fail for
+want of input, Sentinel lists NOAA's public Level II archive for that site.
+If NOAA has no volume in the last hour either, the radar itself is down, and
 the check reports `warn` with NOAA's newest scan and the site's NWS notice
 from the last day, when there is one. If NOAA's archive is current, the gap
 is ours and the check stays `fail`, and it stays `fail` when the archive
-cannot be read. A notice alone never changes a verdict. After the radar
+cannot be read. A composite that is not running stays `fail` whatever the
+radar is doing, and a notice alone never changes a verdict. After the radar
 returns, the `warn` holds for 20 minutes from NOAA's first new scan while our
 feed catches up. Every run also records how far our newest volume trails
 NOAA's (`behind_noaa_s`), so that 20 minutes can later be set from a measured

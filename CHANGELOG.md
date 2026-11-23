@@ -31,13 +31,15 @@ unknown`.
 ### Added
 
 - **NOAA's archive vouches for a NEXRAD outage.** When a NEXRAD check on LB3
-  would fail, Sentinel lists NOAA's public Level II archive for that radar.
-  If NOAA has no volume within the check's own window either, the radar
-  itself is down, and the check reports warn, naming NOAA's newest scan and
-  quoting the radar's NWS notice from the last day when there is one. If
-  NOAA's archive is current the gap is ours and the check stays fail, as it
-  does when the archive cannot be read. A notice alone never changes a
-  verdict. After the radar returns, the warn holds for 20 minutes from
+  would fail for want of input (nothing staged, or the radar absent from the
+  composite run), Sentinel lists NOAA's public Level II archive for that
+  radar. If NOAA has no volume in the last hour either, the radar itself is
+  down, and the check reports warn, naming NOAA's newest scan and quoting the
+  radar's NWS notice from the last day when there is one. If NOAA's archive
+  is current the gap is ours and the check stays fail, as it does when the
+  archive cannot be read or returns anything Sentinel cannot account for. A
+  composite that is not running stays fail whatever the radar is doing, and a
+  notice alone never changes a verdict. After the radar returns, the warn holds for 20 minutes from
   NOAA's first new scan while our feed catches up. Every run records how
   far our newest volume trails NOAA's as `behind_noaa_s`, so that hold can
   be set from a measured distribution later.

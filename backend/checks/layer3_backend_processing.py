@@ -522,9 +522,17 @@ class Layer3CompositeParticipationCheck(Check):
     async def run(self, ctx: Any) -> CheckResult:  # noqa: ANN401  the scheduler's context
         """Judge participation, then let NOAA's archive vouch for a NEXRAD gap.
 
-        The composite drops a radar whose input is older than its 15 min
-        guard, which COMPOSITE_CONTRIB_FAIL_S records, so that is the window
-        NOAA's archive is held to.
+        Held to the staging tree's 1 h retention, the same window as
+        layer3.input. For NEXRAD this check reads presence in the run log,
+        which only proves the file was read, and the composite went on
+        reading the last staged file until the prune removed it. On
+        2026-11-23 it failed at 18:42 (KMUX) and 20:17 (KBBX), a minute after
+        staging emptied. The composite's own 15 min guard would also sit
+        inside NOAA's upload lag, which reached 1086 s on KMUX that day.
+
+        Only "absent from the run" is excused. A missing run log or a file
+        named and not read is the composite misbehaving, whatever the radar
+        is doing.
 
         Args:
             ctx: The scheduler's context, unused here.
@@ -533,8 +541,10 @@ class Layer3CompositeParticipationCheck(Check):
             The check's result.
         """
         _ = ctx
-        return await second_opinion(await self._verdict(),
-                                    window_s=COMPOSITE_CONTRIB_FAIL_S, ours_newest=None)
+        result = await self._verdict()
+        return await second_opinion(result, window_s=COMPOSITE_INPUT_RETENTION_S,
+                                    ours_newest=None,
+                                    excusable=result.metrics.get("included") == 0.0)
 
     async def _verdict(self) -> CheckResult:
         t0 = utcnow()
@@ -1140,7 +1150,8 @@ class Layer3InputStagingCheck(Check):
         declared = result.payload.get("newest_declared")
         ours = datetime.fromisoformat(declared) if isinstance(declared, str) else None
         return await second_opinion(result, window_s=COMPOSITE_INPUT_RETENTION_S,
-                                    ours_newest=ours)
+                                    ours_newest=ours,
+                                    excusable=result.payload.get("staged_files") == 0)
 
     async def _verdict(self) -> CheckResult:
         t0 = utcnow()
