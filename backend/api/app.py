@@ -308,8 +308,8 @@ def create_app() -> FastAPI:
                               COMPOSITE_PRODUCT, DATA_SOURCE,
                               HAS_RADARCA,
                               HOME_VIEW, MAP_OVERLAYS, PRODUCT_LABELS, PRODUCTS,
-                              PRODUCT_UNIT_STATE, RADAR_FOLDER, SETTINGS,
-                              SITE_NAME, X_MOMENTS, moment_to_prefix,
+                              PRODUCT_UNIT_STATE, SETTINGS,
+                              SITE_NAME, moment_prefix_table,
                               product_units)
         return {"version": __version__, "profile": SETTINGS.profile,
                 "site_name": SITE_NAME, "data_source": DATA_SOURCE,
@@ -341,9 +341,7 @@ def create_app() -> FastAPI:
                 # measured under, and the rule has a per-radar exception (the
                 # C-band's PhiDP). A second copy of it in TypeScript is the
                 # bug this project keeps finding.
-                "moment_prefixes": {
-                    rid: {m: moment_to_prefix(rid, m) for m in X_MOMENTS}
-                    for rid in RADAR_FOLDER},
+                "moment_prefixes": moment_prefix_table(),
                 # Per product, the units it is published in, canonical
                 # first, and what the mount held for each when it was last
                 # read. Only products with a real second unit appear, so a

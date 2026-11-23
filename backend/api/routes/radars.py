@@ -1,9 +1,13 @@
 """Radar geography. Static; baked from the upstream JS bundle. Used by the
 frontend MapView component."""
 from __future__ import annotations
+from typing import Any
+
 from fastapi import APIRouter
 
-from ...config import RADAR_FOLDER, RADAR_META_OVERRIDE
+from ... import fs_products as _fs  # noqa: TID252  the package imports relatively throughout
+from ...config import (  # noqa: TID252  the package imports relatively throughout
+    NEXRAD_SITES, RADAR_FOLDER, RADAR_META_OVERRIDE)
 
 router = APIRouter(prefix="/api/radars")
 
@@ -24,6 +28,12 @@ router = APIRouter(prefix="/api/radars")
 # for the named peak (~100-200 m of the antenna) and its 100 km range
 # is from Marin County press coverage ("detects out to 62 miles").
 # elevations=None marks the entries we couldn't source authoritatively.
+#
+# The NEXRAD positions are the ones in each site's Level II volume header,
+# which is the point the NEXRAD plotter centers its frames on. The rounded
+# values these replaced sat 5 to 73 m off it. `frame_half_m` is half the
+# side of that plotter's square frame (693 px over 400 km, north up), which
+# is larger than `range_m` because the frame is not cropped to the ring.
 RADAR_META = {
     "XSCV":  {"lat": 37.3989, "lon": -121.8334, "range_m":  40_000, "kind": "xband", "name": "Coyote Valley", "elevations": [2.0, 3.0, 4.0, 5.0]},
     "XSCW":  {"lat": 38.5216, "lon": -122.8022, "range_m":  40_000, "kind": "xband", "name": "Sonoma", "elevations": [1.5, 2.5, 3.5, 4.5]},
@@ -31,9 +41,12 @@ RADAR_META = {
     "XEBY":  {"lat": 37.8156, "lon": -122.0620, "range_m":  40_000, "kind": "xband", "name": "East Bay", "elevations": [0.0, 1.0, 2.0, 3.0]},
     "XSWR":  {"lat": 37.5742867, "lon": -122.4229867, "range_m":  40_000, "kind": "xband", "name": "Sawyer Ridge", "elevations": [2.5, 3.5, 4.5, 5.5]},
     "CBAND": {"lat": 38.0277, "lon": -122.7161, "range_m": 100_000, "kind": "cband", "name": "Mt Barnabe", "elevations": None},
-    "KBBX":  {"lat": 39.4956, "lon": -121.6316, "range_m": 100_000, "kind": "nexrad", "name": "KBBX", "elevations": None},
-    "KDAX":  {"lat": 38.5010, "lon": -121.6770, "range_m": 100_000, "kind": "nexrad", "name": "KDAX", "elevations": None},
-    "KMUX":  {"lat": 37.1553, "lon": -121.8980, "range_m": 100_000, "kind": "nexrad", "name": "KMUX", "elevations": None},
+    "KBBX":  {"lat": 39.49564, "lon": -121.63161, "range_m": 100_000,
+              "frame_half_m": 200_000, "kind": "nexrad", "name": "KBBX", "elevations": None},
+    "KDAX":  {"lat": 38.50111, "lon": -121.67783, "range_m": 100_000,
+              "frame_half_m": 200_000, "kind": "nexrad", "name": "KDAX", "elevations": None},
+    "KMUX":  {"lat": 37.15522, "lon": -121.89845, "range_m": 100_000,
+              "frame_half_m": 200_000, "kind": "nexrad", "name": "KMUX", "elevations": None},
 }
 
 
@@ -45,9 +58,21 @@ def _meta() -> dict[str, dict]:
     return RADAR_META_OVERRIDE or RADAR_META
 
 
+def _has_frames(rid: str) -> bool:
+    """Can the map draw this radar's frames on this deployment?
+
+    The X-band and C-band frames come from radarca when there is no mount,
+    so they always can. The NEXRAD frames exist only on the mount.
+    """
+    if rid in RADAR_FOLDER:
+        return True
+    return rid in NEXRAD_SITES and _fs.available()
+
+
 @router.get("/meta")
-async def list_radar_meta():
+async def list_radar_meta() -> list[dict[str, Any]]:
+    """Every radar this profile shows, with where it is and what it draws."""
     return [
-        {"id": rid, **meta, "folder": RADAR_FOLDER.get(rid)}
+        {"id": rid, **meta, "folder": RADAR_FOLDER.get(rid), "scan": _has_frames(rid)}
         for rid, meta in _meta().items()
     ]

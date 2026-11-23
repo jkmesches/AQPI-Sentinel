@@ -351,6 +351,11 @@ RADAR_PLOTS_NAME = "{radar}_{prefix}_" + str(ELEVATION_PUBLISHED) + "_{ts}.png"
 RADAR_PLOTS_TS_RE = r"\d{8}-\d{6}"
 RADAR_PLOTS_TS_FMT = "%Y%m%d-%H%M%S"
 
+# No NEXRAD frames on this deployment's map. The plotter draws KSOX and KVTX
+# into this tree, but RADAR_META here lists FLOW alone, so there is no marker
+# to select them from.
+NEXRAD_SITES: tuple[str, ...] = ()
+
 # No tilt tree under this profile's own mount. FLOW's per-elevation frames do
 # exist, in radar-display's document root at
 # `backend_root`/htdocs/FLOW/images/el_<1..4>/ alongside the

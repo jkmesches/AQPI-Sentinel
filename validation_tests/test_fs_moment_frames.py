@@ -18,9 +18,12 @@ So the tree below is built to the shapes measured on the real mounts on
   AQPI  PRODUCTS/Chivo/plots/<folder>/%Y/%m/%d/<folder>_<prefix>_YYYYMMDD-HHMM.png
   XQPI  PRODUCT_IMAGES/%Y/%m/%d/<radar>/<moment>/<radar>_<moment>_3.5_
         YYYYMMDD-HHMMSS.png
+  NEXRAD (AQPI only) PRODUCTS/Chivo/nexrad/%Y/%m/%d/<site>/<moment>/
+        <site>_<moment>_0.5_YYYYMMDD-HHMMSS.png
 
-Both carry one <prefix>_colorbar.png per directory, and the AQPI tree holds
-five X-band folders without RhoHV plus sscb with it.
+All three carry one colorbar per directory, and the AQPI tree holds five
+X-band folders without RhoHV plus sscb with it. The NEXRAD plotter also
+leaves <frame>.png.<pid>.tmp.png while it renders.
 """
 from __future__ import annotations
 import asyncio
@@ -143,11 +146,90 @@ def run_profile(profile: str, root: str) -> None:
           len(everything) == len(frames), f"{len(everything)} of {len(frames)}")
 
 
+def build_nexrad_tree(root: str, day: datetime) -> list[str]:
+    """Three KDAX frames in the NEXRAD plotter's layout, plus its debris.
+
+    The layout is the XQPI plotter's, under PRODUCTS/Chivo/nexrad, as read
+    on the AQPI deployment's mount on 2026-11-23: a moment directory, the
+    K-prefixed site, the elevation in the name and seconds in the stamp. A
+    render in progress is named <frame>.png.<pid>.tmp.png, which still ends
+    in .png.
+
+    Args:
+        root: Directory standing in for SENTINEL_BACKEND_ROOT.
+        day: The UTC instant the frames are stamped from.
+
+    Returns:
+        The three frame names, oldest first.
+    """
+    d = os.path.join(root, "PRODUCTS", "Chivo", "nexrad", day.strftime("%Y/%m/%d"),
+                     "KDAX", "Reflectivity")
+    os.makedirs(d, exist_ok=True)
+    Path(d, "KDAX_Reflectivity_colorbar.png").write_bytes(b"legend")
+    names: list[str] = []
+    for second in (0, 320, 640):
+        ts = (day + timedelta(seconds=second)).strftime("%Y%m%d-%H%M%S")
+        names.append(f"KDAX_Reflectivity_0.5_{ts}.png")
+        Path(d, names[-1]).write_bytes(b"\x89PNG\r\n\x1a\n")
+    Path(d, f"{names[-1]}.4242.tmp.png").write_bytes(b"\x89PNG half")
+    # The July frames under Chivo/plots, which the old root job wrote with
+    # another name, must not be read as this site's.
+    old = os.path.join(root, "PRODUCTS", "Chivo", "plots", "DAX", day.strftime("%Y/%m/%d"))
+    os.makedirs(old, exist_ok=True)
+    Path(old, f"DAX_reflectivity_{day.strftime('%Y%m%d-%H%M')}.png").write_bytes(b"\x89PNG")
+    return names
+
+
+def run_nexrad(root: str) -> None:
+    """The AQPI profile reads NEXRAD frames from their own tree.
+
+    Args:
+        root: Empty directory to build the tree under.
+    """
+    for name in [m for m in sys.modules if m.startswith("backend")]:
+        del sys.modules[name]
+    os.environ["SENTINEL_PROFILE"] = "aqpi"
+    os.environ["SENTINEL_BACKEND_ROOT"] = root
+    import backend.fs_products as fs
+    from backend import config
+
+    day = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=15)
+    names = build_nexrad_tree(root, day)
+    check("nexrad: KDAX is a scan radar", fs.is_scan_radar("KDAX"))
+    check("nexrad: ...filed under its own id", fs.plot_folder("KDAX") == "KDAX")
+    check("nexrad: ...and kept out of RADAR_FOLDER, which the checks iterate",
+          "KDAX" not in config.RADAR_FOLDER)
+    frames = asyncio.run(fs.list_moment_frames("KDAX", "Reflectivity"))
+    got = [n for _, n in frames]
+    check("nexrad: the three frames are found, oldest first", got == names, str(got))
+    check("nexrad: a half-written .tmp.png is not a frame",
+          all(".tmp" not in n for n in got))
+    check("nexrad: the stamp keeps its seconds",
+          frames[1][0] - frames[0][0] == timedelta(seconds=320),
+          str(frames[1][0] - frames[0][0]))
+    resp = asyncio.run(fs.read_moment_image("KDAX", "Reflectivity", names[-1], frames[-1][0]))
+    check("nexrad: the newest frame reads back", resp.status_code == 200,
+          f"HTTP {resp.status_code}")
+    for bad in (f"{names[-1]}.4242.tmp.png", "KDAX_Reflectivity_colorbar.png",
+                f"DAX_reflectivity_{day.strftime('%Y%m%d-%H%M')}.png"):
+        r = asyncio.run(fs.read_moment_image("KDAX", "Reflectivity", bad, frames[-1][0]))
+        check(f"nexrad: {bad!r} is refused", r.status_code == 404, f"HTTP {r.status_code}")
+    try:
+        _ = asyncio.run(fs.list_moment_frames("KDAX", "Velocity"))
+        check("nexrad: a moment the plotter does not draw is refused", False, "no error")
+    except KeyError:
+        check("nexrad: a moment the plotter does not draw is refused", True)
+    check("nexrad: an unknown id is not a scan radar", not fs.is_scan_radar("KXYZ"))
+
+
 def main() -> int:
     for profile in ("aqpi", "xqpi"):
         print(f"--- {profile} ---")
         with tempfile.TemporaryDirectory() as root:
             run_profile(profile, root)
+    print("--- nexrad ---")
+    with tempfile.TemporaryDirectory() as root:
+        run_nexrad(root)
     print(f"\n{len(FAILURES)} FAILED: {', '.join(FAILURES)}" if FAILURES
           else "\nall fs moment-frame assertions passed")
     return 1 if FAILURES else 0

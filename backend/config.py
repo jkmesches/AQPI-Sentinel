@@ -420,12 +420,43 @@ MOMENT_TO_PREFIX_DEFAULT = {
 
 
 def moment_to_prefix(radar_id: str, moment: str) -> str:
+    """The filename prefix one radar publishes a moment under.
+
+    Args:
+        radar_id: Radar id, from RADAR_FOLDER or NEXRAD_SITES.
+        moment: Moment name in this profile's vocabulary.
+
+    Returns:
+        The prefix.
+
+    Raises:
+        KeyError: If this radar does not publish the moment.
+    """
+    if radar_id in NEXRAD_SITES:
+        return NEXRAD_MOMENT_PREFIX[moment]
     if radar_id == "CBAND" and moment == "PhiDP":
         return "PhiDP"
     return MOMENT_TO_PREFIX_DEFAULT[moment]
 
 
 X_MOMENTS = list(MOMENT_TO_PREFIX_DEFAULT.keys())
+
+
+def moment_prefix_table() -> dict[str, dict[str, str]]:
+    """Every radar's moments and the prefixes they publish under.
+
+    This is the `moment_prefixes` field of /api/version. The X-band and
+    C-band radars list every X_MOMENTS label. The NEXRAD sites list only
+    what their plotter draws, so the map leaves them off for the rest.
+
+    Returns:
+        Radar id to {moment label: published prefix}.
+    """
+    table = {rid: {m: moment_to_prefix(rid, m) for m in X_MOMENTS}
+             for rid in RADAR_FOLDER}
+    table.update({rid: dict(NEXRAD_MOMENT_PREFIX) for rid in NEXRAD_SITES})
+    return table
+
 
 # Temperature uses "F" or "Deg" (note: NOT "DEG") for its subdir.
 TEMP_UNIT_SUBDIR = {"F": "F", "DEG": "Deg"}
@@ -1262,6 +1293,31 @@ RADAR_PLOTS_NAME: str = "{folder}_{prefix}_{ts}.png"
 RADAR_PLOTS_TS_RE: str = r"\d{8}-\d{4}"
 RADAR_PLOTS_TS_FMT: str = "%Y%m%d-%H%M"
 
+# === NEXRAD frames, rendered on the backend since 2026-11-23 ===
+#
+# The three S-band sites the composite reads. An AQPI copy of XQPI's NEXRAD
+# plotter draws each one's 0.5 degree CorrReflectivity from the same DROPS
+# volumes the composite ingests, every five minutes from ldm's crontab. It
+# replaced a root-owned job that stopped on 2026-07-01 and was never
+# relaunched, whose frames still sit under Chivo/plots with another name.
+#
+# Its own layout rather than RADAR_PLOTS_*, because it keeps the XQPI
+# plotter's: a moment directory, the K-prefixed site, the elevation in the
+# name and seconds in the stamp. The day directory and the stamp both come
+# from the sweep's start in UTC. A render in progress is named
+# <frame>.png.<pid>.tmp.png, which the anchored name pattern rejects.
+#
+# Kept apart from RADAR_FOLDER, which the L2, LB2, LB3 and L4 checks iterate.
+# Listing these sites there would register radar checks the NEXRAD feed has
+# no data for.
+NEXRAD_SITES: tuple[str, ...] = ("KBBX", "KDAX", "KMUX")
+NEXRAD_PLOTS_TREE: str = "PRODUCTS/Chivo/nexrad/%Y/%m/%d/{radar}/{prefix}"
+NEXRAD_PLOTS_NAME: str = "{radar}_{prefix}_0.5_{ts}.png"
+NEXRAD_PLOTS_TS_RE: str = r"\d{8}-\d{6}"
+NEXRAD_PLOTS_TS_FMT: str = "%Y%m%d-%H%M%S"
+# Reflectivity is the only moment the plotter draws.
+NEXRAD_MOMENT_PREFIX: dict[str, str] = {"Reflectivity": "Reflectivity"}
+
 # === radar-display is a directory on the main archive, not only a website ===
 #
 # radardisplay.engr.colostate.edu serves this tree verbatim: the URL path
@@ -1506,6 +1562,7 @@ if SETTINGS.profile == "xqpi":
     RADAR_PLOTS_NAME = _xqpi.RADAR_PLOTS_NAME
     RADAR_PLOTS_TS_RE = _xqpi.RADAR_PLOTS_TS_RE
     RADAR_PLOTS_TS_FMT = _xqpi.RADAR_PLOTS_TS_FMT
+    NEXRAD_SITES = _xqpi.NEXRAD_SITES
     TILT_TREE = _xqpi.TILT_TREE
     MOMENT_TO_PREFIX_DEFAULT = _xqpi.MOMENT_TO_PREFIX
     X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)

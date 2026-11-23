@@ -29,10 +29,12 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .config import (PRODUCT_IMAGES_PREFIX, RADAR_FOLDER, RADAR_PLOTS_NAME,
-                     RADAR_PLOTS_TREE, RADAR_PLOTS_TS_FMT, RADAR_PLOTS_TS_RE,
-                     SETTINGS, TILT_IMAGE_DIR, TILT_JSON_DIR, TILT_TREE,
-                     manifest_rel, moment_to_prefix)
+from .config import (NEXRAD_PLOTS_NAME, NEXRAD_PLOTS_TREE, NEXRAD_PLOTS_TS_FMT,
+                     NEXRAD_PLOTS_TS_RE, NEXRAD_SITES, PRODUCT_IMAGES_PREFIX,
+                     RADAR_FOLDER, RADAR_PLOTS_NAME, RADAR_PLOTS_TREE,
+                     RADAR_PLOTS_TS_FMT, RADAR_PLOTS_TS_RE, SETTINGS,
+                     TILT_IMAGE_DIR, TILT_JSON_DIR, TILT_TREE, manifest_rel,
+                     moment_to_prefix)
 
 # Matches layer1_backend_product.FS_TIMEOUT_S. A mount that does not answer in
 # five seconds is wedged, and failing is better than holding the connection.
@@ -196,11 +198,60 @@ def _backend_root() -> str:
     return str(root)
 
 
+def is_scan_radar(radar: str) -> bool:
+    """Whether this deployment can serve frames for a radar id at all.
+
+    Args:
+        radar: A radar id from a request.
+
+    Returns:
+        True for a radar in RADAR_FOLDER or NEXRAD_SITES.
+    """
+    return radar in RADAR_FOLDER or radar in NEXRAD_SITES
+
+
+def plot_folder(radar: str) -> str:
+    """The folder name a radar's frames are filed under.
+
+    A NEXRAD site is filed under its own id. Every other radar uses the
+    RADAR_FOLDER spelling, which differs from the id (``scvw`` for XSCV).
+
+    Args:
+        radar: Radar id.
+
+    Returns:
+        The folder.
+
+    Raises:
+        KeyError: If the radar is in neither table.
+    """
+    if radar in NEXRAD_SITES:
+        return radar
+    return RADAR_FOLDER[radar]
+
+
+def _plot_layout(radar: str) -> tuple[str, str, str, str]:
+    """The tree, name pattern, stamp pattern and stamp format for one radar.
+
+    Args:
+        radar: Radar id.
+
+    Returns:
+        (tree, name, ts_re, ts_fmt), the NEXRAD plotter's for a NEXRAD site
+        and this profile's RADAR_PLOTS_* for every other radar.
+    """
+    if radar in NEXRAD_SITES:
+        return (NEXRAD_PLOTS_TREE, NEXRAD_PLOTS_NAME, NEXRAD_PLOTS_TS_RE,
+                NEXRAD_PLOTS_TS_FMT)
+    return (RADAR_PLOTS_TREE, RADAR_PLOTS_NAME, RADAR_PLOTS_TS_RE, RADAR_PLOTS_TS_FMT)
+
+
 def plots_dir(radar: str, moment: str, day: datetime) -> str:
     """Absolute directory holding one radar's frames for one moment, one UTC day.
 
     Args:
-        radar: Radar id as ``RADAR_FOLDER`` keys it, e.g. "XEBY" or "FLOW".
+        radar: Radar id as ``RADAR_FOLDER`` keys it, e.g. "XEBY" or "FLOW",
+            or a NEXRAD site.
         moment: Moment name in this profile's vocabulary.
         day: Any instant on the UTC day wanted; only the date is read.
 
@@ -210,8 +261,9 @@ def plots_dir(radar: str, moment: str, day: datetime) -> str:
     Raises:
         KeyError: If the radar or moment is not in this profile's tables.
     """
-    rel = RADAR_PLOTS_TREE.format(
-        radar=radar, folder=RADAR_FOLDER[radar], prefix=moment_to_prefix(radar, moment))
+    tree = _plot_layout(radar)[0]
+    rel = tree.format(
+        radar=radar, folder=plot_folder(radar), prefix=moment_to_prefix(radar, moment))
     # Format first, then strftime: the template carries both kinds of
     # placeholder and strftime would choke on a stray brace.
     return os.path.join(_backend_root(), day.strftime(rel))
@@ -224,18 +276,20 @@ def _frame_re(radar: str, moment: str) -> re.Pattern[str]:
     directory carries is excluded by having no timestamp rather than by a
     separate rule, and a sibling product cannot pass as a frame.
     """
-    parts = {"radar": radar, "folder": RADAR_FOLDER[radar],
+    parts = {"radar": radar, "folder": plot_folder(radar),
              "prefix": moment_to_prefix(radar, moment)}
-    head, tail = RADAR_PLOTS_NAME.split("{ts}")
+    _, name, ts_re, _ = _plot_layout(radar)
+    head, tail = name.split("{ts}")
     return re.compile(
         f"^{re.escape(head.format(**parts))}"
-        f"({RADAR_PLOTS_TS_RE})"
+        f"({ts_re})"
         f"{re.escape(tail.format(**parts))}$")
 
 
 def _list_frames_blocking(radar: str, moment: str, days: int) -> list[tuple[datetime, str]]:
     """Scan `days` UTC days back, newest day first, for frames of one moment."""
     pat = _frame_re(radar, moment)
+    ts_fmt = _plot_layout(radar)[3]
     found: list[tuple[datetime, str]] = []
     now = datetime.now(timezone.utc)
     for back in range(days):
@@ -254,7 +308,7 @@ def _list_frames_blocking(radar: str, moment: str, days: int) -> list[tuple[date
                 # The tree names frames in UTC with no offset in the text,
                 # so the zone is attached here rather than parsed.
                 ts = datetime.strptime(  # noqa: DTZ007  zone attached below
-                    m.group(1), RADAR_PLOTS_TS_FMT)
+                    m.group(1), ts_fmt)
             except ValueError:
                 continue
             found.append((ts.replace(tzinfo=timezone.utc), name))

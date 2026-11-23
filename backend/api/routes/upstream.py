@@ -10,10 +10,10 @@ from pathlib import Path as _Path
 from typing import Any
 from zoneinfo import ZoneInfo as _ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 
 from ...checks.transports import CheckContext  # noqa: TID252  relative, as every import in this module
-from ...config import (PRODUCTS,  # noqa: TID252  file convention
+from ...config import (NEXRAD_SITES, PRODUCTS,  # noqa: TID252  file convention
                        RADAR_FOLDER, SETTINGS, image_path,
                        manifest_rel, moment_to_prefix)
 from ... import fs_products as _fs
@@ -635,7 +635,9 @@ _XBAND_TS_RE = __import__("re").compile(r"_(\d{8})-(\d{4})\.png$")
 _activity_cache: dict[str, float] = {}
 
 
-async def _activity_for(app, ctx, scan_path: str) -> float:
+async def _activity_for(app: FastAPI, ctx: CheckContext, scan_path: str,
+                        fetcher: Callable[[], Awaitable[_fs.FsResponse]] | None = None,
+                        ) -> float:
     """Non-empty pixel fraction for one frame.
 
     Goes through _serve_source, so the sparkline is computed from our own
@@ -643,12 +645,15 @@ async def _activity_for(app, ctx, scan_path: str) -> float:
     consumer of upstream bandwidth in the whole app — selecting a composite
     asks it for EVERY step in the timeline (31 frames), and before this it
     fetched all of them straight from radarca and decoded each with PIL.
+
+    `fetcher` reads the frame off the mount, for a frame radarca does not
+    serve (the NEXRAD sites).
     """
     cached = _activity_cache.get(scan_path)
     if cached is not None:
         return cached
     try:
-        body, _ct, _prov = await _serve_source(app, ctx, scan_path)
+        body, _ct, _prov = await _serve_source(app, ctx, scan_path, fetcher=fetcher)
     except Exception:
         _activity_cache[scan_path] = 0.0
         return 0.0
@@ -687,6 +692,13 @@ async def step_activity(
             path = image_path(product_id, s["imageName"])
             out.append({"i": i, "ts": s.get("timestamp"),
                         "activity": await _activity_for(request.app, ctx, path)})
+    elif radar and radar in NEXRAD_SITES:
+        # Off the mount, since radarca's listing holds no NEXRAD frames.
+        for i, (ts, source) in enumerate(await _nexrad_frames(radar, moment)):
+            out.append({"i": i, "ts": ts.isoformat(),
+                        "activity": await _activity_for(
+                            request.app, ctx, source,
+                            fetcher=_xband_fs_fetcher(radar, moment, ts, source))})
     elif radar:
         if radar not in RADAR_FOLDER:
             raise HTTPException(404, f"unknown radar: {radar}")
@@ -717,9 +729,8 @@ async def radar_steps(radar: str, request: Request,
     names returned by xbandRadarImages. Used by the frontend when no composite
     is selected — gives the scrubber a real timeline that matches what's
     actually available upstream."""
-    if radar not in RADAR_FOLDER:
+    if not _fs.is_scan_radar(radar):
         raise HTTPException(404, f"unknown radar: {radar}")
-    folder = RADAR_FOLDER[radar]
     if prefix is None:
         try:
             prefix = moment_to_prefix(radar, moment)
@@ -788,6 +799,8 @@ async def _xband_frames(radar: str, moment: str, ctx: CheckContext,
         ``xband_chivo/<folder>/<name>`` shape the archive and the caches are
         already keyed on, so nothing stored before this change is orphaned.
     """
+    if radar in NEXRAD_SITES:
+        return await _nexrad_frames(radar, moment)
     folder = RADAR_FOLDER[radar]
     prefix = moment_to_prefix(radar, moment)
 
@@ -809,6 +822,31 @@ async def _xband_frames(radar: str, moment: str, ctx: CheckContext,
             out.append((ts, source))
     out.sort()
     return out
+
+
+async def _nexrad_frames(radar: str,
+                         moment: str) -> list[tuple[_dt.datetime, str]]:
+    """Recent frames for one NEXRAD site, oldest first, off the mount alone.
+
+    radarca serves no frames for these sites, and the archive tier has never
+    held any, so a deployment with no mount has nothing to offer and says so
+    with an empty list rather than a request radarca would answer with 404.
+
+    Args:
+        radar: A site in NEXRAD_SITES.
+        moment: Moment name; only Reflectivity is drawn.
+
+    Returns:
+        (timestamp, logical source) pairs, oldest first, keyed
+        ``nexrad_chivo/<site>/<name>`` for the caches.
+    """
+    if not _fs.available():
+        return []
+    try:
+        frames = await _fs.list_moment_frames(radar, moment)
+    except (OSError, TimeoutError, KeyError):
+        return []
+    return [(ts, f"nexrad_chivo/{radar}/{name}") for ts, name in frames]
 
 
 def _xband_fs_fetcher(
@@ -852,9 +890,8 @@ async def latest_xband_scan(
     composite scrubber.
     """
     _PROXY_HITS["xband_scan"] += 1
-    if radar not in RADAR_FOLDER:
+    if not _fs.is_scan_radar(radar):
         raise HTTPException(404, f"unknown radar: {radar}")
-    folder = RADAR_FOLDER[radar]
     # `prefix=` overrides moment mapping if explicitly set (for power users
     # or future automation that knows the upstream productPrefix string).
     if prefix is None:

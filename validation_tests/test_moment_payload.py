@@ -53,8 +53,8 @@ def payload_for(profile: str) -> dict[str, dict[str, str]]:
     for name in [m for m in sys.modules if m.startswith("backend")]:
         del sys.modules[name]
     config = importlib.import_module("backend.config")
-    return {rid: {m: config.moment_to_prefix(rid, m) for m in config.X_MOMENTS}
-            for rid in config.RADAR_FOLDER}
+    table: dict[str, dict[str, str]] = config.moment_prefix_table()
+    return table
 
 
 def check_resolvable(profile: str, payload: dict[str, dict[str, str]],
@@ -125,6 +125,14 @@ def main() -> int:
                 "no longer needs to be per-radar")
     else:
         fails.append("aqpi: CBAND or XEBY is missing from RADAR_FOLDER")
+
+    # The NEXRAD plotter draws reflectivity only. Offering more would put a
+    # Velocity frame request for KDAX on the wire and take a 400 back.
+    for site in ("KBBX", "KDAX", "KMUX"):
+        if aqpi.get(site) != {"Reflectivity": "Reflectivity"}:
+            fails.append(f"aqpi/{site}: offers {aqpi.get(site)}, not reflectivity alone")
+    if set(payloads["xqpi"]) != {"FLOW"}:
+        fails.append(f"xqpi: offers {sorted(payloads['xqpi'])}, not FLOW alone")
 
     check_js_matches(payloads, fails)
 
