@@ -534,9 +534,10 @@ UNITS = ("in", "mm")
 # What this deployment calls itself, everywhere a human reads it.
 SITE_NAME = "XQPI Sentinel"
 
-# Shown in the header where AQPI names radarca. There is no HTTP origin here;
-# everything is read off the secondary archive mount.
-DATA_SOURCE = "the secondary archive · /projects/xqpi"
+# Shown in the header where AQPI names radarca. There is no HTTP origin here,
+# so this is the tree on the mount, and config puts the deployment's own
+# source label in front of it (SENTINEL_SOURCE_LABEL).
+DATA_SOURCE = "/projects/xqpi"
 
 # Role words, as in config.BACKEND_SOURCE. This deployment names its own tree
 # with SENTINEL_SOURCE_TAG and SENTINEL_SOURCE_LABEL.

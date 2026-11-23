@@ -28,6 +28,21 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dashboard's alarm band floated mid-page.** It shared a grid with the
+  four rails and sat in the row under them, so it rode up and down with the
+  tallest rail's content and left empty space below it on a quiet page. The
+  rails now take the height the band leaves, and the band sits at the foot
+  of the page whatever the rails hold.
+
+- **The XQPI header read "the secondary archive · /projects/xqpi".** The name
+  scrub rewrote a tree name written into that string, and no setting could
+  change it. The header now puts the deployment's own source label
+  (`SENTINEL_SOURCE_LABEL`) in front of the tree's path, as AQPI already did
+  in front of radarca. The FAQ's paragraph on source tags read the same
+  way and is rewritten.
+
 ## [0.15.2] - 2026-11-23
 
 Readouts that match their frames, two timeline filters and unlinked panes.

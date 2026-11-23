@@ -120,6 +120,7 @@ print("@@" + json.dumps({
     "radarca_mods":   list(backend.checks._RADARCA),
     "has_radarca":    config.HAS_RADARCA,
     "backend_source": list(config.BACKEND_SOURCE),
+    "data_source":    config.DATA_SOURCE,
     "products":       sorted(config.PRODUCTS),
     "radars":         sorted(config.RADAR_FOLDER),
     "site_name": config.SITE_NAME,
@@ -207,6 +208,14 @@ def main() -> int:
     check("xqpi declares no display tier", xqpi["has_radarca"] is False)
     check("xqpi reports a role-word source pair", xqpi["backend_source"] == ["FS", "Archive"],
           str(xqpi["backend_source"]))
+    # The header. The scrub turned a label written into this string into a
+    # role phrase no setting could change; the label now comes from
+    # BACKEND_SOURCE, which SENTINEL_SOURCE_LABEL sets.
+    check("xqpi's header names its tree after the source label",
+          xqpi["data_source"] == "Archive · /projects/xqpi", xqpi["data_source"])
+    check("aqpi's header names the mount and then radarca",
+          aqpi["data_source"] == "Archive · radarca.engr.colostate.edu",
+          aqpi["data_source"])
     check("the only radar is FLOW", xqpi["radars"] == ["FLOW"], str(xqpi["radars"]))
     check("four products are configured", len(xqpi["products"]) == 4,
           str(xqpi["products"]))

@@ -1527,9 +1527,10 @@ if SETTINGS.profile not in ("aqpi", "xqpi"):
 #
 # Both names when both are read, the mount first because it carries almost
 # everything. A deployment with no mount keeps the profile's own answer, which
-# is what the test deployment runs on. XQPI names its tree in DATA_SOURCE
-# already and has no HTTP origin at all, so HAS_RADARCA keeps it from being
-# named twice.
+# is what the test deployment runs on. XQPI has no HTTP origin, so its
+# DATA_SOURCE is the tree's path and the label goes in front of that. The
+# label used to be written into XQPI's string, where the name scrub turned it
+# into a role phrase the operator could not change.
 
 # Last word on the source labels, after the profile block above has set its
 # own. A deployment names its trees here rather than in source, so the public
@@ -1544,7 +1545,7 @@ if _sscb_tag or _sscb_label:
     SPECIAL_TREE_SOURCE = (_sscb_tag or SPECIAL_TREE_SOURCE[0],
                            _sscb_label or SPECIAL_TREE_SOURCE[1])
 
-if SETTINGS.backend_root and HAS_RADARCA:
+if SETTINGS.backend_root:
     DATA_SOURCE = f"{BACKEND_SOURCE[1]} · {DATA_SOURCE}"
 
 if COMPOSITE_PRODUCT not in PRODUCTS:

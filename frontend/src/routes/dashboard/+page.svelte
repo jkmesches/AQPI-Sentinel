@@ -398,8 +398,9 @@
   The tag is the point of the paired layout. A column header only works while
   it is on screen — it is gone the moment the rail scrolls, and gone again
   when someone pastes a screenshot of three rows into a thread. Two characters
-  welded to the trace survive both. The main archive = the backend tree (the main archive, or the secondary archive for
-  CBAND); RC = radarca, the scraped upstream.
+  welded to the trace survive both. The backend tag is the deployment's own
+  (config.BACKEND_SOURCE, or SPECIAL_TREE_SOURCE for CBAND); RC = radarca, the
+  scraped upstream.
 
   A null `row` means this source does not cover this target on this
   deployment — no backend mount at all, CBAND without SENTINEL_SSCB_ROOT, or a
@@ -924,8 +925,8 @@
 				{/if}
 			</ul>
 	</aside>
-
 </div>
+
 	<!-- ALARM STREAM, full width at the foot of the page --------------------------------- -->
 	<!-- An alarm row is a severity chip, a stage, an id, the subject, the
 	     time it opened, its age, the message and an ack button: eight
