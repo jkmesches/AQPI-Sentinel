@@ -138,6 +138,8 @@ export function runTests(mod, coverage, products) {
       + `${aqpi.stops[21].open} ${aqpi.stops[21].lo}`);
     check('the C-band reads through the same table',
       rampFor('CBAND', 'CorrReflectivity') === aqpi);
+    check('...and so do the NEXRAD sites, under their own prefix',
+      ['KBBX', 'KDAX', 'KMUX'].every((r) => rampFor(r, 'Reflectivity') === aqpi));
   }
 
   console.log('\nan unknown radar or moment reads nothing:');
@@ -147,8 +149,8 @@ export function runTests(mod, coverage, products) {
     check('both unknown', rampFor('', '') === null);
     check('a moment spelled as another tree spells it',
       rampFor('XEBY', 'reflectivity') === null);
-    check('a radar the console cannot select',
-      rampFor('KBBX', 'reflectivity') === null);
+    check('a NEXRAD moment its plotter does not draw',
+      rampFor('KBBX', 'Velocity') === null);
     check('an X-band moment the C-band does not share',
       rampFor('CBAND', 'FilteredPhiDP') === null);
   }

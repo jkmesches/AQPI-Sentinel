@@ -173,7 +173,6 @@
 	import {
 		radarStatusByTarget, radarStatusOf, radarVerdicts, radarStageReadings
 	} from '$lib/radarStatus';
-	import { isAlerting } from '$lib/grouping';
 	import { diag } from '$lib/diag';
 	import { nexradImageUrl, unionExtent } from '$lib/map/nexrad';
 	import {
@@ -203,7 +202,7 @@
 	import { burnScarsLayer } from '$lib/map/layers/burnScars';
 	import { streamGaugesLayer } from '$lib/map/layers/streamGauges';
 	import {
-		radarExtent, radarPointsGeo, radarRangesGeo, rangeSpanDeg
+		frameExtent, isSelectable, radarPointsGeo, radarRangesGeo, rangeSpanDeg
 	} from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
@@ -220,6 +219,8 @@
 		name: string;
 		folder: string | null;
 		elevations: number[] | null;
+		frame_half_m?: number;
+		scan?: boolean;
 	}
 
 	let mapDiv: HTMLDivElement;
@@ -1064,8 +1065,11 @@
 		// Nearest first because where two scans overlap, the closer
 		// radar resolved that ground better.
 		void radarFramesAt;
+		// The X-bands before any NEXRAD, because they draw on top of it
+		// and the reading has to be the pixel the reader is looking at.
 		const near = [...radarSamplers.entries()].sort(
-			(a, b) => extentGap(a[1].extent, lngLat) - extentGap(b[1].extent, lngLat));
+			(a, b) => Number(isNexrad(a[0])) - Number(isNexrad(b[0]))
+				|| extentGap(a[1].extent, lngLat) - extentGap(b[1].extent, lngLat));
 		for (const [, held] of near) {
 			const got = sampleAt(ramp, held.sampler, held.extent, lngLat);
 			if (got) return got;
@@ -1180,7 +1184,10 @@
 		// once. Where they disagree, as the C-band does on ZDR and
 		// PhiDP, there is no one scale to draw and the answer is still
 		// nothing.
-		const ramps = activeRadars.map((radar) => {
+		// Only the radars drawing this moment. A NEXRAD site left on under
+		// Velocity has no prefix and draws nothing, and counting it would
+		// take the X-bands' velocity legend away.
+		const ramps = activeRadars.filter(drawsMoment).map((radar) => {
 			const prefix = prefixFor(momentPrefixes, radar, currentMoment);
 			return prefix ? rampFor(radar, prefix) : null;
 		});
@@ -1550,9 +1557,30 @@
 	// What the panel header counts as on.
 	//
 
-	const selectableRadars = $derived(
-		radars.filter((r) => r.kind === 'xband' || r.kind === 'cband')
-	);
+	const selectableRadars = $derived(radars.filter(isSelectable));
+	const nexradSelectable = $derived(selectableRadars.some((r) => r.kind === 'nexrad'));
+
+	/**
+	 * Whether a radar publishes the moment on show.
+	 *
+	 * The NEXRAD plotter draws reflectivity only, and the scan route answers
+	 * 400 for its other moments, so those radars stay selected but undrawn
+	 * until reflectivity is back. Every radar draws until /api/version has
+	 * answered, as each did before the table existed.
+	 *
+	 * @param id The radar.
+	 * @returns True when the radar has a prefix for the current moment.
+	 */
+	function drawsMoment(id: string): boolean {
+		return momentPrefixes === null
+			|| prefixFor(momentPrefixes, id, currentMoment) !== null;
+	}
+	const drawnRadars = $derived(activeRadars.filter(drawsMoment));
+
+	/** Whether a radar is a NEXRAD site, which draws under the network's own. */
+	function isNexrad(id: string): boolean {
+		return radars.find((r) => r.id === id)?.kind === 'nexrad';
+	}
 
 	// What the Reference control reads. The composite and the radars have
 	// controls of their own, so counting them here would report the same
@@ -1711,12 +1739,13 @@
 		// permanently snapped to a nearby frame — including at the newest
 		// step, where a radar that had just published sat a frame behind.
 		// See $lib/radarTimeline for the merge rule.
-		const merged = await buildSharedTimeline(activeRadars, currentMoment);
+		const drawn = drawnRadars;
+		const merged = await buildSharedTimeline(drawn, currentMoment);
 		if (!merged) return null;
 		// The activity sparkline is a single trace, so it follows the first
 		// active radar; it is indicative rather than per-radar.
-		if (activeRadars.length > 0) {
-			loadActivity(`radar=${activeRadars[0]}&moment=${encodeURIComponent(currentMoment)}`);
+		if (drawn.length > 0) {
+			loadActivity(`radar=${drawn[0]}&moment=${encodeURIComponent(currentMoment)}`);
 		}
 		return { steps: merged.steps as Step[], idx: merged.idx };
 	}
@@ -2381,7 +2410,7 @@
 
 	function refreshRadarOverlays() {
 		if (!map || !styleReady) return;
-		const active = new Set(activeRadars);
+		const active = new Set(drawnRadars);
 		// When tilt mode owns a radar, drop it from the radarca overlay set
 		// so the two don't stack — the tilt overlay handles it instead. The
 		// removal branch below then tears down any radarca overlay we'd
@@ -2402,7 +2431,7 @@
 			if (_addedOverlays.has(id)) continue;
 			const r = radars.find((x) => x.id === id);
 			if (!r) continue;
-			const e = radarExtent(r);
+			const e = frameExtent(r);
 			// Record the URL the source is created with, so the first
 			// syncRadarOverlayTime after an add doesn't immediately re-fetch
 			// the frame the source already loaded.
@@ -2418,12 +2447,25 @@
 					[e.west, e.south]
 				]
 			});
-			addOverlayBelowMarkers(map, {
+			const layer: maplibregl.AddLayerObject = {
 				id: radarLayerId(id),
 				type: 'raster',
 				source: radarSrcId(id),
 				paint: { 'raster-opacity': overlayOpacity, 'raster-fade-duration': 0 }
-			});
+			};
+			// A NEXRAD frame covers 400 km and would hide every X-band scan
+			// under it, so it goes beneath the lowest one on the map. Each
+			// X-band layer is added just under the markers, so the earliest
+			// still in the set is the lowest. An X-band added later lands
+			// above every NEXRAD for the same reason.
+			const lowestOwn = isNexrad(id)
+				? [..._addedOverlays].find((x) => !isNexrad(x))
+				: undefined;
+			if (lowestOwn && map.getLayer(radarLayerId(lowestOwn))) {
+				map.addLayer(layer, radarLayerId(lowestOwn));
+			} else {
+				addOverlayBelowMarkers(map, layer);
+			}
 			_addedOverlays.add(id);
 			// Feed the readout too. This path hands the URL to MapLibre and
 			// lets it fetch, so preloadImage never runs and prepareRadars
@@ -3021,11 +3063,11 @@
 		const isCurrent = () => myToken === _radarSyncToken && !!map && styleReady;
 		// Snapshot the targets so a later mutation to activeRadars doesn't
 		// race the loop.
-		const targets = activeRadars
+		const targets = drawnRadars
 			.map((id) => {
 				const r = radars.find((x) => x.id === id);
 				if (!r) return null;
-				return { id, url: xbandScanUrl(id), e: radarExtent(r) };
+				return { id, url: xbandScanUrl(id), e: frameExtent(r) };
 			})
 			.filter((t): t is { id: string; url: string; e: { west: number; north: number; east: number; south: number } } => t !== null);
 
@@ -3206,20 +3248,14 @@
 	}
 	const selectAll = () => setSelection(selectableRadars.map((r) => r.id));
 	const selectNone = () => setSelection([]);
-	const selectXband = () =>
-		setSelection(selectableRadars.filter((r) => r.kind === 'xband').map((r) => r.id));
-	// `isAlerting`, not `!== 'pass'`: the two differ exactly on `skip`, and a
-	// radar nothing has reported is unknown rather than down. Selecting those
-	// would select the whole fleet on any profile before its first run. The
-	// default here used to be `pass`, which failed the other way — on XQPI,
-	// where no L2 stage exists, every radar read pass and this selected
-	// nothing however broken the fleet was.
-	const selectDown = () =>
-		setSelection(
-			selectableRadars
-				.filter((r) => isAlerting(radarStatusOf(radarStatus, r.id)))
-				.map((r) => r.id)
-		);
+	// The deployment's own radars, everything but the NEXRAD sites it borrows.
+	const selectNetwork = () =>
+		setSelection(selectableRadars.filter((r) => r.kind !== 'nexrad').map((r) => r.id));
+	const selectNexrad = () =>
+		setSelection(selectableRadars.filter((r) => r.kind === 'nexrad').map((r) => r.id));
+	// Named after the profile ("AQPI", "XQPI"), and "network" until
+	// /api/version says which one this is.
+	const networkLabel = $derived(siteProfile ? siteProfile.toUpperCase() : 'network');
 
 	// ---- periodic scan refresh ---------------------------------------------
 	let scanRefresh: ReturnType<typeof setInterval>;
@@ -3644,13 +3680,16 @@
 			});
 			return out;
 		}
-		for (const id of activeRadars) {
+		// NEXRAD first, so its sheets draw under the X-bands' as the flat
+		// layers do.
+		const order = [...activeRadars].sort((a, b) => Number(isNexrad(b)) - Number(isNexrad(a)));
+		for (const id of order) {
 			const r = radars.find((x) => x.id === id);
 			const url = _appliedRadarUrl.get(id);
 			if (!r || !url) continue;
 			out.push({
 				id: `sheet-radar-${id}`,
-				corners: ring(radarExtent(r)),
+				corners: ring(frameExtent(r)),
 				image: url,
 				version: url,
 				opacity: overlayOpacity
@@ -5142,10 +5181,12 @@
 	{#snippet radarsBody()}
 		<!-- Quick filters — text links, not buttons -->
 		<div class="flex gap-3 px-3 py-1 text-[9.5px] text-[var(--color-faint)]">
-			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" onclick={selectAll}>all</button>
-			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" onclick={selectXband}>x-band</button>
-			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" onclick={selectDown}>down</button>
-			<button class="ml-auto hover:text-[var(--color-fail)] uppercase tracking-wider" onclick={selectNone}>clear</button>
+			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" data-preset="network" onclick={selectNetwork}>{networkLabel}</button>
+			{#if nexradSelectable}
+				<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" data-preset="nexrad" onclick={selectNexrad}>nexrad</button>
+			{/if}
+			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" data-preset="all" onclick={selectAll}>all</button>
+			<button class="ml-auto hover:text-[var(--color-fail)] uppercase tracking-wider" data-preset="clear" onclick={selectNone}>clear</button>
 		</div>
 
 		<!-- Per-radar rows — full-row click toggles, solo on hover -->

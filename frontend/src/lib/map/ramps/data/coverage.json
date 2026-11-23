@@ -329,6 +329,37 @@
 			"colors": "254/254",
 			"covered": true,
 			"note": "The only radar that publishes RhoHV at all: the five X-band folders carry Reflectivity, Zdr, FilteredPhiDP and Velocity, and the route answers 404 for RhoHV on every one of them. Plain matplotlib viridis over Normalize(0.0, 1.0), with both bounds literal in c_band_plotting.py on the C-band producer host rather than taken from the 0-to-1 convention, which is what makes the scale a reading instead of a guess. Measured at 254/254, and 254 is viridis's own distinct count out of 256 entries. The frame is 2.9 MB against 0.2 to 0.6 for the others because the renderer applies its (ncp > 0.7) and (snr > 5) mask to dbz, zdr, vel and phidp and writes rhohv raw, so the speckle is the data."
+		},
+		{
+			"radar": "KBBX",
+			"folder": "KBBX",
+			"moment": "Reflectivity",
+			"ramp": "aqpi-xband-reflectivity",
+			"frames": 10,
+			"pixels": 243392,
+			"colors": "19/19",
+			"covered": true,
+			"note": "The NEXRAD plotter's frames under Chivo/nexrad, copied off the AQPI mount from the 2026/11/23 directory. The scale is from its plotting call rather than its colorbar: BoundaryNorm over -30 to 80 dBZ in 5 dBZ bins with clip=True, which puts each color in the same bin as the X-band's BoundaryNorm over -25 to 75 with extend='both', open ends included. KDAX and KMUX were measured from the same copy."
+		},
+		{
+			"radar": "KDAX",
+			"folder": "KDAX",
+			"moment": "Reflectivity",
+			"ramp": "aqpi-xband-reflectivity",
+			"frames": 16,
+			"pixels": 922266,
+			"colors": "18/18",
+			"covered": true
+		},
+		{
+			"radar": "KMUX",
+			"folder": "KMUX",
+			"moment": "Reflectivity",
+			"ramp": "aqpi-xband-reflectivity",
+			"frames": 13,
+			"pixels": 905884,
+			"colors": "18/18",
+			"covered": true
 		}
 	],
 	"shared_colorbars": {

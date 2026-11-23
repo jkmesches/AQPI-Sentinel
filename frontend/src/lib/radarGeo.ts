@@ -25,6 +25,31 @@ export interface RadarSite {
 	range_m: number;
 	kind: string;
 	name?: string;
+	/**
+	 * Half the side of the published frame in meters, for a radar whose
+	 * frame is not its range box. Absent for the X-bands, whose frames span
+	 * exactly their range.
+	 */
+	frame_half_m?: number;
+	/**
+	 * Whether this deployment can draw the radar's frames. Absent on a
+	 * backend that predates the field, where the X-bands and the C-band were
+	 * the radars that had frames.
+	 */
+	scan?: boolean;
+}
+
+/** Earth's mean radius in km, which turns ground distance into arc. */
+const EARTH_RADIUS_KM = 6371.0;
+
+/**
+ * Whether a radar has frames the map can draw, so a click on it selects it.
+ *
+ * @param site The radar.
+ * @returns The backend's answer, or the old kind rule where it gave none.
+ */
+export function isSelectable(site: RadarSite): boolean {
+	return site.scan ?? (site.kind === 'xband' || site.kind === 'cband');
 }
 
 /** Colors for one radar, resolved by the caller from its own theme. */
@@ -94,6 +119,41 @@ export function radarExtent(site: RadarSite): {
 }
 
 /**
+ * The box a radar's frame is placed in.
+ *
+ * The X-band frames take their range box, as they always have. A frame that
+ * names its own size (the NEXRAD plotter's 400 km square) is centered in Web
+ * Mercator instead. MapLibre interpolates an image linearly in Mercator, and
+ * Mercator stretches toward the pole, so a box centered in latitude puts
+ * the frame's middle pixel north of the radar: by 2.5 km for a 200 km half
+ * width at KDAX. Centered in Mercator, the middle pixel sits on the radar and
+ * the scale there is the true one.
+ *
+ * @param site The radar.
+ * @returns West, east, south and north in degrees.
+ * @raises RangeError If `frame_half_m` is not a positive finite number.
+ */
+export function frameExtent(site: RadarSite): {
+	west: number; east: number; south: number; north: number;
+} {
+	const half = site.frame_half_m;
+	if (half === undefined) return radarExtent(site);
+	if (!Number.isFinite(half) || half <= 0) {
+		throw new RangeError(`frame_half_m must be positive, got ${half}`);
+	}
+	const phi = (site.lat * Math.PI) / 180;
+	// Arc of the half width, stretched by the Mercator scale at the radar.
+	const span = half / 1000 / EARTH_RADIUS_KM / Math.cos(phi);
+	const y0 = Math.log(Math.tan(Math.PI / 4 + phi / 2));
+	const latOf = (y: number) => ((2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180) / Math.PI;
+	const dLon = (span * 180) / Math.PI;
+	return {
+		west: site.lon - dLon, east: site.lon + dLon,
+		south: latOf(y0 - span), north: latOf(y0 + span)
+	};
+}
+
+/**
  * One point feature per radar, carrying its status and colors.
  *
  * @param radars The sites to draw.
@@ -126,9 +186,10 @@ export function radarPointsGeo(
 					color: paint.verdict,
 					center_color: paint.center,
 					halo_color: paint.halo,
-					// NEXRAD sites are drawn for context and have no overlay
-					// of their own, so a click on one has nothing to show.
-					clickable: r.kind === 'xband' || r.kind === 'cband'
+					// A NEXRAD site has an overlay only where the deployment
+					// reads its frames off the mount, and a click on one
+					// without frames has nothing to show.
+					clickable: isSelectable(r)
 				}
 			};
 		})

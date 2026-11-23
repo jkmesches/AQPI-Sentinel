@@ -14,7 +14,7 @@
  * something an operator can click and get nothing from.
  */
 export function runTests(mod) {
-	const { rangeSpanDeg, rangeRingCoords, radarExtent,
+	const { rangeSpanDeg, rangeRingCoords, radarExtent, frameExtent, isSelectable,
 	        radarPointsGeo, radarRangesGeo } = mod;
 	const failures = [];
 	const check = (label, cond, detail = '') => {
@@ -110,6 +110,62 @@ export function runTests(mod) {
 	const unknown = radarPointsGeo([{ ...XEBY, id: 'NEW' }], () => 'skip', paint);
 	check('an unreported radar takes the skip paint',
 	      unknown.features[0].properties.center_color === 'c-skip');
+
+	// --- 6. which radars a click selects ---------------------------------
+	// The backend says so per deployment: NEXRAD frames exist only where
+	// the mount does, and the field is absent on a backend that predates it.
+	const KDAX_SCAN = { ...KDAX, scan: true, frame_half_m: 200000 };
+	check('a NEXRAD site with frames is selectable', isSelectable(KDAX_SCAN) === true);
+	check('...and its pin is clickable',
+	      radarPointsGeo([KDAX_SCAN], status, paint).features[0].properties.clickable === true);
+	check('a NEXRAD site the backend says has none is not',
+	      isSelectable({ ...KDAX, scan: false }) === false);
+	check('an X-band the backend says has none is not either',
+	      isSelectable({ ...XEBY, scan: false }) === false);
+	check('without the field, the kind decides as it did',
+	      isSelectable(XEBY) && isSelectable({ ...XEBY, kind: 'cband' }) && !isSelectable(KDAX));
+
+	// --- 7. where a frame is placed --------------------------------------
+	const lat2y = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+	const y2lat = (y) => ((2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180) / Math.PI;
+	const KDAX_EXACT = { ...KDAX_SCAN, lat: 38.50111, lon: -121.67783 };
+	const fe = frameExtent(KDAX_EXACT);
+	// MapLibre interpolates linearly in Mercator, so the middle pixel lands
+	// at the Mercator midpoint of the box.
+	const midLat = y2lat((lat2y(fe.north) + lat2y(fe.south)) / 2);
+	check('the middle pixel of a NEXRAD frame lands on the radar',
+	      Math.abs(midLat - KDAX_EXACT.lat) * 111.19 < 0.001,
+	      `${((midLat - KDAX_EXACT.lat) * 111.19 * 1000).toFixed(2)} m`);
+	check('...in longitude too', Math.abs((fe.west + fe.east) / 2 - KDAX_EXACT.lon) < 1e-9);
+	const naive = { north: KDAX_EXACT.lat + 200 / 111, south: KDAX_EXACT.lat - 200 / 111 };
+	const naiveMid = y2lat((lat2y(naive.north) + lat2y(naive.south)) / 2);
+	const offKm = (naiveMid - KDAX_EXACT.lat) * 111.19;
+	check('a box centered in latitude would put it 2.5 km north (the bug this avoids)',
+	      Math.abs(offKm - 2.5) < 0.05, `${offKm.toFixed(3)} km`);
+	// 400 km across at the radar's own Mercator scale, east to west and
+	// north to south alike, so the square frame stays square.
+	const kmPerRadAtRadar = 6371 * Math.cos((KDAX_EXACT.lat * Math.PI) / 180);
+	const widthKm = ((fe.east - fe.west) * Math.PI / 180) * kmPerRadAtRadar;
+	const heightKm = (lat2y(fe.north) - lat2y(fe.south)) * kmPerRadAtRadar;
+	check('the frame spans 400 km across at the radar', Math.abs(widthKm - 400) < 1e-6,
+	      `${widthKm.toFixed(4)} km`);
+	check('...and 400 km top to bottom', Math.abs(heightKm - 400) < 1e-6,
+	      `${heightKm.toFixed(4)} km`);
+	check('...and less latitude north of the radar than south (Mercator stretches poleward)',
+	      fe.north - KDAX_EXACT.lat < KDAX_EXACT.lat - fe.south,
+	      `${(fe.north - KDAX_EXACT.lat).toFixed(5)} vs ${(KDAX_EXACT.lat - fe.south).toFixed(5)}`);
+	const xe = frameExtent(XEBY);
+	const re = radarExtent(XEBY);
+	check('an X-band frame keeps its range box',
+	      xe.west === re.west && xe.east === re.east && xe.north === re.north
+	      && xe.south === re.south);
+	for (const bad of [0, -1, NaN, Infinity]) {
+		let threw = false;
+		try { frameExtent({ ...KDAX, frame_half_m: bad }); } catch (e) {
+			threw = e instanceof RangeError;
+		}
+		check(`a frame half width of ${String(bad)} is refused`, threw);
+	}
 
 	console.log(failures.length
 		? `\n${failures.length} FAILED: ${failures.join(', ')}`

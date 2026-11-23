@@ -23,10 +23,6 @@ const build = (src, name) => {
   return out;
 };
 
-// grouping too: the desktop map's "down" button composes isAlerting over
-// radarStatusOf, and that composition is the part a reimplementation gets
-// wrong — `!== 'pass'` would select every unmonitored radar.
 const mod = await import(build('radarStatus.ts', 'radarStatus.mjs'));
-const grouping = await import(build('grouping.ts', 'grouping.mjs'));
 const { runTests } = await import('./test_radar_status.mjs');
-process.exit(runTests(mod, grouping));
+process.exit(runTests(mod));

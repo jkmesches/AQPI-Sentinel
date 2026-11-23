@@ -28,6 +28,31 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **The NEXRAD sites can be put on the map.** KBBX, KDAX and KMUX are read
+  off the mount from the NEXRAD plotter's own tree, the way the X-band frames
+  are, and are selectable wherever the deployment has that mount. Their pins
+  keep their status colors and become clickable. Each 400 km frame is
+  centered on its radar in Web Mercator, because a box centered in latitude
+  put the middle of the frame 2.5 km north of the radar. Against the Iowa
+  Mesonet mosaic the shipped placement sits within 1.2 km, in no consistent
+  direction, where the latitude-centered box sat 2 to 3 km north. The
+  frames draw under the network's own radars, and the readout follows the
+  same order. The plotter draws reflectivity only, so the sites stay selected
+  but undrawn under the other moments. The readout and legend use the X-band
+  reflectivity table, which matched every color in 39 frames across the
+  three sites. `/api/radars/meta` now says per radar whether its frames can
+  be drawn (`scan`) and gives the NEXRAD frame size (`frame_half_m`), and
+  carries the sites' Level II positions in place of the rounded ones.
+
+### Changed
+
+- **The radar presets are the profile's name, NEXRAD, all and clear.** The
+  first selects the deployment's own radars ("AQPI" or "XQPI"), and the
+  NEXRAD preset appears only where those frames can be drawn. The "x-band"
+  and "down" presets are gone.
+
 ### Fixed
 
 - **The dashboard's alarm band floated mid-page.** It shared a grid with the

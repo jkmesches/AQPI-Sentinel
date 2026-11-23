@@ -15,12 +15,11 @@
 
 const R = (check_id, target, status) => ({ check_id, target, status });
 
-export function runTests(mod, grouping) {
+export function runTests(mod) {
   const { radarStatusByTarget, radarStatusOf, radarVerdicts, radarStageReadings,
           RADAR_STATUS_STAGES, NO_READING } = mod;
   const statusOf = (stages, id) => radarStatusOf(radarStatusByTarget(stages), id);
   const sourceOf = (stages, id) => radarVerdicts(stages)[id]?.from ?? 'absent';
-  const { isAlerting } = grouping;
   const failures = [];
   const check = (label, cond, detail = '') => {
     console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  — ${detail}` : ''}`);
@@ -280,26 +279,6 @@ export function runTests(mod, grouping) {
   {
     check('exactly L2, LB2, LB3', RADAR_STATUS_STAGES.join(',') === 'L2,LB2,LB3',
       RADAR_STATUS_STAGES.join(','));
-  }
-
-  console.log('\nthe map\'s "down" button selects the broken, not the unknown:');
-  {
-    // selectDown composes isAlerting over radarStatusOf. The two defaults it
-    // could have picked both fail: `?? 'pass'` (what shipped) selected nothing
-    // on XQPI, and a plain `!== 'pass'` over `skip` would select the whole
-    // fleet before any stage had reported.
-    const down = (stages, id) => isAlerting(radarStatusOf(radarStatusByTarget(stages), id));
-    const lb2 = (status) => ({ LB2: [R('layer2.backend.FLOW', 'FLOW', status)] });
-
-    check('a failing radar is selected', down(lb2('fail'), 'FLOW') === true);
-    check('an erroring radar is selected', down(lb2('error'), 'FLOW') === true);
-    check('a warning radar is selected', down(lb2('warn'), 'FLOW') === true);
-    check('a healthy radar is not', down(lb2('pass'), 'FLOW') === false);
-    check('a radar that declined to judge is not', down(lb2('skip'), 'FLOW') === false);
-    check('a radar nothing reported is not', down({}, 'FLOW') === false);
-    check('...nor on a profile with no stages at all', down(undefined, 'FLOW') === false);
-    // The original symptom: a down radar must now actually be selectable.
-    check('the XQPI regression is closed', down(lb2('fail'), 'FLOW') === true);
   }
 
   console.log('\nthe input is not mutated:');
