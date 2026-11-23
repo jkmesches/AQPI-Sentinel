@@ -22,7 +22,7 @@
 	         type MomentPrefixes, type UnitTable } from '$lib/site';
 	import { momentChoices, momentDisplay, defaultMoment,
 	         prefixFor } from '$lib/map/moments';
-	import { rampFor, rampForProduct } from '$lib/map/ramps/registry';
+	import { rampFor, rampForProduct, tiltRampFor } from '$lib/map/ramps/registry';
 	import { unitChoices, defaultUnit, unitNote,
 	         resolveUnit } from '$lib/map/units';
 	import { decodeLink, encodeLink, hasAny, stepForTime,
@@ -983,6 +983,14 @@
 	const compSampler = new FrameSampler();
 	let compFrame = $state<
 		{ extent: Extent; product: string; unit: string | null } | null>(null);
+	// The tilt frame on screen, held apart from the radar samplers. Those
+	// hold Chivo frames, painted from other tables over other ranges, and
+	// the tilt radar's own Chivo frame stays held while its tilt shows. A
+	// shared slot would read one through the other's ramp whenever a tilt
+	// frame failed to load.
+	const tiltSampler = new FrameSampler();
+	let tiltFrame = $state<
+		{ extent: Extent; radar: string; moment: string } | null>(null);
 	let readoutValue = $state<string | null>(null);
 	let readoutAt = $state<{ x: number; y: number } | null>(null);
 
@@ -1029,6 +1037,18 @@
 		// view the console opens on.
 		if (composite !== 'none' && compFrame) {
 			return sampleAt(ramp, compSampler, compFrame.extent, lngLat);
+		}
+		// A tilt replaces its radar's overlay, so it is the only frame to
+		// read there. A held frame for another radar or moment answers
+		// nothing, since activeRamp has already moved to the new one.
+		const tiltRadar = tiltOverlayRadarId();
+		const tiltMoment = tiltSourceFor(currentMoment);
+		if (tiltRadar && tiltMoment) {
+			if (!tiltFrame || tiltFrame.radar !== tiltRadar
+				|| tiltFrame.moment !== tiltMoment) {
+				return null;
+			}
+			return sampleAt(ramp, tiltSampler, tiltFrame.extent, lngLat);
 		}
 		// Otherwise every radar that is on, nearest first. The legend
 		// draws one scale for radars that share a table, so the readout
@@ -1139,6 +1159,13 @@
 			return rampForProduct(composite, currentUnit);
 		}
 		if (activeRadars.length === 0) return null;
+		// A tilt is radar-display's frame, not Chivo's: uncorrected
+		// reflectivity over -30 to 85, a different velocity table, and a
+		// RhoHV the Chivo tree does not publish for these radars.
+		if (tiltEngaged && tiltRadarMeta) {
+			const tiltMoment = tiltSourceFor(currentMoment);
+			if (tiltMoment) return tiltRampFor(tiltRadarMeta.id, tiltMoment);
+		}
 		// Every active radar, not just a single one. The X-band radars
 		// paint one moment from one table, so two of them on screen have
 		// one scale and refusing to draw it took the legend and the
@@ -2439,6 +2466,10 @@
 		if (!id || !tiltMoment || !_tiltGeo) {
 			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
 			if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
+			// Assigned without reading it first: this runs inside effects,
+			// and a read here would make the effect depend on what it writes.
+			tiltSampler.clear();
+			tiltFrame = null;
 			return;
 		}
 		const myToken = ++_tiltToken;
@@ -2457,16 +2488,18 @@
 		});
 		const ok = await preloadImage(url, isCurrent);
 		if (!ok || !isCurrent()) return;
+		const shownExtent: Extent = { west: lon - dLon, east: lon + dLon,
+			south: lat - dLat, north: lat + dLat };
 		// Held so the beam surface can draw this same frame at its own
 		// heights when the mesh is on. The angle is the radar's, not
 		// the folder index the URL carries.
-		_tiltShown = {
-			url,
-			extent: { west: lon - dLon, east: lon + dLon,
-				south: lat - dLat, north: lat + dLat },
-			lng: lon,
-			lat
-		};
+		_tiltShown = { url, extent: shownExtent, lng: lon, lat };
+		// And for the readout, which had no tilt frame to read before
+		// this and reported nothing over a tilt. The image is decoded
+		// already, so this costs a draw rather than a fetch.
+		tiltFrame = tiltSampler.draw(ok)
+			? { extent: shownExtent, radar: id, moment: tiltMoment }
+			: null;
 		const src = map.getSource('tilt-overlay') as maplibregl.ImageSource | undefined;
 		if (src && typeof src.updateImage === 'function') {
 			src.updateImage({ url, coordinates: coords });
@@ -5037,15 +5070,17 @@
 				moment: <span class="text-[var(--color-bright)]">{MOMENTS.find((m) => m.key === currentMoment)?.full ?? currentMoment}</span>
 			</div>
 
-			<!-- Tilt (elevation) selector — only when exactly one X-band radar
-			     is active. "Default" = the display tier's single pre-rendered
-			     sweep; 1..4 = radar-display per-elevation PPI (Phase 1: newest
-			     frame, no scrubbing).
+			<!-- Tilt (elevation) selector, only when exactly one X-band radar
+			     is active. "Processed scan" is the backend's own Chivo frame,
+			     read off the mount where the deployment has one and from
+			     radarca otherwise. It was labeled "Default (RadarCA)", which
+			     read as the imagery coming from radarca on a deployment that
+			     never fetched it there. 1..4 are radar-display's per-elevation
+			     PPIs.
 			     Gated on hasRadarca: BOTH sources here are the CSU display
-			     stack — the default option comes from radarca and the numbered
-			     ones from radar-display — so on a deployment with neither,
-			     every option in this control is dead. It listed FLOW's four
-			     swept elevations, none of which it could fetch. -->
+			     stack, so on a deployment with neither, every option in this
+			     control is dead. It listed FLOW's four swept elevations, none
+			     of which it could fetch. -->
 			{#if tiltRadarMeta && hasRadarca}
 				<div class="mt-2 flex items-center gap-2">
 					<span class="num text-[9.5px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
@@ -5067,9 +5102,9 @@
 								}
 							}
 						}}
-						title={`Pick a scan elevation. Default uses ${RADARCA_LABEL}'s single sweep. Drives the time strip on the radar's 7-frame loop.`}
+						title={`Processed scan is the backend's own frame for this radar, the one ${RADARCA_LABEL} also shows, with corrected reflectivity. An elevation shows radar-display's raw sweep at that angle, uncorrected, and drives the time strip on its 7-frame loop.`}
 					>
-						<option value={0}>Default ({RADARCA_LABEL})</option>
+						<option value={0}>Processed scan</option>
 						{#each tiltRadarMeta.elevations ?? [] as ang, i}
 							<option value={i + 1}>{ang}° EL</option>
 						{/each}

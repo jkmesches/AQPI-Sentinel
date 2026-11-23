@@ -31,6 +31,22 @@ export interface RampStop {
 	 * the legend. Absent elsewhere, where the value places the block.
 	 */
 	at?: number;
+	/**
+	 * Which side past its range this stop also stands for.
+	 *
+	 * A renderer that clips paints every value below its minimum in the
+	 * first color and every value above its maximum in the last, so those
+	 * two stops cover an open band. Absent where the producer's behavior
+	 * past the ends was not read from its code.
+	 */
+	open?: 'below' | 'above';
+}
+
+/** One value range a color stands for. */
+export interface Band {
+	lo: number;
+	hi: number;
+	open?: 'below' | 'above';
 }
 
 /** One moment's color-to-value table. */
@@ -55,11 +71,14 @@ export interface Ramp {
 	 * The colormap definition this table was generated from, when it was
 	 * generated rather than read off a published colorbar.
 	 *
-	 * Its presence is what marks a ramp as continuous: a table quantised
-	 * from a colormap has neighbors one channel step apart, where a
-	 * table read off a block bar has stops that are meant to be told
-	 * apart. The two want different matching rules, and this says which
-	 * kind the table is without a second field to keep in step.
+	 * Its presence selects the per-stop matching rule in `toleranceAt`. A
+	 * table quantised from a continuous colormap has neighbors one channel
+	 * step apart, and a listed one may reuse a color for two bands, as the
+	 * radar-display reflectivity table does. A single closest-pair
+	 * tolerance fails both, the first by admitting nothing and the second
+	 * by measuring zero, while a tolerance bounded by value handles each.
+	 * Whether the scale reads as bands or as a value is `rampKind`'s call,
+	 * from the stop spacing.
 	 */
 	built_from?: {
 		kind: string;
@@ -153,6 +172,17 @@ export interface Reading {
 	hi: number;
 	/** Summed channel distance to the nearest stop. */
 	distance: number;
+	/** Set when the matched stop is open past one end of the scale. */
+	open?: 'below' | 'above';
+	/**
+	 * The other bands painted in exactly the matched color, ascending.
+	 *
+	 * Present only where a ramp reuses a color. The radar-display
+	 * reflectivity table paints both below -25 dBZ and 5 to 10 dBZ in
+	 * #646464, and naming the first band alone would put a confident
+	 * wrong number on half of those pixels.
+	 */
+	also?: Band[];
 }
 
 /**
@@ -188,7 +218,32 @@ export function invert(
 		if (d === 0) break;
 	}
 	if (!best || bestDistance > toleranceAt(ramp, bestIndex)) return null;
-	return { value: best.value, lo: best.lo, hi: best.hi, distance: bestDistance };
+	const reading: Reading = {
+		value: best.value, lo: best.lo, hi: best.hi, distance: bestDistance
+	};
+	if (best.open) reading.open = best.open;
+	const also = sharedBands(ramp, bestIndex);
+	if (also.length) reading.also = also;
+	return reading;
+}
+
+/**
+ * The bands of every other stop painted in the same color as one stop.
+ *
+ * @param ramp The table.
+ * @param index The stop that matched.
+ * @returns Those stops' bands in table order, empty for a color used once.
+ */
+function sharedBands(ramp: Ramp, index: number): Band[] {
+	const color = ramp.stops[index].color.toLowerCase();
+	const out: Band[] = [];
+	for (const [i, stop] of ramp.stops.entries()) {
+		if (i === index || stop.color.toLowerCase() !== color) continue;
+		out.push(stop.open
+			? { lo: stop.lo, hi: stop.hi, open: stop.open }
+			: { lo: stop.lo, hi: stop.hi });
+	}
+	return out;
 }
 
 /** Each ramp's own tolerance, computed once per table. */
@@ -303,8 +358,9 @@ const STOP_TOLERANCES = new WeakMap<Ramp, number[]>();
  * A table read off a published block bar gets one answer for every
  * stop, since its stops are meant to be told apart and the closest pair
  * bounds them all. A table generated from a renderer's colormap gets an
- * answer per stop, because it is a quantised continuous scale and its
- * neighbors are one channel step apart by construction.
+ * answer per stop. A quantised continuous scale needs that because its
+ * neighbors are one channel step apart by construction, and a listed one
+ * that reuses a color needs it so that color matches only exactly.
  *
  * @param ramp The table.
  * @param index Which stop matched.
@@ -328,6 +384,10 @@ export function toleranceAt(ramp: Ramp, index: number): number {
  * ramp rather than assumed, since the continuous ones are sampled from a
  * gradient and their neighbors are close by construction.
  *
+ * A stop that shares its exact color with another counts when the reading
+ * names its band among the others, since that is the honest answer for a
+ * color the producer reused and the readout prints every band it names.
+ *
  * @param ramp The table to check.
  * @returns How many stops invert to their own value, and the total.
  */
@@ -335,7 +395,11 @@ export function selfCoverage(ramp: Ramp): { exact: number; total: number } {
 	let exact = 0;
 	for (const stop of ramp.stops) {
 		const back = invert(ramp, parseHex(stop.color));
-		if (back && back.value === stop.value) exact++;
+		if (!back) continue;
+		if (back.value === stop.value
+			|| (back.also ?? []).some((b) => b.lo === stop.lo && b.hi === stop.hi)) {
+			exact++;
+		}
 	}
 	return { exact, total: ramp.stops.length };
 }

@@ -203,6 +203,47 @@ export function runTests(mod, ramps) {
       readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 }));
   }
 
+  // radar-display clips at both ends and paints #646464 for two bands,
+  // so a single closed range would be wrong on the ends and on half the
+  // gray pixels. Readings built the way invert returns them for those
+  // stops, which test_map_ramps checks separately.
+  console.log('\nan open end and a reused color read as what they cover:');
+  {
+    const tilt = ramps['tilt-reflectivity'];
+    const top = tilt.stops[tilt.stops.length - 1];
+    check('the top stop reads as everything above its bound',
+      readoutText(tilt, { value: top.value, lo: top.lo, hi: top.hi, distance: 0,
+        open: 'above' }) === '80.0 dBZ or more',
+      readoutText(tilt, { value: top.value, lo: top.lo, hi: top.hi, distance: 0,
+        open: 'above' }));
+    const gray = tilt.stops[0];
+    const both = readoutText(tilt, {
+      value: gray.value, lo: gray.lo, hi: gray.hi, distance: 0, open: 'below',
+      also: [{ lo: 5, hi: 10 }]
+    });
+    check('a reused gray names both of its bands',
+      both === 'below -25.0 dBZ or 5.0 to 10.0 dBZ', both);
+    const order = readoutText(tilt, {
+      value: 7.5, lo: 5, hi: 10, distance: 0,
+      also: [{ lo: -30, hi: -25, open: 'below' }]
+    });
+    check('...in ascending order whichever stop matched first',
+      order === both, order);
+    const vel = ramps['tilt-velocity'];
+    const low = vel.stops[0];
+    check('a velocity end band keeps its own precision',
+      readoutText(vel, { value: low.value, lo: low.lo, hi: low.hi, distance: 0,
+        open: 'below' }) === 'below -30.3 m/s',
+      readoutText(vel, { value: low.value, lo: low.lo, hi: low.hi, distance: 0,
+        open: 'below' }));
+    const flow = ramps['flow-reflectivity'];
+    const f = flow.stops[0];
+    check('a ramp with no open ends reads as before',
+      readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 })
+      === '-30.0 to -25.6 dBZ',
+      readoutText(flow, { value: f.value, lo: f.lo, hi: f.hi, distance: 0 }));
+  }
+
   console.log('\na dimensionless ramp prints no unit and no gap:');
   {
     // The correlation coefficient is a ratio. Appending an empty unit

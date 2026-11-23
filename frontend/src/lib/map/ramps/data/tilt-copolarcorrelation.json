@@ -1,0 +1,138 @@
+{
+ "_comment": [
+  "The renderer's CrossPolCorrelation field, which the Chivo tree does not publish for the X-band radars.",
+  "The colorbar and the plotting call agree on 0.5 to 1.0."
+ ],
+ "moment": "copolarcorrelation",
+ "unit": "",
+ "label": "RhoHV (CrossPolCorrelation)",
+ "min": 0.5,
+ "max": 1.0,
+ "source": "radar-display tilt renderer: pcolormesh over a ListedColormap of the colorscales.py list, vmin and vmax from the six plotting scripts' command line (ZE,-30,85 VE,-35,35 RHV,0.5,1.0). Read from the code by the AQPI Backend session, recorded in the AQPI wiki data-flow page (tilt frame renderer)",
+ "read_on": "2026-11-22",
+ "built_from": {
+  "kind": "ListedColormap",
+  "anchors": [
+   "#d2d2d2",
+   "#22c8fc",
+   "#1a9df2",
+   "#0f3cf1",
+   "#28f32c",
+   "#1cbc20",
+   "#118b15",
+   "#08590a",
+   "#fef937",
+   "#e5b329",
+   "#fd9527",
+   "#fc291c",
+   "#b21a10",
+   "#e44a8c",
+   "#772f9e",
+   "#000000"
+  ],
+  "levels": 16,
+  "vmin": 0.5,
+  "vmax": 1.0
+ },
+ "stops": [
+  {
+   "color": "#d2d2d2",
+   "value": 0.5156,
+   "lo": 0.5,
+   "hi": 0.5312,
+   "open": "below"
+  },
+  {
+   "color": "#22c8fc",
+   "value": 0.5469,
+   "lo": 0.5312,
+   "hi": 0.5625
+  },
+  {
+   "color": "#1a9df2",
+   "value": 0.5781,
+   "lo": 0.5625,
+   "hi": 0.5938
+  },
+  {
+   "color": "#0f3cf1",
+   "value": 0.6094,
+   "lo": 0.5938,
+   "hi": 0.625
+  },
+  {
+   "color": "#28f32c",
+   "value": 0.6406,
+   "lo": 0.625,
+   "hi": 0.6562
+  },
+  {
+   "color": "#1cbc20",
+   "value": 0.6719,
+   "lo": 0.6562,
+   "hi": 0.6875
+  },
+  {
+   "color": "#118b15",
+   "value": 0.7031,
+   "lo": 0.6875,
+   "hi": 0.7188
+  },
+  {
+   "color": "#08590a",
+   "value": 0.7344,
+   "lo": 0.7188,
+   "hi": 0.75
+  },
+  {
+   "color": "#fef937",
+   "value": 0.7656,
+   "lo": 0.75,
+   "hi": 0.7812
+  },
+  {
+   "color": "#e5b329",
+   "value": 0.7969,
+   "lo": 0.7812,
+   "hi": 0.8125
+  },
+  {
+   "color": "#fd9527",
+   "value": 0.8281,
+   "lo": 0.8125,
+   "hi": 0.8438
+  },
+  {
+   "color": "#fc291c",
+   "value": 0.8594,
+   "lo": 0.8438,
+   "hi": 0.875
+  },
+  {
+   "color": "#b21a10",
+   "value": 0.8906,
+   "lo": 0.875,
+   "hi": 0.9062
+  },
+  {
+   "color": "#e44a8c",
+   "value": 0.9219,
+   "lo": 0.9062,
+   "hi": 0.9375
+  },
+  {
+   "color": "#772f9e",
+   "value": 0.9531,
+   "lo": 0.9375,
+   "hi": 0.9688
+  },
+  {
+   "color": "#000000",
+   "value": 0.9844,
+   "lo": 0.9688,
+   "hi": 1.0,
+   "open": "above"
+  }
+ ],
+ "dimensionless": true
+}

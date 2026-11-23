@@ -16,7 +16,7 @@
 export function runTests(mod, coverage, products) {
   const {
     rampFor, coverageFor, radarsSharing, keyOf, RAMPS, MEASURED_ON,
-    rampForProduct, productCoverageFor
+    rampForProduct, productCoverageFor, tiltRampFor, TILT_PAIRS
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -159,6 +159,9 @@ export function runTests(mod, coverage, products) {
       check(`${p.ramp} is in RAMPS for ${p.product}`, !!RAMPS[p.ramp]);
       named.add(p.ramp);
     }
+    for (const p of TILT_PAIRS.filter((r) => r.covered)) {
+      named.add(p.ramp);
+    }
     const unused = Object.keys(RAMPS).filter((n) => !named.has(n));
     check('no ramp ships without a covered pair or product',
       unused.length === 0, unused.join(' ') || 'none');
@@ -295,6 +298,36 @@ export function runTests(mod, coverage, products) {
         basis === 'frames' || /frame check/i.test(p.note ?? ''),
         p.note ? p.note.slice(0, 60) : 'no note');
     }
+  }
+
+  // The tilt frames are radar-display's, painted from other tables over
+  // other ranges than Chivo's, and both trees spell one moment "velocity".
+  // The registry folds case, so the two have separate indexes, and a
+  // shared one would hand the readout whichever table was registered last.
+  console.log('\na tilt pair answers from its own record:');
+  {
+    for (const p of TILT_PAIRS.filter((r) => r.covered)) {
+      const r = tiltRampFor(p.radar, p.moment);
+      check(`tilt ${p.radar}/${p.moment} -> ${p.ramp}`,
+        r !== null && r === RAMPS[p.ramp],
+        r ? `${r.moment} ${r.min}..${r.max} ${r.unit}` : 'null');
+      const [got, total] = p.colors.split('/').map(Number);
+      check(`tilt ${p.radar}/${p.moment}: covered agrees with its evidence`,
+        p.covered === (got === total && total > 0), p.colors);
+    }
+    const tiltVel = tiltRampFor('XSCV', 'velocity');
+    const chivoVel = rampFor('XSCV', 'Velocity');
+    check('a tilt velocity and a Chivo Velocity are different tables',
+      tiltVel !== null && chivoVel !== null && tiltVel !== chivoVel,
+      `${tiltVel?.min}..${tiltVel?.max} vs ${chivoVel?.min}..${chivoVel?.max}`);
+    check('...and the Chivo lookup never answers with a tilt table',
+      !['reflectivity', 'velocity', 'copolarcorrelation'].some((m) => {
+        const r = rampFor('XSCV', m);
+        return r !== null && r.source === RAMPS['tilt-velocity'].source;
+      }));
+    check('an unmeasured radar has no tilt ramp', tiltRampFor('FLOW', 'velocity') === null);
+    check('a Chivo moment name is not a tilt moment',
+      tiltRampFor('XSCV', 'CorrReflectivity') === null);
   }
 
   console.log(failures.length

@@ -1,0 +1,187 @@
+{
+ "_comment": [
+  "The field is the radar's uncorrected Reflectivity, not the attenuation-corrected CorrReflectivity the Chivo frames show.",
+  "#646464 paints two bands, below -25 and 5 to 10, so a gray pixel reads as both.",
+  "The renderer's published colorbar is labeled -35 to 80 and reads 5 dBZ below these frames. If the plotting scripts move to ZE,-35,80, this ramp must move with them the same day."
+ ],
+ "moment": "reflectivity",
+ "unit": "dBZ",
+ "label": "Z, uncorrected [dBZ]",
+ "min": -30.0,
+ "max": 85.0,
+ "source": "radar-display tilt renderer: pcolormesh over a ListedColormap of the colorscales.py list, vmin and vmax from the six plotting scripts' command line (ZE,-30,85 VE,-35,35 RHV,0.5,1.0). Read from the code by the AQPI Backend session, recorded in the AQPI wiki data-flow page (tilt frame renderer)",
+ "read_on": "2026-11-22",
+ "built_from": {
+  "kind": "ListedColormap",
+  "anchors": [
+   "#646464",
+   "#ccffff",
+   "#cc99cc",
+   "#996699",
+   "#663366",
+   "#cccc99",
+   "#999966",
+   "#646464",
+   "#04e9e7",
+   "#019ff4",
+   "#0300f4",
+   "#02fd02",
+   "#01c501",
+   "#008e00",
+   "#fdf802",
+   "#e5bc00",
+   "#fd9500",
+   "#fd0000",
+   "#d40000",
+   "#bc0000",
+   "#f800fd",
+   "#9854c6",
+   "#fdfdfd"
+  ],
+  "levels": 23,
+  "vmin": -30.0,
+  "vmax": 85.0
+ },
+ "stops": [
+  {
+   "color": "#646464",
+   "value": -27.5,
+   "lo": -30.0,
+   "hi": -25.0,
+   "open": "below"
+  },
+  {
+   "color": "#ccffff",
+   "value": -22.5,
+   "lo": -25.0,
+   "hi": -20.0
+  },
+  {
+   "color": "#cc99cc",
+   "value": -17.5,
+   "lo": -20.0,
+   "hi": -15.0
+  },
+  {
+   "color": "#996699",
+   "value": -12.5,
+   "lo": -15.0,
+   "hi": -10.0
+  },
+  {
+   "color": "#663366",
+   "value": -7.5,
+   "lo": -10.0,
+   "hi": -5.0
+  },
+  {
+   "color": "#cccc99",
+   "value": -2.5,
+   "lo": -5.0,
+   "hi": 0.0
+  },
+  {
+   "color": "#999966",
+   "value": 2.5,
+   "lo": 0.0,
+   "hi": 5.0
+  },
+  {
+   "color": "#646464",
+   "value": 7.5,
+   "lo": 5.0,
+   "hi": 10.0
+  },
+  {
+   "color": "#04e9e7",
+   "value": 12.5,
+   "lo": 10.0,
+   "hi": 15.0
+  },
+  {
+   "color": "#019ff4",
+   "value": 17.5,
+   "lo": 15.0,
+   "hi": 20.0
+  },
+  {
+   "color": "#0300f4",
+   "value": 22.5,
+   "lo": 20.0,
+   "hi": 25.0
+  },
+  {
+   "color": "#02fd02",
+   "value": 27.5,
+   "lo": 25.0,
+   "hi": 30.0
+  },
+  {
+   "color": "#01c501",
+   "value": 32.5,
+   "lo": 30.0,
+   "hi": 35.0
+  },
+  {
+   "color": "#008e00",
+   "value": 37.5,
+   "lo": 35.0,
+   "hi": 40.0
+  },
+  {
+   "color": "#fdf802",
+   "value": 42.5,
+   "lo": 40.0,
+   "hi": 45.0
+  },
+  {
+   "color": "#e5bc00",
+   "value": 47.5,
+   "lo": 45.0,
+   "hi": 50.0
+  },
+  {
+   "color": "#fd9500",
+   "value": 52.5,
+   "lo": 50.0,
+   "hi": 55.0
+  },
+  {
+   "color": "#fd0000",
+   "value": 57.5,
+   "lo": 55.0,
+   "hi": 60.0
+  },
+  {
+   "color": "#d40000",
+   "value": 62.5,
+   "lo": 60.0,
+   "hi": 65.0
+  },
+  {
+   "color": "#bc0000",
+   "value": 67.5,
+   "lo": 65.0,
+   "hi": 70.0
+  },
+  {
+   "color": "#f800fd",
+   "value": 72.5,
+   "lo": 70.0,
+   "hi": 75.0
+  },
+  {
+   "color": "#9854c6",
+   "value": 77.5,
+   "lo": 75.0,
+   "hi": 80.0
+  },
+  {
+   "color": "#fdfdfd",
+   "value": 82.5,
+   "lo": 80.0,
+   "hi": 85.0,
+   "open": "above"
+  }
+ ]
+}

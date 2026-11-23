@@ -44,6 +44,12 @@ import aqpiXPhidp from './data/aqpi-xband-differential-phase.json';
 import aqpiCZdr from './data/aqpi-cband-differential-reflectivity.json';
 import aqpiCPhidp from './data/aqpi-cband-differential-phase.json';
 import aqpiCRhohv from './data/aqpi-cband-rhohv.json';
+// radar-display's tilt frames, which paint other fields from other tables
+// than Chivo does, and are recorded in their own coverage file.
+import tiltCoverage from './data/tilt-coverage.json';
+import tiltReflectivity from './data/tilt-reflectivity.json';
+import tiltVelocity from './data/tilt-velocity.json';
+import tiltCopolar from './data/tilt-copolarcorrelation.json';
 
 /** Every checked-in ramp, by the name coverage.json refers to it by. */
 export const RAMPS: Readonly<Record<string, Ramp>> = {
@@ -69,7 +75,10 @@ export const RAMPS: Readonly<Record<string, Ramp>> = {
 	'aqpi-product-water-level': productWaterLevel as Ramp,
 	'aqpi-product-qpe-in': productQpeIn as Ramp,
 	'aqpi-product-qpe-rate-in': productQpeRateIn as Ramp,
-	'aqpi-product-forecast-rate-in': productForecastRateIn as Ramp
+	'aqpi-product-forecast-rate-in': productForecastRateIn as Ramp,
+	'tilt-reflectivity': tiltReflectivity as Ramp,
+	'tilt-velocity': tiltVelocity as Ramp,
+	'tilt-copolarcorrelation': tiltCopolar as Ramp
 };
 
 /** One row of the coverage record. */
@@ -262,6 +271,54 @@ export function productCoverageFor(product: string,
  */
 export function rampFor(radar: string, moment: string): Ramp | null {
 	return INDEX.get(keyOf(radar, moment)) ?? null;
+}
+
+interface TiltCoverageFile {
+	measured_on: string;
+	pairs: CoveragePair[];
+}
+
+const TILT_FILE = tiltCoverage as unknown as TiltCoverageFile;
+
+/**
+ * Build the tilt lookup, refusing a row that names an absent ramp.
+ *
+ * Its own index rather than rows in coverage.json, because the case-folded
+ * key would make a tilt "velocity" and a Chivo "Velocity" the same pair.
+ *
+ * @returns Radar and tilt moment to ramp.
+ * @raises Error If a covered row points at a ramp that is not in RAMPS.
+ */
+function buildTiltIndex(): Map<string, Ramp> {
+	const index = new Map<string, Ramp>();
+	for (const p of TILT_FILE.pairs) {
+		if (!p.covered || p.ramp === null) continue;
+		const ramp = RAMPS[p.ramp];
+		if (!ramp) {
+			throw new Error(
+				`tilt-coverage.json covers ${p.radar}/${p.moment} with ramp ` +
+				`"${p.ramp}", which is not in RAMPS`);
+		}
+		index.set(keyOf(p.radar, p.moment), ramp);
+	}
+	return index;
+}
+
+const TILT_INDEX = buildTiltIndex();
+
+/** The covered tilt pairs, for a test that every ramp has evidence. */
+export const TILT_PAIRS: readonly CoveragePair[] = TILT_FILE.pairs;
+
+/**
+ * The ramp that reads one radar's radar-display tilt, or null when unmeasured.
+ *
+ * @param radar The radar's short name.
+ * @param moment The tilt moment as radar-display names its files, e.g.
+ *     "copolarcorrelation".
+ * @returns The ramp, or null.
+ */
+export function tiltRampFor(radar: string, moment: string): Ramp | null {
+	return TILT_INDEX.get(keyOf(radar, moment)) ?? null;
 }
 
 /**

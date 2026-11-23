@@ -121,6 +121,10 @@ export function runTests(mod, ramps) {
           if (i === j) continue;
           const d = colorDistance(parseHex(ramp.stops[i].color),
             parseHex(ramp.stops[j].color));
+          // A color the producer painted twice is not a snap between
+          // neighbors. invert reports both bands for it, which the
+          // reused-color group below holds it to.
+          if (d === 0) continue;
           if (d > tol) continue;
           const gap = Math.abs(ramp.stops[i].value - ramp.stops[j].value);
           if (gap > worst) {
@@ -161,6 +165,35 @@ export function runTests(mod, ramps) {
           `${strictest} vs ${loosest}`);
       }
     }
+  }
+
+  console.log('\na color painted twice reads as both of its bands:');
+  {
+    // radar-display's reflectivity table lists #646464 first and eighth,
+    // for below -25 dBZ and for 5 to 10. Reporting the first match alone
+    // put a confident wrong band on every gray pixel of the second kind.
+    const tilt = ramps['tilt-reflectivity'];
+    const gray = invert(tilt, [100, 100, 100]);
+    check('the gray matches', gray !== null && gray.distance === 0,
+      JSON.stringify(gray));
+    check('...as its first stop, open below',
+      gray?.lo === -30 && gray?.hi === -25 && gray?.open === 'below',
+      JSON.stringify(gray));
+    check('...and names the other band it paints',
+      gray?.also?.length === 1 && gray.also[0].lo === 5 && gray.also[0].hi === 10,
+      JSON.stringify(gray?.also));
+    check('a near-gray matches neither, since the reused stops are exact',
+      invert(tilt, [101, 100, 100]) === null,
+      JSON.stringify(invert(tilt, [101, 100, 100])));
+    const blue = invert(tilt, parseHex('#0300f4'));
+    check('a color used once carries no other band',
+      blue !== null && blue.also === undefined, JSON.stringify(blue));
+    const top = invert(tilt, parseHex('#fdfdfd'));
+    check('the top stop says it is open above',
+      top?.open === 'above' && top.lo === 80, JSON.stringify(top));
+    const c = selfCoverage(tilt);
+    check('every stop, the second gray included, reads back',
+      c.exact === c.total && c.total === 23, `${c.exact}/${c.total}`);
   }
 
   console.log('\na ramp with close stops gets a tighter tolerance:');

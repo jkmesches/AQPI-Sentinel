@@ -1,0 +1,129 @@
+{
+ "_comment": [
+  "The colorbar and the plotting call agree on -35 to 35."
+ ],
+ "moment": "velocity",
+ "unit": "m/s",
+ "label": "V [m/s]",
+ "min": -35.0,
+ "max": 35.0,
+ "source": "radar-display tilt renderer: pcolormesh over a ListedColormap of the colorscales.py list, vmin and vmax from the six plotting scripts' command line (ZE,-30,85 VE,-35,35 RHV,0.5,1.0). Read from the code by the AQPI Backend session, recorded in the AQPI wiki data-flow page (tilt frame renderer)",
+ "read_on": "2026-11-22",
+ "built_from": {
+  "kind": "ListedColormap",
+  "anchors": [
+   "#0000ff",
+   "#3232ff",
+   "#4b4bff",
+   "#6464ff",
+   "#7d7dff",
+   "#9696ff",
+   "#afafff",
+   "#f0e1f0",
+   "#ffafaf",
+   "#ff9696",
+   "#ff7d7d",
+   "#ff6464",
+   "#ff4b4b",
+   "#ff3232",
+   "#ff0000"
+  ],
+  "levels": 15,
+  "vmin": -35.0,
+  "vmax": 35.0
+ },
+ "stops": [
+  {
+   "color": "#0000ff",
+   "value": -32.6667,
+   "lo": -35.0,
+   "hi": -30.3333,
+   "open": "below"
+  },
+  {
+   "color": "#3232ff",
+   "value": -28.0,
+   "lo": -30.3333,
+   "hi": -25.6667
+  },
+  {
+   "color": "#4b4bff",
+   "value": -23.3333,
+   "lo": -25.6667,
+   "hi": -21.0
+  },
+  {
+   "color": "#6464ff",
+   "value": -18.6667,
+   "lo": -21.0,
+   "hi": -16.3333
+  },
+  {
+   "color": "#7d7dff",
+   "value": -14.0,
+   "lo": -16.3333,
+   "hi": -11.6667
+  },
+  {
+   "color": "#9696ff",
+   "value": -9.3333,
+   "lo": -11.6667,
+   "hi": -7.0
+  },
+  {
+   "color": "#afafff",
+   "value": -4.6667,
+   "lo": -7.0,
+   "hi": -2.3333
+  },
+  {
+   "color": "#f0e1f0",
+   "value": 0.0,
+   "lo": -2.3333,
+   "hi": 2.3333
+  },
+  {
+   "color": "#ffafaf",
+   "value": 4.6667,
+   "lo": 2.3333,
+   "hi": 7.0
+  },
+  {
+   "color": "#ff9696",
+   "value": 9.3333,
+   "lo": 7.0,
+   "hi": 11.6667
+  },
+  {
+   "color": "#ff7d7d",
+   "value": 14.0,
+   "lo": 11.6667,
+   "hi": 16.3333
+  },
+  {
+   "color": "#ff6464",
+   "value": 18.6667,
+   "lo": 16.3333,
+   "hi": 21.0
+  },
+  {
+   "color": "#ff4b4b",
+   "value": 23.3333,
+   "lo": 21.0,
+   "hi": 25.6667
+  },
+  {
+   "color": "#ff3232",
+   "value": 28.0,
+   "lo": 25.6667,
+   "hi": 30.3333
+  },
+  {
+   "color": "#ff0000",
+   "value": 32.6667,
+   "lo": 30.3333,
+   "hi": 35.0,
+   "open": "above"
+  }
+ ]
+}

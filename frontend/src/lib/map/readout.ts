@@ -14,7 +14,7 @@
  */
 
 import { lon2x, lat2y } from './nexrad';
-import { TRANSPARENT_ALPHA, type Ramp, type Reading } from './ramps/invert';
+import { TRANSPARENT_ALPHA, type Band, type Ramp, type Reading } from './ramps/invert';
 import { rampKind } from './ramps/legend';
 
 /** The four corners of a placed image, clockwise from the north-west. */
@@ -243,6 +243,28 @@ export function readoutText(ramp: Ramp, reading: Reading | null): string | null 
 		return withUnit(reading.value.toFixed(bandDecimals(step)), ramp.unit);
 	}
 	const d = bandDecimals(reading.hi - reading.lo);
-	return withUnit(
-		`${reading.lo.toFixed(d)} to ${reading.hi.toFixed(d)}`, ramp.unit);
+	const own: Band = reading.open
+		? { lo: reading.lo, hi: reading.hi, open: reading.open }
+		: { lo: reading.lo, hi: reading.hi };
+	const bands = [own, ...(reading.also ?? [])].sort((a, b) => a.lo - b.lo);
+	return bands.map((b) => bandText(b, d, ramp.unit)).join(' or ');
+}
+
+/**
+ * One band as the chip prints it.
+ *
+ * An open band names only its inner bound, because the renderer painted
+ * everything past it in the same color and a closed range there would
+ * claim the field stops where the scale does.
+ *
+ * @param band The band.
+ * @param d Decimals for its bounds.
+ * @param unit The ramp's unit, which may be empty.
+ * @returns The text, e.g. "below -25.0 dBZ", "80.0 dBZ or more" or
+ *     "5.0 to 10.0 dBZ".
+ */
+function bandText(band: Band, d: number, unit: string): string {
+	if (band.open === 'below') return `below ${withUnit(band.hi.toFixed(d), unit)}`;
+	if (band.open === 'above') return `${withUnit(band.lo.toFixed(d), unit)} or more`;
+	return `${band.lo.toFixed(d)} to ${withUnit(band.hi.toFixed(d), unit)}`;
 }

@@ -28,6 +28,39 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The RhoHV tilt showed nothing on any radar.** The mount reader capped a
+  moment name at 16 characters, and radar-display names its correlation
+  frames `copolarcorrelation`, which is 18. Every request was refused as a
+  bad name before it reached the disk. It shipped that way in v0.15.0 and
+  v0.15.1, and only on deployments that read tilts off the mount.
+
+- **Hovering a tilt reported nothing.** The tilt overlay never handed its
+  frame to the readout, and the legend went on drawing the Chivo scale for
+  a frame painted from radar-display's own tables. A tilt now has its own
+  held frame and its own three ramps, and the legend names the tilt field.
+
+  The tilt tables differ from Chivo's in more than color. Tilt reflectivity
+  is the uncorrected field over -30 to 85 dBZ, velocity runs -35 to 35 m/s
+  in 15 bands, and RhoHV is a field the Chivo tree does not publish for the
+  X-band radars. The ranges come from the renderer's plotting call, because
+  its own colorbar is drawn from other limits and reads 5 dBZ below every
+  frame. All 15 radar and moment pairs read back at 100% of painted area
+  over 28 frames each.
+
+- **A reused color reads as both of its bands.** The tilt reflectivity table
+  paints #646464 for below -25 dBZ and for 5 to 10 dBZ, and the readout
+  says "below -25.0 dBZ or 5.0 to 10.0 dBZ" rather than naming the first.
+  The end bands read as open ("80.0 dBZ or more"), since the renderer
+  paints everything past either limit in the end colors.
+
+### Changed
+
+- **The tilt picker's first option reads "Processed scan".** It read
+  "Default (RadarCA)", which suggested the imagery came from radarca on a
+  deployment that reads the same frames off its own mount.
+
 ## [0.15.1] - 2026-11-22
 
 Three things the radar cards got wrong at a width the test deployment

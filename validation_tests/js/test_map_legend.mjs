@@ -47,7 +47,12 @@ export function runTests(mod, ramps) {
     'aqpi-product-reflectivity',
     'aqpi-product-forecast-accum-in',
     'aqpi-product-forecast-accum-mm',
-    'aqpi-product-forecast-rate-in'
+    'aqpi-product-forecast-rate-in',
+    // radar-display's ListedColormaps, 15 to 23 colors with nothing
+    // between them, velocity included.
+    'tilt-reflectivity',
+    'tilt-velocity',
+    'tilt-copolarcorrelation'
   ]);
 
   console.log('a block bar and a gradient bar are told apart:');
