@@ -15,7 +15,7 @@
  */
 export function runTests(mod) {
 	const { rangeSpanDeg, rangeRingCoords, radarExtent, frameExtent, isSelectable,
-	        radarPointsGeo, radarRangesGeo } = mod;
+	        ringShown, shownRadars, radarPointsGeo, radarRangesGeo } = mod;
 	const failures = [];
 	const check = (label, cond, detail = '') => {
 		console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${label}${detail ? '  — ' + detail : ''}`);
@@ -99,7 +99,19 @@ export function runTests(mod) {
 
 	// --- 5. rings as features --------------------------------------------
 	const rings = radarRangesGeo(sites, status, paint);
-	check('one polygon per radar', rings.features.length === 3);
+	check('one polygon per radar, less an inactive NEXRAD site',
+	      rings.features.map((f) => f.properties.id).join(',') === 'XEBY,FLOW',
+	      rings.features.map((f) => f.properties.id).join(','));
+	const kdaxOn = radarRangesGeo(sites, status, paint, (id) => id === 'KDAX');
+	check('...whose ring appears once its imagery is on',
+	      kdaxOn.features.map((f) => f.properties.id).join(',') === 'XEBY,KDAX,FLOW');
+	check('an X-band ring shows whether or not it is on',
+	      ringShown(XEBY, false) && ringShown(XEBY, true) && !ringShown(KDAX, false)
+	      && ringShown(KDAX, true));
+	check('hiding the NEXRAD sites leaves the others in order',
+	      shownRadars(sites, false).map((r) => r.id).join(',') === 'XEBY,FLOW'
+	      && shownRadars(sites, true).length === 3);
+	check('...and returns a copy', shownRadars(sites, true) !== sites);
 	check('...each a single closed ring',
 	      rings.features.every((f) => f.geometry.coordinates.length === 1
 	                                  && f.geometry.coordinates[0].length === 65));

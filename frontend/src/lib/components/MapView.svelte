@@ -202,7 +202,8 @@
 	import { burnScarsLayer } from '$lib/map/layers/burnScars';
 	import { streamGaugesLayer } from '$lib/map/layers/streamGauges';
 	import {
-		frameExtent, isSelectable, radarPointsGeo, radarRangesGeo, rangeSpanDeg
+		frameExtent, isSelectable, radarPointsGeo, radarRangesGeo, rangeSpanDeg,
+		ringShown, shownRadars
 	} from '$lib/radarGeo';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
 	import { loadPrefs, savePrefs, clearPrefs, DEFAULT_PREFS,
@@ -1397,7 +1398,11 @@
 	function applyPrefs(p: ReturnType<typeof loadPrefs>) {
 		composite       = p.composite as Composite;
 		currentMoment   = p.moment as Moment;
-		activeRadars    = [...p.activeRadars];
+		nexradSitesOn   = p.nexradSites;
+		// isNexrad needs the radar list, so the first pass, before it loads,
+		// keeps every id and the second pass drops the hidden ones.
+		activeRadars    = p.nexradSites ? [...p.activeRadars]
+			: p.activeRadars.filter((id) => !isNexrad(id));
 		nexradEnabled   = p.nexrad;
 		layerOpacity    = normalizeOpacities(p.layerOpacity, p.opacity);
 		watershedsOn    = p.watersheds;
@@ -1419,7 +1424,7 @@
 		const c = map?.getCenter();
 		return {
 			composite, moment: currentMoment, activeRadars: [...activeRadars],
-			nexrad: nexradEnabled, opacity: overlayOpacity,
+			nexrad: nexradEnabled, nexradSites: nexradSitesOn, opacity: overlayOpacity,
 			layerOpacity: { ...layerOpacity },
 			watersheds: watershedsOn, reservoirs: reservoirsOn, terrain: terrainOn,
 			terrain3D: terrain3DOn, streamGauges: streamGaugesOn,
@@ -1436,6 +1441,7 @@
 	// restoring — without that gate, opening the page erases your settings.
 	$effect(() => {
 		void composite; void currentMoment; void activeRadars; void nexradEnabled;
+		void nexradSitesOn;
 		void layerOpacity; void watershedsOn; void reservoirsOn;
 		void terrainOn; void terrain3DOn; void streamGaugesOn; void tiltEl;
 		void burnScarsOn; void burnScarYears; void playSpeed;
@@ -1557,7 +1563,13 @@
 	// What the panel header counts as on.
 	//
 
-	const selectableRadars = $derived(radars.filter(isSelectable));
+	// The radars this pane draws and offers. The NEXRAD sites can be hidden
+	// from the settings menu: their pins sit among the X-bands, and anyone
+	// not using their imagery has three more rows and pins to read past.
+	let nexradSitesOn = $state(true);
+	const radarsShown = $derived(shownRadars(radars, nexradSitesOn));
+	const nexradListed = $derived(radars.some((r) => r.kind === 'nexrad'));
+	const selectableRadars = $derived(radarsShown.filter(isSelectable));
 	const nexradSelectable = $derived(selectableRadars.some((r) => r.kind === 'nexrad'));
 
 	/**
@@ -1686,8 +1698,25 @@
 	});
 	const statusForRadar = (id: string) => radarStatusOf(radarStatus, id);
 
-	const pointsGeo = () => radarPointsGeo(radars, statusForRadar, radarPaint, isActive);
-	const rangesGeo = () => radarRangesGeo(radars, statusForRadar, radarPaint, isActive);
+	const pointsGeo = () => radarPointsGeo(radarsShown, statusForRadar, radarPaint, isActive);
+	const rangesGeo = () => radarRangesGeo(radarsShown, statusForRadar, radarPaint, isActive);
+
+	/**
+	 * Show or hide the NEXRAD sites in this pane.
+	 *
+	 * Hiding drops them from the selection too, since imagery for a radar
+	 * with no pin and no row would be a layer nothing on screen accounts for.
+	 *
+	 * @param on Whether the sites are shown.
+	 */
+	function setNexradSites(on: boolean): void {
+		nexradSitesOn = on;
+		if (!on && activeRadars.some(isNexrad)) {
+			activeRadars = activeRadars.filter((id) => !isNexrad(id));
+			refreshRadarOverlays();
+		}
+		syncBaseSources();
+	}
 
 	function syncBaseSources() {
 		if (!map?.getSource('radars')) return;
@@ -2716,6 +2745,9 @@
 		if (link.product) composite = link.product as Composite;
 		if (link.moment) currentMoment = link.moment;
 		if (link.radars.length > 0) activeRadars = [...link.radars];
+		// A link that names a NEXRAD site shows the sites, or its imagery
+		// would draw with no pin and no row to say whose it is.
+		if (activeRadars.some(isNexrad)) nexradSitesOn = true;
 		// The unit is resolved against the product the link just set, not
 		// against whatever was selected a moment ago.
 		currentUnit = resolveUnit(
@@ -3585,7 +3617,7 @@
 	 */
 	function ringSpecs(): RingSpec[] {
 		const tiltOn = tiltRadarMeta?.id ?? null;
-		return selectableRadars.map((r) => {
+		return selectableRadars.filter((r) => ringShown(r, isActive(r.id))).map((r) => {
 			const paint = radarPaint(radarStatusOf(radarStatus, r.id));
 			const on = isActive(r.id);
 			return {
@@ -3900,7 +3932,7 @@
 			terrain: style.terrain ?? null,
 			state: {
 				composite, moment: currentMoment, activeRadars: [...activeRadars],
-				nexradEnabled, overlayOpacity,
+				nexradEnabled, nexradSitesOn, overlayOpacity,
 				layerOpacity: { ...layerOpacity }, tiltEl,
 				watershedsOn, reservoirsOn, terrainOn, terrain3DOn,
 				streamGaugesOn, burnScarsOn, burnScarYears, burnScarThrough,
@@ -5259,6 +5291,39 @@
 		{/if}
 	{/snippet}
 
+	{#snippet sitesBody()}
+		<!-- Under its own heading, because the settings menu's last heading
+		     is the opacity one and this is not an opacity. -->
+		<div
+			class="label mt-3 border-t border-[var(--color-border)] pt-3 tracking-[0.2em] text-[var(--color-default)]"
+		>
+			NEXRAD sites
+		</div>
+		<p class="mt-1 text-[9.5px] leading-tight text-[var(--color-faint)]">
+			Whether {radars.filter((r) => r.kind === 'nexrad').map((r) => r.id).join(', ')}
+			appear in the pane you have selected. Their range rings show only
+			while their imagery is on.
+		</p>
+		<button
+			data-nexrad-sites
+			aria-pressed={nexradSitesOn}
+			class="mt-2 flex w-full items-center justify-between rounded-sm border border-[var(--color-border-strong)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-elevated)]/40"
+			onclick={() => setNexradSites(!nexradSitesOn)}
+		>
+			<span class="flex items-center gap-2">
+				<span
+					class="inline-block h-2 w-2 rounded-full {nexradSitesOn
+						? 'bg-[var(--color-info)]'
+						: 'bg-[var(--color-faint)]'}"
+				></span>
+				<span class="text-[var(--color-default)]">Show NEXRAD sites</span>
+			</span>
+			<span class="num text-[9.5px] {nexradSitesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+				{nexradSitesOn ? 'ON' : 'OFF'}
+			</span>
+		</button>
+	{/snippet}
+
 	{#snippet opacityBody()}
 		<!-- Opacity, one row per raster layer. The three stack on the same
 		     ground, so the question is which to fade against the others.
@@ -5347,6 +5412,9 @@
 			style="font-size: {scaled(11, uiScale)}px"
 		>
 			{@render opacityBody()}
+			{#if nexradListed}
+				{@render sitesBody()}
+			{/if}
 		</div>
 	{/if}
 

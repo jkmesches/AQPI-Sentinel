@@ -28,6 +28,23 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **NEXRAD range rings show only while their imagery is on.** The three
+  200 km rings covered the whole network and buried the X-band rings under
+  them. A NEXRAD site's ring now appears when the site is selected for
+  imagery and goes away when it is deselected, flat and in 3D. The other
+  rings are unchanged.
+
+### Added
+
+- **A setting to hide the NEXRAD sites.** The map's Settings menu has a
+  "NEXRAD sites" toggle, per pane and saved with the other map settings.
+  Turned off, the sites' pins, rows and preset disappear and any of them
+  that were selected are deselected. A link that names a NEXRAD site turns
+  them back on, so its imagery never draws without a pin. The NEXRAD mosaic
+  under Reference is a separate layer and is unaffected.
+
 ## [0.15.5] - 2026-11-23
 
 ### Added

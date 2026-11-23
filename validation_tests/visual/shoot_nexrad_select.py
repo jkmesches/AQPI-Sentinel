@@ -122,6 +122,52 @@ async def snapshot(page: Page) -> dict[str, Any]:
     return got
 
 
+def feature_count(snap: dict[str, Any], source: str) -> int | None:
+    """How many features a GeoJSON source holds, as the probe summarizes it."""
+    data = snap.get("sources", {}).get(source, {}).get("data", {})
+    count = data.get("featureCount") if isinstance(data, dict) else None
+    return count if isinstance(count, int) else None
+
+
+async def check_sites_toggle(page: Page, out: list[dict[str, Any]]) -> None:
+    """The settings toggle hides the NEXRAD sites, drops them, and persists.
+
+    Args:
+        page: The loaded console.
+        out: Collects each step's reading.
+    """
+    await click_preset(page, "all")
+    await page.locator("[data-settings-toggle]").first.click()
+    await page.locator("[data-nexrad-sites]").first.click()
+    await page.wait_for_timeout(STEP_SETTLE_MS)
+    snap = await snapshot(page)
+    state = snap.get("state", {})
+    rows: list[str] = await page.evaluate(
+        "() => [...document.querySelectorAll('[data-dock-slot] li')].map(e => e.textContent)")
+    presets = await page.locator("[data-preset='nexrad']").count()
+    out.append({"step": "hiding the sites: off, deselected, no pins, rows or preset",
+                "want": [False, sorted(NETWORK), len(NETWORK), False, 0],
+                "got": [state.get("nexradSitesOn"), sorted(state.get("activeRadars", [])),
+                        feature_count(snap, "radars"),
+                        any(site in r for r in rows for site in NEXRAD), presets]})
+    out.append({"step": "...and no NEXRAD layer left on the map",
+                "want": [-1, -1, -1], "got": [layer_index(snap, r) for r in NEXRAD]})
+    _ = await page.reload(wait_until="load")
+    await page.wait_for_timeout(LOAD_SETTLE_MS)
+    state = (await snapshot(page)).get("state", {})
+    out.append({"step": "the setting survives a reload", "want": False,
+                "got": state.get("nexradSitesOn")})
+    await page.locator("[data-settings-toggle]").first.click()
+    await page.locator("[data-nexrad-sites]").first.click()
+    await page.wait_for_timeout(STEP_SETTLE_MS)
+    snap = await snapshot(page)
+    out.append({"step": "showing them again brings the pins back",
+                "want": [True, len(NETWORK) + len(NEXRAD)],
+                "got": [snap.get("state", {}).get("nexradSitesOn"),
+                        feature_count(snap, "radars")]})
+    await page.keyboard.press("Escape")
+
+
 def layer_index(snap: dict[str, Any], radar: str) -> int:
     """A radar layer's place in the paint order, or -1 when it is absent."""
     order: list[str] = snap.get("layerOrder", [])
@@ -197,8 +243,14 @@ async def check_presets(page: Page, out: list[dict[str, Any]]) -> None:
     out.append({"step": "preset row", "want": ["network=AQPI", "nexrad=nexrad",
                                                "all=all", "clear=clear"],
                 "got": first_pane})
+    snap = await snapshot(page)
+    out.append({"step": "with nothing selected, no NEXRAD ring is drawn (pins, rings)",
+                "want": [len(NETWORK) + len(NEXRAD), len(NETWORK)],
+                "got": [feature_count(snap, "radars"), feature_count(snap, "ranges")]})
     await click_preset(page, "nexrad")
     snap = await snapshot(page)
+    out.append({"step": "selecting the NEXRAD sites draws their rings",
+                "want": len(NETWORK) + len(NEXRAD), "got": feature_count(snap, "ranges")})
     out.append({"step": "nexrad preset selects the three sites",
                 "want": list(NEXRAD), "got": snap.get("state", {}).get("activeRadars")})
     src = snap.get("sources", {}).get("radar-KDAX-src", {})
@@ -309,12 +361,16 @@ async def run(base: str, outdir: Path, frames: Path | None) -> dict[str, Any]:
         try:
             ctx = await browser.new_context(viewport=VIEWPORT, device_scale_factor=1)
             page = await ctx.new_page()
+            # Seeded once per tab. An init script runs on every load, so
+            # seeding unconditionally would wipe what the reload step checks.
             await page.add_init_script(
                 "window.__errs=[];"
                 "window.addEventListener('error', e => window.__errs.push(String(e.message)));"
-                "localStorage.clear(); localStorage.setItem('sentinel-theme','dark');"
-                "localStorage.setItem('sentinel-map-prefs', JSON.stringify({activeRadars: [],"
-                " moment: 'Reflectivity', composite: 'none', nexrad: false}));")
+                "if (!sessionStorage.getItem('probe-seeded')) {"
+                " sessionStorage.setItem('probe-seeded', '1');"
+                " localStorage.clear(); localStorage.setItem('sentinel-theme','dark');"
+                " localStorage.setItem('sentinel-map-prefs', JSON.stringify({activeRadars: [],"
+                " moment: 'Reflectivity', composite: 'none', nexrad: false})); }")
             for glob, handler in make_router(paint, requests).items():
                 await page.route(glob, handler)
             _ = await page.goto(f"{base}/?diag=probe", wait_until="load", timeout=60_000)
@@ -322,6 +378,7 @@ async def run(base: str, outdir: Path, frames: Path | None) -> dict[str, Any]:
             await check_presets(page, steps)
             await check_stacking(page, refl, steps)
             await check_all_and_network(page, steps)
+            await check_sites_toggle(page, steps)
             if frames is not None:
                 await shoot_real(page, paint, frames, outdir)
             errs: list[str] = await page.evaluate("() => window.__errs || []")

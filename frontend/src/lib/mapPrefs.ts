@@ -68,7 +68,10 @@ export interface MapPrefs {
 	composite: string;
 	moment: string;
 	activeRadars: string[];
+	/** The Iowa Mesonet NEXRAD mosaic under everything, a reference layer. */
 	nexrad: boolean;
+	/** Whether the NEXRAD sites' pins, rows and imagery are offered at all. */
+	nexradSites: boolean;
 	/**
 	 * The radar overlays' opacity, kept so a build without per-layer
 	 * opacity still reads a usable value out of a blob this one wrote.
@@ -95,6 +98,7 @@ export const DEFAULT_PREFS: MapPrefs = {
 	moment: 'Reflectivity',
 	activeRadars: [],
 	nexrad: false,
+	nexradSites: true,
 	opacity: DEFAULT_OPACITIES.radars,
 	layerOpacity: { ...DEFAULT_OPACITIES },
 	watersheds: false,
@@ -250,6 +254,7 @@ export function loadPrefs(vocab: PrefsVocabulary = {}): MapPrefs {
 		moment:       pick(obj.moment, vocab.moments, DEFAULT_PREFS.moment),
 		activeRadars: [...new Set(radars)],
 		nexrad:       bool(obj.nexrad, DEFAULT_PREFS.nexrad),
+		nexradSites:  bool(obj.nexradSites, DEFAULT_PREFS.nexradSites),
 		opacity:      num(obj.opacity, DEFAULT_PREFS.opacity, 0, 1),
 		// `obj.opacity` is the single slider older builds wrote, and it
 		// seeds the radar layer only where no per-layer value exists yet.

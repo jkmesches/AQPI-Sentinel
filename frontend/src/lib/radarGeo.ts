@@ -52,6 +52,33 @@ export function isSelectable(site: RadarSite): boolean {
 	return site.scan ?? (site.kind === 'xband' || site.kind === 'cband');
 }
 
+/**
+ * Whether a radar's range ring is drawn.
+ *
+ * A NEXRAD ring is 200 km across the whole network and buries the X-band
+ * rings under it, so it is drawn only while that radar's imagery is on.
+ *
+ * @param site The radar.
+ * @param active Whether its overlay is on.
+ * @returns True to draw the ring.
+ */
+export function ringShown(site: RadarSite, active: boolean): boolean {
+	return site.kind !== 'nexrad' || active;
+}
+
+/**
+ * The radars a map shows, with or without the NEXRAD sites.
+ *
+ * @param radars Every radar the deployment lists.
+ * @param showNexrad Whether the NEXRAD sites are shown at all.
+ * @returns The radars to draw and offer.
+ */
+export function shownRadars<T extends RadarSite>(
+	radars: readonly T[], showNexrad: boolean
+): T[] {
+	return showNexrad ? [...radars] : radars.filter((r) => r.kind !== 'nexrad');
+}
+
 /** Colors for one radar, resolved by the caller from its own theme. */
 export interface RadarPaint {
 	/** Fill and stroke for the range ring, and the legacy single color. */
@@ -246,12 +273,12 @@ export function radarPointsGeo(
 }
 
 /**
- * One polygon feature per radar's range ring.
+ * One polygon feature per radar's range ring, for the rings ringShown draws.
  *
  * @param radars The sites to draw.
  * @param statusFor One radar's collapsed status, by id.
  * @param paintFor Colors for a status.
- * @param isActive Whether a radar's overlay is on.
+ * @param isActive Whether a radar's overlay is on. A NEXRAD ring needs it.
  * @returns A FeatureCollection ready for a GeoJSON source.
  */
 export function radarRangesGeo(
@@ -262,7 +289,7 @@ export function radarRangesGeo(
 ): GeoJSON.FeatureCollection {
 	return {
 		type: 'FeatureCollection',
-		features: radars.map((r) => ({
+		features: radars.filter((r) => ringShown(r, isActive(r.id))).map((r) => ({
 			type: 'Feature' as const,
 			geometry: { type: 'Polygon' as const, coordinates: [rangeRingCoords(r)] },
 			properties: {

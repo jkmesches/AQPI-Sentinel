@@ -56,6 +56,15 @@ export function runTests(mod) {
 	check('toggles and opacity survive', p.nexrad === true && p.terrain === true &&
 	      p.opacity === 0.35);
 	check('the camera survives', p.camera && p.camera.zoom === 8.5 && p.camera.bearing === 12);
+	check('the NEXRAD sites are shown by default', DEFAULT_PREFS.nexradSites === true
+	      && p.nexradSites === true);
+	savePrefs({ ...DEFAULT_PREFS, nexradSites: false, nexrad: true });
+	p = loadPrefs(VOCAB);
+	check('hiding the NEXRAD sites survives, apart from the mosaic toggle',
+	      p.nexradSites === false && p.nexrad === true);
+	reset();
+	store.set(KEY, JSON.stringify({ composite: 'qpe_1hr' }));
+	check('a blob from before the setting shows the sites', loadPrefs(VOCAB).nexradSites === true);
 
 	// --- 2. stale vocabulary must degrade, never break -------------------
 	reset();
@@ -98,10 +107,12 @@ export function runTests(mod) {
 
 	reset();
 	store.set(KEY, JSON.stringify({ opacity: 'lots', tiltEl: 'high', nexrad: 'yes',
-	                                activeRadars: 'XSCV', camera: 'somewhere' }));
+	                                nexradSites: 'no', activeRadars: 'XSCV',
+	                                camera: 'somewhere' }));
 	p = loadPrefs(VOCAB);
 	check('wrong types fall back per field', p.opacity === DEFAULT_PREFS.opacity &&
-	      p.tiltEl === DEFAULT_PREFS.tiltEl && p.nexrad === DEFAULT_PREFS.nexrad);
+	      p.tiltEl === DEFAULT_PREFS.tiltEl && p.nexrad === DEFAULT_PREFS.nexrad &&
+	      p.nexradSites === DEFAULT_PREFS.nexradSites);
 	check('a non-array radar list does not become a string of characters',
 	      Array.isArray(p.activeRadars) && p.activeRadars.length === 0, String(p.activeRadars));
 	check('a non-object camera is rejected', p.camera === null);
