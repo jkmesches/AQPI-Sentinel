@@ -18,6 +18,8 @@ checks three loads whose answers do not depend on guessing that order:
    the radar's empty pixels.
 3. Both painted, radar turned on after the composite: the radar's band, since
    a later overlay draws on top.
+4. Forecast rain under a reflectivity scan: the legend draws the rain scale
+   until the radar goes on over it, then the radar's (Joseph, 2026-11-23).
 
 Usage
 -----
@@ -60,6 +62,10 @@ RAMPS = VISUAL.parent.parent / "frontend/src/lib/map/ramps/data"
 COMPOSITE = "comp_ref"
 COMPOSITE_RAMP = RAMPS / "aqpi-product-reflectivity.json"
 COMPOSITE_STOP = 16
+#: A composite whose scale has a different title from the radars'.
+LEGEND_PRODUCT = "fcst_total_precip"
+LEGEND_PRODUCT_TITLE = json.loads(
+    (RAMPS / "aqpi-product-forecast-accum-in.json").read_text())["label"]
 SCAN_SIZE = (697, 693)
 COMPOSITE_SIZE = (565, 605)
 POINTS = ((0.5, 0.5), (0.46, 0.54), (0.54, 0.47))
@@ -83,6 +89,12 @@ def composite_stop() -> dict[str, Any]:
             "reads": f"{stop['lo']:.1f} to {stop['hi']:.1f} {ramp['unit']}"}
 
 
+def radar_title() -> str:
+    """The title the legend gives the X-band reflectivity scale."""
+    ramp = json.loads((RAMPS / "aqpi-xband-reflectivity.json").read_text())
+    return str(ramp["label"])
+
+
 def png(size: tuple[int, int], rgb: tuple[int, int, int] | None) -> bytes:
     """A frame painted in one color, or fully transparent for None.
 
@@ -99,18 +111,19 @@ def png(size: tuple[int, int], rgb: tuple[int, int, int] | None) -> bytes:
     return buf.getvalue()
 
 
-async def load(browser: Browser, base: str, comp: bytes, scan: bytes) -> Page:
+async def load(browser: Browser, base: str, spec: dict[str, Any]) -> Page:
     """Open the console on the composite with no radar on, frames served.
 
     Args:
         browser: The running chromium.
         base: The deployment's origin.
-        comp: The composite frame to serve.
-        scan: The X-band scan to serve for every radar.
+        spec: The case, with its composite product and the frames to serve.
 
     Returns:
         The loaded page.
     """
+    comp, scan = spec["comp"], spec["scan"]
+    product = spec.get("product", COMPOSITE)
     page = await (await browser.new_context(viewport=VIEWPORT,
                                             device_scale_factor=1)).new_page()
     await page.add_init_script(
@@ -118,7 +131,7 @@ async def load(browser: Browser, base: str, comp: bytes, scan: bytes) -> Page:
         "e=>window.__errs.push(String(e.message)));"
         "localStorage.clear();localStorage.setItem('sentinel-theme','dark');"
         "localStorage.setItem('sentinel-map-prefs', JSON.stringify("
-        f"{{activeRadars:[], moment:'Reflectivity', composite:'{COMPOSITE}',"
+        f"{{activeRadars:[], moment:'Reflectivity', composite:'{product}',"
         " nexrad:false}));")
 
     def serving(body: bytes) -> Callable[[Route], Awaitable[None]]:
@@ -148,19 +161,31 @@ async def case(browser: Browser, base: str, spec: dict[str, Any],
     Returns:
         What was read, and whether every point read what it should.
     """
-    page = await load(browser, base, spec["comp"], spec["scan"])
+    page = await load(browser, base, spec)
     try:
         held = await page.locator("[data-view]").first.get_attribute(
             "data-readout-composite")
+        legend = [await legend_title(page)]
         await solo(page, "XSCV")
+        legend.append(await legend_title(page))
         seen = [await read_at(page, fx, fy) for fx, fy in POINTS]
         _ = await page.screenshot(path=str(outdir / f"{spec['name']}.png"))
         errs: list[str] = await page.evaluate("()=>window.__errs||[]")
     finally:
         await page.context.close()
+    legend_ok = "legend" not in spec or legend == spec["legend"]
     return {"case": spec["name"], "want": spec["want"], "seen": seen,
+            "legend": legend, "want_legend": spec.get("legend"),
             "composite_held": held, "errors": errs,
-            "ok": bool(held) and not errs and all(s == spec["want"] for s in seen)}
+            "ok": bool(held) and not errs and legend_ok
+            and all(s == spec["want"] for s in seen)}
+
+
+async def legend_title(page: Page) -> str | None:
+    """The legend's title, or None when no legend is drawn."""
+    got: str | None = await page.evaluate(
+        "() => document.querySelector('[data-legend-title]')?.textContent?.trim() ?? null")
+    return got
 
 
 async def run(base: str, outdir: Path) -> list[dict[str, Any]]:
@@ -183,6 +208,12 @@ async def run(base: str, outdir: Path) -> list[dict[str, Any]]:
          "scan": empty_scan, "want": comp["reads"]},
         {"name": "radar-over-painted-composite", "comp": painted_comp,
          "scan": painted_scan, "want": radar["reads"]},
+        # Forecast rain under a reflectivity scan, so the two scales have
+        # different titles. The legend draws the composite's until the radar
+        # goes on over it, then the radar's.
+        {"name": "legend-follows-radar-on-top", "product": LEGEND_PRODUCT,
+         "comp": empty_comp, "scan": painted_scan, "want": radar["reads"],
+         "legend": [LEGEND_PRODUCT_TITLE, radar_title()]},
     ]
     out: list[dict[str, Any]] = []
     async with async_playwright() as pw:
@@ -214,9 +245,11 @@ def main() -> int:
     results = asyncio.run(run(args.base, outdir))
     _ = (outdir / "report.json").write_text(json.dumps(results, indent=2))
     for r in results:
-        print(f"  {'ok  ' if r['ok'] else 'FAIL'}  {r['case']}: saw {r.get('seen')!r}"
-              + ("" if r["ok"] else f" (want {r.get('want')!r}, composite held "
-                 f"{r.get('composite_held')!r}, errors {r.get('errors') or r.get('error')})"))
+        print(f"  {'ok  ' if r['ok'] else 'FAIL'}  {r['case']}: saw {r.get('seen')!r}, "
+              f"legend {r.get('legend')!r}"
+              + ("" if r["ok"] else f" (want {r.get('want')!r}, legend "
+                 f"{r.get('want_legend')!r}, composite held {r.get('composite_held')!r}, "
+                 f"errors {r.get('errors') or r.get('error')})"))
     bad = sum(1 for r in results if not r["ok"])
     print("all composite and radar readout cases passed" if bad == 0 else f"{bad} FAILED")
     return 0 if bad == 0 else 1

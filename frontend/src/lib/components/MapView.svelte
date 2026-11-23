@@ -33,7 +33,7 @@
 	import { OFF_SCALE, overlayFraction, overlayPixel,
 	         readoutFor, readoutHint } from '$lib/map/readout';
 	import { FrameSampler } from '$lib/map/sampler';
-	import { firstReading, topFirst } from '$lib/map/readoutOrder';
+	import { anyAbove, firstReading, topFirst } from '$lib/map/readoutOrder';
 	import MapLegend from '$lib/components/MapLegend.svelte';
 	import MapCompass from '$lib/components/MapCompass.svelte';
 	import { DEFAULT_UI_SCALE, scaled } from '$lib/map/uiScale';
@@ -987,6 +987,16 @@
 	function bumpRadarFrames(): void {
 		radarFramesAt = untrack(() => radarFramesAt) + 1;
 	}
+	/**
+	 * Bumped when an image overlay's layer is added or removed, which is
+	 * when the map's paint order can change. The map itself is not
+	 * reactive, so the legend reads its order on this signal.
+	 */
+	let overlayOrderAt = $state(0);
+	/** Say that the overlay layers changed, untracked for the reason above. */
+	function bumpOverlayOrder(): void {
+		overlayOrderAt = untrack(() => overlayOrderAt) + 1;
+	}
 	// The composite's own held frame. Separate from the radar sampler
 	// rather than shared, because both can be on screen at once and the
 	// composite is the one the cursor is over nearly everywhere.
@@ -1173,17 +1183,27 @@
 		}
 	});
 
-	// The ramp the legend draws and the readout reads through.
+	// The ramp the legend draws.
 	//
-	// The composite wins when one is showing, because it is painted over
-	// the radar overlays and covers far more ground, so the pixel under
-	// the cursor is almost always its own. Until 2026-11-21 no product
-	// had a measured ramp and both features simply stayed off over a
-	// composite, which is the view the console opens on.
+	// The imagery on top decides it, the same rule the readout reads by.
+	// The composite and the radars sit in one band under the markers, and
+	// the one added last draws over the rest, so a radar turned on after
+	// the composite is on top and its scale is the one drawn (Joseph,
+	// 2026-11-23). With no radar above it, the composite's. Until
+	// 2026-11-21 no product had a measured ramp and the legend stayed off
+	// over a composite, which is the view the console opens on.
 	const activeRamp = $derived.by(() => {
-		if (composite !== 'none') {
-			return rampForProduct(composite, currentUnit);
+		if (composite === 'none') return radarsRamp;
+		void overlayOrderAt;
+		const over = new Set([...drawnRadars.map(radarLayerId), 'tilt-overlay-layer']);
+		if (radarsRamp && map && anyAbove(map.getLayersOrder(), 'comp-overlay-layer', over)) {
+			return radarsRamp;
 		}
+		return rampForProduct(composite, currentUnit);
+	});
+
+	// The one scale the radars (or a tilt) on screen share, or null.
+	const radarsRamp = $derived.by(() => {
 		if (activeRadars.length === 0) return null;
 		// A tilt is radar-display's frame, not Chivo's: uncorrected
 		// reflectivity over -30 to 85, a different velocity table, and a
@@ -2007,7 +2027,10 @@
 		if (!e || stepIdx < 0) {
 			const m = map;
 			return () => {
-				if (m.getLayer('comp-overlay-layer')) m.removeLayer('comp-overlay-layer');
+				if (m.getLayer('comp-overlay-layer')) {
+					m.removeLayer('comp-overlay-layer');
+					bumpOverlayOrder();
+				}
 				if (m.getSource('comp-overlay')) m.removeSource('comp-overlay');
 			};
 		}
@@ -2064,6 +2087,7 @@
 					paint: { 'raster-opacity': layerOpacity.composite,
 						'raster-fade-duration': 0 }
 				});
+				bumpOverlayOrder();
 			}
 		};
 	}
@@ -2467,6 +2491,7 @@
 			if (map.getLayer(radarLayerId(id))) map.removeLayer(radarLayerId(id));
 			if (map.getSource(radarSrcId(id))) map.removeSource(radarSrcId(id));
 			_addedOverlays.delete(id);
+			bumpOverlayOrder();
 			_appliedRadarUrl.delete(id);
 		}
 		// add overlays newly active
@@ -2510,6 +2535,7 @@
 				addOverlayBelowMarkers(map, layer);
 			}
 			_addedOverlays.add(id);
+			bumpOverlayOrder();
 			// Feed the readout too. This path hands the URL to MapLibre and
 			// lets it fetch, so preloadImage never runs and prepareRadars
 			// then skips the frame as already applied. Without this the
@@ -2560,7 +2586,12 @@
 		const tiltMoment = tiltSourceFor(currentMoment);
 		// Not engaged → tear down and bail.
 		if (!id || !tiltMoment || !_tiltGeo) {
-			if (map.getLayer('tilt-overlay-layer')) map.removeLayer('tilt-overlay-layer');
+			// Bumped only when a layer really goes, since this runs on every
+			// refresh while tilt is off.
+			if (map.getLayer('tilt-overlay-layer')) {
+				map.removeLayer('tilt-overlay-layer');
+				bumpOverlayOrder();
+			}
 			if (map.getSource('tilt-overlay')) map.removeSource('tilt-overlay');
 			// Assigned without reading it first: this runs inside effects,
 			// and a read here would make the effect depend on what it writes.
@@ -2609,6 +2640,7 @@
 				source: 'tilt-overlay',
 				paint: { 'raster-opacity': overlayOpacity, 'raster-fade-duration': 0 }
 			});
+			bumpOverlayOrder();
 		}
 	}
 

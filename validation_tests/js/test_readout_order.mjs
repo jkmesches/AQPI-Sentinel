@@ -9,7 +9,7 @@
  * paint order, top down, falling through transparent pixels.
  */
 export function runTests(mod) {
-	const { topFirst, firstReading } = mod;
+	const { topFirst, firstReading, anyAbove } = mod;
 	const failures = [];
 	const check = (label, cond, detail = '') => {
 		console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${label}${detail ? '  — ' + detail : ''}`);
@@ -43,6 +43,24 @@ export function runTests(mod) {
 		topFirst(input, ['radar-XEBY-layer', 'comp-overlay-layer']);
 		return input[0] === comp && input[1] === xeby;
 	})());
+
+	console.log('\nwhich scale the legend draws:');
+	const radars = new Set(['radar-XEBY-layer', 'tilt-overlay-layer']);
+	check('a radar over the composite is above it',
+		anyAbove(['basemap', 'comp-overlay-layer', 'radar-XEBY-layer', 'radar-halo'],
+			'comp-overlay-layer', radars));
+	check('a radar under the composite is not',
+		!anyAbove(['basemap', 'radar-XEBY-layer', 'comp-overlay-layer', 'radar-halo'],
+			'comp-overlay-layer', radars));
+	check('the radar markers do not count as imagery',
+		!anyAbove(['comp-overlay-layer', 'radar-halo', 'radar-point'],
+			'comp-overlay-layer', radars));
+	check('a tilt over the composite is above it',
+		anyAbove(['comp-overlay-layer', 'tilt-overlay-layer'], 'comp-overlay-layer', radars));
+	check('with no composite on the map, a radar is above it',
+		anyAbove(['basemap', 'radar-XEBY-layer'], 'comp-overlay-layer', radars));
+	check('with no radar on the map, nothing is',
+		!anyAbove(['basemap', 'comp-overlay-layer'], 'comp-overlay-layer', radars));
 
 	console.log('\nreading down through them:');
 	const at = { 'radar-XEBY-layer': null, 'comp-overlay-layer': '10.0 to 15.0 dBZ' };

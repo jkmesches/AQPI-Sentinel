@@ -28,6 +28,14 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The map legend draws the scale of the imagery on top.** With a radar
+  turned on over a composite, the legend now draws the radar's scale, since
+  the radar is what shows there, and goes back to the composite's when no
+  radar is above it. It follows the same paint order the cursor readout
+  reads by.
+
 ## [0.15.7] - 2026-11-23
 
 ### Added

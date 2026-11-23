@@ -42,6 +42,27 @@ export function topFirst<T extends Paintable>(
 }
 
 /**
+ * Whether any of a set of layers draws above another.
+ *
+ * The legend asks this of the radar layers and the composite: a radar
+ * turned on after the composite draws over it, and its scale is the one to
+ * draw. A missing lower layer counts as below everything on the map.
+ *
+ * @param order The map's layer ids, bottom to top.
+ * @param below The layer to compare against.
+ * @param above The layers that may sit over it.
+ * @returns True when one of `above` is on the map and higher than `below`.
+ */
+export function anyAbove(
+	order: readonly string[],
+	below: string,
+	above: ReadonlySet<string>
+): boolean {
+	const floor = order.indexOf(below);
+	return order.some((id, i) => i > floor && above.has(id));
+}
+
+/**
  * Read down through the overlays until one is painted at the point.
  *
  * @param layers The overlays, topmost first.
