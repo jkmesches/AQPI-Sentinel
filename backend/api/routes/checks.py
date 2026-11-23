@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from ...checks.layer0_episode import reads_radarca  # noqa: TID252  module uses relative imports
+from ...config import NEXRAD_RADARS  # noqa: TID252  module uses relative imports
 from ...registry import CHECKS
 import datetime as _dt
 
@@ -23,6 +24,9 @@ async def list_checks():
             "source_tag":   getattr(c, "source_tag", None),
             "source_label": getattr(c, "source_label", None),
             "reads_radarca": reads_radarca(c),
+            # Whether the check watches a NEXRAD radar, by the same set that
+            # keeps those alarms from notifying (alarms/record_only.py).
+            "nexrad": c.target in NEXRAD_RADARS,
         }
         for c in CHECKS.values()
     ]

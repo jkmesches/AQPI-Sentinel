@@ -36,6 +36,9 @@ export interface CheckMeta {
 	 *  backend's own rule (layer0_episode.reads_radarca). Absent from a
 	 *  backend older than the timeline's RadarCA filter. */
 	reads_radarca?: boolean;
+	/** Whether the check watches a NEXRAD radar (config.NEXRAD_RADARS).
+	 *  Absent from a backend older than the dashboard's NEXRAD filter. */
+	nexrad?: boolean;
 }
 export interface CheckRun extends StatusRow {
 	id: number;

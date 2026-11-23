@@ -28,6 +28,17 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard filters for RadarCA and NEXRAD checks.** Two checkboxes above
+  the rails, "hide RadarCA" and "hide NEXRAD", take the checks whose readings
+  come from RadarCA, or that watch a NEXRAD radar, off every rail and out of
+  the alarm band. Each is offered only when the deployment has such checks,
+  and the choice is kept per browser. The alarm band's header still states
+  the true open count and says how many alarms the filters hold back. The
+  backend classifies each check (`reads_radarca` and the new `nexrad` on
+  `/api/checks`), and a check it has not classified is never hidden.
+
 ### Changed
 
 - **Alarms on the NEXRAD radars are recorded and never sent.** The LB3

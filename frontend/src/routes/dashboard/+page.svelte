@@ -18,6 +18,27 @@
 	import { api, type CheckMeta } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { hiddenCheckIds, sourceCounts } from '$lib/checkFilter';
+
+	// Hide the checks whose readings come from RadarCA, or that watch a NEXRAD
+	// radar, from every rail and from the alarm band. The backend classifies
+	// each check (see $lib/checkFilter). Persisted per browser, and read in the
+	// initializer so the effect that saves it cannot write the default over the
+	// stored choice first.
+	const storedFlag = (key: string): boolean => {
+		try { return localStorage.getItem(key) === '1'; } catch { return false; }
+	};
+	let hideRadarca = $state(storedFlag('sentinel.dashboard.hideRadarca'));
+	let hideNexrad = $state(storedFlag('sentinel.dashboard.hideNexrad'));
+	$effect(() => {
+		try {
+			localStorage.setItem('sentinel.dashboard.hideRadarca', hideRadarca ? '1' : '0');
+			localStorage.setItem('sentinel.dashboard.hideNexrad', hideNexrad ? '1' : '0');
+		} catch { /* storage blocked: the filters still apply for this visit */ }
+	});
+	const hiddenIds = $derived(hiddenCheckIds(sentinel.checks, { hideRadarca, hideNexrad }));
+	const sourceCount = $derived(sourceCounts(sentinel.checks));
+	const shown = (r: { check_id: string }) => !hiddenIds.has(r.check_id);
 
 	// Every reading of every radar, flat, for the header's pass count. The rail
 	// itself renders `radarGroups`, which collapses a radar's several readings
@@ -30,6 +51,7 @@
 			// not land in the radar rail or its count. It gets its own row in
 			// the Site rail, where a backend processing step belongs.
 			.filter((r) => r.check_id !== 'layer3.backend.drops')
+			.filter(shown)
 			.slice().sort((a, b) => a.target.localeCompare(b.target))
 	);
 
@@ -78,8 +100,8 @@
 	// while alerting: an operator needs to be able to see that it IS running,
 	// which was the whole gap on 2026-10-05.
 	const dropsRow = $derived(
-		(sentinel.rollup?.stages?.LB3 ?? []).find((r) => r.check_id === 'layer3.backend.drops')
-			?? null
+		(sentinel.rollup?.stages?.LB3 ?? []).filter(shown)
+			.find((r) => r.check_id === 'layer3.backend.drops') ?? null
 	);
 
 	// The fleet correlation verdict is about the rail, not a row in it. Pulled
@@ -95,8 +117,10 @@
 	// stopped". Showing both would be two banners making the same claim with
 	// different confidence.
 	const fleetRow = $derived(
-		(sentinel.rollup?.stages?.LB2 ?? []).find((r) => r.check_id === BACKEND_FLEET_CHECK_ID)
-			?? (sentinel.rollup?.stages?.L2 ?? []).find((r) => isFleetCheck(r.check_id))
+		(sentinel.rollup?.stages?.LB2 ?? []).filter(shown)
+			.find((r) => r.check_id === BACKEND_FLEET_CHECK_ID)
+			?? (sentinel.rollup?.stages?.L2 ?? []).filter(shown)
+				.find((r) => isFleetCheck(r.check_id))
 			?? null
 	);
 	const fleetAlerting = $derived(!!fleetRow && isAlerting(fleetRow.status));
@@ -139,6 +163,9 @@
 			const rc = new Set<string>();
 			const bk = new Set<string>();
 			for (const c of sentinel.checks) {
+				// A hidden side is absent for layout, so hiding RadarCA turns
+				// the paired rails into backend-only ones.
+				if (hiddenIds.has(c.id)) continue;
 				if (c.stage === radarcaStage) rc.add(c.target);
 				else if (c.stage === backendStage) bk.add(c.target);
 			}
@@ -198,8 +225,8 @@
 	};
 
 	const productPairs = $derived(pairByTarget(
-		sentinel.rollup?.stages?.L1 ?? [],
-		sentinel.rollup?.stages?.LB1 ?? []
+		(sentinel.rollup?.stages?.L1 ?? []).filter(shown),
+		(sentinel.rollup?.stages?.LB1 ?? []).filter(shown)
 	));
 	// CheckMeta lookup by check_id — used per-row to feed cadence into the
 	// Sparkline so its visible window auto-sizes to each check (radars at
@@ -218,12 +245,12 @@
 	// inconsistent — flagged in the 2026-05-18 review.
 	const productRows = $derived(
 		[...(sentinel.rollup?.stages?.L1 ?? []), ...(sentinel.rollup?.stages?.LB1 ?? [])]
-			.slice()
+			.filter(shown)
 			.sort((a, b) => a.target.localeCompare(b.target))
 	);
 	// Site = L0 only (origin liveness, TLS, public page, root-404).
 	// Renamed from "Edge" since it now drops the L1 static feeds.
-	const siteRows = $derived(sentinel.rollup?.stages?.L0 ?? []);
+	const siteRows = $derived((sentinel.rollup?.stages?.L0 ?? []).filter(shown));
 
 	// Group product rows by category (Radar Data / Atmospheric Forecast /
 	// CoSMoS / NWM / Other). Vectors + stream feeds fall into "Other".
@@ -266,7 +293,8 @@
 	// deployment without a mount.
 	const compositeInput = $derived.by(() => {
 		const rows = (sentinel.rollup?.stages?.LB3 ?? [])
-			.filter((r) => r.check_id.startsWith('layer3.composite.'));
+			.filter((r) => r.check_id.startsWith('layer3.composite.'))
+			.filter(shown);
 		if (!rows.length) return null;
 		const short = rows.filter((r) => isAlerting(r.status))
 			.slice().sort((a, b) => a.target.localeCompare(b.target));
@@ -291,7 +319,7 @@
 	// other three are mosaics that had nowhere to appear at all.
 	const l4Rows = $derived(
 		(sentinel.rollup?.stages?.['L4-T1T2'] ?? [])
-			.slice().sort((a, b) => a.target.localeCompare(b.target))
+			.filter(shown).sort((a, b) => a.target.localeCompare(b.target))
 	);
 	const l4ByTarget = $derived.by(() => {
 		const out: Record<string, (typeof l4Rows)[number]> = {};
@@ -309,7 +337,7 @@
 	// asked of the rendered product rather than of the image.
 	const l3Rows = $derived(
 		(sentinel.rollup?.stages?.L3 ?? [])
-			.slice().sort((a, b) => a.target.localeCompare(b.target))
+			.filter(shown).sort((a, b) => a.target.localeCompare(b.target))
 	);
 
 	/** The newest value of one check's metric, or null when none has landed. */
@@ -385,7 +413,11 @@
 	// the count, it just stops occupying one of five scarce rows.
 	let showAcked = $state(false);
 
-	const ranking = $derived(rankAlarms(sentinel.alarms, { showAcked, limit: ALARM_ROWS }));
+	const keptAlarms = $derived(sentinel.alarms.filter(shown));
+	// The header keeps the true count, so the band says how much of it the
+	// source filters hold back. Without it a filtered band reads as a lie.
+	const filteredAlarmCount = $derived(sentinel.alarms.length - keptAlarms.length);
+	const ranking = $derived(rankAlarms(keptAlarms, { showAcked, limit: ALARM_ROWS }));
 	const shownAlarms   = $derived(ranking.shown);
 	const overflowCount = $derived(ranking.overflow);
 	const ackedCount    = $derived(ranking.acked);
@@ -471,6 +503,34 @@
      followed the tallest rail's content up and down the page as rows
      expanded and collapsed. -->
 <div class="flex h-full flex-col gap-2 p-2">
+<!-- Source filters. Each appears only where the backend classifies some
+     checks that way, so XQPI, which reads no RadarCA and watches no NEXRAD
+     radar, shows neither. -->
+{#if sourceCount.radarca > 0 || sourceCount.nexrad > 0}
+	<div data-dashboard-filters
+		class="flex shrink-0 items-center justify-end gap-4 px-1 text-[9.5px]">
+		{#if sourceCount.radarca > 0}
+			<label
+				data-hide-radarca
+				class="flex items-center gap-1 uppercase tracking-wider text-[var(--color-muted)]"
+				title={`Hide the ${sourceCount.radarca} checks whose readings come from RadarCA, from every rail and the alarm band. Pairs keep their backend half.`}
+			>
+				<input type="checkbox" bind:checked={hideRadarca} class="accent-[var(--color-ok)]" />
+				<span>hide RadarCA{hideRadarca ? ` (${sourceCount.radarca})` : ''}</span>
+			</label>
+		{/if}
+		{#if sourceCount.nexrad > 0}
+			<label
+				data-hide-nexrad
+				class="flex items-center gap-1 uppercase tracking-wider text-[var(--color-muted)]"
+				title={`Hide the ${sourceCount.nexrad} checks that watch a NEXRAD radar, from every rail and the alarm band. Their alarms never notify either way.`}
+			>
+				<input type="checkbox" bind:checked={hideNexrad} class="accent-[var(--color-ok)]" />
+				<span>hide NEXRAD{hideNexrad ? ` (${sourceCount.nexrad})` : ''}</span>
+			</label>
+		{/if}
+	</div>
+{/if}
 <div data-rails class="grid min-h-0 flex-1 grid-cols-12 items-start gap-2 overflow-y-auto">
 	<!-- RAIL 1: SITE ------------------------------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
@@ -947,6 +1007,11 @@
 		{#if sentinel.alarms.length}
 			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-faint)]">
 				<span>most severe first · top {ALARM_ROWS}</span>
+				{#if filteredAlarmCount}
+					<span data-alarms-filtered={filteredAlarmCount} class="text-[var(--color-muted)]">
+						{filteredAlarmCount} hidden by the source filters
+					</span>
+				{/if}
 				{#if ackedCount}
 					<label class="flex cursor-pointer items-center gap-1.5 text-[var(--color-muted)] hover:text-[var(--color-bright)]">
 						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 shrink-0 accent-[var(--color-ok)]" />
@@ -977,6 +1042,7 @@
 					: opened.toISOString().slice(11, 19) + 'Z'}
 				{@const isAcked = !!a.ack}
 				<li
+					data-alarm-row
 					class="row-hover sev-bar grid grid-cols-[2.5rem_6.5rem_3.5rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
 						''}"
 					title={isAcked ? `acked by ${a.ack?.acked_by} at ${a.ack?.acked_at}${a.ack?.note ? ' — ' + a.ack.note : ''}` : ''}
@@ -1035,13 +1101,19 @@
 			{#if !sentinel.alarms.length}
 				<li class="px-4 py-3 text-[12px] text-[var(--color-faint)]">no open alarms.</li>
 			{:else if !shownAlarms.length}
-				<!-- Open alarms exist but every one is acknowledged. Say so
-				     explicitly: "no open alarms" here would be a lie. -->
-				<li class="px-4 py-3 text-[12px] text-[var(--color-faint)]">
-					all {sentinel.alarms.length} open alarm{sentinel.alarms.length === 1 ? '' : 's'}
-					{sentinel.alarms.length === 1 ? 'is' : 'are'} acknowledged —
-					<button type="button" class="underline decoration-dotted hover:text-[var(--color-bright)]"
-					        onclick={() => (showAcked = true)}>show {sentinel.alarms.length === 1 ? 'it' : 'them'}</button>.
+				<!-- Open alarms exist but none has a row, because each is
+				     acknowledged or held back by a source filter. Say which,
+				     since "no open alarms" here would be a lie. -->
+				<li data-alarms-empty class="px-4 py-3 text-[12px] text-[var(--color-faint)]">
+					{#if ackedCount}
+						{ackedCount} open alarm{ackedCount === 1 ? ' is' : 's are'} acknowledged,
+						<button type="button" class="underline decoration-dotted hover:text-[var(--color-bright)]"
+						        onclick={() => (showAcked = true)}>show {ackedCount === 1 ? 'it' : 'them'}</button>.
+					{/if}
+					{#if filteredAlarmCount}
+						{filteredAlarmCount} open alarm{filteredAlarmCount === 1 ? ' is' : 's are'}
+						hidden by the source filters above.
+					{/if}
 				</li>
 			{/if}
 		</ul>
