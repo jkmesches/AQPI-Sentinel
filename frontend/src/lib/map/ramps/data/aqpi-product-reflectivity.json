@@ -7,6 +7,10 @@
  "scale": "linear",
  "source": "https://radarca.engr.colostate.edu/images/colormap_ref.png",
  "read_on": "2026-11-21",
+ "edges": "premultiplied",
+ "edges_measured": "2026-11-24, frames fetched from radarca. Of 160,874 comp_ref edge pixels (alpha 128 to 254, six frames 19:18 to 20:18Z), 4.0% sat within 3 of a stop as stored and 67.0% after dividing by alpha; of 61,061 comp_now edge pixels (three frames 20:28 to 21:08Z), 8.8% and 74.2%.",
+ "blends": "resampled",
+ "blends_measured": "2026-11-24, the same six comp_ref frames. Of 672,115 fully opaque pixels, 65.3% sat on a stop and 32.8% matched none but lay within 6 of a mix of two neighboring stops; 1.5% fit only a mix of stops further apart. The producer paints in bands and resamples after; a zoomed crop of the 19:54Z frame shows the mixes along the band edges.",
  "stops": [
   {
    "color": "#ccefff",

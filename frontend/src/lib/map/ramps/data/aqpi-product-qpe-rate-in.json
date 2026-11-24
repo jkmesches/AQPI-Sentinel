@@ -7,6 +7,8 @@
 	"scale": "log",
 	"source": "LinearSegmentedColormap.from_list(\"custom_cmap\", colors) with LogNorm(vmin=0.01, vmax=20), qpe_new.py on the C-band producer host; read by the AQPI Laptop session 2026-11-21. The same table as the accumulation products, which is what the renderer does: one colormap serves rain60min, rain15min and rainrate, and only the unit differs.",
 	"read_on": "2026-11-21",
+	"edges": "premultiplied",
+	"edges_measured": "2026-11-24, frames fetched from radarca. Of 5,031 precip_rate_radar edge pixels (alpha 128 to 254, three frames 19:32 to 20:12Z), 8.6% sat within 3 of a stop as stored and 97.0% after dividing by alpha.",
 	"built_from": {
 		"kind": "LinearSegmentedColormap.from_list",
 		"anchors": [

@@ -397,6 +397,17 @@ export function runTests(mod, ramps) {
       /quantis|quantiz/.test(hint), hint);
     check('a gradient scale has nothing to explain',
       readoutHint(gradient) === null);
+    check('and the hint says a blended pixel reads as both bands',
+      /blended/.test(hint) && /range of both/.test(hint), hint);
+
+    // A pixel mixing two bands' colors reads as the span of both, from the
+    // bottom of the lower band to the top of the upper one.
+    const blend = { value: 20, lo: 10, hi: 30, distance: 1.2, blend: true };
+    check('a blended pixel prints the span of its two bands',
+      readoutText(blocks, blend) === '10 to 30 dBZ', readoutText(blocks, blend));
+    const openBlend = { value: 5, lo: 0, hi: 20, distance: 1, blend: true, open: 'below' };
+    check('...and keeps an open end open',
+      readoutText(blocks, openBlend) === 'below 20 dBZ', readoutText(blocks, openBlend));
   }
 
   console.log(failures.length

@@ -7,6 +7,8 @@
  "scale": "linear",
  "source": "https://radarca.engr.colostate.edu/images/colormap_depth_ft.png",
  "read_on": "2026-11-21",
+ "edges": "premultiplied",
+ "edges_measured": "2026-11-24, frames fetched from radarca. Of 62,370 water_depth edge pixels (alpha 128 to 254, three frames for 2026-11-24 18:00 to 11-25 06:00), 5.6% sat within 3 of a stop as stored and 47.1% after dividing by alpha.",
  "stops": [
   {
    "color": "#2a2a2a",

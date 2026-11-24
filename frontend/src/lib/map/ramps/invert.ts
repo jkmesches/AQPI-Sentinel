@@ -94,6 +94,31 @@ export interface Ramp {
 	 * legend places them from the measurement rather than from a rule.
 	 */
 	ticks?: { value: number; fraction: number }[];
+	/**
+	 * How the producer stores a partly transparent pixel.
+	 *
+	 * "premultiplied" means it wrote the color already multiplied by its
+	 * alpha, though PNG holds straight alpha, so an edge pixel reads back
+	 * darkened and matches no stop until the alpha is divided out. Set from
+	 * a measurement of real frames, recorded in `edges_measured`. Absent
+	 * means a pixel is read as stored.
+	 */
+	edges?: 'premultiplied';
+	/** The frames and numbers `edges` was set from. */
+	edges_measured?: string;
+	/**
+	 * Whether the producer resamples after painting, so that where two
+	 * bands meet a pixel mixes their colors.
+	 *
+	 * "resampled" lets `invert` read such a pixel as the span of the two
+	 * bands. Set from a measurement of real frames, recorded in
+	 * `blends_measured`. Absent means a color off every stop is off the
+	 * scale: a producer that paints each band in one exact color, as the
+	 * radar renderers do, leaves nothing between them but linework.
+	 */
+	blends?: 'resampled';
+	/** The frames and numbers `blends` was set from. */
+	blends_measured?: string;
 	/** Where the colorbar was read from. */
 	source: string;
 	/** The date it was read, ISO 8601. */
@@ -164,6 +189,60 @@ export function colorDistance(a: Rgb, b: Rgb): number {
 	return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
 }
 
+/** Whether a ramp paints in blocks or as a gradient. */
+export type RampKind = 'discrete' | 'continuous';
+
+/**
+ * Median adjacent-stop distance above which a ramp is painted in blocks.
+ *
+ * Measured over FLOW's four colorbars on 2026-11-21. The three continuous
+ * bars are sampled from a gradient and step by 13 to 17 between neighbors,
+ * medians 14 to 15, because extract_ramp.py starts a new stop once the color
+ * moves past its BLOCK_TOLERANCE of 12. Reflectivity is painted in blocks and
+ * its median step is 148, with no single step under 24.
+ *
+ * 20 sits above the continuous maximum of 17 and below the smallest discrete
+ * step of 24. The median rather than the minimum is the test, since a
+ * discrete bar may put two similar blocks side by side, as reflectivity does
+ * at #d30000 and #bb0000.
+ */
+export const DISCRETE_MEDIAN_STEP = 20;
+
+/**
+ * Typical color distance between neighboring stops.
+ *
+ * @param ramp The table to measure.
+ * @returns The median summed channel distance, or 0 for a single stop.
+ * @raises RangeError If the ramp carries no stops.
+ */
+export function medianAdjacentStep(ramp: Ramp): number {
+	if (ramp.stops.length === 0) throw new RangeError('ramp carries no stops');
+	if (ramp.stops.length === 1) return 0;
+	const steps: number[] = [];
+	for (let i = 1; i < ramp.stops.length; i++) {
+		steps.push(colorDistance(
+			parseHex(ramp.stops[i - 1].color), parseHex(ramp.stops[i].color)));
+	}
+	steps.sort((a, b) => a - b);
+	const mid = Math.floor(steps.length / 2);
+	return steps.length % 2 === 1
+		? steps[mid]
+		: (steps[mid - 1] + steps[mid]) / 2;
+}
+
+/**
+ * How a ramp should be drawn, and whether its stops are bands.
+ *
+ * @param ramp The table to classify.
+ * @returns 'discrete' for a bar painted in blocks, 'continuous' otherwise.
+ * @raises RangeError If the ramp carries no stops.
+ */
+export function rampKind(ramp: Ramp): RampKind {
+	return medianAdjacentStep(ramp) >= DISCRETE_MEDIAN_STEP
+		? 'discrete'
+		: 'continuous';
+}
+
 /** A value read back from a pixel, with how well the color matched. */
 export interface Reading {
 	value: number;
@@ -174,6 +253,11 @@ export interface Reading {
 	distance: number;
 	/** Set when the matched stop is open past one end of the scale. */
 	open?: 'below' | 'above';
+	/**
+	 * Set when the pixel mixes two stops' colors, and `lo` to `hi` then
+	 * spans both of their bands.
+	 */
+	blend?: true;
 	/**
 	 * The other bands painted in exactly the matched color, ascending.
 	 *
@@ -193,38 +277,375 @@ export interface Reading {
  * of the radar's coverage. A readout that guessed instead would put a
  * confident dBZ on a road name.
  *
+ * On a ramp whose producer resamples, a pixel that matches no stop may
+ * mix two neighboring bands, and reads as the span of both when nothing
+ * else fits (see `blendReading`). On a ramp whose producer premultiplies
+ * its edges, a partly transparent pixel read exactly is divided by its
+ * alpha first.
+ *
  * @param ramp The moment's table.
  * @param rgb The pixel.
  * @param alpha The pixel's alpha, where available. Below TRANSPARENT_ALPHA
  *     the pixel is outside coverage and reads as null.
+ * @param options Whether the pixel holds the file's own bytes.
  * @returns The reading, or null.
  */
 export function invert(
 	ramp: Ramp,
 	rgb: Rgb,
-	alpha: number = 255
+	alpha: number = 255,
+	options: InvertOptions = {}
 ): Reading | null {
 	if (alpha <= TRANSPARENT_ALPHA) return null;
-	let best: RampStop | null = null;
+	const recovered = ramp.edges === 'premultiplied' && alpha < 255;
+	// Read as stored, a premultiplied edge is darker than its band and can
+	// sit on a darker band's color: the composite's 20 to 25 dBZ green at
+	// alpha 200 lands within 3 of its 25 to 30 green. A canvas readback rounds
+	// it past any stated bound, so without the file's bytes it reads as
+	// nothing.
+	if (recovered && options.exact !== true) return null;
+	const color = recovered ? unpremultiply(rgb, alpha) : rgb;
+	const spread = summedError(channelError(alpha, recovered));
+	// A solid pixel keeps the stop test it has always had, whose tolerance
+	// already absorbs one write. Only a recovered color carries more.
+	const margin = recovered ? spread : 0;
+	return stopReading(ramp, color, margin)
+		?? blendReading(ramp, color, spread, margin);
+}
+
+/**
+ * The most a producer's 8-bit write moves one channel, in channel units.
+ *
+ * One rather than a half, because the composite producer truncates. Of
+ * 250,107 pixels in six comp_ref frames of 2026-11-24 that sat between two
+ * stops, 75.2% lay within the round-to-nearest bound of the nearest
+ * two-stop mix and 97.6% within the bound this sets.
+ */
+export const WRITE_ERROR = 1;
+
+/** How `invert` should treat the pixel it is given. */
+export interface InvertOptions {
+	/**
+	 * Whether the pixel holds the file's own bytes.
+	 *
+	 * A 2D canvas stores premultiplied color and rounds a partly
+	 * transparent pixel on the way back out, by up to 75 summed channel
+	 * units at the faintest edges of one comp_ref frame in Firefox. A
+	 * premultiplied edge is recovered only from exact bytes, where the
+	 * producer's own writes are the only error left to bound.
+	 */
+	exact?: boolean;
+}
+
+/**
+ * How far a pixel's color may sit from the color its producer meant, per
+ * channel.
+ *
+ * A solid pixel carries one write. A color recovered from a premultiplied
+ * edge carries two, the color and the alpha, and dividing by the alpha
+ * scales both by 255 over it: the color's error directly, and the alpha's
+ * through the channel it divides, which is at most 255.
+ *
+ * @param alpha The pixel's alpha, above TRANSPARENT_ALPHA.
+ * @param recovered Whether the color was divided by its alpha.
+ * @returns The bound in channel units.
+ */
+export function channelError(alpha: number, recovered: boolean): number {
+	return recovered ? 2 * WRITE_ERROR * (255 / alpha) : WRITE_ERROR;
+}
+
+/**
+ * The summed channel distance a per-channel error allows.
+ *
+ * It bounds how far a recovered color sits from the one its producer meant.
+ * It also bounds how far a mixed pixel sits from the segment between its two
+ * stops: an error of e per channel moves a color at most e√3 in straight
+ * line, so the segment's nearest point is no further, and the summed
+ * distance to that point is at most √3 times that.
+ *
+ * @param perChannel The bound per channel.
+ * @returns Three times it.
+ */
+export function summedError(perChannel: number): number {
+	return 3 * perChannel;
+}
+
+/**
+ * The color a premultiplied pixel was painted in, before its alpha.
+ *
+ * Left unrounded, since the error bound is stated in these units.
+ *
+ * @param rgb The stored channels.
+ * @param alpha Its alpha, above TRANSPARENT_ALPHA.
+ * @returns The channels divided by alpha, at most 255.
+ */
+function unpremultiply(rgb: Rgb, alpha: number): Rgb {
+	const k = 255 / alpha;
+	return [
+		Math.min(255, rgb[0] * k),
+		Math.min(255, rgb[1] * k),
+		Math.min(255, rgb[2] * k)
+	];
+}
+
+/** Each ramp's stop colors, parsed once per table. */
+const STOP_COLORS = new WeakMap<Ramp, Rgb[]>();
+
+/**
+ * A ramp's stop colors as channels.
+ *
+ * @param ramp The table.
+ * @returns One triple per stop, in table order.
+ */
+function stopColors(ramp: Ramp): Rgb[] {
+	let out = STOP_COLORS.get(ramp);
+	if (out === undefined) {
+		out = ramp.stops.map((s) => parseHex(s.color));
+		STOP_COLORS.set(ramp, out);
+	}
+	return out;
+}
+
+/**
+ * The stop a color is, when it is one.
+ *
+ * The nearest stop within its tolerance, as the readout has always read.
+ * A margin widens that for a color carrying more error than a solid
+ * pixel: every color the margin allows must fall inside the stop's
+ * tolerance and read the same, or the answer would turn on an error the
+ * pixel cannot show.
+ *
+ * @param ramp The table.
+ * @param color The pixel, recovered where its edge was premultiplied.
+ * @param margin The summed error beyond a solid pixel's, 0 for one.
+ * @returns The reading, or null.
+ */
+function stopReading(ramp: Ramp, color: Rgb, margin: number): Reading | null {
+	const colors = stopColors(ramp);
+	let best = -1;
 	let bestDistance = Infinity;
-	let bestIndex = -1;
-	for (const [i, stop] of ramp.stops.entries()) {
-		const d = colorDistance(rgb, parseHex(stop.color));
+	for (let i = 0; i < colors.length; i++) {
+		const d = colorDistance(color, colors[i]);
 		if (d < bestDistance) {
 			bestDistance = d;
-			best = stop;
-			bestIndex = i;
+			best = i;
 		}
 		if (d === 0) break;
 	}
-	if (!best || bestDistance > toleranceAt(ramp, bestIndex)) return null;
+	if (best < 0 || bestDistance + margin > toleranceAt(ramp, best)) return null;
+	if (margin > 0) {
+		// A color within the margin of this one has its nearest stop within
+		// twice the margin of the nearest here.
+		const reach = bestDistance + 2 * margin;
+		for (let i = 0; i < colors.length; i++) {
+			if (colorDistance(color, colors[i]) <= reach && !sameReading(ramp, best, i)) {
+				return null;
+			}
+		}
+	}
+	const stop = ramp.stops[best];
 	const reading: Reading = {
-		value: best.value, lo: best.lo, hi: best.hi, distance: bestDistance
+		value: stop.value, lo: stop.lo, hi: stop.hi, distance: bestDistance
 	};
-	if (best.open) reading.open = best.open;
-	const also = sharedBands(ramp, bestIndex);
+	if (stop.open) reading.open = stop.open;
+	const also = sharedBands(ramp, best);
 	if (also.length) reading.also = also;
 	return reading;
+}
+
+/** Each ramp's discreteness, computed once per table. */
+const KINDS = new WeakMap<Ramp, RampKind>();
+
+/**
+ * Whether two stops say the same thing to a reader.
+ *
+ * The same color always does. On a continuous ramp two values within the
+ * snap budget do, since that is how far a snapped match may be wrong. On a
+ * discrete ramp only the same band does.
+ *
+ * @param ramp The table.
+ * @param i One stop.
+ * @param j The other.
+ * @returns Whether a reading of either would print the same.
+ */
+function sameReading(ramp: Ramp, i: number, j: number): boolean {
+	const a = ramp.stops[i];
+	const b = ramp.stops[j];
+	if (a.color.toLowerCase() === b.color.toLowerCase()) return true;
+	if (cachedKind(ramp) === 'continuous') {
+		return Math.abs(a.value - b.value)
+			<= Math.abs(ramp.max - ramp.min) * SNAP_BUDGET;
+	}
+	return a.lo === b.lo && a.hi === b.hi && a.open === b.open;
+}
+
+/**
+ * `rampKind`, remembered per table.
+ *
+ * @param ramp The table.
+ * @returns Its kind.
+ */
+function cachedKind(ramp: Ramp): RampKind {
+	let kind = KINDS.get(ramp);
+	if (kind === undefined) {
+		kind = rampKind(ramp);
+		KINDS.set(ramp, kind);
+	}
+	return kind;
+}
+
+/** Two stops whose colors a pixel may mix, and what the mix stands for. */
+interface MixPair {
+	/** The first stop's color. */
+	from: Rgb;
+	/** The second stop's color less the first's. */
+	step: Rgb;
+	/** The step's squared length. */
+	length2: number;
+	/** Both stops' bands as one, or null when it is open at both ends. */
+	span: Band | null;
+	/** Whether the two stops are neighbors on the scale. */
+	adjacent: boolean;
+}
+
+/** Each discrete ramp's pairs, built once per table. */
+const MIX_PAIRS = new WeakMap<Ramp, MixPair[]>();
+
+/**
+ * Every pair of differently colored stops on a ramp.
+ *
+ * @param ramp The table.
+ * @returns The pairs, each once.
+ */
+function mixPairs(ramp: Ramp): MixPair[] {
+	const cached = MIX_PAIRS.get(ramp);
+	if (cached !== undefined) return cached;
+	const colors = stopColors(ramp);
+	const out: MixPair[] = [];
+	for (let i = 0; i < colors.length; i++) {
+		for (let j = i + 1; j < colors.length; j++) {
+			const step: Rgb = [
+				colors[j][0] - colors[i][0],
+				colors[j][1] - colors[i][1],
+				colors[j][2] - colors[i][2]
+			];
+			const length2 = step[0] ** 2 + step[1] ** 2 + step[2] ** 2;
+			if (length2 === 0) continue;
+			out.push({ from: colors[i], step, length2,
+			           span: spanOf(ramp.stops[i], ramp.stops[j]), adjacent: j === i + 1 });
+		}
+	}
+	MIX_PAIRS.set(ramp, out);
+	return out;
+}
+
+/**
+ * Two stops' bands as one range.
+ *
+ * @param s One stop.
+ * @param t The other.
+ * @returns The range from the lower bottom to the higher top, open where
+ *     the stop at that end is, or null when it would be open at both ends
+ *     and no band could say it.
+ */
+function spanOf(s: RampStop, t: RampStop): Band | null {
+	const low = s.lo <= t.lo ? s : t;
+	const high = s.hi >= t.hi ? s : t;
+	const below = low.open === 'below';
+	const above = high.open === 'above';
+	if (below && above) return null;
+	const band: Band = { lo: low.lo, hi: high.hi };
+	if (below) band.open = 'below';
+	if (above) band.open = 'above';
+	return band;
+}
+
+/**
+ * Summed channel distance from a color to the nearest mix of a pair.
+ *
+ * The nearest mix in straight-line distance, which is the point
+ * `summedError` bounds.
+ *
+ * @param color The pixel.
+ * @param pair The two stops.
+ * @returns The distance.
+ */
+function distanceToMix(color: Rgb, pair: MixPair): number {
+	const { from, step } = pair;
+	const along = ((color[0] - from[0]) * step[0] + (color[1] - from[1]) * step[1]
+		+ (color[2] - from[2]) * step[2]) / pair.length2;
+	const t = Math.min(1, Math.max(0, along));
+	return Math.abs(color[0] - (from[0] + t * step[0]))
+		+ Math.abs(color[1] - (from[1] + t * step[1]))
+		+ Math.abs(color[2] - (from[2] + t * step[2]));
+}
+
+/**
+ * The span of two neighboring bands a pixel mixes, when nothing else fits.
+ *
+ * The composite producer paints in bands and then resamples the image,
+ * so where two bands meet a pixel takes a weighted mix of both colors.
+ * Its value lies somewhere across the two bands. The weight says where
+ * the pixel sat between two cells, not what either cell held, so the
+ * reading is the whole span and never a value interpolated inside it.
+ *
+ * Only on a ramp whose producer was measured to resample (`blends`), and
+ * only a discrete one, whose stops are bands. A continuous ramp's
+ * neighbors are already within its tolerance, and a pixel far from all of
+ * them is off the ramp rather than between two of its hundreds of stops.
+ *
+ * Only neighboring bands. A pixel near the mix of two bands further apart
+ * is as likely three or more bands mixed, or linework, and the mix of a
+ * blue and a red passes within 3 of the composite's purples: read as a
+ * span it printed "10 to 65 dBZ" over a -15 to -5 dBZ color.
+ *
+ * Every pair whose mix comes within the radius could have made the pixel,
+ * neighbors or not. Exactly one may, and no stop may be within its own
+ * tolerance plus the margin, or the readout would be choosing among
+ * answers the pixel cannot tell apart.
+ *
+ * @param ramp The table.
+ * @param color The pixel, recovered where its edge was premultiplied.
+ * @param radius The summed error a mix may carry.
+ * @param margin The summed error beyond a solid pixel's, 0 for one.
+ * @returns The reading, or null.
+ */
+function blendReading(
+	ramp: Ramp, color: Rgb, radius: number, margin: number
+): Reading | null {
+	if (ramp.blends !== 'resampled' || cachedKind(ramp) !== 'discrete') return null;
+	const colors = stopColors(ramp);
+	for (let i = 0; i < colors.length; i++) {
+		if (colorDistance(color, colors[i]) <= toleranceAt(ramp, i) + margin) return null;
+	}
+	let found: Band | null = null;
+	let nearest = Infinity;
+	for (const pair of mixPairs(ramp)) {
+		const d = distanceToMix(color, pair);
+		if (d > radius) continue;
+		if (!pair.adjacent || pair.span === null) return null;
+		if (found !== null && !sameBand(found, pair.span)) return null;
+		found = pair.span;
+		nearest = Math.min(nearest, d);
+	}
+	if (found === null) return null;
+	const reading: Reading = {
+		value: (found.lo + found.hi) / 2, lo: found.lo, hi: found.hi,
+		distance: nearest, blend: true
+	};
+	if (found.open) reading.open = found.open;
+	return reading;
+}
+
+/**
+ * Whether two bands are the same range.
+ *
+ * @param a One band.
+ * @param b The other.
+ * @returns True when both bounds and the open side agree.
+ */
+function sameBand(a: Band, b: Band): boolean {
+	return a.lo === b.lo && a.hi === b.hi && a.open === b.open;
 }
 
 /**

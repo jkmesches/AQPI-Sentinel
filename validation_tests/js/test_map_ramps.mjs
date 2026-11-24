@@ -18,7 +18,7 @@ export function runTests(mod, ramps) {
   const {
     invert, parseHex, colorDistance, selfCoverage,
     MATCH_TOLERANCE, TRANSPARENT_ALPHA, toleranceFor, toleranceAt,
-    SNAP_BUDGET
+    SNAP_BUDGET, WRITE_ERROR, channelError, summedError
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -367,6 +367,177 @@ export function runTests(mod, ramps) {
     check('velocity resolves near a metre per second',
       (vel.stops[5].hi - vel.stops[5].lo) < 1.5,
       (vel.stops[5].hi - vel.stops[5].lo).toFixed(2));
+  }
+
+  // The composite producer paints in bands and then resamples, so where two
+  // bands meet a pixel mixes both colors. Measured on 2026-11-24: 33% of
+  // comp_ref's solid pixels were such mixes and read "not on this scale".
+  const comp = ramps['aqpi-product-reflectivity'];
+  const rgbOf = (hex) => parseHex(hex);
+  // A mix as the producer writes it: weighted, then truncated to 8 bits.
+  const mix = (a, b, w) => a.map((c, i) => Math.floor((1 - w) * c + w * b[i]));
+  const band = (r) => (r ? `${r.lo} to ${r.hi}${r.open ? ` ${r.open}` : ''}` : 'null');
+  const blocks = (stops, extra = {}) => ({
+    moment: 'Test', unit: 'u', label: 'T [u]', min: 0, max: 40,
+    source: 'synthetic', read_on: '2026-11-24', blends: 'resampled', stops, ...extra
+  });
+
+  console.log('\na pixel between two bands reads as the span of both:');
+  {
+    const cyan = comp.stops[7];
+    const blue = comp.stops[8];
+    const half = invert(comp, mix(rgbOf(cyan.color), rgbOf(blue.color), 0.5));
+    check('a half mix of 5 to 10 and 10 to 15 dBZ spans both',
+      half?.blend === true && half.lo === cyan.lo && half.hi === blue.hi, band(half));
+    // The weight says where the pixel sat between two cells, not what
+    // either held, so no value inside the span is singled out.
+    const third = invert(comp, mix(rgbOf(cyan.color), rgbOf(blue.color), 0.3));
+    check('...and so does a mix weighted toward one of them',
+      third?.blend === true && third.lo === half.lo && third.hi === half.hi, band(third));
+    const slight = invert(comp, mix(rgbOf(cyan.color), rgbOf(blue.color), 0.02));
+    check('a trace of the neighbor still reads the band it is mostly',
+      slight !== null && !slight.blend && slight.lo === cyan.lo, band(slight));
+    // Further apart, a mix is as likely three bands or linework. The red
+    // team's case: a blue and red mix passes within 3 of the purples.
+    const green = comp.stops[10];
+    const wide = invert(comp, mix(rgbOf(blue.color), rgbOf(green.color), 0.5));
+    check('a mix of bands further apart reads as nothing', wide === null, band(wide));
+    check('a purple near a blue and red mix is not read as 10 to 65 dBZ',
+      invert(comp, [107, 63, 107]) === null, band(invert(comp, [107, 63, 107])));
+    const plain = { ...comp };
+    delete plain.blends;
+    check('a ramp not measured to resample reads no mixes',
+      invert(plain, mix(rgbOf(cyan.color), rgbOf(blue.color), 0.5)) === null,
+      band(invert(plain, mix(rgbOf(cyan.color), rgbOf(blue.color), 0.5))));
+  }
+
+  console.log('\na mix is read only inside the write error, and only one way:');
+  {
+    const s = blocks([
+      { color: '#640000', value: 5, lo: 0, hi: 10 },
+      { color: '#006400', value: 15, lo: 10, hi: 20 },
+      { color: '#646400', value: 25, lo: 20, hi: 30 },
+      { color: '#000000', value: 35, lo: 30, hi: 40 }
+    ]);
+    check('a truncated write moves a mix at most 3 summed',
+      summedError(channelError(255, false)) === 3 * WRITE_ERROR,
+      String(summedError(channelError(255, false))));
+    // #640000 to #006400 and #646400 to #000000 cross at (50, 50, 0).
+    check('where two mixes cross, the pixel reads as nothing',
+      invert(s, [50, 50, 0]) === null, band(invert(s, [50, 50, 0])));
+    // Kept a neighbor of #640000, so the mix is one the rule may read.
+    const lone = blocks([s.stops[0], s.stops[1],
+      { color: '#ffffff', value: 25, lo: 20, hi: 30 }]);
+    check('with one mix there, it reads',
+      invert(lone, [50, 50, 0])?.blend === true, band(invert(lone, [50, 50, 0])));
+    check('3 off the mix still reads',
+      invert(lone, [50, 50, 3]) !== null, band(invert(lone, [50, 50, 3])));
+    check('4 off it does not', invert(lone, [50, 50, 4]) === null,
+      band(invert(lone, [50, 50, 4])));
+    const ends = blocks([
+      { color: '#640000', value: -5, lo: -10, hi: 0, open: 'below' },
+      { color: '#006400', value: 45, lo: 40, hi: 50, open: 'above' }
+    ]);
+    check('a mix open at both ends says nothing',
+      invert(ends, [50, 50, 0]) === null, band(invert(ends, [50, 50, 0])));
+    const open = blocks([ends.stops[0], s.stops[1],
+      { color: '#ffffff', value: 25, lo: 20, hi: 30 }]);
+    const below = invert(open, [50, 50, 0]);
+    check('a mix with the open bottom band keeps it open',
+      below?.open === 'below' && below.hi === 20, band(below));
+  }
+
+  console.log('\na gradient has no mixes, only its own stops:');
+  {
+    const a = rgbOf(vel.stops[3].color);
+    const b = rgbOf(vel.stops[50].color);
+    const m = mix(a, b, 0.5);
+    check('a color between two far velocity stops is not read as a span',
+      invert(vel, m)?.blend !== true, band(invert(vel, m)));
+    // Sixty stops one red step apart, then two lone ones. (0, 100, 100)
+    // lies on the mix of the lone pair and no other, so only the ramp's
+    // kind keeps it from reading as their span.
+    const red = Array.from({ length: 60 }, (_, i) => ({
+      color: `#${i.toString(16).padStart(2, '0')}0000`, value: i, lo: i, hi: i + 1
+    }));
+    const lone = blocks([...red,
+      { color: '#00c800', value: 70, lo: 70, hi: 71 },
+      { color: '#0000c8', value: 80, lo: 80, hi: 81 }], { max: 81 });
+    check('even a color only one mix explains is off a gradient',
+      invert(lone, [0, 100, 100]) === null, band(invert(lone, [0, 100, 100])));
+  }
+
+  // The radarca products write an edge pixel's color already multiplied by
+  // its alpha. Read as stored it is darker than its band, and the composite's
+  // 20 to 25 dBZ green there lands on its 25 to 30 green.
+  const premult = (rgb, a) => rgb.map((c) => Math.floor((c * a) / 255));
+  const unflagged = { ...comp };
+  delete unflagged.edges;
+
+  console.log('\na premultiplied edge is divided out, from exact bytes only:');
+  {
+    const lime = comp.stops[10];
+    const edge = premult(rgbOf(lime.color), 200);
+    const asStored = invert(unflagged, edge, 200);
+    check('read as stored, the lime edge reads one band too high',
+      asStored?.lo === comp.stops[11].lo, band(asStored));
+    const exact = invert(comp, edge, 200, { exact: true });
+    check('divided out, it reads its own band',
+      exact?.lo === lime.lo && !exact.blend, band(exact));
+    check('from a rounded canvas readback it reads nothing',
+      invert(comp, edge, 200) === null, band(invert(comp, edge, 200)));
+    const faint = premult(rgbOf(lime.color), 20);
+    check('at alpha 20 the error is too wide to name a band',
+      invert(comp, faint, 20, { exact: true }) === null,
+      band(invert(comp, faint, 20, { exact: true })));
+    check('a solid pixel is read the same either way',
+      band(invert(comp, rgbOf(lime.color), 255, { exact: true }))
+        === band(invert(comp, rgbOf(lime.color), 255)));
+    check('dividing by alpha scales both writes by 255 over it',
+      Math.abs(channelError(128, true) - 2 * WRITE_ERROR * 255 / 128) < 1e-9,
+      String(channelError(128, true)));
+  }
+
+  console.log('\na recovered color reads a band only if its whole error does:');
+  {
+    // Stored (66, 66, 67) at alpha 170 recovers as (99, 99, 100.5), 1.5 from
+    // the first stop, with a summed error of 9 either way.
+    const near = blocks([
+      { color: '#636363', value: 5, lo: 0, hi: 10 },
+      { color: '#636370', value: 15, lo: 10, hi: 20 }
+    ], { edges: 'premultiplied' });
+    const far = blocks([near.stops[0],
+      { color: '#63638c', value: 15, lo: 10, hi: 20 }], { edges: 'premultiplied' });
+    check('with the next band 13 away, the error could reach it: nothing',
+      invert(near, [66, 66, 67], 170, { exact: true }) === null,
+      band(invert(near, [66, 66, 67], 170, { exact: true })));
+    check('with it 41 away, the band holds',
+      invert(far, [66, 66, 67], 170, { exact: true })?.lo === 0,
+      band(invert(far, [66, 66, 67], 170, { exact: true })));
+  }
+
+  console.log('\nthe premultiplied ramps are the measured ones, and say so:');
+  {
+    const flagged = all.filter(([, r]) => r.edges).map(([n]) => n).sort();
+    const measured = ['aqpi-product-qpe-in', 'aqpi-product-qpe-rate-in',
+      'aqpi-product-reflectivity', 'aqpi-product-water-depth',
+      'aqpi-product-water-level'];
+    // A regenerated ramp file drops a hand-set field, and the readout would
+    // go back to reading darkened edges as stored without a word.
+    check('exactly the five measured ramps are flagged',
+      JSON.stringify(flagged) === JSON.stringify(measured), flagged.join(', '));
+    for (const [name, r] of all.filter(([, x]) => x.edges)) {
+      check(`${name} says what it was measured on`,
+        r.edges === 'premultiplied' && /^\d{4}-\d{2}-\d{2}, /.test(r.edges_measured ?? ''),
+        String(r.edges_measured).slice(0, 40));
+    }
+    // Every other discrete ramp's frames read back in full, so nothing in
+    // them lies between two stops but linework.
+    const blending = all.filter(([, r]) => r.blends).map(([n]) => n);
+    check('only the composite is read for mixes, the one measured to resample',
+      blending.join() === 'aqpi-product-reflectivity'
+        && comp.blends === 'resampled' && /^\d{4}-\d{2}-\d{2}, /.test(comp.blends_measured ?? ''),
+      blending.join(', '));
   }
 
   console.log(failures.length

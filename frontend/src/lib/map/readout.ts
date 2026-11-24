@@ -238,9 +238,11 @@ export function readoutFor(
 export function readoutHint(ramp: Ramp): string | null {
 	if (rampKind(ramp) === 'continuous') return null;
 	return `This overlay is painted in ${ramp.stops.length} bands, so a `
-		+ 'pixel says which band it is in. The producer quantized the '
-		+ 'field into those colors before publishing it, and a single '
-		+ 'number here would be precision the picture does not carry.';
+		+ 'pixel says which band it is in. Where the producer blended two '
+		+ 'bands at their edge, a pixel reads as the range of both. The '
+		+ 'producer quantized the field into those colors before publishing '
+		+ 'it, and a single number here would be precision the picture does '
+		+ 'not carry.';
 }
 
 /**

@@ -23,7 +23,12 @@
 		"which says the table is the right one, and unmatched colors then read",
 		"as nothing rather than as a wrong number.",
 		"",
-		"Measured on 2026-11-21 against the test deployment."
+		"Measured on 2026-11-21 against the test deployment. A row with its own",
+		"measured_on was measured again after the readout learned to read a",
+		"pixel that mixes two bands and an edge its producer stored",
+		"premultiplied (invert.ts), against frames fetched from radarca that",
+		"day; its note, or its remeasure field where the note is the build",
+		"record, gives the earlier rule's share on the same frames."
 	],
 	"measured_on": "2026-11-21",
 	"tool": "validation_tests/visual/extract_ramp.py, check_ramp_ticks.py, ramp_coverage.py",
@@ -33,20 +38,22 @@
 			"unit": null,
 			"ramp": "aqpi-product-reflectivity",
 			"frames": 3,
-			"pixels": 33.064,
+			"pixels": 83.462,
+			"measured_on": "2026-11-24",
 			"exact_common": true,
 			"covered": true,
-			"note": "Nowcast of the same field, published from the same colormap."
+			"note": "Nowcast of the same field, published from the same colormap. Three frames 20:28 to 21:08Z: 83.5% reads back, against 56.2% by the earlier rule on the same frames. 21.4% of painted area reads as the span of two neighboring bands, and 42.7% of the partly transparent pixels read once divided by alpha."
 		},
 		{
 			"product": "comp_ref",
 			"unit": null,
 			"ramp": "aqpi-product-reflectivity",
-			"frames": 3,
-			"pixels": 33.064,
+			"frames": 6,
+			"pixels": 75.327,
+			"measured_on": "2026-11-24",
 			"exact_common": true,
 			"covered": true,
-			"note": "The frame's commonest colors sit on stops at distance 0. The rest is coastline drawn into the image and one-unit noise around each stop."
+			"note": "The frame's commonest colors sit on stops at distance 0. Six frames 19:18 to 20:18Z: 75.3% reads back, against 46.4% by the earlier rule on the same frames. Most of what the earlier rule missed was not noise: 33% of the solid pixels mix two bands, where the producer resampled after painting, and 31% of all painted pixels are partly transparent edges stored premultiplied. 21.1% of painted area now reads as the span of two neighboring bands, and 35.0% of the edge pixels read once divided by alpha. The rest is coastline, mixes of bands further apart, and edges too faint to read within the write error."
 		},
 		{
 			"product": "fcst_precip_rate",
@@ -113,48 +120,57 @@
 			"unit": null,
 			"ramp": "aqpi-product-water-depth",
 			"frames": 1,
-			"pixels": 92.38,
+			"pixels": 92.677,
+			"measured_on": "2026-11-24",
 			"exact_common": true,
-			"covered": true
+			"covered": true,
+			"note": "The 2026-11-24 18:00 frame: 92.7% reads back, against 92.6% by the earlier rule on the same frame."
 		},
 		{
 			"product": "max_water_level",
 			"unit": null,
 			"ramp": "aqpi-product-water-level",
 			"frames": 1,
-			"pixels": 95.321,
+			"pixels": 96.166,
+			"measured_on": "2026-11-24",
 			"exact_common": false,
 			"covered": true,
-			"note": "The same ramp and the same renderer; plot_max_water_level.py:89 carries a colour block that is byte-identical to the level one."
+			"note": "The same ramp and the same renderer; plot_max_water_level.py:89 carries a colour block that is byte-identical to the level one. The 2026-11-24 18:00 frame: 96.2% reads back, against 95.1% by the earlier rule on the same frame."
 		},
 		{
 			"product": "precip_rate_radar",
 			"unit": "in/h",
 			"ramp": "aqpi-product-qpe-rate-in",
-			"frames": 4,
-			"pixels": 78.028,
+			"frames": 3,
+			"pixels": 39.435,
+			"measured_on": "2026-11-24",
 			"exact_common": false,
 			"covered": true,
+			"remeasure": "Three frames 19:32 to 20:12Z, light rain, 94.8% of whose painted pixels are partly transparent edges stored premultiplied: 39.4% reads back, against 17.6% by the earlier rule on the same frames. The share depends on how much of a frame is edge, which is why it sits below the 2026-11-21 figure of 78.0%.",
 			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The same table as the accumulation products with the unit changed, because the renderer uses one colormap for all three and only the label differs; a rate reported in inches is a rate reported wrong. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. These three are unsmoothed: qpe_new.py imports gaussian_filter and never calls it, so the shortfall is resampling alone. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
 		},
 		{
 			"product": "qpe_15min",
 			"unit": "in",
 			"ramp": "aqpi-product-qpe-in",
-			"frames": 4,
-			"pixels": 79.857,
+			"frames": 3,
+			"pixels": 54.264,
+			"measured_on": "2026-11-24",
 			"exact_common": false,
 			"covered": true,
+			"remeasure": "Three frames 19:32 to 20:12Z, 77.6% of whose painted pixels are partly transparent edges stored premultiplied: 54.3% reads back, against 28.1% by the earlier rule on the same frames. The 2026-11-21 figure of 79.9% came from frames with less edge.",
 			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. These three are unsmoothed: qpe_new.py imports gaussian_filter and never calls it, so the shortfall is resampling alone. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
 		},
 		{
 			"product": "qpe_1hr",
 			"unit": "in",
 			"ramp": "aqpi-product-qpe-in",
-			"frames": 4,
-			"pixels": 81.05,
+			"frames": 3,
+			"pixels": 53.398,
+			"measured_on": "2026-11-24",
 			"exact_common": false,
 			"covered": true,
+			"remeasure": "Three frames 19:32 to 20:12Z, 78.7% of whose painted pixels are partly transparent edges stored premultiplied: 53.4% reads back, against 27.1% by the earlier rule on the same frames. The 2026-11-21 figure of 81.1% came from frames with less edge.",
 			"note": "Built from the renderer's own colormap: the same 12 anchors as the forecast rate but LinearSegmentedColormap.from_list with no N, so 256 entries, under LogNorm(0.01, 20). Read from qpe_new.py on the C-band producer host. The six intermediate values in its bounds list never reach the norm, so there are no bands in these images at all, which is why the block colorbar the catalog publishes explained so little of them. Neither renderer generates a bar. The remaining fifth of the pixels is matplotlib's antialiasing, where a pixel sits between two of the 256 entries and the per-stop tolerance refuses it. These three are unsmoothed: qpe_new.py imports gaussian_filter and never calls it, so the shortfall is resampling alone. One caveat on accuracy: qpe_new.py converts mm to inches with 0.0394 for accumulation and 0.03937 for rate, against a true 0.0393701, so accumulation reads 0.08% high and rate 0.0008% high."
 		},
 		{
@@ -162,19 +178,22 @@
 			"unit": null,
 			"ramp": "aqpi-product-water-depth",
 			"frames": 3,
-			"pixels": 92.654,
+			"pixels": 92.634,
+			"measured_on": "2026-11-24",
 			"exact_common": true,
 			"covered": true,
-			"note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement."
+			"note": "Meters, from the bar's own label and confirmed on 2026-11-21. radarca's catalog says feet and backend/config.py followed it until this measurement. Three frames for 2026-11-24 18:00 to 11-25 06:00: 92.6% reads back, against 92.5% by the earlier rule on the same frames. Only 16.5% of the edge pixels read once divided by alpha, because on this ramp the write error left after dividing usually reaches stops more than 1% of the range apart."
 		},
 		{
 			"product": "water_level",
 			"unit": null,
 			"ramp": "aqpi-product-water-level",
-			"frames": 6,
-			"pixels": 95.763,
+			"frames": 3,
+			"pixels": 96.768,
+			"measured_on": "2026-11-24",
 			"exact_common": false,
 			"covered": true,
+			"remeasure": "Three frames for 2026-11-24 18:00 to 11-25 06:00: 96.8% reads back, against 95.5% by the earlier rule on the same frames.",
 			"note": "Built from the renderer's own colormap, not from the published bar: LinearSegmentedColormap.from_list over 14 anchors, N=256, linear vmin=-4 vmax=10 metres, read from plot_water_level.py:108 on the CoSMoS host. The published colormap_level_ft.png is a hand-made asset with no code path to the plotter, which is why it verified against its own printed numbers and explained 0.032% of the pixels. The renderer resamples with a Hanning window, so most pixels sit between two of the 256 entries; the per-stop tolerance in invert.ts admits a neighbour only where that moves the answer by at most 1% of the range, which is 0.14 m. Two bands are dropped because the map turns back on itself below zero and paints -3.84 m and -2.41 m the same colour, and #6f00ff is dropped because the unmasked -99999 fill clips to vmin and lands on it."
 		}
 	]

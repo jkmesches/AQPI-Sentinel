@@ -11,26 +11,12 @@
  */
 
 import type { Ramp } from './invert';
-import { parseHex, colorDistance } from './invert';
 
-/** Whether a ramp paints in blocks or as a gradient. */
-export type RampKind = 'discrete' | 'continuous';
-
-/**
- * Median adjacent-stop distance above which a ramp is painted in blocks.
- *
- * Measured over FLOW's four colorbars on 2026-11-21. The three continuous
- * bars are sampled from a gradient and step by 13 to 17 between neighbors,
- * medians 14 to 15, because extract_ramp.py starts a new stop once the color
- * moves past its BLOCK_TOLERANCE of 12. Reflectivity is painted in blocks and
- * its median step is 148, with no single step under 24.
- *
- * 20 sits above the continuous maximum of 17 and below the smallest discrete
- * step of 24. The median rather than the minimum is the test, since a
- * discrete bar may put two similar blocks side by side, as reflectivity does
- * at #d30000 and #bb0000.
- */
-export const DISCRETE_MEDIAN_STEP = 20;
+// Defined beside the inversion, which reads a blended pixel only on a
+// discrete ramp and has to stay free of imports for ramp_coverage.py.
+export {
+	DISCRETE_MEDIAN_STEP, medianAdjacentStep, rampKind, type RampKind
+} from './invert';
 
 /**
  * The most ticks one bar may ask for.
@@ -42,41 +28,6 @@ export const DISCRETE_MEDIAN_STEP = 20;
  * of 1e-6 across differential phase did the latter once.
  */
 export const MAX_TICKS = 1000;
-
-/**
- * Typical color distance between neighboring stops.
- *
- * @param ramp The table to measure.
- * @returns The median summed channel distance, or 0 for a single stop.
- * @raises RangeError If the ramp carries no stops.
- */
-export function medianAdjacentStep(ramp: Ramp): number {
-	if (ramp.stops.length === 0) throw new RangeError('ramp carries no stops');
-	if (ramp.stops.length === 1) return 0;
-	const steps: number[] = [];
-	for (let i = 1; i < ramp.stops.length; i++) {
-		steps.push(colorDistance(
-			parseHex(ramp.stops[i - 1].color), parseHex(ramp.stops[i].color)));
-	}
-	steps.sort((a, b) => a - b);
-	const mid = Math.floor(steps.length / 2);
-	return steps.length % 2 === 1
-		? steps[mid]
-		: (steps[mid - 1] + steps[mid]) / 2;
-}
-
-/**
- * How a ramp should be drawn.
- *
- * @param ramp The table to classify.
- * @returns 'discrete' for a bar painted in blocks, 'continuous' otherwise.
- * @raises RangeError If the ramp carries no stops.
- */
-export function rampKind(ramp: Ramp): RampKind {
-	return medianAdjacentStep(ramp) >= DISCRETE_MEDIAN_STEP
-		? 'discrete'
-		: 'continuous';
-}
 
 /**
  * Where a value sits along the bar.

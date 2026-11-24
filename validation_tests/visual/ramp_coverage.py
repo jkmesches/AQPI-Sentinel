@@ -19,6 +19,11 @@ a copy of its rule here. Two implementations of one rule is the bug this
 project keeps finding, most recently a status reducer that existed twice
 with only one copy fixed.
 
+Each distinct color is counted with its alpha and passed to `invert` as
+exact, because Pillow decodes the file's own bytes, the same bytes the
+console reads through WebGL. A ramp whose producer premultiplies its edges
+reads those pixels only with their alpha.
+
 Usage
 -----
 ::
@@ -65,20 +70,20 @@ TRANSPARENT_ALPHA = 8
 RARE_PIXELS = 4
 
 
-def distinct_colors(paths: list[Path]) -> Counter[tuple[int, int, int]]:
+def distinct_colors(paths: list[Path]) -> Counter[tuple[int, int, int, int]]:
     """Count every opaque color across a set of frames.
 
     Args:
         paths: The frames to read.
 
     Returns:
-        Pixel counts by RGB.
+        Pixel counts by RGBA.
 
     Raises:
         ValueError: If a frame has no opaque pixel, which means it is blank
             and measures nothing.
     """
-    seen: Counter[tuple[int, int, int]] = Counter()
+    seen: Counter[tuple[int, int, int, int]] = Counter()
     for p in paths:
         with Image.open(p) as img:
             rgba = img.convert("RGBA")
@@ -86,7 +91,7 @@ def distinct_colors(paths: list[Path]) -> Counter[tuple[int, int, int]]:
                       if px[3] > TRANSPARENT_ALPHA]
         if not opaque:
             raise ValueError(f"{p.name} has no opaque pixel")
-        seen.update(px[:3] for px in opaque)
+        seen.update(opaque)
     return seen
 
 
@@ -97,7 +102,7 @@ def invert_all(
 
     Args:
         ramp: The ramp, as checked in.
-        colors: The colors to look up.
+        colors: The colors to look up, as RGBA.
 
     Returns:
         One reading per color, with None where nothing matched.
@@ -129,7 +134,8 @@ def invert_all(
             "readFileSync(process.argv[2], 'utf8'));\n"
             "console.log(JSON.stringify({\n"
             "  alpha: TRANSPARENT_ALPHA,\n"
-            "  readings: colors.map((c) => invert(ramp, c))\n"
+            "  readings: colors.map((c) =>\n"
+            "    invert(ramp, [c[0], c[1], c[2]], c[3], { exact: true }))\n"
             "}));\n")
         run = subprocess.run(
             ["node", str(script), str(payload)],
@@ -170,17 +176,27 @@ def main() -> int:
 
     matched = [c for c, r in zip(colors, readings, strict=True) if r is not None]
     unmatched = [c for c, r in zip(colors, readings, strict=True) if r is None]
+    blended = [c for c, r in zip(colors, readings, strict=True)
+               if r is not None and r.get("blend")]
     pixels = sum(counts.values())
     matched_px = sum(counts[c] for c in matched)
+    edge_px = sum(n for c, n in counts.items() if c[3] < 255)
+    edge_read = sum(counts[c] for c in matched if c[3] < 255)
 
     print(f"ramp     {ramp['moment']} ({ramp['unit']}), {len(stops)} stops")
     print(f"frames   {len(args.frames)}, {pixels:,} opaque pixels")
-    print(f"colors   {len(matched)}/{len(colors)} distinct map to a stop")
+    print(f"colors   {len(matched)}/{len(colors)} distinct, with alpha, read back")
     print(f"pixels   {matched_px / pixels * 100:.3f}% of painted area reads back")
+    print(f"blends   {sum(counts[c] for c in blended) / pixels * 100:.3f}% "
+          "of painted area reads as the span of two bands")
+    if edge_px:
+        print(f"edges    {edge_read:,} of {edge_px:,} partly transparent pixels "
+              f"read back ({edge_read / edge_px * 100:.1f}%)")
     for c in unmatched:
         n = counts[c]
         kind = "rare" if n < RARE_PIXELS else "COMMON"
-        print(f"  unmatched  #{c[0]:02x}{c[1]:02x}{c[2]:02x}  {n:>7,} px  {kind}")
+        print(f"  unmatched  #{c[0]:02x}{c[1]:02x}{c[2]:02x} a={c[3]:<3}  "
+              f"{n:>7,} px  {kind}")
 
     if len(unmatched) > args.max_unmatched:
         print(f"\nFAIL: {len(unmatched)} unmatched, "

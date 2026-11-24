@@ -7,6 +7,8 @@
 	"scale": "log",
 	"source": "LinearSegmentedColormap.from_list(\"custom_cmap\", colors) with LogNorm(vmin=0.01, vmax=20), qpe_new.py:1 on the C-band producer host; read by the AQPI Laptop session 2026-11-21",
 	"read_on": "2026-11-21",
+	"edges": "premultiplied",
+	"edges_measured": "2026-11-24, frames fetched from radarca. Of 45,998 qpe_1hr edge pixels (alpha 128 to 254, three frames 19:32 to 20:12Z), 8.0% sat within 3 of a stop as stored and 99.7% after dividing by alpha; of 30,685 qpe_15min edge pixels (three frames, same times), 7.7% and 99.7%.",
 	"built_from": {
 		"kind": "LinearSegmentedColormap.from_list",
 		"anchors": [
