@@ -28,6 +28,21 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-24
+
+### Fixed
+
+- **The map's side panel no longer scrolls sideways when a product is
+  stale.** A product marked "not updating" made the product menu wider
+  than the panel at the 12 px text size. The product and tilt menus now fit
+  the panel and cut a long name off inside the box.
+- **The dashboard's product list no longer shows empty categories.** A
+  category with no products on the deployment is left out, where it had
+  read "not exposed upstream" and "no products in this group". A category
+  that "hide RadarCA" empties, such as the National Water Model feeds,
+  which all read RadarCA, stays listed as "filtered" with the number of
+  products the filter hides.
+
 ## [0.16.0] - 2026-11-24
 
 ### Changed
