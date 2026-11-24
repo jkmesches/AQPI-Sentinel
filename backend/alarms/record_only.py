@@ -1,8 +1,9 @@
 """Alarms that are recorded and never notify anyone.
 
 Two rules make an alarm record-only. It opens, escalates in severity and
-shows on the timeline, the dashboard and in the daily report as any other
-does, but it never sends email, webhook or web push.
+shows on the timeline and the dashboard as any other does, but it never
+sends email, webhook or web push. The daily report lists no alarms and none
+of these checks, so it needs no rule of its own.
 
 1. Its target is a NEXRAD radar. Joseph, 2026-11-23: users must not receive
    warnings about the NEXRAD radars.

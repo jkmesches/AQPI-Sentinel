@@ -36,6 +36,7 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 # After the path setup above, which these need.
 from test_alarm_tiers import TierStore, alarm_row, make_engine  # noqa: E402
 
+from backend import digest  # noqa: E402
 from backend.alarms import record_only as rol  # noqa: E402
 from backend.alarms.engine import AlarmEngine  # noqa: E402
 from backend.alarms.models import (  # noqa: E402
@@ -46,7 +47,7 @@ from backend.api.routes import admin as admin_routes  # noqa: E402
 from backend.api.routes.radars import RADAR_META  # noqa: E402
 from backend.checks.base import utcnow  # noqa: E402
 from backend.config import (  # noqa: E402
-    COMPOSITE_EXPECTED_RADARS, NEXRAD_RADARS, NEXRAD_SITES)
+    COMPOSITE_EXPECTED_RADARS, NEXRAD_RADARS, NEXRAD_SITES, RECORD_ONLY_TRIAL_CHECKS)
 
 failures: list[str] = []
 
@@ -253,6 +254,15 @@ def test_trial_rule() -> None:
     check("...and after it, notifies", not record_only(undated))
     check("the NEXRAD rule is unchanged", record_only({"target": "KBBX"})
           and rol.reason({"target": "KBBX"}) is not None)
+    # Joseph, 2026-11-24: leave the trial checks out of the daily report.
+    # It lists subjects of its families only, so this holds while no family
+    # prefix covers a trial or NEXRAD check.
+    prefixes = [p for fam in digest._FAMILIES.values() for ps in fam.values() for p in ps]
+    quiet_ids = set(RECORD_ONLY_TRIAL_CHECKS) | {
+        f"layer3.input.{r}" for r in NEXRAD_RADARS} | {
+        f"layer3.composite.{r}" for r in NEXRAD_RADARS}
+    listed = sorted(c for c in quiet_ids if any(c.startswith(p) for p in prefixes))
+    check("the daily report lists no trial or NEXRAD check", not listed, str(listed))
 
 
 async def test_trial_engine() -> None:

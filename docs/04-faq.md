@@ -305,9 +305,11 @@ answerable. It never gates evaluation: a tier that stopped recording would
 leave a hole in the history that nothing could see later.
 
 Alarms on the three NEXRAD radars (KBBX, KDAX and KMUX) follow the same rule
-at all times. They open, escalate and show on the dashboard, the timeline and
-the daily report, but never send email, webhook or push, because nobody here
-can act on a NEXRAD radar. Each step they would have sent is logged as
+at all times. They open, escalate and show on the dashboard and the timeline,
+but never send email, webhook or push, because nobody here can act on a
+NEXRAD radar. The daily report does not list them either: it reports each
+product's and radar's availability from the L1, LB1, L2 and LB2 checks, and
+no alarms. Each step they would have sent is logged as
 `record-only`. The set is `NEXRAD_RADARS` in `config.py`.
 
 A new check can start on a record-only trial in the same way. Its alarms are
