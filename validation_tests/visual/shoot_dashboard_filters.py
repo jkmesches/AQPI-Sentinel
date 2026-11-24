@@ -146,6 +146,15 @@ async def rail_steps(page: Page, outdir: Path) -> list[dict[str, Any]]:
     _ = await page.screenshot(path=str(outdir / "dashboard_filtered.png"))
     out.append({"step": "hide RadarCA removes the RadarCA readings", "want": False,
                 "got": "Origin reachable" in after_both})
+    # The National Water Model feeds all read RadarCA and have no backend
+    # half, so this filter empties their group. On prod (2026-11-24) the empty
+    # group said "not exposed upstream", as if the products did not exist.
+    empties: list[str] = await page.locator("[data-group-empty]").all_inner_texts()
+    out.append({"step": "a product group the filter empties says it is filtered",
+                "want": [True, True, False],
+                "got": [len(empties) > 0,
+                        all("hidden by the source filters" in e for e in empties),
+                        "not exposed upstream" in after_both.lower()]})
     await reload(page)
     boxes = [await page.locator(f"[{a}] input").first.is_checked()
              for a in ("data-hide-radarca", "data-hide-nexrad")]

@@ -229,6 +229,18 @@
 		(sentinel.rollup?.stages?.L1 ?? []).filter(shown),
 		(sentinel.rollup?.stages?.LB1 ?? []).filter(shown)
 	));
+	// How many products each category holds before the source filters. The
+	// National Water Model feeds all read RadarCA and have no backend half, so
+	// "hide RadarCA" empties that group, which then claimed upstream exposed
+	// no such products.
+	const productsBeforeFilters = $derived.by(() => {
+		const targets: Record<string, Set<string>> = {};
+		const all = [...(sentinel.rollup?.stages?.L1 ?? []), ...(sentinel.rollup?.stages?.LB1 ?? [])];
+		for (const r of all) {
+			(targets[productCategory(r.target)] ??= new Set()).add(r.target);
+		}
+		return Object.fromEntries(Object.entries(targets).map(([cat, set]) => [cat, set.size]));
+	});
 	// CheckMeta lookup by check_id — used per-row to feed cadence into the
 	// Sparkline so its visible window auto-sizes to each check (radars at
 	// 2-min cadence get a 1-hour window; forecasts at 30-min cadence get
@@ -883,15 +895,18 @@
 		<div class="lg:overflow-y-auto" tabindex="0" role="region" aria-label="Product list">
 			{#each productGroups as g}
 				{@const gc = groupCount(g.rows)}
+				{@const hidden = g.rows.length === 0 ? (productsBeforeFilters[g.category] ?? 0) : 0}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
 					<span>{g.label}</span>
 					<span class="num text-[12px] text-[var(--color-faint)] ml-auto">
-						{g.rows.length === 0 ? 'not exposed upstream' : `${gc.pass}/${gc.total}`}
+						{g.rows.length > 0 ? `${gc.pass}/${gc.total}` : hidden ? 'filtered' : 'not exposed upstream'}
 					</span>
 				</div>
 				{#if g.rows.length === 0}
-					<div class="px-3 py-1.5 text-[12px] text-[var(--color-faint)] italic">
-						no products in this group.
+					<div data-group-empty class="px-3 py-1.5 text-[12px] text-[var(--color-faint)] italic">
+						{hidden
+							? `${hidden} product${hidden === 1 ? '' : 's'} hidden by the source filters.`
+							: 'no products in this group.'}
 					</div>
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
