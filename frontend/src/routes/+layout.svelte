@@ -256,9 +256,11 @@
 	</main>
 
 	<!-- Tasteful attribution footer. Muted single-line strip across the
-	     bottom; doesn't shout, but it's there. Links open in a new tab. -->
+	     bottom; doesn't shout, but it's there. Links open in a new tab.
+	     Wraps below about 380 px: unwrapped, the link group ran to 376 px
+	     and scrolled every page sideways in a 320 px window. -->
 	<footer
-		class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
+		class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
 	>
 		<span>
 			Built by
@@ -269,7 +271,7 @@
 				rel="noopener"
 			>Joseph Mesches</a>
 		</span>
-		<span class="flex items-center gap-3">
+		<span class="flex flex-wrap items-center gap-x-3 gap-y-0.5">
 			{#if version.value}
 				<span class="num text-[var(--color-faint)]">v{version.value}</span>
 				<span class="text-[var(--color-faint)]">·</span>
