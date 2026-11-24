@@ -98,6 +98,9 @@ body {
 
 /* dark glow (default) */
 :root, [data-theme="dark"] {
+	/* Native checkboxes, date pickers and scrollbars follow the theme; without
+	   it they stayed white on the dark page. */
+	color-scheme: dark;
 	--bg-glow: #0f2016;
 	--panel-sheen: rgba(255,255,255,0.012);
 	--map-attrib-bg:   rgba(10,19,13,0.65);
@@ -111,6 +114,7 @@ body {
    LIGHT THEME: theme C, an off-white canvas, CSU Green header, Oval Green footer.
    =========================================================================== */
 [data-theme="light"] {
+	color-scheme: light;
 	--color-canvas:        #f6f6f2;
 	--color-surface:       #ffffff;
 	--color-surface-hi:    #efefe9;

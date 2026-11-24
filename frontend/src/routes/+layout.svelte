@@ -18,6 +18,7 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
+	import DisclosureArrow from '$lib/components/DisclosureArrow.svelte';
 	import NavLink from '$lib/components/NavLink.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { fmtAge, stageLabel } from '$lib/format';
@@ -84,6 +85,22 @@
 	);
 
 	let { children }: { children: any } = $props();
+
+	// The narrow header's menu and stage list, closed again on each page so
+	// a link chosen from the menu does not leave it covering the new page.
+	let menuOpen = $state(false);
+	let stagesOpen = $state(false);
+	$effect(() => {
+		page.url.pathname;
+		menuOpen = false;
+	});
+	const stripWorst = $derived(
+		totalFail || totalError ? 'fail' : totalWarn ? 'warn' : totalPass ? 'pass' : 'skip'
+	);
+	const stageCount = $derived(Object.keys(counts).length);
+	const stagesPassing = $derived(
+		Object.values(counts).filter((c) => c.pass && !c.warn && !c.fail && !c.error).length
+	);
 </script>
 
 <svelte:head><title>{siteName}</title></svelte:head>
@@ -100,25 +117,52 @@
 	     viewport was and every page scrolled sideways under it. A page
 	     that scrolls sideways turns a drag on the map into a pan of the
 	     page. -->
+	<!-- Below 1024 px the header is two rows: the name and a menu button,
+	     then the UTC clock and the pass count. The page links, the theme
+	     toggle and sign-in open from the menu, and the data source, local
+	     clock and update age wait for a wider window. Unfolded, the same
+	     header took five rows of a 320 px phone before any page content, a
+	     third of a phone held sideways (734 x 343), and three rows of a
+	     768 px tablet, taller than the folded header just below it. -->
 	<header
-		class="band flex flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2.5 text-[12px]"
+		class="band flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-[12px]"
 	>
-		<div class="flex items-baseline gap-3">
+		<div class="order-1 flex min-w-0 items-baseline gap-3 lg:order-none">
 			<span
 				class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]"
 			>{siteName.toUpperCase()}</span>
 			<!-- The separator goes with the source. A deployment whose backend
 			     does not name one left the header reading "AQPI SENTINEL ·". -->
 			{#if dataSource}
-				<span class="text-[var(--color-faint)] text-[12px]">·</span>
+				<span class="hidden text-[var(--color-faint)] text-[12px] lg:inline">·</span>
 				<span
-					class="text-[12px] text-[var(--color-muted)] num"
+					class="hidden text-[12px] text-[var(--color-muted)] num lg:inline"
 					data-data-source>{dataSource}</span>
 			{/if}
 		</div>
 
+		<button
+			type="button"
+			class="order-2 ml-auto flex h-8 w-8 items-center justify-center rounded-sm border border-[var(--color-border-strong)] text-[var(--color-default)] hover:text-[var(--color-bright)] lg:hidden"
+			aria-expanded={menuOpen}
+			aria-controls="site-nav site-tools"
+			aria-label="Menu"
+			onclick={() => (menuOpen = !menuOpen)}
+		>
+			<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+				<path
+					d={menuOpen ? 'M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5' : 'M2 4 H14 M2 8 H14 M2 12 H14'}
+					stroke="currentColor"
+					stroke-width="1.6"
+					stroke-linecap="round"
+					fill="none"
+				/>
+			</svg>
+		</button>
+
 		<nav
-			class="flex flex-wrap items-center gap-1 border-l border-[var(--color-border)] pl-3"
+			id="site-nav"
+			class="{menuOpen ? 'flex' : 'hidden'} order-4 basis-full flex-wrap items-center gap-1 lg:order-none lg:flex lg:basis-auto lg:border-l lg:border-[var(--color-border)] lg:pl-3"
 			aria-label="Pages"
 		>
 			<NavLink href="/" label="Map" />
@@ -131,15 +175,18 @@
 			{/if}
 		</nav>
 
-		<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-[12px]">
+		<!-- `contents` below 1024 px, so the two groups inside take their own
+		     places in the header's order; one right-aligned group above. -->
+		<div class="contents lg:ml-auto lg:flex lg:flex-wrap lg:items-center lg:justify-end lg:gap-x-6 lg:gap-y-1">
+		<div class="order-3 flex basis-full flex-wrap items-center gap-x-6 gap-y-1 text-[12px] lg:order-none lg:basis-auto">
 			<!-- dual clock: UTC + local -->
 			<div class="flex items-baseline gap-3">
 				<div class="flex items-baseline gap-1">
 					<span class="num text-[18px] tracking-wide text-[var(--color-bright)] leading-none">{utc}</span>
 					<span class="label">utc</span>
 				</div>
-				<span class="text-[var(--color-faint)]">·</span>
-				<div class="flex items-baseline gap-1">
+				<span class="hidden text-[var(--color-faint)] lg:inline">·</span>
+				<div class="hidden items-baseline gap-1 lg:flex">
 					<span class="num text-[18px] tracking-wide text-[var(--color-default)] leading-none">{localParts.time}</span>
 					<span class="label">{localParts.zone || 'local'}</span>
 				</div>
@@ -160,7 +207,7 @@
 			</div>
 
 			<!-- liveness indicator -->
-			<div class="flex items-center gap-2">
+			<div class="hidden items-center gap-2 lg:flex">
 				{#if sentinel.loading}
 					<span class="text-[var(--color-muted)]">…</span>
 				{:else if sentinel.error}
@@ -176,7 +223,12 @@
 					</span>
 				{/if}
 			</div>
+		</div>
 
+		<div
+			id="site-tools"
+			class="{menuOpen ? 'flex' : 'hidden'} order-5 basis-full flex-wrap items-center gap-x-6 gap-y-2 lg:order-none lg:flex lg:basis-auto"
+		>
 			<ThemeToggle />
 
 			<!-- AUTH CHIP -->
@@ -211,15 +263,40 @@
 				{/if}
 			</div>
 		</div>
+		</div>
 	</header>
 
 	<!-- STAGE STRIP. Wraps for the reason the header does: six stages and
 	     an alarm count in one non-wrapping row measured 885 px whatever
-	     the viewport was. -->
+	     the viewport was. Below 1024 px it is one summary row that opens the
+	     list, since wrapped it took six rows of a phone. -->
 	<nav
-		class="flex flex-wrap items-center gap-x-5 gap-y-0.5 border-b border-[var(--color-border)] px-4 py-1.5"
+		class="border-b border-[var(--color-border)] px-4 py-1.5"
 		aria-label="Pipeline stages"
 	>
+		<button
+			type="button"
+			class="flex w-full items-center gap-2 text-left text-[12px] lg:hidden"
+			aria-expanded={stagesOpen}
+			aria-controls="stage-list"
+			onclick={() => (stagesOpen = !stagesOpen)}
+		>
+			<StatusDot status={stripWorst} size={7} />
+			<span class="label tracking-[0.18em] text-[var(--color-default)]">Stages</span>
+			<span class="num whitespace-nowrap text-[var(--color-muted)]">{stagesPassing}/{stageCount} ok</span>
+			{#if sentinel.alarms.length}
+				<span class="num ml-auto whitespace-nowrap text-[var(--color-fail)]">
+					{sentinel.alarms.length} alarm{sentinel.alarms.length === 1 ? '' : 's'}
+				</span>
+			{/if}
+			<span class="flex {sentinel.alarms.length ? '' : 'ml-auto'}">
+				<DisclosureArrow open={stagesOpen} />
+			</span>
+		</button>
+		<div
+			id="stage-list"
+			class="{stagesOpen ? 'flex' : 'hidden'} flex-wrap items-center gap-x-5 gap-y-0.5 pt-1.5 lg:flex lg:pt-0"
+		>
 		{#each Object.entries(counts) as [stage, c]}
 			<!-- Fall through to 'skip' (gray) when nothing in the stage
 			     is actually healthy — a category whose rows are all
@@ -239,11 +316,12 @@
 			<span class="text-[var(--color-faint)]">·</span>
 		{/each}
 		{#if sentinel.alarms.length}
-			<div class="ml-auto flex items-center gap-2 text-[12px]">
+			<div class="ml-auto hidden items-center gap-2 text-[12px] lg:flex">
 				<span class="label text-[var(--color-fail)]">alarms</span>
 				<span class="num text-[var(--color-bright)]">{sentinel.alarms.length} open</span>
 			</div>
 		{/if}
+		</div>
 	</nav>
 
 	{#if diag.anyDisabled}
@@ -268,12 +346,14 @@
 	     Wraps below about 380 px: unwrapped, the link group ran to 376 px
 	     and scrolled every page sideways in a 320 px window. -->
 	<footer
-		class="site-footer flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] px-4 py-1.5 text-[12px] text-[var(--color-faint)]"
+		class="site-footer flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] px-4 py-0.5 text-[12px] text-[var(--color-faint)]"
 	>
+		<!-- Each link is at least 24 x 24 px (WCAG 2.2 2.5.8), and the
+		     footer's padding gives back the height that adds. -->
 		<span>
 			Built by
 			<a
-				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				class="inline-flex min-h-6 min-w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://github.com/jkmesches"
 				target="_blank"
 				rel="noopener"
@@ -285,26 +365,26 @@
 				<span class="text-[var(--color-faint)]">·</span>
 			{/if}
 			<a
-				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				class="inline-flex min-h-6 min-w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="/faq"
 			>FAQ</a>
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
-				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				class="inline-flex min-h-6 min-w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://jkmesches.github.io/AQPI-Sentinel/"
 				target="_blank"
 				rel="noopener"
 			>documentation</a>
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
-				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				class="inline-flex min-h-6 min-w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="/api/docs"
 				target="_blank"
 				rel="noopener"
 			>API</a>
 			<span class="text-[var(--color-faint)]">·</span>
 			<a
-				class="text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
+				class="inline-flex min-h-6 min-w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)] transition-colors"
 				href="https://radarca.engr.colostate.edu"
 				target="_blank"
 				rel="noopener"

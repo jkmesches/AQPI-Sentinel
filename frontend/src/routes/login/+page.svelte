@@ -67,10 +67,12 @@
 			</div>
 		{/if}
 
+		<!-- The form's one action, filled in the accent: canvas text on CSU
+		     Gold in dark and on CSU Green in light, both over 9:1. -->
 		<button
 			type="submit"
 			disabled={busy}
-			class="w-full border border-[var(--color-border-strong)] px-3 py-2 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
+			class="w-full bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold uppercase tracking-wider text-[var(--color-canvas)] hover:opacity-90 disabled:opacity-50"
 		>
 			{busy ? 'signing in…' : 'sign in'}
 		</button>

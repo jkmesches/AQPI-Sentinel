@@ -53,7 +53,8 @@
 	const TIME_COL_W    = 12;   // px, default per-bucket column width
 	const LABEL_COL_W   = 220;  // px, sticky left label column
 	const TIME_HDR_H    = 32;   // px, sticky top time-header height
-	const STAGE_ROW_H   = 22;   // px, height of a "[Stage]" separator row
+	// px, height of a "[Stage]" separator row; a button, so 24 (WCAG 2.2 2.5.8)
+	const STAGE_ROW_H   = 24;
 
 	let tab           = $state<Tab>('radars');
 
@@ -875,9 +876,15 @@
 	{/each}
 {/snippet}
 
-<div class="flex h-full flex-col">
+<!-- The page scrolls as a whole once the grid reaches its minimum height,
+     so a short window (a phone held sideways) still shows the grid below
+     the controls rather than squeezing it to nothing. -->
+<div class="flex h-full flex-col overflow-y-auto">
 	<h1 class="sr-only">Timeline</h1>
 	<!-- TABS -->
+	<!-- Below 640 px the tabs drop their tracked capitals and some padding:
+	     as set above that, the three need 335 px and a 320 px window has
+	     288. The description waits for a window with room for it. -->
 	<nav
 		class="flex items-end gap-1 border-b border-[var(--color-border)] px-4 pt-2 text-[12px]"
 		aria-label="Timeline sections"
@@ -887,7 +894,7 @@
 			{@const total = c.pass + c.warn + c.fail + c.error + c.skip}
 			{@const bad = c.fail + c.error}
 			<button
-				class="flex items-center gap-1.5 px-3 py-1.5 uppercase tracking-wider {tab === t.key
+				class="flex shrink-0 items-center gap-1.5 px-2 py-1.5 sm:px-3 sm:uppercase sm:tracking-wider {tab === t.key
 					? 'text-[var(--color-bright)] border-b-2 border-[var(--color-bright)] -mb-px'
 					: 'text-[var(--color-muted)] hover:text-[var(--color-default)] border-b-2 border-transparent -mb-px'}"
 				onclick={() => (tab = t.key)}
@@ -897,7 +904,7 @@
 				{t.label}
 			</button>
 		{/each}
-		<span class="ml-3 mb-1.5 text-[12px] text-[var(--color-faint)] truncate">
+		<span class="ml-3 mb-1.5 hidden min-w-0 truncate text-[12px] text-[var(--color-faint)] md:inline">
 			{tabCfg.desc}
 		</span>
 	</nav>
@@ -909,12 +916,14 @@
 			<span class="num text-[var(--color-muted)]">{buckets.length} rows · {totalCols} checks</span>
 		</div>
 
-		<div class="flex items-center gap-1">
+		<div class="flex min-w-0 max-w-full items-center gap-1">
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">grain</span>
-			<div class="flex border border-[var(--color-border-strong)]">
+			<!-- Wraps as a group in a narrow window; each label stays on one
+			     line, where "1 min" had broken into "1" over "min". -->
+			<div class="flex min-w-0 flex-wrap border border-[var(--color-border-strong)]">
 				{#each BUCKETS as b}
 					<button
-						class="px-2 py-0.5 text-[12px] {bucket === b.key
+						class="min-h-6 whitespace-nowrap px-2 py-0.5 text-[12px] {bucket === b.key
 							? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
 							: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
 						onclick={() => setBucket(b.key)}
@@ -1021,7 +1030,7 @@
 		<div class="px-4 py-2 text-[12px] text-[var(--color-fail)] border-b border-[var(--color-border)]">{error}</div>
 	{/if}
 
-	<div class="flex-1 overflow-auto bg-[var(--color-canvas)] relative">
+	<div class="relative min-h-[18rem] flex-1 overflow-auto bg-[var(--color-canvas)]">
 		{#if loading}
 			<div class="px-4 py-8 text-[12px] text-[var(--color-muted)]">loading timeline…</div>
 		{:else if !buckets.length}

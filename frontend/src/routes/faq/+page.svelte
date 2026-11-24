@@ -68,11 +68,13 @@
 	</header>
 
 	<!-- Jump list: on a dashboard people arrive looking for one answer. -->
-	<nav class="mb-6 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px]" aria-label="Questions">
+	<!-- Each link is 24 px tall, so wrapped rows keep their targets apart
+	     (WCAG 2.2 2.5.8). -->
+	<nav class="mb-6 flex flex-wrap gap-x-3 text-[12px]" aria-label="Questions">
 		{#each FAQ as f, i}
 			<a
 				href="#{f.id}"
-				class="text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
+				class="inline-flex min-h-6 items-center text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"
 			>{i + 1}. {f.q.replace(/\?$/, '')}</a>
 		{/each}
 	</nav>

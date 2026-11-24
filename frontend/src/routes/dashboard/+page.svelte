@@ -503,7 +503,14 @@
      below them at the foot of the page. In one grid with the rails, the band
      followed the tallest rail's content up and down the page as rows
      expanded and collapsed. -->
-<div class="flex h-full flex-col gap-2 p-2">
+<!-- The page scrolls as a whole once the rails reach their minimum height.
+     Held sideways (734 x 343), a phone squeezed the rails to nothing and
+     showed only the alarm band.
+     Below lg the rails stack in one column at their full height, and only
+     the page scrolls. Bounded there by the viewport, each rail took a
+     quarter of a phone and showed its header and one clipped row. -->
+
+<div class="flex h-full flex-col gap-2 overflow-y-auto p-2">
 <h1 class="sr-only">Dashboard</h1>
 <!-- Source filters. Each appears only where the backend classifies some
      checks that way, so XQPI, which reads no RadarCA and watches no NEXRAD
@@ -533,7 +540,7 @@
 		{/if}
 	</div>
 {/if}
-<div data-rails class="grid min-h-0 flex-1 grid-cols-12 items-start gap-2 overflow-y-auto">
+<div data-rails class="grid flex-1 grid-cols-12 items-start gap-2 lg:min-h-[18rem] lg:overflow-y-auto">
 	<!-- RAIL 1: SITE ------------------------------------------------------------------- -->
 	<!-- Site sits ABOVE Radars: the L0 connectivity tier is the root cause
 	     of most cascading failures, so keeping it at eye level makes
@@ -554,7 +561,7 @@
 	     hence the ignores on the four rails. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<aside
-		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3"
+		class="panel col-span-12 flex flex-col lg:col-span-3 lg:max-h-full lg:overflow-y-auto"
 		tabindex="0"
 		aria-label="Site checks"
 	>
@@ -614,7 +621,7 @@
 	     detector, if any, fired. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<aside
-		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3"
+		class="panel col-span-12 flex flex-col lg:col-span-3 lg:max-h-full lg:overflow-y-auto"
 		tabindex="0"
 		aria-label="Radars"
 	>
@@ -701,7 +708,7 @@
 					     during an incident. -->
 					<button
 						type="button"
-						class="flex w-full items-center gap-1.5 text-left"
+						class="flex min-h-6 w-full items-center gap-1.5 text-left"
 						aria-expanded={open}
 						onclick={() => toggleRadar(g.target, g.alerting)}
 						title={`${g.target} · ${g.rows.length} check${g.rows.length === 1 ? '' : 's'}`
@@ -863,7 +870,7 @@
 
 	<!-- RAIL 3: PRODUCTS --------------------------------------------------------------- -->
 	<aside
-		class="panel col-span-12 flex max-h-full flex-col overflow-hidden lg:col-span-4"
+		class="panel col-span-12 flex flex-col lg:col-span-4 lg:max-h-full lg:overflow-hidden"
 		aria-label="Products"
 	>
 		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
@@ -873,7 +880,7 @@
 			</div>
 		{/if}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div class="overflow-y-auto" tabindex="0" role="region" aria-label="Product list">
+		<div class="lg:overflow-y-auto" tabindex="0" role="region" aria-label="Product list">
 			{#each productGroups as g}
 				{@const gc = groupCount(g.rows)}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
@@ -948,7 +955,7 @@
 	     no other rail. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<aside
-		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-2"
+		class="panel col-span-12 flex flex-col lg:col-span-2 lg:max-h-full lg:overflow-y-auto"
 		tabindex="0"
 		aria-label="Quality"
 	>
@@ -1033,7 +1040,9 @@
 				: 'all clear'}
 		/>
 		{#if sentinel.alarms.length}
-			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider text-[var(--color-faint)]">
+			<!-- Spaced so that, wrapped on a phone, the checkbox and the link
+			     sit outside each other's 24 px target (WCAG 2.2 2.5.8). -->
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider text-[var(--color-faint)]">
 				<span>most severe first · top {ALARM_ROWS}</span>
 				{#if filteredAlarmCount}
 					<span data-alarms-filtered={filteredAlarmCount} class="text-[var(--color-muted)]">
@@ -1042,16 +1051,16 @@
 				{/if}
 				{#if ackedCount}
 					<label class="flex cursor-pointer items-center gap-1.5 text-[var(--color-muted)] hover:text-[var(--color-bright)]">
-						<input type="checkbox" bind:checked={showAcked} class="h-3 w-3 shrink-0 accent-[var(--color-ok)]" />
+						<input type="checkbox" bind:checked={showAcked} class="h-4 w-4 shrink-0 accent-[var(--color-ok)]" />
 						<span>show acknowledged ({ackedCount})</span>
 					</label>
 				{/if}
 				<span class="ml-auto normal-case tracking-normal">
 					{#if overflowCount}
-						<a class="text-[var(--color-muted)] underline decoration-dotted hover:text-[var(--color-bright)]"
+						<a class="inline-flex min-h-6 items-center text-[var(--color-muted)] underline decoration-dotted hover:text-[var(--color-bright)]"
 						   href="/history?tab=alarms">+{overflowCount} more not shown</a>
 					{:else}
-						<a class="text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+						<a class="inline-flex min-h-6 items-center text-[var(--color-faint)] hover:text-[var(--color-bright)]"
 						   href="/history?tab=alarms">all alarms</a>
 					{/if}
 				</span>
