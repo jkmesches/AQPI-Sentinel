@@ -16,7 +16,6 @@
   "moment": "Reflectivity",
   "nexrad": false,
   "opacity": 0.8,
-  "panelOpen": true,
   "reservoirs": false,
   "streamGauges": false,
   "terrain": false,
@@ -196,6 +195,9 @@
    },
    "range-fill": {
     "id": "range-fill",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
      "fill-color": [
       "get",
@@ -208,6 +210,9 @@
    },
    "range-stroke": {
     "id": "range-stroke",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
      "line-color": [
       "get",
@@ -241,7 +246,11 @@
    },
    "tilt-overlay-layer": {
     "id": "tilt-overlay-layer",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
+     "raster-fade-duration": 0,
      "raster-opacity": 0.8
     },
     "source": "tilt-overlay",
@@ -269,7 +278,7 @@
    },
    "ranges": {
     "data": {
-     "featureCount": 9,
+     "featureCount": 6,
      "propertyKeys": [
       "active",
       "color",
@@ -282,20 +291,20 @@
    "tilt-overlay": {
     "coordinates": [
      [
-      -122.5234,
-      38.1801
+      -122.524,
+      38.1806
      ],
      [
-      -121.6006,
-      38.1801
+      -121.5999,
+      38.1806
      ],
      [
-      -121.6006,
-      37.4511
+      -121.5999,
+      37.4505
      ],
      [
-      -122.5234,
-      37.4511
+      -122.524,
+      37.4505
      ]
     ],
     "type": "image",
@@ -310,18 +319,33 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "comp_ref",
+   "frameErrors": {},
    "hasRadarca": true,
+   "layerOpacity": {
+    "composite": 0.7,
+    "nexrad": 0.6,
+    "radars": 0.8
+   },
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "nexradSitesOn": true,
+   "overlayBuilds": {
+    "burnScars": 1,
+    "reservoirs": 1,
+    "streamGauges": 1,
+    "terrain": 1,
+    "watersheds": 1
+   },
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
-   "panelOpen": true,
    "playing": false,
    "prefsReady": true,
    "profile": "aqpi",
    "reservoirsOn": false,
    "stepCount": 7,
    "stepIdx": 6,
+   "stepsDropped": 0,
    "stepsFor": "",
    "streamGaugesOn": false,
    "terrain3DOn": false,
@@ -333,6 +357,7 @@
  },
  "unstableOrder": false,
  "volatile": [
+  "camera.bearing",
   "sources.tilt-overlay.coordinates[0][0]",
   "sources.tilt-overlay.coordinates[0][1]",
   "sources.tilt-overlay.coordinates[1][0]",

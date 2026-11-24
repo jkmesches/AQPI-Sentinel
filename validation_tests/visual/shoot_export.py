@@ -125,7 +125,7 @@ async def open_console(browser: Browser, base: str) -> Page:
         "localStorage.setItem('sentinel-theme', 'dark');"
         "localStorage.setItem('sentinel-map-prefs', JSON.stringify("
         "{activeRadars:['XEBY'], moment:'Reflectivity',"
-        " composite:'comp_ref', panelOpen:true}));")
+        " composite:'comp_ref'}));")
     await page.goto(base, wait_until="load", timeout=45_000)
     await page.wait_for_timeout(LOAD_SETTLE_MS)
     return page

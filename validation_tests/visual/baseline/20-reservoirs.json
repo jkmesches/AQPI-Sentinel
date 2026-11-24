@@ -14,7 +14,6 @@
   "moment": "Reflectivity",
   "nexrad": false,
   "opacity": 0.8,
-  "panelOpen": true,
   "reservoirs": true,
   "streamGauges": false,
   "terrain": false,
@@ -99,7 +98,11 @@
   "layers": {
    "comp-overlay-layer": {
     "id": "comp-overlay-layer",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
+     "raster-fade-duration": 0,
      "raster-opacity": 0.7
     },
     "source": "comp-overlay",
@@ -204,6 +207,9 @@
    },
    "range-fill": {
     "id": "range-fill",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
      "fill-color": [
       "get",
@@ -216,6 +222,9 @@
    },
    "range-stroke": {
     "id": "range-stroke",
+    "layout": {
+     "visibility": "visible"
+    },
     "paint": {
      "line-color": [
       "get",
@@ -328,7 +337,7 @@
    },
    "ranges": {
     "data": {
-     "featureCount": 9,
+     "featureCount": 6,
      "propertyKeys": [
       "active",
       "color",
@@ -357,18 +366,33 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "comp_ref",
+   "frameErrors": {},
    "hasRadarca": true,
+   "layerOpacity": {
+    "composite": 0.7,
+    "nexrad": 0.6,
+    "radars": 0.8
+   },
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "nexradSitesOn": true,
+   "overlayBuilds": {
+    "burnScars": 1,
+    "reservoirs": 1,
+    "streamGauges": 1,
+    "terrain": 1,
+    "watersheds": 1
+   },
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
-   "panelOpen": true,
    "playing": false,
    "prefsReady": true,
    "profile": "aqpi",
    "reservoirsOn": true,
    "stepCount": 31,
    "stepIdx": 30,
+   "stepsDropped": 0,
    "stepsFor": "comp_ref",
    "streamGaugesOn": false,
    "terrain3DOn": false,
@@ -380,6 +404,7 @@
  },
  "unstableOrder": false,
  "volatile": [
+  "camera.bearing",
   "state.stepCount",
   "state.stepIdx"
  ]

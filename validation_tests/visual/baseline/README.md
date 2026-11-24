@@ -13,6 +13,24 @@ down to which fetch returned first, and the first baseline recorded one of
 the two arrangements. `$lib/map/layers/stack.ts` declares the order now, and
 the recorded layer order changed on purpose.
 
+It was replaced again on 2026-11-24, from v0.15.9. Changes made on 11-21 to
+11-23 had not been recorded, and all 28 states differed for these reasons:
+
+- new probe fields: `stepsDropped` (`7deaca8`), `overlayBuilds` (`3eafb55`),
+  `nexradSitesOn` (`48b0094`) and `layerOpacity` (`eadb60f`)
+- layer visibility set explicitly, with the flat composite and the range
+  rings hidden under 3D terrain, where they are drawn in the air (`5cbd546`,
+  `b3f07a7`)
+- no raster fade on the composite and NEXRAD layers (`495fac2`)
+- range rings for the six selectable radars only, down from nine, since
+  NEXRAD rings draw on selection (`48b0094`)
+- `panelOpen` gone from the prefs, which nothing read after the dock moved
+  to its own key (`58c197c`); state 09 now sets `sentinel-dock-open`
+
+A second capture taken right after agreed with this one on 27 states. It
+lost `02-composite-nowcast` on both tries, because the deployment's
+nowcast was failing its freshness check at the time and no frame loaded.
+
 Compare the current code against it:
 
 ```bash

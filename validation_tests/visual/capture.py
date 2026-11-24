@@ -61,6 +61,10 @@ DEFAULT_BASE = os.environ.get("SENTINEL_VISUAL_BASE",
                               "http://localhost:5173")
 PREFS_KEY = "sentinel-map-prefs"
 PREFS_VERSION = 1
+# The dock keeps its own key, apart from the prefs. Until 2026-11-24 state 09
+# set a `panelOpen` pref that nothing read and captured the open dock.
+DOCK_KEY = "sentinel-dock-open"
+DOCK_CLOSED_STATES = frozenset({"09-panel-closed"})
 VIEWPORT = {"width": 1600, "height": 950}
 
 # The console fetches a step list, then a frame, then applies both behind the
@@ -137,7 +141,7 @@ def default_prefs(**over: Json) -> dict[str, Json]:
     """
     base: dict[str, Json] = {
         "composite": "comp_ref", "moment": "Reflectivity", "activeRadars": [],
-        "nexrad": False, "opacity": 0.8, "panelOpen": True,
+        "nexrad": False, "opacity": 0.8,
         "watersheds": False, "reservoirs": False, "terrain": False,
         "terrain3D": False, "streamGauges": False, "burnScars": False,
         # Two, matching mapPrefs.DEFAULT_PREFS, so "00-default" is the state
@@ -196,7 +200,7 @@ STATES: list[tuple[str, dict[str, Json], frozenset[str]]] = [
      want("comp-overlay")),
     ("07-opacity-low", default_prefs(opacity=0.25), want("comp-overlay")),
     ("08-opacity-full", default_prefs(opacity=1.0), want("comp-overlay")),
-    ("09-panel-closed", default_prefs(panelOpen=False), want("comp-overlay")),
+    ("09-panel-closed", default_prefs(), want("comp-overlay")),
     ("10-nexrad", default_prefs(nexrad=True), want("comp-overlay", "nexrad")),
     ("11-nexrad-no-composite", default_prefs(nexrad=True, composite="none"),
      want("nexrad")),
@@ -557,15 +561,20 @@ async def capture_state(page: Page, cfg: RunConfig, name: str,
         The scrubbed snapshot with the keys found to be volatile.
 
     Raises:
-        RuntimeError: If the probe never appears or the state never loads
-            what it asked for. Recording either would be a lie, and a
-            baseline entry saying a layer is absent is the kind of lie a
-            later refactor gets blamed for.
+        RuntimeError: If the probe never appears, the state never loads
+            what it asked for, or the dock is not in the state's position.
+            Recording any of these would be a lie, and a baseline entry
+            saying a layer is absent is the kind of lie a later refactor
+            gets blamed for.
         TypeError: If the probe returns something other than an object.
     """
+    dock = "closed" if name in DOCK_CLOSED_STATES else "open"
+    # Every state writes the dock key, since storage carries over from the
+    # state before it on the same page.
     await page.evaluate(
-        "([k, v]) => localStorage.setItem(k, JSON.stringify(v))",
-        [PREFS_KEY, prefs])
+        "([pk, pv, dk, dv]) => { localStorage.setItem(pk, JSON.stringify(pv));"
+        " localStorage.setItem(dk, dv); }",
+        [PREFS_KEY, prefs, DOCK_KEY, dock])
     # `load`, never `networkidle`. The console polls every 5 s and holds a
     # websocket open, so the network never goes idle and a capture keyed on
     # that waits out its timeout on every state.
@@ -579,6 +588,10 @@ async def capture_state(page: Page, cfg: RunConfig, name: str,
     if missing:
         raise RuntimeError(f"never loaded {sorted(missing)} within "
                            f"{SETTLE_MAX_MS / 1000:g}s")
+    shown = await page.get_attribute("[data-panel]", "data-panel",
+                                     timeout=5_000)
+    if shown != dock:
+        raise RuntimeError(f"dock is {shown!r}, the state asked for {dock!r}")
     if cfg.shots:
         await page.screenshot(path=str(cfg.out / f"{name}.png"))
 

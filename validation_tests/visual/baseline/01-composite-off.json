@@ -14,7 +14,6 @@
   "moment": "Reflectivity",
   "nexrad": false,
   "opacity": 0.8,
-  "panelOpen": true,
   "reservoirs": false,
   "streamGauges": false,
   "terrain": false,
@@ -258,7 +257,7 @@
    },
    "ranges": {
     "data": {
-     "featureCount": 9,
+     "featureCount": 6,
      "propertyKeys": [
       "active",
       "color",
@@ -275,18 +274,33 @@
    "burnScarYears": 2,
    "burnScarsOn": false,
    "composite": "none",
+   "frameErrors": {},
    "hasRadarca": true,
+   "layerOpacity": {
+    "composite": 0.7,
+    "nexrad": 0.6,
+    "radars": 0.8
+   },
    "mapDead": false,
    "moment": "Reflectivity",
    "nexradEnabled": false,
+   "nexradSitesOn": true,
+   "overlayBuilds": {
+    "burnScars": 1,
+    "reservoirs": 1,
+    "streamGauges": 1,
+    "terrain": 1,
+    "watersheds": 1
+   },
+   "overlayErrors": {},
    "overlayOpacity": 0.8,
-   "panelOpen": true,
    "playing": false,
    "prefsReady": true,
    "profile": "aqpi",
    "reservoirsOn": false,
    "stepCount": 0,
    "stepIdx": -1,
+   "stepsDropped": 0,
    "stepsFor": "",
    "streamGaugesOn": false,
    "terrain3DOn": false,
@@ -298,6 +312,9 @@
  },
  "unstableOrder": false,
  "volatile": [
+  "camera.bearing",
+  "layers.range-fill.layout.visibility",
+  "layers.range-stroke.layout.visibility",
   "state.stepCount",
   "state.stepIdx"
  ]
