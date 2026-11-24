@@ -1142,7 +1142,7 @@
 		const rgba = from.at(px.x, px.y);
 		if (!rgba) return null;
 		return readoutFor(ramp, rgba,
-			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3]));
+			invert(ramp, [rgba[0], rgba[1], rgba[2]], rgba[3], { exact: from.exact }));
 	}
 
 	// Drop the held frame the moment it stops being the one on screen. A

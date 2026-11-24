@@ -161,6 +161,88 @@ export function runTests(mod) {
       s.draw(img(700, 600)) === true && s.at(10, 10) !== null);
   }
 
+  // A 2D canvas rounds a partly transparent pixel on the way out, so the
+  // sampler reads the file's own bytes when it can. Stub readers stand in
+  // for WebGL; whether WebGL returns the bytes unchanged was measured in
+  // three browser engines (sampler.ts).
+  const bytesOf = (w, h, fill) => {
+    const out = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) out.set(fill(x, y), (y * w + x) * 4);
+    }
+    return out;
+  };
+  // The file's bytes for a frame: its edge pixels at alpha 128. The canvas
+  // stub hands back the same pixels rounded, as a real canvas would.
+  const edge = (x, y) => [x % 200, y % 200, 7, 128];
+  const rounded = (x, y) => [(x % 200) + 1, y % 200, 7, 128];
+
+  console.log('\nan opaque pixel comes from the canvas, which keeps it exact:');
+  {
+    let reads = 0;
+    const s = new FrameSampler(() => fakeCanvas(pix), () => { reads++; return null; });
+    s.draw(img(40, 30));
+    check('drawing reads no bytes', reads === 0, String(reads));
+    check('an opaque sample is the canvas pixel',
+      s.at(12, 7)?.join() === pix(12, 7).join(), String(s.at(12, 7)));
+    check('...counted exact', s.exact === true);
+    check('...without reading the bytes', reads === 0, String(reads));
+  }
+
+  console.log('\na partly transparent pixel comes from the file\'s bytes:');
+  {
+    let reads = 0;
+    const s = new FrameSampler(() => fakeCanvas(rounded), (f) => {
+      reads++;
+      return bytesOf(f.naturalWidth, f.naturalHeight, edge);
+    });
+    s.draw(img(40, 30));
+    const got = s.at(12, 7);
+    check('an edge sample returns the file\'s bytes, not the rounded canvas',
+      got?.join() === '12,7,7,128', String(got));
+    check('...and says so', s.exact === true);
+    s.at(3, 4);
+    check('the bytes are read once per frame', reads === 1, String(reads));
+    s.draw(img(40, 30));
+    s.at(3, 4);
+    check('a new frame reads its own', reads === 2, String(reads));
+  }
+
+  console.log('\nwithout the bytes the canvas answers, and says it is not exact:');
+  {
+    const failing = new FrameSampler(() => fakeCanvas(rounded), () => null);
+    failing.draw(img(40, 30));
+    check('a failed read falls back to the canvas',
+      failing.at(5, 6)?.join() === rounded(5, 6).join(), String(failing.at(5, 6)));
+    check('...and is not exact', failing.exact === false);
+    const short = new FrameSampler(() => fakeCanvas(rounded), () => new Uint8Array(12));
+    short.draw(img(40, 30));
+    check('bytes of the wrong size are refused',
+      short.at(5, 6)?.join() === rounded(5, 6).join() && short.exact === false,
+      String(short.at(5, 6)));
+    const empty = new FrameSampler(() => fakeCanvas(rounded), () => bytesOf(1, 1, edge));
+    check('nothing sampled is not exact', empty.exact === false);
+  }
+
+  console.log('\nno frame\'s bytes outlive it:');
+  {
+    let fail = false;
+    const s = new FrameSampler(() => fakeCanvas(rounded),
+      (f) => (fail ? null : bytesOf(f.naturalWidth, f.naturalHeight, edge)));
+    s.draw(img(40, 30));
+    s.at(1, 1);
+    fail = true;
+    s.draw(img(40, 30));
+    check('the next frame does not read the last one\'s bytes',
+      s.at(12, 7)?.join() === rounded(12, 7).join() && s.exact === false,
+      String(s.at(12, 7)));
+    fail = false;
+    s.draw(img(40, 30));
+    s.at(1, 1);
+    s.clear();
+    check('clear drops them', s.at(12, 7) === null && s.exact === false);
+  }
+
   console.log(failures.length
     ? `\n${failures.length} FAILED: ${failures.join(', ')}`
     : '\nall sampler assertions passed');
