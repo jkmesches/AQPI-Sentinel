@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from playwright.async_api import Page, Route, async_playwright
+    from playwright.async_api import Browser, Page, Route, WebSocketRoute, async_playwright
 except ImportError:  # pragma: no cover - environment check
     print("playwright is not installed: pip install playwright "
           "&& playwright install chromium", file=sys.stderr)
@@ -50,6 +50,10 @@ STAND_IN = "XEBY"
 #: A check on the stand-in radar, and one neither filter touches.
 STAND_IN_CHECK = "layer2.radar.XEBY"
 NEUTRAL_CHECK = "layer0.net.dns"
+#: The National Water Model feeds, which $lib/format files under one category.
+NWM_TARGETS = frozenset({"flowlines", "watersheds", "stream", "stream_csv"})
+GROUPS_JS = """() => [...document.querySelectorAll('[aria-label="Product list"] > div')]
+  .map((d) => d.innerText.trim().toUpperCase()).filter(Boolean)"""
 
 BAND_JS = """() => {
   const b = document.querySelector('[data-alarm-band]');
@@ -151,10 +155,9 @@ async def rail_steps(page: Page, outdir: Path) -> list[dict[str, Any]]:
     # group said "not exposed upstream", as if the products did not exist.
     empties: list[str] = await page.locator("[data-group-empty]").all_inner_texts()
     out.append({"step": "a product group the filter empties says it is filtered",
-                "want": [True, True, False],
+                "want": [True, True],
                 "got": [len(empties) > 0,
-                        all("hidden by the source filters" in e for e in empties),
-                        "not exposed upstream" in after_both.lower()]})
+                        all("hidden by the source filters" in e for e in empties)]})
     await reload(page)
     boxes = [await page.locator(f"[{a}] input").first.is_checked()
              for a in ("data-hide-radarca", "data-hide-nexrad")]
@@ -210,6 +213,47 @@ async def band_steps(page: Page, served: list[dict[str, Any]],
     return out
 
 
+async def empty_category_step(browser: Browser, base: str) -> dict[str, Any]:
+    """A product category with no products on the deployment is not listed.
+
+    Joseph, 2026-11-24: a group reading "no products in this group" should
+    not be shown. The National Water Model rows are taken out of
+    /api/status, and the live feed is closed so a check run cannot put them
+    back, which makes the category empty on any deployment.
+
+    Args:
+        browser: The running chromium.
+        base: The deployment's origin.
+
+    Returns:
+        One reading: whether the NWM group and the Radar Data group are listed.
+    """
+    async def without_nwm(route: Route) -> None:
+        resp = await route.fetch()
+        body: dict[str, Any] = await resp.json()
+        for stage, rows in body.get("stages", {}).items():
+            body["stages"][stage] = [r for r in rows if r.get("target") not in NWM_TARGETS]
+        await route.fulfill(response=resp, json=body)
+
+    async def closed(ws: WebSocketRoute) -> None:
+        await ws.close()
+
+    context = await browser.new_context(viewport=VIEWPORT)
+    try:
+        page = await context.new_page()
+        await page.route("**/api/status", without_nwm)
+        await page.route_web_socket("**/api/ws", closed)
+        _ = await page.goto(f"{base}/dashboard", wait_until="load", timeout=60_000)
+        await page.wait_for_timeout(LOAD_SETTLE_MS)
+        groups: list[str] = await page.evaluate(GROUPS_JS)
+    finally:
+        await context.close()
+    return {"step": "a category with no products is not listed",
+            "want": [False, True],
+            "got": [any(g.startswith("NATIONAL WATER MODEL") for g in groups),
+                    any(g.startswith("RADAR DATA") for g in groups)]}
+
+
 async def run(base: str, outdir: Path) -> list[dict[str, Any]]:
     """Every step, in one browser.
 
@@ -249,6 +293,7 @@ async def run(base: str, outdir: Path) -> list[dict[str, Any]]:
             out += await band_steps(page, served, outdir)
             errs: list[str] = await page.evaluate("() => window.__errs || []")
             out.append({"step": "page errors", "want": [], "got": errs})
+            out.append(await empty_category_step(browser, base))
         finally:
             await browser.close()
     return out

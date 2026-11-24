@@ -231,8 +231,8 @@
 	));
 	// How many products each category holds before the source filters. The
 	// National Water Model feeds all read RadarCA and have no backend half, so
-	// "hide RadarCA" empties that group, which then claimed upstream exposed
-	// no such products.
+	// "hide RadarCA" empties that group, and the group says so rather than
+	// vanishing as if the products did not exist.
 	const productsBeforeFilters = $derived.by(() => {
 		const targets: Record<string, Set<string>> = {};
 		const all = [...(sentinel.rollup?.stages?.L1 ?? []), ...(sentinel.rollup?.stages?.LB1 ?? [])];
@@ -266,9 +266,9 @@
 	const siteRows = $derived((sentinel.rollup?.stages?.L0 ?? []).filter(shown));
 
 	// Group product rows by category (Radar Data / Atmospheric Forecast /
-	// CoSMoS / NWM / Other). Vectors + stream feeds fall into "Other".
-	// `nwm` stays in the list with an empty row count so the operator
-	// knows it's accounted for upstream even though no products land here.
+	// CoSMoS / NWM / Other). A category with no products on this deployment
+	// is left out (Joseph, 2026-11-24), and one the source filters emptied
+	// stays, with a note saying how many products they hide.
 	const productGroups = $derived.by(() => {
 		const groups: Record<string, any[]> = {};
 		for (const cat of PRODUCT_CATEGORY_ORDER) groups[cat] = [];
@@ -285,7 +285,7 @@
 		}
 		return PRODUCT_CATEGORY_ORDER
 			.map((cat) => ({ category: cat, label: PRODUCT_CATEGORY_LABEL[cat], rows: groups[cat] }))
-			.filter((g) => g.category !== 'other' || g.rows.length > 0);
+			.filter((g) => g.rows.length > 0 || (productsBeforeFilters[g.category] ?? 0) > 0);
 	});
 	// Which product the participation rows belong to, straight from the
 	// backend. Empty on a backend that predates the field, and the rail then
@@ -895,18 +895,18 @@
 		<div class="lg:overflow-y-auto" tabindex="0" role="region" aria-label="Product list">
 			{#each productGroups as g}
 				{@const gc = groupCount(g.rows)}
+				<!-- A group listed with no rows is one the source filters emptied;
+				     productGroups leaves out a category with no products. -->
 				{@const hidden = g.rows.length === 0 ? (productsBeforeFilters[g.category] ?? 0) : 0}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
 					<span>{g.label}</span>
 					<span class="num text-[12px] text-[var(--color-faint)] ml-auto">
-						{g.rows.length > 0 ? `${gc.pass}/${gc.total}` : hidden ? 'filtered' : 'not exposed upstream'}
+						{g.rows.length > 0 ? `${gc.pass}/${gc.total}` : 'filtered'}
 					</span>
 				</div>
 				{#if g.rows.length === 0}
 					<div data-group-empty class="px-3 py-1.5 text-[12px] text-[var(--color-faint)] italic">
-						{hidden
-							? `${hidden} product${hidden === 1 ? '' : 's'} hidden by the source filters.`
-							: 'no products in this group.'}
+						{hidden} product{hidden === 1 ? '' : 's'} hidden by the source filters.
 					</div>
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
