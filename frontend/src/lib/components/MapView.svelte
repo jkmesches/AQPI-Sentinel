@@ -4909,11 +4909,14 @@
 				></span>
 				<!-- Named, because a harness reaching for "the second select on
 				     the page" got the playback speed and left both panes on
-				     one product while reporting that it had switched them. -->
+				     one product while reporting that it had switched them.
+				     min-w-0, because a select is as wide as its longest option,
+				     and an option marked "not updating" pushed the panel into a
+				     sideways scroll. -->
 				<select
 					data-product-select
 					aria-label="Product"
-					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+					class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 					value={composite}
 					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
 					title="Choose the composite overlay to render on the map"
@@ -5216,7 +5219,7 @@
 					<select
 						data-tilt-select
 						aria-label="Tilt"
-						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+						class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 						value={tiltEl}
 						onchange={(e) => {
 							tiltEl = Number((e.target as HTMLSelectElement).value);

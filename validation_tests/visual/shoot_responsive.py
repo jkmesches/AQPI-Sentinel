@@ -235,6 +235,40 @@ async def check_compare(page: Page, name: str, width: int,
     return cm, True
 
 
+async def long_option_overflow(page: Page) -> list[str]:
+    """Give the product select its longest real option and find what scrolls sideways.
+
+    A select is as wide as its longest option, and an unhealthy product's
+    option carries a warning sign and "not updating". With the select unable
+    to shrink, that one option pushed the panel into a sideways scroll
+    (2026-11-24). The option is added here because a live product being
+    stale is luck.
+
+    Args:
+        page: The loaded console, panel open.
+
+    Returns:
+        Each box that scrolls sideways afterwards, as "class: scroll/client".
+    """
+    got: list[str] = await page.evaluate("""() => {
+      const sel = document.querySelector('[data-product-select]');
+      if (!sel) return ['no product select'];
+      const opt = document.createElement('option');
+      opt.textContent = 'Water Depth (CoSMoS) \\u00b7 maximum  \\u26a0 not updating';
+      sel.appendChild(opt);
+      const out = [];
+      for (const el of document.querySelectorAll('*')) {
+        const x = getComputedStyle(el).overflowX;
+        if (['auto', 'scroll'].includes(x) && el.scrollWidth > el.clientWidth + 1) {
+          out.push(`${String(el.className).slice(0, 60)}: ${el.scrollWidth}/${el.clientWidth}`);
+        }
+      }
+      opt.remove();
+      return out;
+    }""")
+    return got
+
+
 async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
     """Load the console at each size and measure the layout.
 
@@ -272,6 +306,9 @@ async def run(browser: Browser, base: str, outdir: Path) -> dict[str, Any]:
         if viewport["width"] >= 900 and m["stripLayout"] != "one-row":
             problems.append(
                 f"{name}: the time strip wrapped with room to spare")
+        if m["panel"] == "open":
+            problems += [f"{name}: a 'not updating' product option scrolls {box} sideways"
+                         for box in await long_option_overflow(page)]
 
         await page.screenshot(path=str(outdir / f"responsive-{name}.png"),
                               full_page=False)
