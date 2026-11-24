@@ -23,6 +23,7 @@
 	import { momentChoices, momentDisplay, defaultMoment,
 	         prefixFor } from '$lib/map/moments';
 	import { rampFor, rampForProduct, tiltRampFor } from '$lib/map/ramps/registry';
+	import { PALETTE, verdictColors } from '$lib/palette';
 	import { unitChoices, defaultUnit, unitNote,
 	         resolveUnit } from '$lib/map/units';
 	import { decodeLink, encodeLink, hasAny, stepForTime,
@@ -1543,20 +1544,10 @@
 		unionExtent(Object.values(compExtent ?? {}), EXTENT_LARGE)
 	);
 
-	// Theme-keyed status colors. MapLibre paint expressions can't read CSS
-	// custom properties, so we keep two parallel tables and pick the right
-	// one based on theme.resolved. Keep these in sync with app.css's status
-	// tokens for each mode (Issue #4 redesign).
-	const VERDICT_DARK: Record<string, string> = {
-		pass: '#4ade80', warn: '#fbbf24', fail: '#f87171',
-		error: '#f87171', skip: '#8a9389'
-	};
-	const VERDICT_LIGHT: Record<string, string> = {
-		pass: '#16a34a', warn: '#9a6905', fail: '#B91C1C',
-		error: '#B91C1C', skip: '#57584C'
-	};
+	// MapLibre paint can't read CSS custom properties, so the verdict colors
+	// come from $lib/palette, which is held to app.css by a test.
 	const verdictColor = $derived.by(() => {
-		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		const table = verdictColors(theme.resolved);
 		return (status: string) => table[status] ?? table.skip;
 	});
 
@@ -1570,7 +1561,7 @@
 	// for ghost states." This makes "is the radar actually broken?" answerable
 	// from across the room.
 	const radarCenterColor = $derived.by(() => {
-		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		const table = verdictColors(theme.resolved);
 		return (status: string) => {
 			if (status === 'pass') return table.pass;
 			if (status === 'warn' || status === 'fail' || status === 'error') return table.fail;
@@ -1578,7 +1569,7 @@
 		};
 	});
 	const radarHaloColor = $derived.by(() => {
-		const table = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		const table = verdictColors(theme.resolved);
 		return (status: string) => {
 			if (status === 'pass') return table.pass;
 			if (status === 'warn') return table.warn;
@@ -3437,7 +3428,7 @@
 			paint: {
 				'circle-radius': ['case', ['get', 'active'], 5.5, 4],
 				'circle-color': ['get', 'center_color'],
-				'circle-stroke-color': t === 'light' ? '#ffffff' : '#0c100d',  /* --color-canvas per mode */
+				'circle-stroke-color': PALETTE[t].canvas,
 				'circle-stroke-width': 1
 			}
 		});
@@ -3453,8 +3444,8 @@
 				'text-font': ['Stadia Regular']
 			},
 			paint: {
-				'text-color': t === 'light' ? '#1c1f1c' : '#d0d6d0',  /* --color-default per mode */
-				'text-halo-color': t === 'light' ? '#ffffff' : '#0c100d',  /* --color-canvas per mode */
+				'text-color': PALETTE[t].default,
+				'text-halo-color': PALETTE[t].canvas,
 				'text-halo-width': 1.2
 			}
 		});

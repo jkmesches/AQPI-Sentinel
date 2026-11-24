@@ -10,6 +10,7 @@
  * theme swap at the wrong moment left the reservoirs unbuilt until something
  * else triggered a rebuild.
  */
+import { PALETTE } from '../../palette';
 import type { LayerCtx, LayerModule, Theme } from './registry';
 
 /** Where each file lives, served from the frontend's static tree. */
@@ -41,7 +42,7 @@ const loadReservoirs = cachedLoader(RESERVOIRS_URL);
 const WATERSHED_LINE = { light: '#3f6478', dark: '#5a8aa0' };
 const RESERVOIR_DOT = { light: '#1f6d8e', dark: '#5fa8c4' };
 const RESERVOIR_TEXT = { light: '#1f6d8e', dark: '#9bc4d2' };
-const HALO = { light: '#ffffff', dark: '#0c100d' };
+const HALO = { light: PALETTE.light.canvas, dark: PALETTE.dark.canvas };
 
 const pick = (table: Record<Theme, string>, t: Theme) => table[t];
 

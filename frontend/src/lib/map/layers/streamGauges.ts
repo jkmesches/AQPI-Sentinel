@@ -9,6 +9,7 @@
  */
 import type { ExpressionSpecification } from 'maplibre-gl';
 
+import { PALETTE } from '../../palette';
 import type { LayerCtx, LayerModule, Theme } from './registry';
 
 export const GAUGE_SOURCE = 'stream-gauges';
@@ -22,7 +23,7 @@ export const LIVE_STATUS = 'R';
 
 const LIVE_FILL = { light: '#0a6f9b', dark: '#6ec2e0' };
 const BASIC_FILL = { light: '#5d8aa8', dark: '#6e8aa0' };
-const STROKE = { light: '#ffffff', dark: '#0c100d' };
+const STROKE = { light: PALETTE.light.canvas, dark: PALETTE.dark.canvas };
 
 /** One site, as the backend reports it. */
 export interface GaugeSite {

@@ -101,7 +101,7 @@
 	     that scrolls sideways turns a drag on the map into a pan of the
 	     page. -->
 	<header
-		class="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-[var(--color-border)] px-4 py-2.5 text-[12px]"
+		class="band flex flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2.5 text-[12px]"
 	>
 		<div class="flex items-baseline gap-3">
 			<span
@@ -260,7 +260,7 @@
 	     Wraps below about 380 px: unwrapped, the link group ran to 376 px
 	     and scrolled every page sideways in a 320 px window. -->
 	<footer
-		class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
+		class="site-footer flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
 	>
 		<span>
 			Built by

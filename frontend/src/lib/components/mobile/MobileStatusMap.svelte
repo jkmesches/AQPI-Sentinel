@@ -11,6 +11,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
+	import { PALETTE, verdictColors } from '$lib/palette';
 	import { url as apiUrl } from '$lib/origin';
 	import { resolveHomeView, type HomeView } from '$lib/site';
 	import { buildSharedTimeline } from '$lib/radarTimeline';
@@ -20,15 +21,6 @@
 	const STYLE_LIGHT = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
 	const STYLE_DARK = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
 
-	// Mirrors MapView's status palette.
-	const VERDICT_LIGHT: Record<string, string> = {
-		pass: '#16a34a', warn: '#9a6905', fail: '#B91C1C',
-		error: '#B91C1C', skip: '#57584C'
-	};
-	const VERDICT_DARK: Record<string, string> = {
-		pass: '#4ade80', warn: '#fbbf24', fail: '#f87171',
-		error: '#f87171', skip: '#8a9389'
-	};
 
 	interface RadarMeta { id: string; lat: number; lon: number; range_m: number; kind: string; name: string }
 	interface Step { i: number; ts: string | null; imageName: string; day: string; date: string; time: string }
@@ -185,13 +177,13 @@
 	const statusByRadar = $derived(radarStatusByTarget(sentinel.rollup?.stages));
 
 	function centerColorFor(s: string): string {
-		const t = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		const t = verdictColors(theme.resolved);
 		if (s === 'pass') return t.pass;
 		if (s === 'warn' || s === 'fail' || s === 'error') return t.fail;
 		return t.skip;
 	}
 	function haloColorFor(s: string): string {
-		const t = theme.resolved === 'light' ? VERDICT_LIGHT : VERDICT_DARK;
+		const t = verdictColors(theme.resolved);
 		if (s === 'pass') return t.pass;
 		if (s === 'warn') return t.warn;
 		if (s === 'fail' || s === 'error') return t.fail;
@@ -276,8 +268,8 @@
 				'circle-color': ['get', 'center_color'],
 				'circle-stroke-color': [
 					'case', ['==', ['get', 'selected'], 1],
-					'#8ABE82',
-					theme.resolved === 'light' ? '#ffffff' : '#0c100d'
+					PALETTE[theme.resolved].accent,
+					PALETTE[theme.resolved].canvas
 				],
 				'circle-stroke-width': ['case', ['==', ['get', 'selected'], 1], 3, 1.5]
 			}
@@ -292,8 +284,8 @@
 				'text-font': ['Stadia Regular']
 			},
 			paint: {
-				'text-color': theme.resolved === 'light' ? '#1c1f1c' : '#d0d6d0',
-				'text-halo-color': theme.resolved === 'light' ? '#ffffff' : '#0c100d',
+				'text-color': PALETTE[theme.resolved].default,
+				'text-halo-color': PALETTE[theme.resolved].canvas,
 				'text-halo-width': 1.2
 			}
 		});

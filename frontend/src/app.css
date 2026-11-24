@@ -1,49 +1,63 @@
 @import 'tailwindcss';
+/* Poppins, CSU's web face, bundled rather than loaded from Google Fonts, so
+   a page makes no third-party request and renders offline. */
+@import '@fontsource/poppins/latin-400.css';
+@import '@fontsource/poppins/latin-500.css';
+@import '@fontsource/poppins/latin-600.css';
 
 /* =========================================================================
- * SENTINEL — CSU-themed operations-center tokens (Issue #4)
+ * SENTINEL: CSU-themed operations-center tokens
  *
- * Palette goals:
- *   - Light: warm off-white canvas, CSU forest-green accents
- *   - Dark:  green-tinted slate, CSU green lightened for visibility
- *   - default/muted/faint text tiers all meet WCAG AA on their canvas
- *     (dark "faint" went from 2.4:1 → 4.0:1; the previous tier was the
- *     main "text is hard to read" complaint)
+ * The CSU theme, chosen by Joseph from mockups on 2026-11-24 (wiki plan 81
+ * §8): A for dark, C for light, Poppins for text. Brand values from
+ * brand.colostate.edu: CSU Green #1E4D2B, CSU Gold #C8C372, Oval Green
+ * #006144. CSU publishes no dark-mode guidance; its web guideline puts the
+ * site header on CSU Green with the white wordmark, which `.band` does in
+ * both themes.
  *
- * Brand source: brand.colostate.edu — Forest Green #1E4D2B, Gold #C8C372
+ * Every text and status token is at least 4.5:1 on canvas, surface and
+ * surface-hi in its theme. The status colors were chosen to stay apart for
+ * red-green color blindness: their worst pair is 12.4 (dark) and 6.5 (light)
+ * as OKLab distance x100 under simulated protanopia and deuteranopia,
+ * where the previous palette's error and info were 0.3 apart.
  * ========================================================================= */
 
 @theme {
-	/* color (dark, default) */
-	--color-canvas:        #0c100d;     /* deep slate w/ green tint */
-	--color-surface:       #131815;     /* panels */
-	--color-surface-hi:    #1a201d;     /* row hover */
-	--color-elevated:      #232a26;
-	--color-border:        #1c2320;
-	--color-border-strong: #2f3833;
-	--color-default:       #d0d6d0;     /* 13:1 on canvas */
-	--color-muted:         #8a9389;     /* 6.5:1 (was 4.5:1) */
-	--color-faint:         #677067;     /* 4.0:1 (was 2.4:1) */
+	/* color (dark, default): theme A, near-black tinted with CSU Green's hue */
+	--color-canvas:        #0a130d;
+	--color-surface:       #101b14;     /* panels */
+	--color-surface-hi:    #16231b;     /* row hover */
+	--color-elevated:      #1e2e24;
+	--color-border:        #1b2920;
+	--color-border-strong: #2f4337;
+	--color-default:       #e3e8e1;     /* 13:1 on surface-hi */
+	--color-muted:         #a4afa2;     /* 7.2:1 on surface-hi */
+	--color-faint:         #808c7f;     /* 4.6:1 on surface-hi */
 	--color-bright:        #ffffff;
 
 	/* CSU brand accents */
-	--color-accent:      #8ABE82;     /* CSU green lightened for dark, 7.5:1 */
-	--color-accent-soft: #C8C372;     /* CSU gold */
+	--color-accent:      #C8C372;     /* CSU Gold, 8.9:1 on surface-hi */
+	--color-accent-soft: #e0dc8a;     /* the gold's light tint, from colostate.edu */
 
-	/* status (dark) */
-	--color-ok:       #4ade80;
-	--color-warn:     #fbbf24;
-	--color-fail:     #f87171;
+	/* status (dark). Pass is CSU Green's hue lifted to read on the dark
+	   canvas (Joseph's pick); CSU Green itself is 1.8:1 there. */
+	--color-ok:       #39a758;
+	--color-warn:     #ffc038;        /* CSU Energy palette "Sunshine" */
+	--color-fail:     #f76e6e;
 	/* `error` = the check could not determine state (upstream API timed out,
 	   Playwright crashed), as distinct from `fail` = the monitored thing is
 	   broken. These were the same red until 2026-08-25, which made ~1,500
 	   upstream-API timeouts/day render as radar outages. Violet is legible
 	   against ok/warn/fail/muted for the common color-vision types and does
 	   not read as "worse than fail". */
-	--color-error:    #a78bfa;
-	--color-info:     #60a5fa;
-	--color-suppress: #8a8f8a;
-	--color-critical: #f472b6;
+	--color-error:    #976ef7;
+	--color-info:     #6ec0f7;
+	--color-suppress: #8f978e;
+	--color-critical: #f283bd;
+
+	/* The header band, the same in both themes (see .band). */
+	--color-band:      #1E4D2B;       /* CSU Green */
+	--color-band-rule: #C8C372;       /* CSU Gold */
 
 	/* dBZ accents — scientific colormap, theme-independent */
 	--color-dbz-1: #4b006e;
@@ -55,7 +69,7 @@
 	--color-dbz-7: #d90000;
 
 	/* typography */
-	--font-display: 'Inter Tight', 'InterVariable', system-ui, sans-serif;
+	--font-display: 'Poppins', system-ui, sans-serif;
 	--font-mono:    ui-monospace, 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
 	--font-numeric: var(--font-mono);
 }
@@ -67,54 +81,86 @@ body {
 		var(--color-canvas);
 	color: var(--color-default);
 	font-family: var(--font-display);
-	font-feature-settings: 'cv11', 'ss01';
-	letter-spacing: 0.005em;
 	transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 /* dark glow (default) */
 :root, [data-theme="dark"] {
-	--bg-glow: #0d1612;
+	--bg-glow: #0f2016;
 	--panel-sheen: rgba(255,255,255,0.012);
-	--map-attrib-bg:   rgba(12,16,13,0.65);
-	--map-attrib-fg:   #d0d6d0;
+	--map-attrib-bg:   rgba(10,19,13,0.65);
+	--map-attrib-fg:   #e3e8e1;
 	--map-attrib-link: #ffffff;
+	/* Darker than CSU Green, so faint text still reads on it (4.7:1). */
+	--footer-bg: #0d2416;
 }
 
 /* ===========================================================================
-   LIGHT THEME — warm off-white canvas, CSU forest-green accents.
+   LIGHT THEME: theme C, an off-white canvas, CSU Green header, Oval Green footer.
    =========================================================================== */
 [data-theme="light"] {
-	--color-canvas:        #f5f5f3;
+	--color-canvas:        #f6f6f2;
 	--color-surface:       #ffffff;
-	--color-surface-hi:    #f0f0ed;
-	--color-elevated:      #e6e6e1;
-	--color-border:        #d8d6d0;
-	--color-border-strong: #afaca3;
-	--color-default:       #1c1f1c;     /* 14:1 on white */
-	--color-muted:         #555c50;     /* 5.5:1 on white */
-	--color-faint:         #6f7568;     /* 4.4:1 on white (was 3.2:1) */
-	--color-bright:        #0d100c;
+	--color-surface-hi:    #efefe9;
+	--color-elevated:      #e5e5dd;
+	--color-border:        #d9d8cf;
+	--color-border-strong: #aeac9f;
+	--color-default:       #1a1d1a;     /* 14.7:1 on surface-hi */
+	--color-muted:         #4f564d;     /* 6.6:1 on surface-hi */
+	--color-faint:         #61685e;     /* 5.0:1 on surface-hi */
+	--color-bright:        #0b0e0b;
 
-	--color-accent:      #1E4D2B;       /* CSU forest green, 11:1 on white — brand chrome */
-	--color-accent-soft: #C8C372;       /* CSU gold */
+	--color-accent:      #1E4D2B;       /* CSU Green, 8.5:1 on surface-hi */
+	--color-accent-soft: #C8C372;       /* CSU Gold */
 
-	/* Status greens need to POP at small sizes (dots, sparkline strokes).
-	   Forest green is too desaturated and reads as gray in tables. Use a
-	   bright emerald that still meets AA contrast on white. */
-	--color-ok:       #16a34a;          /* green-600, 4.5:1 — vivid + readable */
-	--color-warn:     #9a6905;          /* deep gold, 5.5:1 */
-	--color-fail:     #B91C1C;          /* red-700, 6.3:1 */
-	--color-error:    #6D28D9;          /* violet-700, 7.1:1 — see dark theme note */
-	--color-info:     #1d4ed8;          /* blue-700, 7.5:1 */
-	--color-suppress: #57584C;
-	--color-critical: #831843;          /* pink-900, 9.5:1 */
+	--color-ok:       #1f7a45;          /* 4.6:1 on surface-hi */
+	--color-warn:     #7a5000;          /* 6.1:1 */
+	--color-fail:     #7a1426;          /* 9.3:1 */
+	--color-error:    #4b2a9e;          /* 8.6:1 */
+	--color-info:     #1271a1;          /* 4.7:1 */
+	--color-suppress: #59595b;          /* CSU's 80% Black */
+	--color-critical: #8c1d4f;
 
-	--bg-glow: #ebede8;
+	--bg-glow: #eef0ea;
 	--panel-sheen: rgba(0,0,0,0.018);
 	--map-attrib-bg:   rgba(255,255,255,0.88);
-	--map-attrib-fg:   #1c1f1c;
-	--map-attrib-link: #0d100c;
+	--map-attrib-fg:   #1a1d1a;
+	--map-attrib-link: #0b0e0b;
+	--footer-bg: #006144;               /* CSU Oval Green, as colostate.edu's footer */
+}
+
+/* The CSU Green band behind the site header, in both themes. It carries its
+   own text and status tokens, since the page's do not read on it: every one
+   below is at least 4.5:1 on #1E4D2B. A failing or warning count in the band
+   also carries its F or W letter, which separates it from the pass count
+   where the two greens and reds are close for red-green color blindness. */
+.band {
+	background: var(--color-band);
+	border-bottom: 2px solid var(--color-band-rule);
+	--color-default:       #ffffff;
+	--color-bright:        #ffffff;
+	--color-muted:         #d5e0d6;     /* 7.2:1 */
+	--color-faint:         #b9c9bb;     /* 5.6:1 */
+	--color-accent:        #C8C372;     /* 5.3:1 */
+	--color-ok:            #58c677;     /* 4.5:1, the pass green's hue */
+	--color-warn:          #ffc038;     /* 6.0:1 */
+	--color-fail:          #ff9a8a;     /* 4.8:1 */
+	--color-error:         #c4a8ff;     /* 4.8:1 */
+	--color-info:          #6ec0f7;     /* 4.9:1 */
+	--color-surface:       rgba(255,255,255,0.08);
+	--color-surface-hi:    rgba(255,255,255,0.12);
+	--color-elevated:      rgba(255,255,255,0.18);
+	--color-border:        rgba(255,255,255,0.18);
+	--color-border-strong: rgba(255,255,255,0.3);
+}
+
+.site-footer { background: var(--footer-bg); }
+/* White on Oval Green, 7.5:1; the faint tint is 4.8:1. */
+[data-theme="light"] .site-footer {
+	--color-default: #ffffff;
+	--color-bright:  #ffffff;
+	--color-muted:   #ffffff;
+	--color-faint:   #d2e6dd;
 }
 
 * { border-color: var(--color-border); }
