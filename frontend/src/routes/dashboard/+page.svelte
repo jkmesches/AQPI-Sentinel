@@ -8,7 +8,8 @@
 	import {
 		fmtAge, severityChip, statusText, statusBorder,
 		stageLabel, prettyCheckLabel, productLabel,
-		productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
+		productCategory, productRowKey, productRowLabel,
+		PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL,
 		sparklineMetric, sparklineDomain, sparklineWarnAt, isFleetCheck,
 		arrivalRowOf, radarRowRank, BACKEND_FLEET_CHECK_ID,
 		readoutMetric, fmtCadence, secondsToNextRun,
@@ -16,7 +17,7 @@
 	import { groupByTarget, worstOf, isAlerting } from '$lib/grouping';
 	import { radarVerdicts } from '$lib/radarStatus';
 	import { getSite } from '$lib/site';
-	import { api, type CheckMeta } from '$lib/api';
+	import { api, type CheckMeta, type StatusRow } from '$lib/api';
 	import { diag } from '$lib/diag';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { hiddenCheckIds, sourceCounts } from '$lib/checkFilter';
@@ -201,16 +202,22 @@
 	//   - L1 carries vector + stream feeds that have no backend counterpart
 	//     at all
 	// Those cells say so rather than rendering a blank, which reads as broken.
-	function pairByTarget(primary: any[], backend: any[]) {
-		const out = new Map<string, { target: string; primary: any; backend: any }>();
-		const slot = (t: string) => {
-			let s = out.get(t);
-			if (!s) { s = { target: t, primary: null, backend: null }; out.set(t, s); }
+	// productRowKey says which readings share a row.
+	type ProductRow = {
+		key: string; target: string; primary: StatusRow | null; backend: StatusRow | null;
+	};
+	function pairByTarget(primary: StatusRow[], backend: StatusRow[]) {
+		const out = new Map<string, ProductRow>();
+		const slot = (r: StatusRow) => {
+			const key = productRowKey(r.check_id, r.target);
+			let s = out.get(key);
+			if (!s) { s = { key, target: r.target, primary: null, backend: null }; out.set(key, s); }
 			return s;
 		};
-		for (const r of primary) slot(r.target).primary = r;
-		for (const r of backend) slot(r.target).backend = r;
-		return [...out.values()].sort((a, b) => a.target.localeCompare(b.target));
+		for (const r of primary) slot(r).primary = r;
+		for (const r of backend) slot(r).backend = r;
+		return [...out.values()].sort((a, b) =>
+			a.target.localeCompare(b.target) || a.key.localeCompare(b.key));
 	}
 	const pairStatuses = (p: { primary: any; backend: any }) =>
 		[p.primary, p.backend].filter(Boolean);
@@ -237,7 +244,8 @@
 		const targets: Record<string, Set<string>> = {};
 		const all = [...(sentinel.rollup?.stages?.L1 ?? []), ...(sentinel.rollup?.stages?.LB1 ?? [])];
 		for (const r of all) {
-			(targets[productCategory(r.target)] ??= new Set()).add(r.target);
+			(targets[productCategory(r.target)] ??= new Set())
+				.add(productRowKey(r.check_id, r.target));
 		}
 		return Object.fromEntries(Object.entries(targets).map(([cat, set]) => [cat, set.size]));
 	});
@@ -910,20 +918,15 @@
 					</div>
 				{:else}
 					<ul class="divide-y divide-[var(--color-border)]">
-						{#each g.rows as p (p.target)}
+						{#each g.rows as p (p.key)}
 							{@const lone = loneOf(p)}
 							{@const ageS = lone ? latestMetric(lone.check_id, 'age_s') : null}
 							<li class="row-hover {pairIsBad(p) ? 'row-bad' : ''} grid {pairedProducts ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_4.5rem_auto]'} items-center gap-2 px-3 py-1.5 text-[12px]">
-								<!-- Named off whichever reading exists. prettyCheckLabel
-								     suffixes "· backend" for layer1.backend.*, which is
-								     right in a paired rail and wrong when the backend IS
-								     the only source, so an unpaired row uses the bare
-								     product label. -->
+								<!-- Named off whichever reading exists, which in an
+								     unpaired rail may be the backend's. -->
 								<span class="num truncate text-[var(--color-bright)]"
 									  title={lone ? `${lone.check_id} · ${p.target}\n${cadenceTitle(lone.check_id)}` : p.target}>
-									{pairedProducts && p.primary
-										? prettyCheckLabel(p.primary.check_id, p.target)
-										: productLabel(p.target)}
+									{lone ? productRowLabel(lone.check_id, p.target) : productLabel(p.target)}
 								</span>
 								{#if pairedProducts}
 									{@render sourceCell(p.backend, 'FS', true, 64)}

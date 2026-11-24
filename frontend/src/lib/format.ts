@@ -559,6 +559,10 @@ const PRODUCT_CATEGORIES: Record<string, ProductCategory> = {
 	water_depth:           'cosmos',
 	max_water_level:       'cosmos',
 	max_water_depth:       'cosmos',
+	// The model driver's cycle manifest, read by the two layer1.model.*
+	// checks. It says whether the run that makes the four products above
+	// finished, so it belongs beside them rather than under Other.
+	cosmos:                'cosmos',
 
 	// Stream Reach feeds sourced from the National Water Model on
 	// radarca. flowlines + watersheds are vector overlays; stream
@@ -572,6 +576,43 @@ const PRODUCT_CATEGORIES: Record<string, ProductCategory> = {
 
 export function productCategory(productId: string): ProductCategory {
 	return PRODUCT_CATEGORIES[productId] ?? 'other';
+}
+
+/**
+ * The key that puts readings in one row of the Products rail.
+ *
+ * A product check and its filesystem mirror share a target, and the target
+ * is what pairs them. Any other check keys on its own id, because two of
+ * them can share a target with no mirror between them. Both CoSMoS manifest
+ * checks target `cosmos`, and keyed by target the second overwrote the
+ * first, leaving one row for two checks.
+ *
+ * @param checkId The check's id.
+ * @param target Its target.
+ * @returns The row key.
+ */
+export function productRowKey(checkId: string, target: string): string {
+	return checkId.startsWith('layer1.product.') || checkId.startsWith('layer1.backend.')
+		? target
+		: checkId;
+}
+
+/**
+ * The name a Products rail row carries.
+ *
+ * A filesystem product reading is named for its product alone, since
+ * prettyCheckLabel's "· backend" suffix is wrong in a row whose source
+ * cells already say which side read it. Every other check takes
+ * prettyCheckLabel's name, the one the timeline and alerts use.
+ *
+ * @param checkId The id of the reading the row is named from.
+ * @param target Its target.
+ * @returns The name.
+ */
+export function productRowLabel(checkId: string, target: string): string {
+	return checkId.startsWith('layer1.backend.')
+		? productLabel(target)
+		: prettyCheckLabel(checkId, target);
 }
 
 // Turn a check_id + target into something a non-engineer can read at a glance.

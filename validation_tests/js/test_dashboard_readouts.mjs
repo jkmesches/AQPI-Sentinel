@@ -15,7 +15,7 @@
 export function runTests(mod) {
   const {
     readoutMetric, sparklineMetric, fmtCadence, secondsToNextRun,
-    parseImageQc, qcLabel
+    parseImageQc, qcLabel, productCategory, productRowKey, productRowLabel
   } = mod;
   const failures = [];
   const check = (label, cond, detail = '') => {
@@ -150,6 +150,43 @@ export function runTests(mod) {
     check('a word that merely contains a detector name is not a verdict',
       parseImageQc('no spikes seen, ring=OK').map((x) => x.name).join(' ') === 'ring',
       parseImageQc('no spikes seen, ring=OK').map((x) => x.name).join(' '));
+  }
+
+  // Both CoSMoS manifest checks target `cosmos`. Until 2026-11-24 the rail
+  // filed that target under Other, keyed its rows by target so the second
+  // check overwrote the first, and named the one left "Cosmos".
+  console.log('\nthe CoSMoS manifest checks sit with the products they gate:');
+  {
+    const cycle = ['layer1.model.cycle', 'cosmos'];
+    const age = ['layer1.model.manifest', 'cosmos'];
+    check('the cosmos target files under CoSMoS Data',
+      productCategory('cosmos') === 'cosmos', productCategory('cosmos'));
+    check('...beside the products the run makes',
+      productCategory('water_level') === productCategory('cosmos'));
+    check('the two manifest checks get a row each',
+      productRowKey(...cycle) !== productRowKey(...age),
+      `${productRowKey(...cycle)} vs ${productRowKey(...age)}`);
+    check('the cycle row is named for what it watches',
+      productRowLabel(...cycle) === 'CoSMoS · cycle outcome', productRowLabel(...cycle));
+    check('the manifest row too',
+      productRowLabel(...age) === 'CoSMoS · cycle manifest age', productRowLabel(...age));
+  }
+
+  console.log('\na product and its filesystem mirror still share one row:');
+  {
+    const rc = ['layer1.product.water_level', 'water_level'];
+    const fs = ['layer1.backend.water_level', 'water_level'];
+    check('the two readings key alike',
+      productRowKey(...rc) === productRowKey(...fs),
+      `${productRowKey(...rc)} vs ${productRowKey(...fs)}`);
+    check('the row is named for the product from either side',
+      productRowLabel(...rc) === productRowLabel(...fs),
+      `${productRowLabel(...rc)} vs ${productRowLabel(...fs)}`);
+    check('...with no backend suffix',
+      !productRowLabel(...fs).includes('backend'), productRowLabel(...fs));
+    check('a vector overlay takes its own name, not a title-cased target',
+      productRowLabel('layer1.vector.flowlines', 'flowlines') === 'Stream flowlines',
+      productRowLabel('layer1.vector.flowlines', 'flowlines'));
   }
 
   if (failures.length) {
