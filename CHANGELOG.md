@@ -28,6 +28,55 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-24
+
+### Changed
+
+- **The console wears Colorado State University's colors.** The dark theme
+  is a near-black tinted with CSU Green, with CSU Gold as its accent, and the
+  light theme is a warm off-white with CSU Green. The site header is a CSU
+  Green band with a gold rule in both themes, and the light theme's footer
+  is CSU's Oval Green, as on colostate.edu. Passing checks show CSU Green's
+  hue lifted to `#39a758`, so it reads on the dark canvas. Every text and
+  status color is at least 4.5:1 on the surfaces it sits on, and error and
+  info no longer look alike to red-green color-blind readers. The map's
+  markers, rings and labels use the same palette. The theme still follows
+  the viewer's system setting until they pick one.
+- **Text is set in Poppins**, CSU's web face, bundled with the app rather
+  than fetched from Google. Numbers, times and IDs stay monospaced.
+- **No text is smaller than 12 px.** About 700 sizes from 8 to 11.5 px moved
+  to 12 px, including the map's panels, popups and stream-gauge hydrograph.
+  Where that crowded, text came out. A radar card keeps its check count in
+  its hover title and names only the image-QC detectors that fired ("QC ok"
+  when none did), and the Quality rail drops its "Image Quality" label.
+- **The desktop pages fit phones, tablets and short windows.** Below
+  1024 px the header folds to the name, the UTC clock, the pass count and a
+  menu button, and the stage strip folds to one summary row that opens the
+  full list. The dashboard, Timeline and History scroll as a page on a short
+  screen, where a phone held sideways had squeezed their content to nothing,
+  and below 1024 px the dashboard stacks its rails at full height. The
+  Timeline's tabs and grain buttons and History's date fields fit a 320 px
+  window. Links, buttons and checkboxes near another control are at least
+  24 px, except the Timeline grid's 16 px cells, which keep its density.
+- **The sign-in button is filled in the accent color**, and the disclosure
+  arrows are drawn as SVG. At 12 px the arrow character had rendered as an
+  orange emoji.
+
+### Fixed
+
+- **Screen readers get names for what they meet.** Status dots are read,
+  each page has a level-one heading, the navigation regions and dashboard
+  rails are named, and the mobile Alarms tab reads its alarm count. The
+  dashboard rails, History table and FAQ tables take keyboard focus, so a
+  keyboard can scroll them. History's date fields and the admin alert,
+  email and user forms tie each label to its input. The map's radar rows are
+  buttons with a pressed state, and each row's solo button also shows on
+  keyboard focus. The map's product and tilt selects are named.
+- **Native controls follow the dark theme.** Checkboxes, date pickers and
+  scrollbars had stayed white on the dark page.
+- **The theme toggle's active option** read 4.3:1 in the header band and
+  now reads 5.9:1.
+
 ## [0.15.10] - 2026-11-24
 
 ### Added

@@ -145,17 +145,21 @@ This is what keeps long-running tabs from leaking.
 
 ## Tailwind v4 conventions
 
-`app.css` defines theme tokens in a `@theme` block:
+The theme follows Colorado State University's colors. `app.css` sets the dark
+theme's tokens in its `@theme` block, and the light theme overrides them under
+`[data-theme="light"]`:
 
 ```css
 @theme {
-    --color-canvas:   light-dark(#fbfbf8, #0c100d);
-    --color-surface:  light-dark(#ffffff, #131815);
-    --color-bright:   light-dark(#0c100d, #ecf2ec);
-    --color-ok:       light-dark(#16a34a, #4ade80);
-    --color-warn:     light-dark(#9a6905, #fbbf24);
-    --color-fail:     light-dark(#B91C1C, #f87171);
-    --color-skip:     light-dark(#6b6b6b, #8a9389);
+    --color-canvas:  #0a130d;    /* near-black with CSU Green's hue */
+    --color-default: #e3e8e1;
+    --color-accent:  #C8C372;    /* CSU Gold */
+    --color-ok:      #39a758;    /* CSU Green lifted to read on the dark canvas */
+    /* ... */
+}
+[data-theme="light"] {
+    --color-canvas:  #f6f6f2;
+    --color-accent:  #1E4D2B;    /* CSU Green */
     /* ... */
 }
 ```
@@ -166,7 +170,22 @@ Use the tokens, not literal colors:
 <div class="bg-[var(--color-surface)] text-[var(--color-bright)] border-[var(--color-border)]">
 ```
 
-Hardcoded colors break the light/dark toggle.
+A literal color breaks the light/dark toggle, and the `ui check` palette rule
+reports it. A few rules keep the theme readable:
+
+- Every text and status token is at least 4.5:1 on the canvas, surface and
+  surface-hi of its theme, and the comment beside a token states its measured
+  ratio. `validation_tests/test_theme_palette.py` checks both, so run it after
+  a token edit.
+- The header band (`.band`) is CSU Green in both themes and sets its own text
+  and status colors from the `--color-band-*` tokens, since the page's status
+  colors do not read on green. A block that redefines a token takes it from
+  another token, never from a literal.
+- MapLibre paints cannot read CSS custom properties, so the map takes its
+  colors from `$lib/palette.ts`, which mirrors the tokens it needs. The palette
+  test fails if the two drift apart.
+- No text is set below 12 px. Text is Poppins, and numbers, times and IDs use
+  the `num` class (a monospaced face with tabular figures).
 
 **Status colors are mapped through `statusText()` / `statusBorder()`
 in `format.ts`** — use them rather than re-coloring per call site.
