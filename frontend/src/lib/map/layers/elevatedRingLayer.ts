@@ -16,7 +16,9 @@
  * rather than crawling along it as the camera zooms.
  */
 import type { CustomLayerInterface, Map as MlMap } from 'maplibre-gl';
-import { MercatorCoordinate } from 'maplibre-gl';
+// The default import, as in MapView.svelte. Vite's dev server loads
+// maplibre-gl as CommonJS during SSR and refuses a named export from it.
+import maplibregl from 'maplibre-gl';
 import { ringFan, ringStrip, type Ring } from './elevatedRings';
 
 /** One ring to draw, and how. */
@@ -103,7 +105,7 @@ function compile(
 function toMercator(
 	lng: number, lat: number, altitudeM: number
 ): [number, number, number] {
-	const m = MercatorCoordinate.fromLngLat({ lng, lat }, altitudeM);
+	const m = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat }, altitudeM);
 	return [m.x, m.y, m.z];
 }
 

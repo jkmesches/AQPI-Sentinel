@@ -13,7 +13,9 @@
  * rather than wrapped around it.
  */
 import type { CustomLayerInterface, Map as MlMap } from 'maplibre-gl';
-import { MercatorCoordinate } from 'maplibre-gl';
+// The default import, as in MapView.svelte. Vite's dev server loads
+// maplibre-gl as CommonJS during SSR and refuses a named export from it.
+import maplibregl from 'maplibre-gl';
 import {
 	beamVertices, isDrawable, sheetVertices, type Beam, type Corners
 } from './elevatedRaster';
@@ -271,7 +273,7 @@ export class ElevatedSheet implements CustomLayerInterface {
 
 		const project = (lng: number, lat: number, alt: number):
 			[number, number, number] => {
-			const m = MercatorCoordinate.fromLngLat({ lng, lat }, alt);
+			const m = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat }, alt);
 			return [m.x, m.y, m.z];
 		};
 		const verts = this.spec.beam
