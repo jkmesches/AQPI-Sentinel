@@ -85,9 +85,9 @@
 					</svg>
 					<div class="min-w-0 flex-1">
 						<div class="num text-[14px] font-medium text-[var(--color-bright)]">{deviceLabel(s)}</div>
-						<div class="mt-0.5 text-[11.5px] text-[var(--color-muted)] num truncate">{summary(s)}</div>
+						<div class="mt-0.5 text-[12px] text-[var(--color-muted)] num truncate">{summary(s)}</div>
 						{#if s.user_agent}
-							<div class="mt-0.5 text-[10.5px] text-[var(--color-faint)] num truncate">{s.user_agent}</div>
+							<div class="mt-0.5 text-[12px] text-[var(--color-faint)] num truncate">{s.user_agent}</div>
 						{/if}
 					</div>
 					<svg viewBox="0 0 24 24" width="14" height="14" class="mt-2 shrink-0 text-[var(--color-faint)]" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

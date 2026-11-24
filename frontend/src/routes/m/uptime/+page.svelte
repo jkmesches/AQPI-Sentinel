@@ -456,7 +456,7 @@
 	<header class="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
 		<div class="flex items-center justify-between gap-2">
 			<h1 class="text-[15px] font-semibold tracking-wide text-[var(--color-bright)]">Uptime</h1>
-			<label class="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+			<label class="flex items-center gap-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 				<input type="checkbox" bind:checked={live} class="accent-[var(--color-ok)] h-3.5 w-3.5" />
 				<span class="text-[var(--color-default)]">Live</span>
 			</label>
@@ -466,7 +466,7 @@
 		     focus — the related-set deliberately spans stages so subtab
 		     filtering would just hide what the user is investigating. -->
 		{#if focusCheckId}
-			<div class="mt-2 flex items-center gap-2 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-2.5 py-1.5 text-[11px]">
+			<div class="mt-2 flex items-center gap-2 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-2.5 py-1.5 text-[12px]">
 				<svg viewBox="0 0 24 24" class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<circle cx="11" cy="11" r="7" />
 					<line x1="20" y1="20" x2="16.65" y2="16.65" />
@@ -475,11 +475,11 @@
 					<div class="truncate text-[var(--color-bright)]">
 						Focused on {focusCheck ? prettyCheckLabel(focusCheck.id, focusCheck.target) : focusCheckId}
 					</div>
-					<div class="text-[10px] num text-[var(--color-faint)]">
+					<div class="text-[12px] num text-[var(--color-faint)]">
 						{relatedIds.size} check{relatedIds.size === 1 ? '' : 's'} · 1h grain · related: same target + deps
 					</div>
 				</div>
-				<a href="/m/uptime" class="shrink-0 rounded-md border border-[var(--color-info)]/60 px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-info)] active:text-[var(--color-bright)]">× clear</a>
+				<a href="/m/uptime" class="shrink-0 rounded-md border border-[var(--color-info)]/60 px-2 py-1 text-[12px] uppercase tracking-wider text-[var(--color-info)] active:text-[var(--color-bright)]">× clear</a>
 			</div>
 		{:else}
 			<!-- Subtab chip strip -->
@@ -498,8 +498,8 @@
 		{/if}
 
 		<!-- Grain chip strip -->
-		<div class="mt-2 flex items-center gap-1 text-[11px]">
-			<span class="mr-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">grain</span>
+		<div class="mt-2 flex items-center gap-1 text-[12px]">
+			<span class="mr-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">grain</span>
 			{#each BUCKETS as b}
 				<button type="button" onclick={() => setBucket(b.key)}
 					class="rounded-md border px-2.5 py-1 num {bucket === b.key
@@ -510,7 +510,7 @@
 					{b.label}
 				</button>
 			{/each}
-			<span class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-faint)] num">{buckets.length} rows · {colCount} checks · UTC</span>
+			<span class="ml-auto text-[12px] uppercase tracking-wider text-[var(--color-faint)] num">{buckets.length} rows · {colCount} checks · UTC</span>
 		</div>
 	</header>
 
@@ -531,7 +531,7 @@
 						<div style="width: {TIME_W + GAP}px;" class="shrink-0"></div>
 						{#each subgroups as sg, gi}
 							<div
-								class="text-[9px] uppercase tracking-[0.14em] text-[var(--color-muted)] truncate px-1 num"
+								class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)] truncate px-1 num"
 								style="width: {sg.cols.length * (CELL + GAP)}px; min-width: {sg.cols.length * (CELL + GAP)}px;"
 							>{sg.label}</div>
 							{#if gi < subgroups.length - 1}
@@ -545,7 +545,7 @@
 						{#each subgroups as sg, gi}
 							{#each sg.cols as col}
 								<div
-									class="num text-[9px] text-[var(--color-default)] leading-[1.05] shrink-0 origin-bottom-left -rotate-45 overflow-hidden whitespace-nowrap"
+									class="num text-[12px] text-[var(--color-default)] leading-[1.05] shrink-0 origin-bottom-left -rotate-45 overflow-hidden whitespace-nowrap"
 									style="width: {CELL + GAP}px; transform-origin: 0 100%;"
 									title={prettyCheckLabel(col.id, col.target)}
 								>
@@ -567,14 +567,14 @@
 						     even when the user has scrolled the grid horizontally
 						     (radar tab has more columns than fit on a phone). -->
 						<div class="day-sep border-b border-[var(--color-border)]/50 bg-[var(--color-canvas)]/85 py-1">
-							<span class="day-sep-text px-3 text-[9.5px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+							<span class="day-sep-text px-3 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 								{dayLabel(b.ts)}
 							</span>
 						</div>
 					{/if}
 					<div class="flex items-center" style="height: {CELL + GAP}px;">
 						<div
-							class="num text-[10px] text-[var(--color-faint)] tabular-nums shrink-0 text-right pr-1"
+							class="num text-[12px] text-[var(--color-faint)] tabular-nums shrink-0 text-right pr-1"
 							style="width: {TIME_W}px;"
 						>
 							{bucketTime(b.ts)}
@@ -603,7 +603,7 @@
 										     Lets operators distinguish "skipped because something
 										     ELSE failed" from "intrinsically skipped" at a glance. -->
 										<span
-											class="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-bold leading-none text-[var(--color-canvas)]"
+											class="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] font-bold leading-none text-[var(--color-canvas)]"
 											aria-hidden="true"
 										>↑</span>
 									{/if}
@@ -627,7 +627,7 @@
 						</button>
 					</div>
 				{:else}
-					<div class="px-3 py-3 text-center text-[10.5px] text-[var(--color-faint)] italic">— end of history —</div>
+					<div class="px-3 py-3 text-center text-[12px] text-[var(--color-faint)] italic">— end of history —</div>
 				{/if}
 			</div>
 		</div>
@@ -646,11 +646,11 @@
 >
 	{#if detailCol}
 		<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-[12px] num">
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Bucket</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Bucket</dt>
 			<dd class="text-[var(--color-default)]">{detailTs.slice(0,19).replace('T',' ')} UTC ({cfg.label})</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
 			<dd class="text-[var(--color-default)]">{detailCol.target || '—'}</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Stage</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Stage</dt>
 			<dd class="text-[var(--color-default)]">{stageLabel(detailCol.stage)}</dd>
 		</dl>
 
@@ -660,7 +660,7 @@
 		     by the historyRuns endpoint. -->
 		{#each (() => { const r = detailRuns.find(capturedImage); return r ? [r] : []; })() as imgRun}
 			<section class="mt-4">
-				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+				<div class="mb-1 flex items-baseline justify-between text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 					<span>Captured image</span>
 					<span class="num text-[var(--color-faint)] normal-case">{imgRun.finished_at.slice(11,19)}Z</span>
 				</div>
@@ -671,7 +671,7 @@
 		{/each}
 
 		<section class="mt-4">
-			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Runs in this bucket</div>
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Runs in this bucket</div>
 			{#if detailLoading}
 				<div class="text-[12px] text-[var(--color-muted)]">loading…</div>
 			{:else if detailError}
@@ -682,12 +682,12 @@
 				<ul class="divide-y divide-[var(--color-border)]/60 rounded-sm border border-[var(--color-border)]">
 					{#each detailRuns as r}
 						<li class="flex items-baseline gap-2 px-2 py-1.5">
-							<span class="num shrink-0 text-[10.5px] text-[var(--color-faint)]">{r.finished_at.slice(11,19)}Z</span>
-							<span class="num shrink-0 text-[10px] uppercase tracking-wider"
+							<span class="num shrink-0 text-[12px] text-[var(--color-faint)]">{r.finished_at.slice(11,19)}Z</span>
+							<span class="num shrink-0 text-[12px] uppercase tracking-wider"
 								style="color: {STATUS_BG[r.status] ?? 'var(--color-muted)'};">
 								{r.status}
 							</span>
-							<span class="truncate text-[11.5px] num text-[var(--color-default)]" title={r.summary}>{r.summary}</span>
+							<span class="truncate text-[12px] num text-[var(--color-default)]" title={r.summary}>{r.summary}</span>
 						</li>
 					{/each}
 				</ul>
@@ -696,11 +696,11 @@
 
 		<div class="mt-5 grid grid-cols-2 gap-2">
 			<button type="button" onclick={showInTimeline}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in Timeline</button>
 			<button type="button" onclick={showInHistory}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in History</button>
 		</div>

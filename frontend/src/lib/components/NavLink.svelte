@@ -6,7 +6,7 @@
 
 <a
 	{href}
-	class="px-2 py-1 text-[11px] uppercase tracking-wider {active
+	class="px-2 py-1 text-[12px] uppercase tracking-wider {active
 		? 'text-[var(--color-bright)] border-b border-[var(--color-bright)]'
 		: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
 >

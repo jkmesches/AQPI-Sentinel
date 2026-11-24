@@ -26,7 +26,7 @@
 {:else}
 	<div class="flex h-full">
 		<aside class="w-44 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-canvas)]">
-			<div class="px-3 py-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-faint)]">
+			<div class="px-3 py-3 text-[12px] uppercase tracking-[0.18em] text-[var(--color-faint)]">
 				admin
 			</div>
 			<nav class="flex flex-col text-[12px]">
@@ -82,7 +82,7 @@
 				     it's user-scope (each user manages their own devices),
 				     not admin-scope. Mirroring it here for discoverability —
 				     most operators look in the admin sidebar first. -->
-				<div class="mt-2 border-t border-[var(--color-border)] pt-2 px-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-faint)]">
+				<div class="mt-2 border-t border-[var(--color-border)] pt-2 px-3 text-[12px] uppercase tracking-[0.18em] text-[var(--color-faint)]">
 					my account
 				</div>
 				<a

@@ -4564,7 +4564,7 @@
 			<div
 				data-pane-label
 				class="num pointer-events-none absolute left-3 top-3 z-20 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/90 uppercase tracking-wider text-[var(--color-faint)] shadow-lg backdrop-blur"
-				style="font-size: {scaled(9.5, uiScale)}px;
+				style="font-size: {scaled(12, uiScale)}px;
 				       padding: {scaled(3, uiScale)}px {scaled(7, uiScale)}px"
 			>
 				{paneLetter} · {compositeMenuValue}
@@ -4618,7 +4618,7 @@
 					<span
 						data-cursor-follow-value
 						class="num absolute left-4 top-[-0.4rem] whitespace-nowrap rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 text-[var(--color-default)] shadow-lg backdrop-blur"
-						style="font-size: {scaled(10, uiScale)}px;
+						style="font-size: {scaled(12, uiScale)}px;
 						       padding: {scaled(2, uiScale)}px {scaled(6, uiScale)}px"
 					>{followValue}</span>
 				{/if}
@@ -4667,7 +4667,7 @@
 					class="num absolute whitespace-nowrap rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/95 text-[var(--color-bright)] shadow-lg backdrop-blur"
 					style="left: {scaled(14, uiScale)}px;
 					       top: {scaled(-6, uiScale)}px;
-					       font-size: {scaled(10, uiScale)}px;
+					       font-size: {scaled(12, uiScale)}px;
 					       padding: {scaled(2, uiScale)}px {scaled(5, uiScale)}px"
 				>
 					<span class="text-[var(--color-faint)]">{mark.label}</span>
@@ -4706,7 +4706,7 @@
 					class="num {readoutValue === OFF_SCALE
 						? 'text-[var(--color-faint)]'
 						: 'text-[var(--color-bright)]'}"
-					style="font-size: {scaled(10.5, uiScale)}px"
+					style="font-size: {scaled(12, uiScale)}px"
 					>{readoutValue}</span
 				>
 			</div>
@@ -4725,22 +4725,22 @@
 				class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-canvas)]/92 px-2 py-1.5 shadow-lg backdrop-blur"
 			>
 				<div class="mb-1 flex items-baseline gap-2">
-					<span class="text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-muted)]">
+					<span class="text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">
 						Measure
 					</span>
-					<span class="text-[9.5px] text-[var(--color-faint)]">
+					<span class="text-[12px] text-[var(--color-faint)]">
 						click to add a point · Backspace undoes · Esc stops
 					</span>
 				</div>
 				{#if measureLegs.length === 0}
-					<div class="num text-[10.5px] text-[var(--color-faint)]">
+					<div class="num text-[12px] text-[var(--color-faint)]">
 						{measurePoints.length === 1
 							? 'one point placed, click again for a distance'
 							: 'no points yet'}
 					</div>
 				{:else}
 					{#each measureLegs as leg, i (i)}
-						<div class="num text-[10.5px] text-[var(--color-default)]">
+						<div class="num text-[12px] text-[var(--color-default)]">
 							<span class="text-[var(--color-faint)]">{i + 1}.</span>
 							{formatDistance(leg.km)}
 							<span class="text-[var(--color-muted)]">
@@ -4749,7 +4749,7 @@
 						</div>
 					{/each}
 					{#if measureLegs.length > 1}
-						<div class="mt-0.5 border-t border-[var(--color-border)] pt-0.5 num text-[10.5px] text-[var(--color-bright)]">
+						<div class="mt-0.5 border-t border-[var(--color-border)] pt-0.5 num text-[12px] text-[var(--color-bright)]">
 							total {formatDistance(measureTotalKm)}
 						</div>
 					{/if}
@@ -4776,10 +4776,10 @@
 		{#if composite !== 'none' && compExtentProvisional.includes(composite)}
 			<div>
 				<div class="rounded-sm border border-[var(--color-warn)]/70 bg-[var(--color-canvas)]/90 px-2 py-1 shadow-lg backdrop-blur">
-					<div class="num text-[9.5px] uppercase tracking-wider text-[var(--color-warn)]">
+					<div class="num text-[12px] uppercase tracking-wider text-[var(--color-warn)]">
 						⚠ Overlay position provisional
 					</div>
-					<div class="num mt-0.5 text-[9.5px] text-[var(--color-muted)]">
+					<div class="num mt-0.5 text-[12px] text-[var(--color-muted)]">
 						Bounds assumed from the radar's range ring; not supplied by the publisher.
 					</div>
 				</div>
@@ -4796,10 +4796,10 @@
 		{#if unitWarning}
 			<div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 max-w-[92%]">
 				<div data-unit-banner class="rounded-sm border border-[var(--color-warn)] bg-[var(--color-warn)]/[0.14] px-3 py-1.5 text-center shadow-xl backdrop-blur">
-					<div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
+					<div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
 						⚠ {currentUnit} {unitWarning}
 					</div>
-					<div class="mt-0.5 num text-[10.5px] text-[var(--color-default)]">
+					<div class="mt-0.5 num text-[12px] text-[var(--color-default)]">
 						{productLabel(composite)} still publishes {unitOptions[0]?.key ?? 'its canonical unit'}. These frames are whatever was last written in {currentUnit}.
 					</div>
 				</div>
@@ -4813,13 +4813,13 @@
 		{#if compositeStale}
 			<div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 max-w-[92%]">
 				<div class="rounded-sm border border-[var(--color-warn)] bg-[var(--color-warn)]/[0.14] px-3 py-1.5 text-center shadow-xl backdrop-blur">
-					<div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
+					<div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--color-warn)]">
 						<!-- The age is omitted while the step list still describes the
 						     product selected a moment ago, since it would be that
 						     one's age. The warning itself is not withheld for it. -->
 						⚠ Not current{compositeAgeH !== null ? ` — ${humanAge(compositeAgeH)} old` : ''}
 					</div>
-					<div class="mt-0.5 text-[10.5px] num text-[var(--color-default)]">
+					<div class="mt-0.5 text-[12px] num text-[var(--color-default)]">
 						{productLabel(composite)} last updated {stepLabel || '—'}. Upstream stopped publishing; this is not live data.
 					</div>
 				</div>
@@ -4849,7 +4849,7 @@
 				data-place-search
 				type="search"
 				placeholder="find a radar, reservoir or watershed"
-				class="w-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-bright)] placeholder:text-[var(--color-faint)] focus:border-[var(--color-info)] focus:outline-none"
+				class="w-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-bright)] placeholder:text-[var(--color-faint)] focus:border-[var(--color-info)] focus:outline-none"
 				value={searchText}
 				oninput={(e) => {
 					searchText = (e.target as HTMLInputElement).value;
@@ -4868,25 +4868,25 @@
 					{#if searchHits.length === 0}
 						<!-- Says what is searched, so a miss reads as "not in
 						     these datasets" rather than as a broken box. -->
-						<div class="px-2 py-1.5 text-[10px] text-[var(--color-faint)]">
+						<div class="px-2 py-1.5 text-[12px] text-[var(--color-faint)]">
 							nothing by that name among the radars, reservoirs
 							and watersheds this deployment carries
 						</div>
 					{:else}
 						{#each searchHits as hit, i (hit.entry.kind + hit.entry.id)}
 							<button
-								class="flex w-full items-baseline gap-2 px-2 py-1 text-left text-[11px] {i === searchHit
+								class="flex w-full items-baseline gap-2 px-2 py-1 text-left text-[12px] {i === searchHit
 									? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
 									: 'text-[var(--color-default)] hover:bg-[var(--color-elevated)]'}"
 								onclick={() => goToPlace(hit.entry)}
 							>
 								<span class="flex-1 truncate">{hit.entry.name}</span>
 								{#if hit.entry.detail}
-									<span class="num shrink-0 text-[9px] text-[var(--color-faint)]">
+									<span class="num shrink-0 text-[12px] text-[var(--color-faint)]">
 										{hit.entry.detail}
 									</span>
 								{/if}
-								<span class="shrink-0 text-[9px] uppercase tracking-wider text-[var(--color-muted)]">
+								<span class="shrink-0 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 									{hit.entry.kind}
 								</span>
 							</button>
@@ -4912,7 +4912,7 @@
 				     one product while reporting that it had switched them. -->
 				<select
 					data-product-select
-					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 					value={composite}
 					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
 					title="Choose the composite overlay to render on the map"
@@ -4942,11 +4942,11 @@
 			     after switching. -->
 			{#if unitOptions.length > 1}
 				<div class="mt-1.5 flex items-center gap-1.5">
-					<span class="num text-[9px] uppercase tracking-wider text-[var(--color-faint)]">unit</span>
+					<span class="num text-[12px] uppercase tracking-wider text-[var(--color-faint)]">unit</span>
 					<div class="flex flex-1 gap-px overflow-hidden rounded-sm border border-[var(--color-border-strong)]">
 						{#each unitOptions as u (u.key)}
 							<button
-								class="num flex-1 py-0.5 text-[10px] font-medium transition-colors {currentUnit === u.key
+								class="num flex-1 py-0.5 text-[12px] font-medium transition-colors {currentUnit === u.key
 									? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
 									: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'}"
 								title={u.live
@@ -4960,7 +4960,7 @@
 					</div>
 				</div>
 				{#if unitWarning}
-					<div data-unit-warning class="num mt-1 text-[9.5px] text-[var(--color-warn)]">
+					<div data-unit-warning class="num mt-1 text-[12px] text-[var(--color-warn)]">
 						⚠ {currentUnit} {unitWarning}
 					</div>
 				{/if}
@@ -4982,7 +4982,7 @@
 				></span>
 				<span class="text-[var(--color-default)]">NEXRAD</span>
 			</span>
-			<span class="num text-[9.5px] {nexradEnabled ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {nexradEnabled ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{nexradEnabled ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5006,9 +5006,9 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">Watersheds</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">HUC-8</span>
+				<span class="text-[12px] text-[var(--color-faint)]">HUC-8</span>
 			</span>
-			<span class="num text-[9.5px] {watershedsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {watershedsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{watershedsOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5025,9 +5025,9 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">Reservoirs</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">major dams</span>
+				<span class="text-[12px] text-[var(--color-faint)]">major dams</span>
 			</span>
-			<span class="num text-[9.5px] {reservoirsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {reservoirsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{reservoirsOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5043,9 +5043,9 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">Terrain</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">hillshade</span>
+				<span class="text-[12px] text-[var(--color-faint)]">hillshade</span>
 			</span>
-			<span class="num text-[9.5px] {terrainOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {terrainOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{terrainOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5061,9 +5061,9 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">3D terrain</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">pitched mesh</span>
+				<span class="text-[12px] text-[var(--color-faint)]">pitched mesh</span>
 			</span>
-			<span class="num text-[9.5px] {terrain3DOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {terrain3DOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{terrain3DOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5075,7 +5075,7 @@
 			     this. Both facts used to be printed under the slider; they
 			     read as hedging in a panel, so they live here. -->
 			<div class="flex items-center gap-2 px-3 pb-1 pt-0.5">
-				<span class="w-[4.2rem] shrink-0 text-[9.5px] uppercase tracking-wider text-[var(--color-muted)]">
+				<span class="w-[4.2rem] shrink-0 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 					sheet
 				</span>
 				<input
@@ -5093,7 +5093,7 @@
 					title="how high the radar imagery floats above the ground"
 					aria-label="imagery sheet altitude"
 				/>
-				<span class="num w-[3.4rem] text-right text-[9.5px] text-[var(--color-muted)]">
+				<span class="num w-[3.4rem] text-right text-[12px] text-[var(--color-muted)]">
 					{(sheetAltitudeM / 1000).toFixed(2)} km
 				</span>
 			</div>
@@ -5110,9 +5110,9 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">Stream gauges</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">NWM · USGS sites</span>
+				<span class="text-[12px] text-[var(--color-faint)]">NWM · USGS sites</span>
 			</span>
-			<span class="num text-[9.5px] {streamGaugesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {streamGaugesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{streamGaugesOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5133,15 +5133,15 @@
 						: 'bg-[var(--color-faint)]'}"
 				></span>
 				<span class="text-[var(--color-default)]">Burn scars</span>
-				<span class="text-[9.5px] text-[var(--color-faint)]">CAL FIRE</span>
+				<span class="text-[12px] text-[var(--color-faint)]">CAL FIRE</span>
 			</span>
-			<span class="num text-[9.5px] {burnScarsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {burnScarsOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{burnScarsOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
 		{#if burnScarsOn}
 		<div class="flex items-center gap-2 px-3 pb-1 pt-0.5">
-			<span class="text-[9.5px] text-[var(--color-faint)]">age</span>
+			<span class="text-[12px] text-[var(--color-faint)]">age</span>
 			<input
 				type="range"
 				min={BURN_SCAR_YEARS_MIN}
@@ -5153,7 +5153,7 @@
 				title="oldest scar to draw, in years since ignition"
 				aria-label="burn scar age window, in years"
 			/>
-			<span class="num w-[3.2rem] text-right text-[9.5px] text-[var(--color-muted)]">
+			<span class="num w-[3.2rem] text-right text-[12px] text-[var(--color-muted)]">
 				≤{burnScarYears} yr
 			</span>
 		</div>
@@ -5161,7 +5161,7 @@
 			<!-- CAL FIRE publishes a season the following spring, so the year in
 			     progress is always missing. Without this line an empty recent
 			     window reads as "no fires" rather than as a data lag. -->
-			<p class="px-3 pb-2 text-[9px] leading-tight text-[var(--color-faint)]">
+			<p class="px-3 pb-2 text-[12px] leading-tight text-[var(--color-faint)]">
 				perimeters through {burnScarThrough}
 			</p>
 		{/if}
@@ -5179,7 +5179,7 @@
 				{#each MOMENTS as m}
 					{@const unavailable = tiltEngaged && !tiltSourceFor(m.key)}
 					<button
-						class="num flex-1 py-1 text-[10.5px] font-medium transition-colors {currentMoment === m.key
+						class="num flex-1 py-1 text-[12px] font-medium transition-colors {currentMoment === m.key
 							? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
 							: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'} {unavailable
 							? 'opacity-30 cursor-not-allowed'
@@ -5194,7 +5194,7 @@
 					</button>
 				{/each}
 			</div>
-			<div class="mt-1 text-[10px] text-[var(--color-faint)] num text-center">
+			<div class="mt-1 text-[12px] text-[var(--color-faint)] num text-center">
 				moment: <span class="text-[var(--color-bright)]">{MOMENTS.find((m) => m.key === currentMoment)?.full ?? currentMoment}</span>
 			</div>
 
@@ -5211,10 +5211,10 @@
 			     of which it could fetch. -->
 			{#if tiltRadarMeta && hasRadarca}
 				<div class="mt-2 flex items-center gap-2">
-					<span class="num text-[9.5px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
+					<span class="num text-[12px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
 					<select
 						data-tilt-select
-						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 						value={tiltEl}
 						onchange={(e) => {
 							tiltEl = Number((e.target as HTMLSelectElement).value);
@@ -5239,7 +5239,7 @@
 					</select>
 				</div>
 				{#if tiltEngaged}
-					<div class="mt-1 text-[9.5px] text-[var(--color-faint)] num text-center">
+					<div class="mt-1 text-[12px] text-[var(--color-faint)] num text-center">
 						radar-display · {steps.length}-frame loop
 					</div>
 				{/if}
@@ -5250,7 +5250,7 @@
 
 	{#snippet radarsBody()}
 		<!-- Quick filters — text links, not buttons -->
-		<div class="flex gap-3 px-3 py-1 text-[9.5px] text-[var(--color-faint)]">
+		<div class="flex gap-3 px-3 py-1 text-[12px] text-[var(--color-faint)]">
 			<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" data-preset="network" onclick={selectNetwork}>{networkLabel}</button>
 			{#if nexradSelectable}
 				<button class="hover:text-[var(--color-bright)] uppercase tracking-wider" data-preset="nexrad" onclick={selectNexrad}>nexrad</button>
@@ -5265,7 +5265,7 @@
 				{@const st = radarStatusOf(radarStatus, r.id)}
 				{@const checked = isActive(r.id)}
 				<li
-					class="group relative flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-1.5 text-[11px] cursor-pointer transition-colors {checked
+					class="group relative flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-1.5 text-[12px] cursor-pointer transition-colors {checked
 						? 'bg-[var(--color-elevated)]/40'
 						: 'hover:bg-[var(--color-elevated)]/25'}"
 					onclick={() => toggleRadar(r.id)}
@@ -5292,7 +5292,7 @@
 					<span class="num flex-1 text-[var(--color-bright)] tracking-wide">{r.id}</span>
 					<!-- status word -->
 					<span
-						class="text-[9.5px] uppercase tracking-wider {st === 'pass'
+						class="text-[12px] uppercase tracking-wider {st === 'pass'
 							? 'text-[var(--color-ok)]'
 							: st === 'fail'
 								? 'text-[var(--color-fail)]'
@@ -5304,7 +5304,7 @@
 					</span>
 					<!-- solo button (hover-only) -->
 					<button
-						class="absolute right-2 invisible group-hover:visible rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--color-default)] hover:text-[var(--color-bright)]"
+						class="absolute right-2 invisible group-hover:visible rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:text-[var(--color-bright)]"
 						title="show only this radar"
 						onclick={(e) => { e.stopPropagation(); soloRadar(r.id); }}
 					>
@@ -5321,7 +5321,7 @@
 			     as broken. -->
 			<div
 				data-export-error
-				class="border-t border-[var(--color-warn)]/50 bg-[var(--color-warn)]/10 px-3 py-1 text-[10px] text-[var(--color-warn)]"
+				class="border-t border-[var(--color-warn)]/50 bg-[var(--color-warn)]/10 px-3 py-1 text-[12px] text-[var(--color-warn)]"
 			>
 				export failed: {exportError}
 			</div>
@@ -5336,7 +5336,7 @@
 		>
 			NEXRAD sites
 		</div>
-		<p class="mt-1 text-[9.5px] leading-tight text-[var(--color-faint)]">
+		<p class="mt-1 text-[12px] leading-tight text-[var(--color-faint)]">
 			Whether {radars.filter((r) => r.kind === 'nexrad').map((r) => r.id).join(', ')}
 			appear in the pane you have selected. Their range rings show only
 			while their imagery is on.
@@ -5355,7 +5355,7 @@
 				></span>
 				<span class="text-[var(--color-default)]">Show NEXRAD sites</span>
 			</span>
-			<span class="num text-[9.5px] {nexradSitesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
+			<span class="num text-[12px] {nexradSitesOn ? 'text-[var(--color-info)]' : 'text-[var(--color-faint)]'}">
 				{nexradSitesOn ? 'ON' : 'OFF'}
 			</span>
 		</button>
@@ -5373,7 +5373,7 @@
 		>
 			{#each OPACITY_LAYERS as key (key)}
 				<div class="flex items-center gap-2">
-					<span class="w-[4.2rem] shrink-0 text-[9.5px] uppercase tracking-wider
+					<span class="w-[4.2rem] shrink-0 text-[12px] uppercase tracking-wider
 					             text-[var(--color-muted)]">
 						{OPACITY_LABELS[key]}
 					</span>
@@ -5403,7 +5403,7 @@
 					     keeps its ~129px intrinsic width in a flex row, so this
 					     label gave way instead and "100%" slid under the thumb. -->
 					<span
-						class="num w-[2.8rem] shrink-0 text-right text-[9.5px] {isHidden(layerOpacity[key])
+						class="num w-[2.8rem] shrink-0 text-right text-[12px] {isHidden(layerOpacity[key])
 							? 'text-[var(--color-warn)]'
 							: 'text-[var(--color-muted)]'}"
 					>
@@ -5428,7 +5428,7 @@
 			use:portal={'[data-dock-slot]'}
 			data-dock-pane={pane}
 			class="flex flex-col"
-			style="font-size: {scaled(11, uiScale)}px"
+			style="font-size: {scaled(12, uiScale)}px"
 		>
 			{@render dockSection('Product', compositeBody)}
 			{@render dockSection('Moment', momentBody)}
@@ -5446,7 +5446,7 @@
 		<div
 			use:portal={'[data-settings-slot]'}
 			data-settings-pane={pane}
-			style="font-size: {scaled(11, uiScale)}px"
+			style="font-size: {scaled(12, uiScale)}px"
 		>
 			{@render opacityBody()}
 			{#if nexradListed}
@@ -5464,7 +5464,7 @@
 		<div class="flex flex-col border-b border-[var(--color-border)] last:border-b-0">
 			<div
 				class="label px-3 pt-2 tracking-[0.2em] text-[var(--color-muted)]"
-				style="font-size: {scaled(9.5, uiScale)}px"
+				style="font-size: {scaled(12, uiScale)}px"
 			>{name}</div>
 			{@render body()}
 		</div>

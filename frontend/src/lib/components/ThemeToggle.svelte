@@ -9,7 +9,7 @@
 </script>
 
 <div
-	class="flex items-center gap-0 rounded-sm border border-[var(--color-border)] text-[10.5px]"
+	class="flex items-center gap-0 rounded-sm border border-[var(--color-border)] text-[12px]"
 	role="radiogroup"
 	aria-label="theme"
 >

@@ -83,14 +83,14 @@
 	});
 </script>
 
-<div bind:this={rootEl} class="relative flex items-center gap-1 text-[11px]">
+<div bind:this={rootEl} class="relative flex items-center gap-1 text-[12px]">
 	{#if label}
 		<span class="text-[var(--color-muted)] uppercase tracking-wider">{label}</span>
 	{/if}
 	<button
 		type="button"
 		onclick={() => (open = !open)}
-		class="flex items-center gap-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)] hover:bg-[var(--color-elevated)]/40 {width}"
+		class="flex items-center gap-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)] hover:bg-[var(--color-elevated)]/40 {width}"
 	>
 		<span class="num truncate {selected.length ? 'text-[var(--color-bright)]' : 'text-[var(--color-muted)]'}">
 			{buttonLabel}
@@ -104,7 +104,7 @@
 		<div
 			class="absolute left-0 top-full z-40 mt-1 max-h-[60vh] w-[260px] overflow-y-auto rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-xl"
 		>
-			<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+			<div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 				<span>{selected.length} of {options.length} selected</span>
 				<span class="flex items-center gap-2">
 					<button class="text-[var(--color-faint)] hover:text-[var(--color-bright)]" onclick={selectAll}>all</button>
@@ -119,7 +119,7 @@
 					<li>
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-[var(--color-elevated)]/40"
+							class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-elevated)]/40"
 							onclick={() => toggle(opt.value)}
 						>
 							<span
@@ -133,7 +133,7 @@
 							</span>
 							<span class="num flex-1 text-[var(--color-bright)]">{opt.label}</span>
 							{#if opt.hint}
-								<span class="text-[9.5px] text-[var(--color-faint)]">{opt.hint}</span>
+								<span class="text-[12px] text-[var(--color-faint)]">{opt.hint}</span>
 							{/if}
 						</button>
 					</li>
@@ -152,11 +152,11 @@
 							type="text"
 							bind:value={custom}
 							{placeholder}
-							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[11px] text-[var(--color-bright)]"
+							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
 						/>
 						<button
 							type="submit"
-							class="border border-[var(--color-border-strong)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)]"
+							class="border border-[var(--color-border-strong)] px-2 py-1 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)]"
 						>
 							add
 						</button>
@@ -171,7 +171,7 @@
 			{#each selected as v}
 				{@const o = options.find((x) => x.value === v)}
 				<span
-					class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/50 px-1.5 py-0.5 text-[10px] num text-[var(--color-bright)]"
+					class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/50 px-1.5 py-0.5 text-[12px] num text-[var(--color-bright)]"
 				>
 					{o?.label ?? v}
 					<button

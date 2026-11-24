@@ -32,7 +32,7 @@
 	// laid out for. Everything else here is that pair scaled.
 	const dial = $derived(scaled(56, scale));
 	const needle = $derived(scaled(40, scale));
-	const text = $derived(scaled(10, scale));
+	const text = $derived(scaled(12, scale));
 	const textTop = $derived(scaled(38, scale));
 </script>
 

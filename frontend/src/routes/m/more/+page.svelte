@@ -83,7 +83,7 @@
 </script>
 
 <section class="mb-5">
-	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">account</div>
+	<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">account</div>
 	<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
 		{#if auth.loading}
 			<div class="text-[13px] text-[var(--color-muted)]">…</div>
@@ -91,7 +91,7 @@
 			<div class="text-[14px] num text-[var(--color-bright)]">
 				{auth.user.display_name || auth.user.email}
 			</div>
-			<div class="num mt-1 text-[11px] text-[var(--color-muted)]">
+			<div class="num mt-1 text-[12px] text-[var(--color-muted)]">
 				{auth.user.email} · {auth.user.role}
 			</div>
 			<button
@@ -111,7 +111,7 @@
 </section>
 
 <section class="mb-5">
-	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">notifications</div>
+	<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">notifications</div>
 	<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
 		{#if !pushSupported}
 			<div class="text-[12px] text-[var(--color-muted)]">
@@ -126,7 +126,7 @@
 			</div>
 		{:else if pushSubscribed}
 			<div class="text-[13px] text-[var(--color-ok)]">✓ Notifications enabled on this device.</div>
-			<div class="mt-1 text-[11px] text-[var(--color-muted)]">You'll get a push when any alarm fires.</div>
+			<div class="mt-1 text-[12px] text-[var(--color-muted)]">You'll get a push when any alarm fires.</div>
 			<a
 				href="/m/push-settings"
 				class="mt-3 inline-flex min-h-[44px] w-full items-center justify-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 text-[12px] uppercase tracking-wider text-[var(--color-accent)]"
@@ -160,13 +160,13 @@
 			>{pushBusy ? 'enabling…' : 'enable notifications'}</button>
 		{/if}
 		{#if pushError}
-			<div class="mt-2 text-[11px] text-[var(--color-fail)] num">{pushError}</div>
+			<div class="mt-2 text-[12px] text-[var(--color-fail)] num">{pushError}</div>
 		{/if}
 	</div>
 </section>
 
 <section class="mb-5">
-	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">theme</div>
+	<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">theme</div>
 	<div class="grid grid-cols-3 gap-2">
 		{#each ['light', 'auto', 'dark'] as m}
 			{@const isActive = theme.mode === m}
@@ -184,7 +184,7 @@
 
 {#if !installed}
 	<section class="mb-5">
-		<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">install</div>
+		<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">install</div>
 		<div class="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-3 text-[12px] text-[var(--color-default)] leading-relaxed">
 			{#if iosDev}
 				<!-- iOS Safari has no programmatic install API; the user
@@ -227,20 +227,20 @@
 {/if}
 
 <section class="mb-5">
-	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">view</div>
+	<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">view</div>
 	<button
 		type="button"
 		onclick={viewDesktop}
 		class="block min-h-[44px] w-full rounded border border-[var(--color-border-strong)] text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)]"
 		style="-webkit-tap-highlight-color: transparent;"
 	>switch to desktop view</button>
-	<div class="mt-2 px-1 text-[11px] text-[var(--color-faint)]">
+	<div class="mt-2 px-1 text-[12px] text-[var(--color-faint)]">
 		Stays in desktop view until cleared. Open <span class="num">?mobile=1</span> on any page to come back.
 	</div>
 </section>
 
 <section>
-	<div class="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">about</div>
+	<div class="mb-2 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">about</div>
 	<div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 text-[12px] text-[var(--color-muted)]">
 		<div class="num" data-site-line>{dataSource ? `${siteName} · ${dataSource}` : siteName}</div>
 		<div class="num mt-1 text-[var(--color-faint)]">v0.1.0 · mobile</div>

@@ -268,12 +268,12 @@
 	<header class="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-3">
 		<div class="flex items-baseline gap-3">
 			<span class="label tracking-[0.18em] text-[var(--color-bright)]">GROUPS</span>
-			<span class="text-[11px] text-[var(--color-faint)]">
+			<span class="text-[12px] text-[var(--color-faint)]">
 				Bundle users + a notification schedule. Used by alert routing to gate dispatch by time-of-day, weekday, or biweekly cadence.
 			</span>
 		</div>
 		<button
-			class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
+			class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
 			onclick={newGroup}
 		>
 			+ new group
@@ -294,7 +294,7 @@
 								onclick={() => selectGroup(g)}
 							>
 								<span class="num font-medium text-[var(--color-bright)]">{g.name}</span>
-								<span class="text-[10px] text-[var(--color-faint)]">
+								<span class="text-[12px] text-[var(--color-faint)]">
 									{g.members.length} members
 									{#if g.parent_name}· inherits {g.parent_name}{/if}
 								</span>
@@ -302,7 +302,7 @@
 						</li>
 					{/each}
 					{#if groups.length === 0}
-						<li class="px-3 py-3 text-[11px] text-[var(--color-faint)] italic">no groups yet</li>
+						<li class="px-3 py-3 text-[12px] text-[var(--color-faint)] italic">no groups yet</li>
 					{/if}
 				</ul>
 			</aside>
@@ -314,7 +314,7 @@
 					<section class="space-y-2">
 						<div class="flex items-center gap-3">
 							<label class="flex flex-1 items-center gap-2">
-								<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
+								<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
 								<input
 									type="text"
 									bind:value={draft.name}
@@ -323,7 +323,7 @@
 							</label>
 						</div>
 						<label class="flex items-center gap-2">
-							<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Description</span>
+							<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Description</span>
 							<input
 								type="text"
 								bind:value={draft.description}
@@ -331,7 +331,7 @@
 							/>
 						</label>
 						<label class="flex items-center gap-2">
-							<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Inherits from</span>
+							<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Inherits from</span>
 							<select
 								value={draft.parent_group_id ?? ''}
 								onchange={(e) => (draft.parent_group_id = (e.target as HTMLSelectElement).value ? Number((e.target as HTMLSelectElement).value) : null)}
@@ -347,13 +347,13 @@
 
 					<!-- Schedule kind -->
 					<section>
-						<div class="mb-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Notification schedule</div>
+						<div class="mb-2 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Notification schedule</div>
 						<div class="flex gap-1">
 							{#each ['always', 'weekly', 'biweekly'] as k}
 								<button
 									type="button"
 									onclick={() => (draft.kind = k as any)}
-									class="rounded-sm border px-3 py-1 text-[11px] num uppercase tracking-wider transition-colors {draft.kind === k
+									class="rounded-sm border px-3 py-1 text-[12px] num uppercase tracking-wider transition-colors {draft.kind === k
 										? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 										: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40 hover:text-[var(--color-default)]'}"
 								>
@@ -366,13 +366,13 @@
 					{#if draft.kind !== 'always'}
 						<!-- Weekday mask -->
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Active weekdays (UTC)</div>
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Active weekdays (UTC)</div>
 							<div class="flex gap-1">
 								{#each WEEKDAYS as w}
 									<button
 										type="button"
 										onclick={() => toggleWeekday(w.idx)}
-										class="w-12 rounded-sm border px-2 py-1 text-[11px] num {draft.weekdays.includes(w.idx)
+										class="w-12 rounded-sm border px-2 py-1 text-[12px] num {draft.weekdays.includes(w.idx)
 											? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 											: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
 									>
@@ -385,19 +385,19 @@
 						<!-- Time windows -->
 						<section>
 							<div class="mb-1 flex items-center justify-between">
-								<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time windows (UTC)</span>
-								<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addTimeWindow}>+ add</button>
+								<span class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time windows (UTC)</span>
+								<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addTimeWindow}>+ add</button>
 							</div>
 							{#if draft.time_windows.length === 0}
-								<div class="text-[11px] text-[var(--color-faint)] italic">No time windows = active the whole day on matching weekdays.</div>
+								<div class="text-[12px] text-[var(--color-faint)] italic">No time windows = active the whole day on matching weekdays.</div>
 							{:else}
 								<ul class="space-y-1">
 									{#each draft.time_windows as w, i}
 										<li class="flex items-center gap-2">
-											<input type="time" bind:value={w.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={w.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<span class="text-[var(--color-muted)]">→</span>
-											<input type="time" bind:value={w.end} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
-											<button class="text-[10.5px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeTimeWindow(i)}>remove</button>
+											<input type="time" bind:value={w.end} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<button class="text-[12px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeTimeWindow(i)}>remove</button>
 										</li>
 									{/each}
 								</ul>
@@ -406,13 +406,13 @@
 
 						{#if draft.kind === 'biweekly'}
 							<section>
-								<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Anchor date (defines on-weeks)</div>
+								<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Anchor date (defines on-weeks)</div>
 								<input
 									type="date"
 									bind:value={draft.anchor_date}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]"
+									class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 								/>
-								<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+								<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 									On-weeks: the week containing the anchor date, and every other week after. Adjust to align with an existing rotation.
 								</div>
 							</section>
@@ -422,19 +422,19 @@
 					<!-- One-off downtime (specific dates) -->
 					<section>
 						<div class="mb-1 flex items-center justify-between">
-							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">One-off downtime (UTC)</span>
-							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addDowntime}>+ add</button>
+							<span class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">One-off downtime (UTC)</span>
+							<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addDowntime}>+ add</button>
 						</div>
 						{#if draft.downtime.length === 0}
-							<div class="text-[11px] text-[var(--color-faint)] italic">Suppress notifications during specific date ranges (vacations, maintenance).</div>
+							<div class="text-[12px] text-[var(--color-faint)] italic">Suppress notifications during specific date ranges (vacations, maintenance).</div>
 						{:else}
 							<ul class="space-y-1">
 								{#each draft.downtime as d, i}
 									<li class="flex items-center gap-2">
-										<input type="datetime-local" bind:value={d.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
+										<input type="datetime-local" bind:value={d.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 										<span class="text-[var(--color-muted)]">→</span>
-										<input type="datetime-local" bind:value={d.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
-										<button class="text-[10.5px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeDowntime(i)}>remove</button>
+										<input type="datetime-local" bind:value={d.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+										<button class="text-[12px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeDowntime(i)}>remove</button>
 									</li>
 								{/each}
 							</ul>
@@ -444,11 +444,11 @@
 					<!-- Recurring downtime (nightly / weekly / daily blackouts) -->
 					<section>
 						<div class="mb-1 flex items-center justify-between">
-							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Recurring downtime (UTC)</span>
-							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addRecurringDowntime}>+ add</button>
+							<span class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Recurring downtime (UTC)</span>
+							<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={addRecurringDowntime}>+ add</button>
 						</div>
 						{#if draft.recurring_downtime.length === 0}
-							<div class="text-[11px] text-[var(--color-faint)] italic">
+							<div class="text-[12px] text-[var(--color-faint)] italic">
 								Quiet hours that repeat each week. E.g. nightly 22:00 → 06:00, weekends only, or weekday lunch.
 							</div>
 						{:else}
@@ -458,7 +458,7 @@
 										<div class="mb-1 flex flex-wrap items-center gap-1">
 											{#each WEEKDAYS as w}
 												<button type="button" onclick={() => toggleRecurringWeekday(i, w.idx)}
-													class="w-10 rounded-sm border px-1 py-0.5 text-[10.5px] num {r.weekdays.includes(w.idx)
+													class="w-10 rounded-sm border px-1 py-0.5 text-[12px] num {r.weekdays.includes(w.idx)
 														? 'border-[var(--color-warn)] bg-[var(--color-warn)]/15 text-[var(--color-bright)]'
 														: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}">
 													{w.label}
@@ -466,10 +466,10 @@
 											{/each}
 										</div>
 										<div class="flex items-center gap-2">
-											<input type="time" bind:value={r.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={r.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<span class="text-[var(--color-muted)]">→</span>
-											<input type="time" bind:value={r.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
-											<span class="text-[10px] text-[var(--color-faint)] num">
+											<input type="time" bind:value={r.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<span class="text-[12px] text-[var(--color-faint)] num">
 												{#if r.start && r.end}
 													{#if r.start > r.end}
 														overnight ({r.start} → 24:00 + 00:00 → {r.end})
@@ -478,7 +478,7 @@
 													{/if}
 												{/if}
 											</span>
-											<button class="ml-auto text-[10.5px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeRecurringDowntime(i)}>remove</button>
+											<button class="ml-auto text-[12px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeRecurringDowntime(i)}>remove</button>
 										</div>
 									</li>
 								{/each}
@@ -488,7 +488,7 @@
 
 					<!-- Members -->
 					<section>
-						<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
+						<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
 							Members ({draft.member_ids.length})
 						</div>
 						<ul class="max-h-[180px] overflow-y-auto rounded-sm border border-[var(--color-border)]">
@@ -498,7 +498,7 @@
 									<button
 										type="button"
 										onclick={() => toggleMember(u.id)}
-										class="flex w-full items-center gap-2 border-b border-[var(--color-border)]/40 px-3 py-1.5 text-left text-[11.5px] hover:bg-[var(--color-elevated)]/40"
+										class="flex w-full items-center gap-2 border-b border-[var(--color-border)]/40 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-elevated)]/40"
 									>
 										<span class="inline-flex h-3 w-3 items-center justify-center rounded-[2px] border {checked ? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-ok)]' : 'border-[var(--color-border-strong)] text-transparent'}">
 											<svg viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="2">
@@ -506,7 +506,7 @@
 											</svg>
 										</span>
 										<span class="num text-[var(--color-bright)]">{u.email}</span>
-										{#if u.display_name}<span class="text-[10.5px] text-[var(--color-faint)]">{u.display_name}</span>{/if}
+										{#if u.display_name}<span class="text-[12px] text-[var(--color-faint)]">{u.display_name}</span>{/if}
 									</button>
 								</li>
 							{/each}
@@ -516,16 +516,16 @@
 					<!-- Preview -->
 					<section>
 						<div class="flex items-center justify-between mb-1">
-							<span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Schedule preview</span>
-							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={preview}>refresh preview →</button>
+							<span class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Schedule preview</span>
+							<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={preview}>refresh preview →</button>
 						</div>
 						{#if previewWindows.length === 0}
-							<div class="text-[11px] text-[var(--color-faint)] italic">Click "refresh preview" to see the next 5 on-windows.</div>
+							<div class="text-[12px] text-[var(--color-faint)] italic">Click "refresh preview" to see the next 5 on-windows.</div>
 						{:else}
-							<div class="text-[10.5px] num text-[var(--color-muted)]">
+							<div class="text-[12px] num text-[var(--color-muted)]">
 								Active now? <span class={previewActiveNow ? 'text-[var(--color-ok)]' : 'text-[var(--color-fail)]'}>{previewActiveNow ? 'yes' : 'no'}</span>
 							</div>
-							<ul class="mt-1 space-y-0.5 text-[11px] num text-[var(--color-default)]">
+							<ul class="mt-1 space-y-0.5 text-[12px] num text-[var(--color-default)]">
 								{#each previewWindows as w}
 									<li>{w.start.slice(0, 16).replace('T', ' ')}Z → {w.end.slice(0, 16).replace('T', ' ')}Z</li>
 								{/each}
@@ -535,18 +535,18 @@
 
 					<!-- Status + actions -->
 					<section class="flex items-center justify-between border-t border-[var(--color-border)] pt-3">
-						<div class="text-[10.5px] text-[var(--color-faint)]">
+						<div class="text-[12px] text-[var(--color-faint)]">
 							{#if error}<span class="text-[var(--color-fail)]">{error}</span>
 							{:else if info}<span class="text-[var(--color-ok)]">{info}</span>
 							{/if}
 						</div>
 						<div class="flex gap-2">
 							{#if draft.id}
-								<button class="border border-[var(--color-fail)]/50 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-fail)] hover:bg-[var(--color-fail)]/10" onclick={del}>
+								<button class="border border-[var(--color-fail)]/50 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-fail)] hover:bg-[var(--color-fail)]/10" onclick={del}>
 									delete
 								</button>
 							{/if}
-							<button class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25" onclick={save}>
+							<button class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25" onclick={save}>
 								{draft.id ? 'save' : 'create'}
 							</button>
 						</div>

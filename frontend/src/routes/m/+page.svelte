@@ -170,7 +170,7 @@
 			{/if}
 		</div>
 
-		<div class="mt-3 text-[11px] text-[var(--color-faint)] num">
+		<div class="mt-3 text-[12px] text-[var(--color-faint)] num">
 			{#if sinceUpdate !== null}
 				updated {fmtAge(sinceUpdate)} ago
 			{:else}
@@ -259,13 +259,13 @@
 										<!-- Which tree this reading came from. The check
 										     says so itself. A tag baked in here was wrong
 										     for CBAND, which comes off its own tree. -->
-										<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[9px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">
+										<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[12px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">
 											{isSecondary ? (meta?.source_tag ?? 'BK') : 'RC'}
 										</span>
 									{/if}
 								</div>
 								{#if r.summary}
-									<div class="num mt-0.5 truncate text-[11px] text-[var(--color-muted)]">
+									<div class="num mt-0.5 truncate text-[12px] text-[var(--color-muted)]">
 										{r.summary}
 									</div>
 								{/if}
@@ -281,7 +281,7 @@
 				<button
 					type="button"
 					onclick={() => toggleStage(stage)}
-					class="block w-full px-3 py-2 text-center text-[11px] uppercase tracking-wider text-[var(--color-muted)]"
+					class="block w-full px-3 py-2 text-center text-[12px] uppercase tracking-wider text-[var(--color-muted)]"
 				>
 					show {c.pass} passing
 				</button>
@@ -301,15 +301,15 @@
 >
 	{#if detailRow}
 		<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-[12px] num">
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
 			<dd class="text-[var(--color-default)]">{detailRow.target || '—'}</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Status</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Status</dt>
 			<dd class="text-[var(--color-bright)]">{detailRow.status}</dd>
 		</dl>
 
 		{#if detailRow.summary}
 			<section class="mt-4">
-				<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Summary</div>
+				<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Summary</div>
 				<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{detailRow.summary}</pre>
 			</section>
 		{/if}
@@ -319,7 +319,7 @@
 		     drops out for non-imagery check types. -->
 		{#if detailImgRun && capturedImage(detailImgRun)}
 			<section class="mt-4">
-				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+				<div class="mb-1 flex items-baseline justify-between text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 					<span>Latest captured image</span>
 					<span class="num text-[var(--color-faint)] normal-case">{detailImgRun.finished_at.slice(11,19)}Z</span>
 				</div>
@@ -343,7 +343,7 @@
 					detailOpen = false;
 					await goto(`/m/timeline?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Timeline</button>
 			<button type="button"
@@ -356,7 +356,7 @@
 					detailOpen = false;
 					await goto(`/m/uptime?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Uptime</button>
 			<button type="button"
@@ -372,7 +372,7 @@
 					detailOpen = false;
 					await goto(`/m/history?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-2 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>History</button>
 		</div>

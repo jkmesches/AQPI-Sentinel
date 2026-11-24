@@ -58,7 +58,7 @@
 		{#if errorSnippet}
 			{@render errorSnippet()}
 		{:else}
-			<div class="p-4 text-center text-[11px] text-[var(--color-muted)]">image unavailable</div>
+			<div class="p-4 text-center text-[12px] text-[var(--color-muted)]">image unavailable</div>
 		{/if}
 	{:else if visible}
 		<img

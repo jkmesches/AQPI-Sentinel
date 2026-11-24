@@ -47,7 +47,7 @@
 	<!-- Device list -->
 	<aside class="w-64 shrink-0 overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-canvas)]/40">
 		<header class="px-4 py-3 border-b border-[var(--color-border)]">
-			<div class="text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]">Push routing</div>
+			<div class="text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">Push routing</div>
 			<div class="text-[12px] text-[var(--color-default)] mt-0.5">Your subscribed devices</div>
 		</header>
 		{#if loading}
@@ -66,7 +66,7 @@
 						>
 							<div class="min-w-0 flex-1">
 								<div class="num font-medium text-[var(--color-bright)]">{deviceLabel(s)}</div>
-								<div class="text-[10px] text-[var(--color-faint)] truncate">{s.user_agent ?? ''}</div>
+								<div class="text-[12px] text-[var(--color-faint)] truncate">{s.user_agent ?? ''}</div>
 							</div>
 						</button>
 					</li>
@@ -83,7 +83,7 @@
 		{#if selected}
 			<header class="mb-4">
 				<h1 class="text-[15px] font-semibold tracking-wide text-[var(--color-bright)]">{deviceLabel(selected)}</h1>
-				<div class="text-[11px] text-[var(--color-muted)] mt-0.5">{selected.user_agent ?? ''}</div>
+				<div class="text-[12px] text-[var(--color-muted)] mt-0.5">{selected.user_agent ?? ''}</div>
 			</header>
 			<div class="max-w-2xl">
 				<PushRoutingEditor bind:subscription={selected} onSaved={load} />

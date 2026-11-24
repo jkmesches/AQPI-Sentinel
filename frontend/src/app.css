@@ -182,7 +182,7 @@ body {
 
 /* small uppercase label (used for section headers, chip text, etc.) */
 .label {
-	font-size: 10.5px;
+	font-size: 12px;
 	letter-spacing: 0.14em;
 	text-transform: uppercase;
 	color: var(--color-muted);
@@ -235,7 +235,8 @@ svg.spark path.stroke { opacity: 0.95; }
 .maplibregl-ctrl-attrib {
 	background: var(--map-attrib-bg) !important;
 	color: var(--map-attrib-fg) !important;
-	font-size: 10px !important;
+	/* !important: maplibre-gl.css sets the attribution's size after ours loads. */
+	font-size: 12px !important;
 	font-family: var(--font-display) !important;
 }
 .maplibregl-ctrl-attrib a { color: var(--map-attrib-link) !important; }
@@ -268,7 +269,7 @@ svg.spark path.stroke { opacity: 0.95; }
 	background: transparent !important;
 }
 /* Stream-gauge popup body — typography to match other Sentinel panels. */
-.gauge-popup { font: 11px/1.4 var(--font-mono); min-width: 200px; }
+.gauge-popup { font: 12px/1.4 var(--font-mono); min-width: 200px; }
 .gauge-popup .gauge-title { font-weight: 600; color: var(--color-bright); }
 .gauge-popup .gauge-muted { color: var(--color-muted); }
 .gauge-popup .gauge-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
@@ -293,7 +294,8 @@ svg.spark path.stroke { opacity: 0.95; }
 .gauge-chart { display: block; width: 100%; height: auto; margin-top: 6px; }
 .gauge-chart .gc-axis { stroke: var(--color-border-strong); stroke-width: 1; }
 .gauge-chart .gc-now { stroke: var(--color-faint); stroke-width: 1; stroke-dasharray: 2 2; }
-.gauge-chart .gc-tick { fill: var(--color-muted); font: 8.5px var(--font-mono); }
+/* gaugeChart.ts sizes the chart's margins for this 12 px face. */
+.gauge-chart .gc-tick { fill: var(--color-muted); font: 12px var(--font-mono); }
 .gauge-chart .gc-obs {
 	fill: none; stroke: var(--gauge-observed); stroke-width: 2;
 	stroke-linejoin: round; stroke-linecap: round;
@@ -306,10 +308,10 @@ svg.spark path.stroke { opacity: 0.95; }
 /* The stretch the upstream serves nothing for, marked so it reads as absent
    data rather than as a chart that failed to draw. */
 .gauge-chart .gc-gap { fill: var(--color-surface-hi); }
-.gauge-chart .gc-gaplabel { fill: var(--color-faint); font: 8.5px var(--font-mono); }
+.gauge-chart .gc-gaplabel { fill: var(--color-faint); font: 12px var(--font-mono); }
 .gauge-legend {
 	margin-top: 4px; display: flex; gap: 10px;
-	color: var(--color-muted); font-size: 10px;
+	color: var(--color-muted); font-size: 12px;
 }
 .gauge-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .gauge-legend i { display: inline-block; width: 12px; height: 0; border-top-width: 2px; }
@@ -318,7 +320,7 @@ svg.spark path.stroke { opacity: 0.95; }
 
 /* Radar pin hover tooltip — compact name + scan elevations + range. */
 .radar-hover-popup .maplibregl-popup-content { padding: 6px 9px !important; }
-.radar-pop { font: 11px/1.45 var(--font-mono); white-space: nowrap; }
+.radar-pop { font: 12px/1.45 var(--font-mono); white-space: nowrap; }
 .radar-pop .radar-pop-title { font-weight: 600; color: var(--color-bright); margin-bottom: 2px; }
 .radar-pop .gauge-muted { color: var(--color-muted); }
 /* One row per stage that reported the radar. The pin shows one of them, and

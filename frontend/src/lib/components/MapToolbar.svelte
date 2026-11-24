@@ -79,7 +79,7 @@
 		};
 	});
 
-	const base = 'border px-2 py-0.5 text-[10px] uppercase tracking-wider '
+	const base = 'border px-2 py-0.5 text-[12px] uppercase tracking-wider '
 		+ 'transition-colors disabled:opacity-40';
 	const off = 'border-[var(--color-border-strong)] text-[var(--color-muted)] '
 		+ 'hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]';
@@ -153,7 +153,7 @@
 
 	<!-- Panes as a count rather than a compare switch. Two was a toggle;
 	     three needs a way to say which way you are going. -->
-	<span class="num text-[10px] text-[var(--color-faint)]">panes</span>
+	<span class="num text-[12px] text-[var(--color-faint)]">panes</span>
 	<button
 		data-pane-remove
 		class="{base} {off}"
@@ -162,7 +162,7 @@
 		disabled={panes <= 1}
 		onclick={onremovepane}
 	>&minus;</button>
-	<span data-pane-count class="num w-3 text-center text-[11px] text-[var(--color-default)]">
+	<span data-pane-count class="num w-3 text-center text-[12px] text-[var(--color-default)]">
 		{panes}
 	</span>
 	<button
@@ -219,7 +219,7 @@
 				<!-- One size for the legend, the compass, the display bar and
 				     the cursor readout together. Each overlay with its own
 				     size control is a console whose overlays never agree. -->
-				<p class="mt-1 text-[9.5px] leading-tight text-[var(--color-faint)]">
+				<p class="mt-1 text-[12px] leading-tight text-[var(--color-faint)]">
 					How large the legend, compass, display bar and cursor
 					readout are drawn, in every pane.
 				</p>
@@ -231,7 +231,7 @@
 							data-ui-scale={s}
 							aria-pressed={uiScale === s}
 							title="{scaleName(s)} ({Math.round(s * 100)}%)"
-							class="num flex-1 py-1 text-[10.5px] font-medium transition-colors {uiScale === s
+							class="num flex-1 py-1 text-[12px] font-medium transition-colors {uiScale === s
 								? 'bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/70'
 								: 'text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/50 hover:text-[var(--color-default)]'}"
 							onclick={() => onscale(s)}
@@ -240,7 +240,7 @@
 				</div>
 				<div
 					data-ui-scale-current
-					class="num mt-1.5 text-[9.5px] text-[var(--color-muted)]"
+					class="num mt-1.5 text-[12px] text-[var(--color-muted)]"
 				>
 					{scaleName(uiScale)} · {Math.round(uiScale * 100)}%
 				</div>
@@ -254,7 +254,7 @@
 				>
 					Layer opacity
 				</div>
-				<p class="mt-1 text-[9.5px] leading-tight text-[var(--color-faint)]">
+				<p class="mt-1 text-[12px] leading-tight text-[var(--color-faint)]">
 					How hard each raster layer is painted in the pane you have
 					selected. The three stack on the same ground.
 				</p>

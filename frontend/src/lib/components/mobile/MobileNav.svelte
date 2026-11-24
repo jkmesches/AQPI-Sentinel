@@ -63,7 +63,7 @@
 				<path d="M10 19a2 2 0 1 0 4 0" />
 			</svg>
 			{#if alarmCount > 0}
-				<span class="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-[var(--color-fail)] px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
+				<span class="absolute -right-2 -top-1.5 min-w-[18px] rounded-full bg-[var(--color-fail)] px-1 text-center text-[12px] font-semibold leading-[18px] text-white">
 					{alarmCount}
 				</span>
 			{/if}
@@ -91,9 +91,9 @@
 		justify-content: center;
 		gap: 2px;
 		padding: 4px 4px;
-		font-size: 10px;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
+		/* Sentence case at 12 px: "TIMELINE" in tracked capitals is 73 px
+		   wide and a tab at 320 px has 56 px for its label. */
+		font-size: 12px;
 		transition: color 0.12s ease;
 		-webkit-tap-highlight-color: transparent;
 	}

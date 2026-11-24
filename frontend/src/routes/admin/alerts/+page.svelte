@@ -580,7 +580,7 @@
 
 <div class="p-6 max-w-5xl">
 	<div class="label tracking-[0.18em] text-[var(--color-bright)] mb-1">ALERT ROUTING</div>
-	<div class="text-[11px] text-[var(--color-muted)] mb-4 leading-relaxed">
+	<div class="text-[12px] text-[var(--color-muted)] mb-4 leading-relaxed">
 		Decide who gets notified when an alarm fires, with what urgency, and through which channel.
 		Saved to DB; the running alarm engine hot-reloads on save (no restart needed).
 	</div>
@@ -589,7 +589,7 @@
 	     recipient can be added, listed and wired into a plan while delivery is
 	     impossible — a complete-looking setup that notifies nobody. -->
 	{#if smtpMissing}
-		<div class="mb-4 rounded-sm border border-[var(--color-fail)]/50 bg-[var(--color-fail)]/10 px-3 py-2 text-[11.5px] leading-relaxed">
+		<div class="mb-4 rounded-sm border border-[var(--color-fail)]/50 bg-[var(--color-fail)]/10 px-3 py-2 text-[12px] leading-relaxed">
 			<span class="text-[var(--color-fail)] font-semibold">Email will not be delivered.</span>
 			{emailRecipients.length} recipient{emailRecipients.length === 1 ? ' has' : 's have'}
 			an email address, but no SMTP server is configured, so those notifications
@@ -606,7 +606,7 @@
 	{#if needsQuickStart && !loading}
 		<div class="mb-5 rounded-sm border border-[var(--color-ok)]/40 bg-[var(--color-ok)]/5 px-3 py-3">
 			<div class="label text-[var(--color-bright)] mb-1">START HERE</div>
-			<div class="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
+			<div class="text-[12px] text-[var(--color-muted)] mb-2 leading-relaxed">
 				Nobody is currently emailed when something breaks. Enter an address and
 				Sentinel will create the recipient and add it to every escalation plan's
 				first step — the part that is easy to miss, because a recipient on its own
@@ -623,12 +623,12 @@
 					type="button"
 					disabled={quickBusy}
 					onclick={quickSetup}
-					class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
+					class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
 				>{quickBusy ? 'saving…' : 'email me when something breaks'}</button>
-				{#if quickErr}<span class="text-[11px] text-[var(--color-fail)]">{quickErr}</span>{/if}
+				{#if quickErr}<span class="text-[12px] text-[var(--color-fail)]">{quickErr}</span>{/if}
 			</div>
 			{#if !smtpReady && smtpChecked}
-				<div class="mt-2 text-[11px] text-[var(--color-warn)]">
+				<div class="mt-2 text-[12px] text-[var(--color-warn)]">
 					You will also need SMTP configured on
 					<a href="/admin/email" class="underline decoration-dotted">Email / SMTP</a>
 					before anything is delivered.
@@ -640,14 +640,14 @@
 	{#if !loading}
 		<div class="sticky top-0 z-10 -mx-6 px-6 py-2 mb-6 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center gap-3">
 			<button
-				class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
+				class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
 				onclick={save} disabled={saving}
 			>{saving ? 'saving…' : 'save changes'}</button>
 			<button
-				class="text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 				onclick={load}
 			>discard / reload</button>
-			<span class="text-[10px] text-[var(--color-faint)] num ml-auto">
+			<span class="text-[12px] text-[var(--color-faint)] num ml-auto">
 				source: <span class="text-[var(--color-bright)]">{source}</span>
 				{#if updatedAt} · saved {updatedAt.slice(0, 19).replace('T', ' ')} by {updatedBy ?? '?'}{/if}
 			</span>
@@ -669,7 +669,7 @@
 	<!-- ============== RECIPIENTS ============== -->
 	<section class="mb-10">
 		<div class="label text-[var(--color-bright)] mb-1">RECIPIENTS</div>
-		<div class="text-[11px] text-[var(--color-muted)] mb-3 leading-relaxed">
+		<div class="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
 			Who gets notified. Each recipient is a name plus one or more delivery channels
 			(email addresses, a webhook URL, or the backend console log).
 		</div>
@@ -677,7 +677,7 @@
 		{#if receivers.length === 0}
 			<div class="text-[12px] text-[var(--color-faint)] italic mb-3">No recipients yet.</div>
 		{:else}
-			<table class="w-full text-[11.5px] mb-3">
+			<table class="w-full text-[12px] mb-3">
 				<thead class="text-[var(--color-muted)]">
 					<tr class="border-b border-[var(--color-border)]">
 						<th class="px-2 py-1 text-left">name</th>
@@ -694,12 +694,12 @@
 							<td class="px-2 py-1 text-[var(--color-default)]">{recipientSummary(r)}</td>
 							<td class="px-2 py-1">
 								{#if r.group_ids.length === 0}
-									<span class="text-[10.5px] text-[var(--color-faint)] italic">none</span>
+									<span class="text-[12px] text-[var(--color-faint)] italic">none</span>
 								{:else}
 									<div class="flex flex-wrap gap-1">
 										{#each r.group_ids as gid}
 											{@const g = groupOptions.find((x) => x.id === gid)}
-											<span class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-1.5 py-0.5 text-[10px] num text-[var(--color-bright)]">{g?.name ?? `#${gid}`}</span>
+											<span class="rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-1.5 py-0.5 text-[12px] num text-[var(--color-bright)]">{g?.name ?? `#${gid}`}</span>
 										{/each}
 									</div>
 								{/if}
@@ -714,16 +714,16 @@
 										onclick={() => testRecipient(r)}
 										disabled={testing === r.name}
 										title="send a test email to {r.email.join(', ')}"
-										class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2 disabled:opacity-50"
+										class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2 disabled:opacity-50"
 									>{testing === r.name ? 'sending…' : 'test'}</button>
 									{#if testResults[r.name]}
-										<span class="mr-2 text-[10px] {testResults[r.name].ok ? 'text-[var(--color-ok)]' : 'text-[var(--color-fail)]'}"
+										<span class="mr-2 text-[12px] {testResults[r.name].ok ? 'text-[var(--color-ok)]' : 'text-[var(--color-fail)]'}"
 											title={testResults[r.name].msg}
 										>{testResults[r.name].ok ? 'sent' : 'failed'}</span>
 									{/if}
 								{/if}
-								<button onclick={() => openEditor(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2">edit</button>
-								<button onclick={() => delReceiver(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete</button>
+								<button onclick={() => openEditor(i)} class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2">edit</button>
+								<button onclick={() => delReceiver(i)} class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete</button>
 							</td>
 						</tr>
 					{/each}
@@ -731,7 +731,7 @@
 			</table>
 		{/if}
 
-		<button onclick={addReceiver} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add recipient</button>
+		<button onclick={addReceiver} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add recipient</button>
 	</section>
 
 	<!-- ============== RECIPIENT EDIT MODAL ============== -->
@@ -748,18 +748,18 @@
 				</header>
 				<div class="px-5 py-4 space-y-3 text-[12px]">
 					<label class="flex items-center gap-3">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
 						<input bind:value={r.name} placeholder="oncall-primary"
 							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<div class="flex items-start gap-3">
-						<span class="w-24 mt-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Email</span>
+						<span class="w-24 mt-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Email</span>
 						<div class="flex-1">
 							{#if r.email.length}
 								<div class="flex flex-wrap gap-1 mb-1">
 									{#each r.email as e, j}
-										<span class="flex items-center gap-1 border border-[var(--color-border)] bg-[var(--color-elevated)]/40 px-2 py-0.5 text-[11px] num text-[var(--color-bright)]">
+										<span class="flex items-center gap-1 border border-[var(--color-border)] bg-[var(--color-elevated)]/40 px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
 											{e}
 											<button onclick={() => editorDelEmail(j)} class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[12px] leading-none">×</button>
 										</span>
@@ -770,16 +770,16 @@
 								<input bind:value={editorPendingEmail} placeholder="you@example.com" type="email"
 									onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); editorAddEmail(); } }}
 									class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
-								<button onclick={editorAddEmail} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add</button>
+								<button onclick={editorAddEmail} class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add</button>
 							</div>
 						</div>
 					</div>
 
 					<div class="flex items-start gap-3">
-						<span class="w-24 mt-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Groups</span>
+						<span class="w-24 mt-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Groups</span>
 						<div class="flex-1">
 							{#if groupOptions.length === 0}
-								<div class="text-[11px] text-[var(--color-faint)] italic">
+								<div class="text-[12px] text-[var(--color-faint)] italic">
 									No groups defined yet. Create some at <a href="/admin/groups" class="underline">/admin/groups</a> — group members are paged automatically based on the group's notification schedule.
 								</div>
 							{:else}
@@ -788,14 +788,14 @@
 										{@const checked = r.group_ids.includes(g.id)}
 										<button type="button" onclick={() => editorToggleGroup(g.id)}
 											title={g.description || ''}
-											class="rounded-sm border px-2 py-0.5 text-[11px] num {checked
+											class="rounded-sm border px-2 py-0.5 text-[12px] num {checked
 												? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 												: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}">
 											{g.name}
 										</button>
 									{/each}
 								</div>
-								<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+								<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 									Selected groups are expanded to their active members at dispatch time, respecting each group's notification schedule. If every selected group is off-duty the recipient is skipped entirely.
 								</div>
 							{/if}
@@ -803,13 +803,13 @@
 					</div>
 
 					<label class="flex items-center gap-3">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Webhook</span>
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Webhook</span>
 						<input bind:value={r.webhook} placeholder="https://discord.com/api/webhooks/…"
 							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 					</label>
 
 					<label class="flex items-center gap-3">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Console</span>
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Console</span>
 						<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
 							<input type="checkbox" bind:checked={r.console} />
 							Also write to backend log (useful for debugging)
@@ -817,12 +817,12 @@
 					</label>
 
 					<label class="flex items-center gap-3">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Template</span>
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Template</span>
 						<input bind:value={r.template} placeholder="default"
 							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 					</label>
 				</div>
-				<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[11px]">
+				<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[12px]">
 					<button class="border border-[var(--color-border-strong)] px-3 py-1 uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={closeEditor}>done</button>
 				</footer>
 			</div>
@@ -832,7 +832,7 @@
 	<!-- ============== ESCALATION PLANS ============== -->
 	<section class="mb-10">
 		<div class="label text-[var(--color-bright)] mb-1">ESCALATION PLANS</div>
-		<div class="text-[11px] text-[var(--color-muted)] mb-3 leading-relaxed">
+		<div class="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
 			A sequence of steps. Each step waits N (e.g. <span class="num">0m</span>, <span class="num">15m</span>, <span class="num">1h</span>),
 			then notifies the selected recipients. Used by routing rules below.
 		</div>
@@ -844,7 +844,7 @@
 		{#each policies as p, i (i)}
 			<div class="border border-[var(--color-border)] bg-[var(--color-canvas)] p-4 mb-3">
 				<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center mb-3">
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">name</label>
+					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">name</label>
 					<input bind:value={p.name} placeholder="standard"
 						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
 				</div>
@@ -853,18 +853,18 @@
 					{#each p.steps as s, j (j)}
 						<div class="border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-[12px]">
 							<div class="flex items-center gap-3 flex-wrap">
-								<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">step {j + 1}:</span>
-								<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">wait</span>
+								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">step {j + 1}:</span>
+								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">wait</span>
 								<input bind:value={s.delay} placeholder="0m"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-20" />
-								<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">then notify</span>
+								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">then notify</span>
 								{#if receivers.length === 0 && groupOptions.length === 0}
-									<span class="text-[10px] italic text-[var(--color-faint)]">add a recipient or define a group first</span>
+									<span class="text-[12px] italic text-[var(--color-faint)]">add a recipient or define a group first</span>
 								{:else}
 									{#if receivers.length > 0}
 										<div class="flex flex-wrap gap-1">
 											{#each receivers as rec}
-												<label class="flex items-center gap-1 text-[11px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
+												<label class="flex items-center gap-1 text-[12px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
 													<input type="checkbox" checked={s.receivers.includes(rec.name)} onchange={() => toggleStepReceiver(i, j, rec.name)} />
 													<span class="num">{rec.name || '(unnamed)'}</span>
 												</label>
@@ -872,11 +872,11 @@
 										</div>
 									{/if}
 								{/if}
-								<button onclick={() => delStep(i, j)} class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete step</button>
+								<button onclick={() => delStep(i, j)} class="ml-auto text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete step</button>
 							</div>
 							{#if groupOptions.length > 0}
 								<div class="mt-2 flex items-center gap-2 flex-wrap">
-									<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">+ groups</span>
+									<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">+ groups</span>
 									{#each groupOptions as g}
 										{@const checked = s.group_ids.includes(g.id)}
 										<button
@@ -886,14 +886,14 @@
 													? s.group_ids.filter((x) => x !== g.id)
 													: [...s.group_ids, g.id];
 											}}
-											class="rounded-sm border px-2 py-0.5 text-[11px] num {checked
+											class="rounded-sm border px-2 py-0.5 text-[12px] num {checked
 												? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 												: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
 										>
 											{g.name}
 										</button>
 									{/each}
-									<span class="text-[10.5px] text-[var(--color-faint)] ml-2">If a person is in BOTH a checked recipient and a checked group, they only get one notification.</span>
+									<span class="text-[12px] text-[var(--color-faint)] ml-2">If a person is in BOTH a checked recipient and a checked group, they only get one notification.</span>
 								</div>
 							{/if}
 						</div>
@@ -901,19 +901,19 @@
 				</div>
 
 				<div class="mt-3 flex items-center gap-3">
-					<button onclick={() => addStep(i)} class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add step</button>
-					<button onclick={() => delPolicy(i)} class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete plan</button>
+					<button onclick={() => addStep(i)} class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add step</button>
+					<button onclick={() => delPolicy(i)} class="ml-auto text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete plan</button>
 				</div>
 			</div>
 		{/each}
 
-		<button onclick={addPolicy} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add plan</button>
+		<button onclick={addPolicy} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add plan</button>
 	</section>
 
 	<!-- ============== ROUTING RULES ============== -->
 	<section class="mb-10">
 		<div class="label text-[var(--color-bright)] mb-1">ROUTING RULES</div>
-		<div class="text-[11px] text-[var(--color-muted)] mb-3 leading-relaxed">
+		<div class="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
 			First match wins. Each rule maps alarms (filtered by stage / check / target / status,
 			plus optional extra conditions) to an escalation plan. Leave a field blank to match
 			anything.
@@ -923,13 +923,13 @@
 		     three operational priorities: action / attention / informational.
 		     Reshaped in v0.1.2 so severity_floor cleanly distinguishes
 		     "degraded" from "broken." -->
-		<div class="border border-[var(--color-border)] bg-[var(--color-elevated)]/30 p-3 mb-4 text-[11px] leading-relaxed">
-			<div class="text-[var(--color-bright)] uppercase tracking-wider text-[10px] mb-1">Status vs severity</div>
+		<div class="border border-[var(--color-border)] bg-[var(--color-elevated)]/30 p-3 mb-4 text-[12px] leading-relaxed">
+			<div class="text-[var(--color-bright)] uppercase tracking-wider text-[12px] mb-1">Status vs severity</div>
 			<div class="text-[var(--color-muted)] mb-2">
 				The <span class="text-[var(--color-bright)] num">status</span> dropdown matches the raw check signal (5 values).
 				The <span class="text-[var(--color-bright)] num">severity floor</span> matches the rolled-up alarm level (3 values).
 			</div>
-			<table class="num text-[10.5px]">
+			<table class="num text-[12px]">
 				<thead>
 					<tr class="text-[var(--color-faint)]"><th class="text-left pr-4 pb-0.5">check status</th><th class="text-left pr-4 pb-0.5">opens at severity</th><th class="text-left pb-0.5">priority</th></tr>
 				</thead>
@@ -954,10 +954,10 @@
 			<div class="border border-[var(--color-border)] bg-[var(--color-canvas)] p-4 mb-3">
 				<!-- MATCH -->
 				<div class="mb-3">
-					<div class="text-[10px] uppercase tracking-wider text-[var(--color-faint)] mb-2">Match alarms where</div>
+					<div class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] mb-2">Match alarms where</div>
 					<div class="grid grid-cols-2 gap-3 text-[12px]">
 						<label class="flex items-center gap-2">
-							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">stage</span>
+							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">stage</span>
 							<select value={r.match.stage ?? ''} onchange={(e) => setMatch(i, 'stage', (e.target as HTMLSelectElement).value)}
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 								<option value="">(any)</option>
@@ -965,7 +965,7 @@
 							</select>
 						</label>
 						<label class="flex items-center gap-2">
-							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">status</span>
+							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">status</span>
 							<select value={r.match.status_at_open ?? ''} onchange={(e) => setMatch(i, 'status_at_open', (e.target as HTMLSelectElement).value)}
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 								<option value="">(any)</option>
@@ -973,7 +973,7 @@
 							</select>
 						</label>
 						<label class="flex items-center gap-2">
-							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">check</span>
+							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">check</span>
 							{#if checkIds.length > 0}
 								<select value={r.match.check_id ?? ''} onchange={(e) => setMatch(i, 'check_id', (e.target as HTMLSelectElement).value)}
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
@@ -988,7 +988,7 @@
 							{/if}
 						</label>
 						<label class="flex items-center gap-2">
-							<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-14">target</span>
+							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">target</span>
 							{#if targets.length > 0}
 								<select value={r.match.target ?? ''} onchange={(e) => setMatch(i, 'target', (e.target as HTMLSelectElement).value)}
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
@@ -1005,7 +1005,7 @@
 					</div>
 
 					<button onclick={() => (r.showAdvanced = !r.showAdvanced)}
-						class="mt-2 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">
+						class="mt-2 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">
 						{r.showAdvanced ? '▾' : '▸'} custom matchers ({customMatchers(r).length})
 					</button>
 					{#if r.showAdvanced}
@@ -1016,7 +1016,7 @@
 						{@const valueOpts = CUSTOM_KEY_VALUES[effKey] ?? []}
 						<div class="mt-2 pl-4 border-l border-[var(--color-border)] space-y-1 text-[12px]">
 							{#each customMatchers(r) as [k, v]}
-								<div class="flex items-center gap-2 text-[11px] num text-[var(--color-default)]">
+								<div class="flex items-center gap-2 text-[12px] num text-[var(--color-default)]">
 									<span class="text-[var(--color-muted)]">{k}</span>
 									<span class="text-[var(--color-faint)]">=</span>
 									<span class="text-[var(--color-bright)]">{v}</span>
@@ -1070,7 +1070,7 @@
 									type="button"
 									onclick={() => addCustomMatcher(i)}
 									disabled={!effKey || !(pendingMatcherVal[i] ?? '').trim()}
-									class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] disabled:opacity-40 disabled:cursor-not-allowed"
+									class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] disabled:opacity-40 disabled:cursor-not-allowed"
 								>
 									+ add matcher
 								</button>
@@ -1082,44 +1082,44 @@
 				<!-- WHEN (extra conditions) -->
 				<div class="mb-3">
 					<button onclick={() => (r.showWhen = !r.showWhen)}
-						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">
+						class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">
 						{r.showWhen ? '▾' : '▸'} extra conditions {hasAnyCondition(r.when) ? '(set)' : '(optional)'}
 					</button>
 					{#if r.showWhen}
 						<div class="mt-2 pl-4 border-l border-[var(--color-border)] grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-[12px] items-center">
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">time of day in</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day in</label>
 							<div class="flex items-center gap-2">
 								<input bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
-								<span class="text-[10px] text-[var(--color-faint)]">interpreted in the timezone below</span>
+								<span class="text-[12px] text-[var(--color-faint)]">interpreted in the timezone below</span>
 							</div>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">time of day not in</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day not in</label>
 							<input bind:value={r.when.time_of_day_not_in} placeholder="22:00-06:00"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">timezone</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">timezone</label>
 							<div class="flex items-center gap-2">
 								<input bind:value={r.when.timezone} placeholder="UTC"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
-								<span class="text-[10px] text-[var(--color-faint)]">IANA name (e.g. <span class="num">UTC</span>, <span class="num">America/Los_Angeles</span>). Default = UTC.</span>
+								<span class="text-[12px] text-[var(--color-faint)]">IANA name (e.g. <span class="num">UTC</span>, <span class="num">America/Los_Angeles</span>). Default = UTC.</span>
 							</div>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">weekdays only</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">weekdays only</label>
 							<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
 								<input type="checkbox" bind:checked={r.when.weekday_only} />
 								Mon–Fri only (skip weekends)
 							</label>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">min duration (min)</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">min duration (min)</label>
 							<input bind:value={r.when.duration_at_severity_min} placeholder="(none)" type="number" min="0"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">peers also failing</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">peers also failing</label>
 							<input bind:value={r.when.count_of_targets_failing} placeholder=">=2"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">metric above</label>
+							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">metric above</label>
 							<div class="flex items-center gap-2">
 								<input bind:value={r.when.metric_above_name} placeholder="metric name"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
@@ -1133,35 +1133,35 @@
 
 				<!-- THEN -->
 				<div class="border-t border-[var(--color-border)] pt-3">
-					<div class="text-[10px] uppercase tracking-wider text-[var(--color-faint)] mb-2">Then</div>
+					<div class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] mb-2">Then</div>
 					<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">send via plan</label>
+						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send via plan</label>
 						<select bind:value={r.policy}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72">
 							<option value="">— pick a plan —</option>
 							{#each policies as p}<option value={p.name}>{p.name || '(unnamed)'}</option>{/each}
 						</select>
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">severity floor</label>
+						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">severity floor</label>
 						<select bind:value={r.severity_floor}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40">
 							<option value="">(none)</option>
 							{#each SEVERITIES as s}<option value={s}>{s}</option>{/each}
 						</select>
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">repeat every</label>
+						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">repeat every</label>
 						<input bind:value={r.repeat_interval} placeholder="1h (blank = no repeat)"
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
-						<label for="route-hold-down-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">only after it lasts</label>
+						<label for="route-hold-down-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">only after it lasts</label>
 						<input id="route-hold-down-{i}" bind:value={r.hold_down}
 							placeholder="blank = global ({opaque.hold_down ?? '5m'})"
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] self-start pt-1">group by</label>
+						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] self-start pt-1">group by</label>
 						<div class="flex flex-wrap gap-2">
 							{#each GROUP_BY_KEYS as k}
-								<label class="flex items-center gap-1 text-[11px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
+								<label class="flex items-center gap-1 text-[12px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
 									<input type="checkbox" checked={r.group_by.includes(k)} onchange={() => toggleGroupBy(i, k)} />
 									<span class="num">{k}</span>
 								</label>
@@ -1173,14 +1173,14 @@
 				<!-- ACTIONS -->
 				<div class="mt-4 flex items-center gap-3">
 					<button onclick={() => sendTest(i)} disabled={r.testBusy || !r.policy}
-						class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)] disabled:opacity-50"
+						class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)] disabled:opacity-50"
 					>{r.testBusy ? 'sending…' : 'send test alert'}</button>
-					<span class="text-[10px] text-[var(--color-faint)]">(uses currently-saved config)</span>
-					<button onclick={() => delRoute(i)} class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete rule</button>
+					<span class="text-[12px] text-[var(--color-faint)]">(uses currently-saved config)</span>
+					<button onclick={() => delRoute(i)} class="ml-auto text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]">delete rule</button>
 				</div>
 
 				{#if r.testResult}
-					<div class="mt-3 border px-3 py-2 text-[11px] num {r.testResult.ok
+					<div class="mt-3 border px-3 py-2 text-[12px] num {r.testResult.ok
 						? 'border-[var(--color-ok)]/40 bg-[var(--color-ok)]/10 text-[var(--color-ok)]'
 						: 'border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 text-[var(--color-fail)]'}">
 						{#if !r.testResult.results.length}
@@ -1200,7 +1200,7 @@
 			</div>
 		{/each}
 
-		<button onclick={addRoute} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add rule</button>
+		<button onclick={addRoute} class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]">+ add rule</button>
 	</section>
 
 	{/if}

@@ -281,12 +281,12 @@
 	<header class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-border)] px-5 py-3">
 		<div class="flex items-baseline gap-3">
 			<span class="label tracking-[0.18em] text-[var(--color-bright)]">THRESHOLDS</span>
-			<span class="text-[11px] text-[var(--color-faint)]">
+			<span class="text-[12px] text-[var(--color-faint)]">
 				Admin-managed knobs for every check evaluator. Changes take effect on the next tick.
 			</span>
 		</div>
 		{#if updatedAt}
-			<span class="text-[10.5px] text-[var(--color-faint)] num">
+			<span class="text-[12px] text-[var(--color-faint)] num">
 				updated {updatedAt.slice(0, 19).replace('T', ' ')}Z by {updatedBy ?? '—'}
 			</span>
 		{/if}
@@ -301,7 +301,7 @@
 
 			<!-- Globals -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Global tolerances · LB3 composite-contribution bands · QPE producer limit</h2>
+				<h2 class="mb-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Global tolerances · LB3 composite-contribution bands · QPE producer limit</h2>
 				<div class="grid grid-cols-2 gap-x-6 gap-y-2 max-w-2xl">
 					{#each globalKeys as k}
 						<label class="flex items-center justify-between gap-3">
@@ -312,7 +312,7 @@
 								value={draft.globals[k as keyof Globals] ?? ''}
 								oninput={(e) => (draft!.globals[k as keyof Globals] = parseNum((e.target as HTMLInputElement).value) as any)}
 								placeholder={String(defaultGlobal(k as keyof Globals))}
-								class="w-32 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)] text-right"
+								class="w-32 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] text-right"
 							/>
 						</label>
 					{/each}
@@ -321,9 +321,9 @@
 
 			<!-- Products -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Products (L1 freshness · cadence · step count · size · LB1 backend age)</h2>
+				<h2 class="mb-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Products (L1 freshness · cadence · step count · size · LB1 backend age)</h2>
 				<div class="overflow-auto rounded-sm border border-[var(--color-border)]">
-					<table class="w-full text-[11px] num">
+					<table class="w-full text-[12px] num">
 						<thead class="bg-[var(--color-elevated)]/40 text-[var(--color-muted)] uppercase tracking-wider">
 							<tr>
 								<th class="px-3 py-1 text-left">product_id</th>
@@ -345,7 +345,7 @@
 												value={cur[k as keyof ProductOverride] ?? ''}
 												oninput={(e) => (cur[k as keyof ProductOverride] = parseNum((e.target as HTMLInputElement).value) as any)}
 												placeholder={String(defaultProduct(pid, k as keyof ProductOverride) ?? '—')}
-												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
+												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 											/>
 										</td>
 									{/each}
@@ -358,9 +358,9 @@
 
 			<!-- Radars -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Radars (L2 ghost-up threshold)</h2>
+				<h2 class="mb-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Radars (L2 ghost-up threshold)</h2>
 				<div class="overflow-auto rounded-sm border border-[var(--color-border)] max-w-md">
-					<table class="w-full text-[11px] num">
+					<table class="w-full text-[12px] num">
 						<thead class="bg-[var(--color-elevated)]/40 text-[var(--color-muted)] uppercase tracking-wider">
 							<tr>
 								<th class="px-3 py-1 text-left">radar_id</th>
@@ -382,7 +382,7 @@
 												value={cur[k as keyof RadarOverride] ?? ''}
 												oninput={(e) => (cur[k as keyof RadarOverride] = parseNum((e.target as HTMLInputElement).value))}
 												placeholder={String(defaultRadar(rid, k as keyof RadarOverride) ?? '—')}
-												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
+												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 											/>
 										</td>
 									{/each}
@@ -395,9 +395,9 @@
 
 			<!-- L4 Image QC -->
 			<section>
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Image QC (L4) — per-product profiles</h2>
+				<h2 class="mb-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Image QC (L4) — per-product profiles</h2>
 				<div class="overflow-auto rounded-sm border border-[var(--color-border)]">
-					<table class="w-full text-[11px] num">
+					<table class="w-full text-[12px] num">
 						<thead class="bg-[var(--color-elevated)]/40 text-[var(--color-muted)] uppercase tracking-wider">
 							<tr>
 								<th class="px-3 py-1 text-left">identifier</th>
@@ -419,7 +419,7 @@
 											value={cur.extreme_threshold ?? ''}
 											oninput={(e) => (cur.extreme_threshold = parseNum((e.target as HTMLInputElement).value))}
 											placeholder={String(defaultL4(pid, 'extreme_threshold') ?? '—')}
-											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
+											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 										/>
 									</td>
 									<td class="px-3 py-1 text-right">
@@ -429,7 +429,7 @@
 											value={cur.frozen_min_cov_pct ?? ''}
 											oninput={(e) => (cur.frozen_min_cov_pct = parseNum((e.target as HTMLInputElement).value))}
 											placeholder={String(defaultL4(pid, 'frozen_min_cov_pct') ?? '—')}
-											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)] text-right"
+											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 										/>
 									</td>
 									<td class="px-3 py-1 text-center">
@@ -456,8 +456,8 @@
 			</section>
 			<!-- Retroactive reprocess -->
 			<section class="rounded-sm border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/5 p-4">
-				<h2 class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-warn)]">Retroactive reprocess</h2>
-				<p class="mb-3 text-[11px] text-[var(--color-default)] leading-relaxed">
+				<h2 class="mb-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-warn)]">Retroactive reprocess</h2>
+				<p class="mb-3 text-[12px] text-[var(--color-default)] leading-relaxed">
 					Re-classifies historical <span class="num">check_runs</span> rows in the chosen window
 					under the <em>currently saved</em> thresholds. Re-running with no threshold change is a
 					no-op. Rows with <span class="num">reason=local_dns_error</span> or
@@ -465,19 +465,19 @@
 				</p>
 				<div class="flex flex-wrap items-center gap-4 mb-3">
 					<label class="flex items-center gap-2">
-						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">since (UTC)</span>
+						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">since (UTC)</span>
 						<input type="datetime-local" bind:value={reSince}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]" />
+							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
-						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">until (UTC)</span>
+						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">until (UTC)</span>
 						<input type="datetime-local" bind:value={reUntil}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]" />
+							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<div class="flex items-center gap-3">
-						<span class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)]">stages</span>
+						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">stages</span>
 						{#each REPROCESSABLE as [k, lbl]}
-							<label class="flex items-center gap-1 text-[11px]">
+							<label class="flex items-center gap-1 text-[12px]">
 								<input type="checkbox"
 									checked={reStages[k]}
 									onchange={(e) => (reStages[k] = (e.target as HTMLInputElement).checked)}
@@ -491,21 +491,21 @@
 				{#if reJob && reJob.state === 'running'}
 					{@const pct = reJob.n_total ? Math.floor((reJob.n_evaluated / reJob.n_total) * 100) : 0}
 					<div class="flex items-center gap-3">
-						<div class="num text-[11.5px] text-[var(--color-bright)]">running…</div>
-						<div class="num text-[11px] text-[var(--color-muted)]">
+						<div class="num text-[12px] text-[var(--color-bright)]">running…</div>
+						<div class="num text-[12px] text-[var(--color-muted)]">
 							{reJob.n_evaluated}/{reJob.n_total} ({pct}%) · changed {reJob.n_changed} · preserved {reJob.n_preserved}
 						</div>
-						<button class="ml-auto border border-[var(--color-fail)]/50 px-3 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-fail)] hover:bg-[var(--color-fail)]/10" onclick={cancelReprocess}>cancel</button>
+						<button class="ml-auto border border-[var(--color-fail)]/50 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-fail)] hover:bg-[var(--color-fail)]/10" onclick={cancelReprocess}>cancel</button>
 					</div>
 					<div class="mt-2 h-1.5 rounded-sm bg-[var(--color-elevated)]">
 						<div class="h-full rounded-sm bg-[var(--color-ok)]" style="width: {pct}%"></div>
 					</div>
 				{:else if reJob && ['completed','cancelled','error'].includes(reJob.state)}
-					<div class="text-[11.5px] num {reJob.state === 'error' ? 'text-[var(--color-fail)]' : 'text-[var(--color-ok)]'}">
+					<div class="text-[12px] num {reJob.state === 'error' ? 'text-[var(--color-fail)]' : 'text-[var(--color-ok)]'}">
 						{reJob.state}: {reJob.n_evaluated} evaluated · {reJob.n_changed} changed · {reJob.n_preserved} preserved
 						{#if reJob.error}<div class="text-[var(--color-fail)] mt-1">{reJob.error}</div>{/if}
 					</div>
-					<button class="mt-2 text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] underline" onclick={() => (reJob = null)}>
+					<button class="mt-2 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] underline" onclick={() => (reJob = null)}>
 						start another
 					</button>
 				{:else}
@@ -514,25 +514,25 @@
 							type="text"
 							placeholder="type APPLY to confirm"
 							bind:value={reConfirmText}
-							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] num text-[var(--color-bright)]"
+							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 						/>
 						<button
 							type="button"
-							class="border border-[var(--color-warn)] bg-[var(--color-warn)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-warn)]/25 disabled:opacity-50"
+							class="border border-[var(--color-warn)] bg-[var(--color-warn)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-warn)]/25 disabled:opacity-50"
 							onclick={startReprocess}
 							disabled={reConfirmText !== 'APPLY'}
 						>
 							Start retroactive reprocess
 						</button>
-						{#if reError}<span class="text-[var(--color-fail)] text-[11px]">{reError}</span>{/if}
+						{#if reError}<span class="text-[var(--color-fail)] text-[12px]">{reError}</span>{/if}
 					</div>
 				{/if}
 			</section>
 		</div>
 
 		<!-- Footer actions -->
-		<footer class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[11px]">
-			<div class="text-[10.5px] text-[var(--color-faint)]">
+		<footer class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[12px]">
+			<div class="text-[12px] text-[var(--color-faint)]">
 				{#if error}<span class="text-[var(--color-fail)]">{error}</span>
 				{:else if info}<span class="text-[var(--color-ok)]">{info}</span>
 				{:else}Live values update on next check tick. Reprocess option appears once you confirm.{/if}
@@ -568,8 +568,8 @@
 						{#if diff.length === 0}
 							<div class="text-[var(--color-muted)]">No changes to apply.</div>
 						{:else}
-							<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">{diff.length} change{diff.length === 1 ? '' : 's'}</div>
-							<ul class="max-h-[40vh] overflow-auto divide-y divide-[var(--color-border)]/60 rounded-sm border border-[var(--color-border)] text-[11.5px] num">
+							<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">{diff.length} change{diff.length === 1 ? '' : 's'}</div>
+							<ul class="max-h-[40vh] overflow-auto divide-y divide-[var(--color-border)]/60 rounded-sm border border-[var(--color-border)] text-[12px] num">
 								{#each diff as d}
 									<li class="flex items-center gap-3 px-3 py-1.5">
 										<span class="flex-1 text-[var(--color-default)]">{d.key}</span>
@@ -579,17 +579,17 @@
 									</li>
 								{/each}
 							</ul>
-							<div class="rounded-sm border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-[11px] text-[var(--color-warn)]">
+							<div class="rounded-sm border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-[12px] text-[var(--color-warn)]">
 								These changes affect future evaluations only. To reclassify historical rows, use the Retroactive Reprocess panel after applying.
 							</div>
 						{/if}
 					</div>
 					<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3">
-						<button class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={() => (confirmOpen = false)}>
+						<button class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={() => (confirmOpen = false)}>
 							cancel
 						</button>
 						<button
-							class="border border-[var(--color-ok)] bg-[var(--color-ok)]/20 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] disabled:opacity-50"
+							class="border border-[var(--color-ok)] bg-[var(--color-ok)]/20 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] disabled:opacity-50"
 							onclick={apply}
 							disabled={saving || diff.length === 0}
 						>

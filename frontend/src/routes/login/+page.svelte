@@ -36,11 +36,11 @@
 	>
 		<div class="mb-4">
 			<div class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]">AQPI SENTINEL</div>
-			<div class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] mt-1">sign in</div>
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mt-1">sign in</div>
 		</div>
 
 		<label class="block mb-3">
-			<span class="block text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">email</span>
+			<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">email</span>
 			<input
 				type="email"
 				bind:value={email}
@@ -51,7 +51,7 @@
 		</label>
 
 		<label class="block mb-4">
-			<span class="block text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">password</span>
+			<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">password</span>
 			<input
 				type="password"
 				bind:value={password}
@@ -62,7 +62,7 @@
 		</label>
 
 		{#if error}
-			<div class="mb-3 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[11px] text-[var(--color-fail)]">
+			<div class="mb-3 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[12px] text-[var(--color-fail)]">
 				{error}
 			</div>
 		{/if}
@@ -70,7 +70,7 @@
 		<button
 			type="submit"
 			disabled={busy}
-			class="w-full border border-[var(--color-border-strong)] px-3 py-2 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
+			class="w-full border border-[var(--color-border-strong)] px-3 py-2 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50"
 		>
 			{busy ? 'signing in…' : 'sign in'}
 		</button>

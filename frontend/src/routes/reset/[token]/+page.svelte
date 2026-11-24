@@ -61,7 +61,7 @@
 <div class="flex h-full items-center justify-center bg-[var(--color-canvas)]">
 	<div class="w-[22rem] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-6 shadow-xl">
 		<div class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)] mb-1">{siteName.toUpperCase()}</div>
-		<div class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] mb-4">set password</div>
+		<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-4">set password</div>
 
 		{#if loading}
 			<div class="text-[12px] text-[var(--color-muted)]">checking link…</div>
@@ -71,24 +71,24 @@
 			<div class="text-[12px] text-[var(--color-ok)]">Password set. Redirecting to sign-in…</div>
 		{:else}
 			<form onsubmit={submit}>
-				<div class="text-[11px] text-[var(--color-default)] mb-3">
+				<div class="text-[12px] text-[var(--color-default)] mb-3">
 					Setting password for <span class="num text-[var(--color-bright)]">{email}</span>
 				</div>
 				<label class="block mb-3">
-					<span class="block text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">new password</span>
+					<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">new password</span>
 					<input type="password" bind:value={password} required minlength="8"
 						class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
 				</label>
 				<label class="block mb-4">
-					<span class="block text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">confirm</span>
+					<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">confirm</span>
 					<input type="password" bind:value={confirm} required
 						class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
 				</label>
 				{#if error}
-					<div class="mb-3 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[11px] text-[var(--color-fail)]">{error}</div>
+					<div class="mb-3 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[12px] text-[var(--color-fail)]">{error}</div>
 				{/if}
 				<button type="submit" disabled={busy}
-					class="w-full border border-[var(--color-border-strong)] px-3 py-2 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50">
+					class="w-full border border-[var(--color-border-strong)] px-3 py-2 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)] disabled:opacity-50">
 					{busy ? 'setting…' : 'set password'}
 				</button>
 			</form>

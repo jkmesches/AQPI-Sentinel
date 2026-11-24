@@ -278,7 +278,7 @@
 			id: 'radar-label', type: 'symbol', source: 'radars',
 			layout: {
 				'text-field': ['get', 'id'],
-				'text-size': 10,
+				'text-size': 12,
 				'text-offset': [0.95, 0.4],
 				'text-anchor': 'left',
 				'text-font': ['Stadia Regular']
@@ -480,7 +480,7 @@
 			<button
 				type="button"
 				onclick={() => (composite = c.key)}
-				class="shrink-0 rounded-md border px-2.5 py-1 text-[11px] num {sel
+				class="shrink-0 rounded-md border px-2.5 py-1 text-[12px] num {sel
 					? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)] ring-1 ring-inset ring-[var(--color-ok)]/60'
 					: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 				style="-webkit-tap-highlight-color: transparent; min-height: 32px;"
@@ -539,7 +539,7 @@
 				aria-label="next frame">
 				<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><polygon points="12,8 3,3 3,13" /></svg>
 			</button>
-			<div class="num ml-1 flex-1 truncate text-[11.5px] text-[var(--color-bright)]">
+			<div class="num ml-1 flex-1 truncate text-[12px] text-[var(--color-bright)]">
 				{compLabel}
 				{#if stepLabel} · <span class="text-[var(--color-muted)]">{stepLabel}Z</span>{/if}
 			</div>

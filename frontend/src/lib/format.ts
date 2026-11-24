@@ -664,7 +664,7 @@ export function windowFromCadence(cadenceS: number | undefined | null): { ms: nu
 }
 
 export function severityChip(s: string): string {
-	const base = 'px-1 py-0 text-[10px] uppercase tracking-wider rounded-sm border';
+	const base = 'px-1 py-0 text-[12px] uppercase tracking-wider rounded-sm border';
 	const v =
 		{
 			info: 'text-[var(--color-info)] border-[var(--color-info)]/40',

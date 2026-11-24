@@ -129,7 +129,7 @@
 	const STAGE_OPTIONS = [...ALL_STAGES];
 </script>
 
-<div bind:this={rootEl} class="relative inline-block text-[11.5px]">
+<div bind:this={rootEl} class="relative inline-block text-[12px]">
 	<button
 		type="button"
 		onclick={() => (open = !open)}
@@ -148,7 +148,7 @@
 			class="absolute left-0 top-full z-40 mt-1 w-[360px] overflow-hidden rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-2xl"
 			role="dialog"
 		>
-			<header class="border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+			<header class="border-b border-[var(--color-border)] px-3 py-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 				Choose matcher
 			</header>
 			<ul class="divide-y divide-[var(--color-border)]/60">
@@ -163,7 +163,7 @@
 							</span>
 							<span class="flex-1 min-w-0">
 								<div class="text-[12px] font-medium text-[var(--color-bright)]">{p.label}</div>
-								<div class="text-[10.5px] text-[var(--color-faint)] leading-snug">{p.description}</div>
+								<div class="text-[12px] text-[var(--color-faint)] leading-snug">{p.description}</div>
 							</span>
 						</button>
 					</li>
@@ -171,11 +171,11 @@
 			</ul>
 
 			{#if currentPreset === 'custom'}
-				<div class="border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-3 py-2 space-y-1.5 text-[11px]">
-					<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Custom matchers</div>
+				<div class="border-t border-[var(--color-border)] bg-[var(--color-canvas)]/60 px-3 py-2 space-y-1.5 text-[12px]">
+					<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Custom matchers</div>
 					<label class="flex items-center gap-2">
-						<span class="w-16 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">stage</span>
-						<select bind:value={cm_stage} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]">
+						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">stage</span>
+						<select bind:value={cm_stage} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
 							<option value="">(any)</option>
 							{#each STAGE_OPTIONS as s}
 								<option value={s}>{stageLabel(s)} ({s})</option>
@@ -183,16 +183,16 @@
 						</select>
 					</label>
 					<label class="flex items-center gap-2">
-						<span class="w-16 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">target</span>
-						<input type="text" bind:value={cm_target} placeholder="XSCV / qpe_15min / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
+						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">target</span>
+						<input type="text" bind:value={cm_target} placeholder="XSCV / qpe_15min / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
-						<span class="w-16 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">check_id</span>
-						<input type="text" bind:value={cm_check} placeholder="layer2.radar.XEBY / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]" />
+						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">check_id</span>
+						<input type="text" bind:value={cm_check} placeholder="layer2.radar.XEBY / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
-						<span class="w-16 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">severity</span>
-						<select bind:value={cm_sev} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] num text-[var(--color-bright)]">
+						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">severity</span>
+						<select bind:value={cm_sev} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
 							<option value="">(any)</option>
 							<option value="info">info</option>
 							<option value="warn">warn</option>
@@ -200,8 +200,8 @@
 						</select>
 					</label>
 					<div class="flex items-center justify-end gap-2 pt-1">
-						<button type="button" class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={() => (open = false)}>cancel</button>
-						<button type="button" class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-2 py-0.5 text-[10.5px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25" onclick={applyCustom}>apply</button>
+						<button type="button" class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={() => (open = false)}>cancel</button>
+						<button type="button" class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-2 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25" onclick={applyCustom}>apply</button>
 					</div>
 				</div>
 			{/if}

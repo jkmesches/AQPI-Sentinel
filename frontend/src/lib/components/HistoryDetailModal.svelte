@@ -208,7 +208,7 @@
 			<!-- Header -->
 			<header class="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">
 				<div class="min-w-0 flex-1">
-					<div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+					<div class="flex items-center gap-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 						{#if tab === 'alarms'}
 							<span class={severityChip(row.severity)}>{row.severity}</span>
 							<span>·</span>
@@ -224,7 +224,7 @@
 					<h2 id="history-detail-title" class="mt-1 text-[15px] font-semibold text-[var(--color-bright)]">
 						{prettyCheckLabel(row.check_id, row.target)}
 					</h2>
-					<div class="num text-[11px] text-[var(--color-faint)] truncate">{row.check_id}</div>
+					<div class="num text-[12px] text-[var(--color-faint)] truncate">{row.check_id}</div>
 				</div>
 				<button
 					class="inline-flex h-6 w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
@@ -241,22 +241,22 @@
 			<!-- Body -->
 			<div class="space-y-4 px-5 py-4 text-[12px]">
 				<!-- Summary grid -->
-				<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[11.5px] num">
-					<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+				<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[12px] num">
+					<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
 					<dd class="text-[var(--color-default)]">{row.target || '—'}</dd>
 
 					{#if tab === 'checks'}
-						<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Started</dt>
+						<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Started</dt>
 						<dd class="text-[var(--color-default)]">{fmtTs(row.started_at)}</dd>
-						<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Finished</dt>
+						<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Finished</dt>
 						<dd class="text-[var(--color-default)]">{fmtTs(row.finished_at)}</dd>
 					{:else}
-						<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Opened</dt>
+						<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Opened</dt>
 						<dd class="text-[var(--color-default)]">{fmtTs(row.opened_at)}</dd>
-						<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Closed</dt>
+						<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Closed</dt>
 						<dd class="text-[var(--color-default)]">{row.closed_at ? fmtTs(row.closed_at) : '— (still open)'}</dd>
 						{#if row.suppressed_by}
-							<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Suppressed</dt>
+							<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Suppressed</dt>
 							<dd class="text-[var(--color-warn)]">{row.suppressed_by}</dd>
 						{/if}
 					{/if}
@@ -265,14 +265,14 @@
 				<!-- Message / summary -->
 				{#if tab === 'alarms' && row.message}
 					<section>
-						<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Message</div>
-						<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[11.5px] num text-[var(--color-default)] leading-snug">{row.message}</pre>
+						<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Message</div>
+						<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{row.message}</pre>
 					</section>
 				{/if}
 				{#if tab === 'checks' && (fullRun?.summary || row.summary)}
 					<section>
-						<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Summary</div>
-						<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[11.5px] num text-[var(--color-default)] leading-snug">{fullRun?.summary || row.summary}</pre>
+						<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Summary</div>
+						<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{fullRun?.summary || row.summary}</pre>
 					</section>
 				{/if}
 
@@ -281,7 +281,7 @@
 					{@const img = capturedImage(fullRun)}
 					{#if img}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Captured image</div>
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Captured image</div>
 							<div class="overflow-hidden rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)]">
 								<LazyImage src={img} alt="captured scan" minHeight={240} />
 							</div>
@@ -292,12 +292,12 @@
 					{@const l4v = l4Verdicts(fullRun)}
 					{#if l4v}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Image QC verdicts</div>
-							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[11.5px] num">
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Image QC verdicts</div>
+							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[12px] num">
 								<tbody>
 									{#each l4v as [k, v, hint]}
 										<tr class="border-b border-[var(--color-border)]/40 last:border-b-0">
-											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">{k}</td>
+											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[12px]">{k}</td>
 											<td class="px-3 py-1 text-[var(--color-bright)]">{v}</td>
 											<td class="px-3 py-1 text-[var(--color-faint)]">{hint}</td>
 										</tr>
@@ -311,12 +311,12 @@
 					{@const sub = l1SubStatus(fullRun)}
 					{#if sub}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Sub-check verdicts</div>
-							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[11.5px] num">
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Sub-check verdicts</div>
+							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[12px] num">
 								<tbody>
 									{#each sub as [k, v]}
 										<tr class="border-b border-[var(--color-border)]/40 last:border-b-0">
-											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">{k}</td>
+											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[12px]">{k}</td>
 											<td class="px-3 py-1 {v === 'pass' ? 'text-[var(--color-ok)]' : v === 'warn' ? 'text-[var(--color-warn)]' : v === 'fail' ? 'text-[var(--color-fail)]' : v === 'error' ? 'text-[var(--color-error)]' : 'text-[var(--color-muted)]'}">{v}</td>
 										</tr>
 									{/each}
@@ -329,11 +329,11 @@
 					{@const reco = l2Reconcile(fullRun)}
 					{#if reco}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Radar reconciliation</div>
-							<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[11.5px] num">
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Radar reconciliation</div>
+							<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[12px] num">
 								{#each Object.entries(reco) as [k, v]}
 									{#if typeof v !== 'object' || v === null}
-										<dt class="text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">{k}</dt>
+										<dt class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">{k}</dt>
 										<dd class="text-[var(--color-bright)]">{String(v)}</dd>
 									{/if}
 								{/each}
@@ -344,10 +344,10 @@
 
 				<!-- Loading / error -->
 				{#if loading}
-					<div class="text-[11px] text-[var(--color-muted)]">loading details…</div>
+					<div class="text-[12px] text-[var(--color-muted)]">loading details…</div>
 				{/if}
 				{#if error}
-					<div class="rounded-sm border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-3 py-2 text-[11px] text-[var(--color-fail)]">
+					<div class="rounded-sm border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-3 py-2 text-[12px] text-[var(--color-fail)]">
 						{error}
 					</div>
 				{/if}
@@ -357,7 +357,7 @@
 					{@const alarmImg = alarmCapturedImage()}
 					{#if alarmImg}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
 								Captured image (from triggering run)
 							</div>
 							<div class="overflow-hidden rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)]">
@@ -369,14 +369,14 @@
 					{@const aV = alarmAnyL4Verdicts()}
 					{#if aV}
 						<section>
-							<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
+							<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
 								Image QC verdicts (from triggering run)
 							</div>
-							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[11.5px] num">
+							<table class="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] text-[12px] num">
 								<tbody>
 									{#each aV.l4v as [k, v, hint]}
 										<tr class="border-b border-[var(--color-border)]/40 last:border-b-0">
-											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">{k}</td>
+											<td class="px-3 py-1 text-[var(--color-muted)] uppercase tracking-wider text-[12px]">{k}</td>
 											<td class="px-3 py-1 text-[var(--color-bright)]">{v}</td>
 											<td class="px-3 py-1 text-[var(--color-faint)]">{hint}</td>
 										</tr>
@@ -387,12 +387,12 @@
 					{/if}
 
 					<section>
-						<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
+						<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
 							Runs during alarm window ({related.length})
 						</div>
 						<ul class="max-h-[200px] overflow-y-auto rounded-sm border border-[var(--color-border)] divide-y divide-[var(--color-border)]/60">
 							{#each related as r}
-								<li class="flex items-center gap-3 px-3 py-1.5 text-[11.5px] num">
+								<li class="flex items-center gap-3 px-3 py-1.5 text-[12px] num">
 									<StatusBadge status={r.status} />
 									<span class="text-[var(--color-muted)]">{r.finished_at?.slice(11, 19)}Z</span>
 									<span class="flex-1 truncate text-[var(--color-default)]">{r.summary || ''}</span>
@@ -405,17 +405,17 @@
 				<!-- Raw payload (collapsible) -->
 				{#if tab === 'checks' && fullRun?.payload}
 					<details>
-						<summary class="cursor-pointer text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)] hover:text-[var(--color-default)]">
+						<summary class="cursor-pointer text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)] hover:text-[var(--color-default)]">
 							Raw payload
 						</summary>
-						<pre class="mt-1 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[10.5px] num text-[var(--color-muted)] leading-snug">{JSON.stringify(fullRun.payload, null, 2)}</pre>
+						<pre class="mt-1 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-[12px] num text-[var(--color-muted)] leading-snug">{JSON.stringify(fullRun.payload, null, 2)}</pre>
 					</details>
 				{/if}
 			</div>
 
 			<!-- Footer actions -->
-			<footer class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[11px]">
-				<div class="text-[10px] text-[var(--color-faint)]">
+			<footer class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[12px]">
+				<div class="text-[12px] text-[var(--color-faint)]">
 					{#if tab === 'checks'}
 						For the full verify-yourself view (thresholds, upstream URLs, replication recipe), open in Timeline.
 					{:else}

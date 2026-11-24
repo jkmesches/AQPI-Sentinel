@@ -26,7 +26,7 @@ export function runTests(mod) {
     check('the default is one of them', UI_SCALES.includes(DEFAULT_UI_SCALE));
     check('they rise', UI_SCALES.every((s, i) => i === 0 || s > UI_SCALES[i - 1]));
     check('every one is positive', UI_SCALES.every((s) => s > 0));
-    // Below about 0.8 the 9.5 px labels in this console round to 7 px,
+    // Below about 0.8 the 12 px labels in this console drop under 10 px,
     // and above 2 a legend at 280 px wide stops fitting a 426 px pane.
     check('none is smaller than 0.8', smallest >= 0.8, String(smallest));
     check('none is larger than 2', largest <= 2, String(largest));

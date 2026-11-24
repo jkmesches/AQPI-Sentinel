@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
 	import StatusDot from './StatusDot.svelte';
+	import DisclosureArrow from './DisclosureArrow.svelte';
 	import { statusText } from '$lib/format';
 	import type { Snippet } from 'svelte';
 
@@ -55,14 +56,7 @@
 			title={title || label}
 			onclick={() => ontoggle?.()}
 		>
-			<!-- Rotated rather than swapped for a different glyph, so the arrow
-			     animates to its new state and the row does not reflow by a pixel
-			     when two characters have different widths. -->
-			<span
-				class="inline-block w-[0.6rem] shrink-0 text-[9px] text-[var(--color-muted)] transition-transform duration-150"
-				style:transform={open ? 'rotate(90deg)' : 'rotate(0deg)'}
-				aria-hidden="true">▶</span
-			>
+			<DisclosureArrow {open} />
 			<StatusDot status={worst} size={7} {pulseKey} />
 			<span class="num w-[3.6rem] truncate tracking-wide text-[13px] text-[var(--color-bright)]"
 				>{label}</span
@@ -70,11 +64,11 @@
 		</button>
 		<!-- min-w-0 so a long summary truncates inside the row instead of
 		     pushing the trailing cell off the rail. -->
-		<span class="min-w-0 flex-1 truncate text-[10.5px] num {statusText(worst)}">
+		<span class="min-w-0 flex-1 truncate text-[12px] num {statusText(worst)}">
 			{#if collapsed}{@render collapsed()}{/if}
 		</span>
 		{#if count > 1}
-			<span class="shrink-0 num text-[9.5px] text-[var(--color-faint)]" title="{count} checks">
+			<span class="shrink-0 num text-[12px] text-[var(--color-faint)]" title="{count} checks">
 				{count}
 			</span>
 		{/if}

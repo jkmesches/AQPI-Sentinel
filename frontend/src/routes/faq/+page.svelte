@@ -52,7 +52,7 @@
 			</h1>
 			<button
 				type="button"
-				class="shrink-0 border border-[var(--color-border-strong)] px-2 py-0.5 text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+				class="shrink-0 border border-[var(--color-border-strong)] px-2 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
 				onclick={toggleAll}
 			>{allOpen ? 'collapse all' : 'expand all'}</button>
 		</div>
@@ -68,7 +68,7 @@
 	</header>
 
 	<!-- Jump list: on a dashboard people arrive looking for one answer. -->
-	<nav class="mb-6 flex flex-wrap gap-x-3 gap-y-1.5 text-[11px]">
+	<nav class="mb-6 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px]">
 		{#each FAQ as f, i}
 			<a
 				href="#{f.id}"
@@ -85,7 +85,7 @@
 				onclick={() => (open[f.id] = !open[f.id])}
 				aria-expanded={open[f.id]}
 			>
-				<span class="num shrink-0 text-[11px] text-[var(--color-faint)] mt-[3px]">{i + 1}</span>
+				<span class="num shrink-0 text-[12px] text-[var(--color-faint)] mt-[3px]">{i + 1}</span>
 				<span class="flex-1 text-[13.5px] font-medium text-[var(--color-bright)]">{f.q}</span>
 				<span class="shrink-0 text-[var(--color-faint)] text-[12px] mt-[2px]">{open[f.id] ? '−' : '+'}</span>
 			</button>
@@ -117,7 +117,7 @@
 		</ul>
 	</section>
 
-	<footer class="border-t border-[var(--color-border)] pt-3 text-[11px] text-[var(--color-muted)]">
+	<footer class="border-t border-[var(--color-border)] pt-3 text-[12px] text-[var(--color-muted)]">
 		A longer version of this page, plus deployment and maintenance guides, lives on the
 		<a
 			class="text-[var(--color-accent)] hover:text-[var(--color-bright)] transition-colors"
@@ -142,7 +142,7 @@
 				<thead>
 					<tr class="border-b border-[var(--color-border-strong)]">
 						{#each b.head as h}
-							<th class="px-2 py-1 text-left font-semibold uppercase tracking-wider text-[10.5px] text-[var(--color-muted)]">{h}</th>
+							<th class="px-2 py-1 text-left font-semibold uppercase tracking-wider text-[12px] text-[var(--color-muted)]">{h}</th>
 						{/each}
 					</tr>
 				</thead>

@@ -2,6 +2,7 @@
 	import { sentinel } from '$lib/stores/state.svelte';
 	import { rankAlarms } from '$lib/alarmRank';
 	import StatusDot from '$lib/components/StatusDot.svelte';
+	import DisclosureArrow from '$lib/components/DisclosureArrow.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import SectionHeader from '$lib/components/SectionHeader.svelte';
 	import {
@@ -442,7 +443,7 @@
 {#snippet sourceCell(row: any, fallbackTag: string, paired: boolean, w: number)}
 	{#if !row}
 		<span
-			class="num justify-self-start whitespace-nowrap text-[9.5px] text-[var(--color-faint)]"
+			class="num justify-self-start whitespace-nowrap text-[12px] text-[var(--color-faint)]"
 			title="not monitored on this deployment — the backend tree is not mounted for this target"
 		>
 			not mounted
@@ -461,7 +462,7 @@
 		>
 			<StatusDot status={row.status} size={8} pulseKey={sentinel.pulseTick[row.check_id] ?? 0} />
 			{#if paired}
-				<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{tag}</span>
+				<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[12px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{tag}</span>
 			{/if}
 			{#if diag.spark}
 				<Sparkline
@@ -508,7 +509,7 @@
      radar, shows neither. -->
 {#if sourceCount.radarca > 0 || sourceCount.nexrad > 0}
 	<div data-dashboard-filters
-		class="flex shrink-0 items-center justify-end gap-4 px-1 text-[9.5px]">
+		class="flex shrink-0 items-center justify-end gap-4 px-1 text-[12px]">
 		{#if sourceCount.radarca > 0}
 			<label
 				data-hide-radarca
@@ -555,7 +556,7 @@
 				     title rather than nowhere. Left single-line on purpose:
 				     eleven site rows that each wrap to two would fill the
 				     column. -->
-				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
+				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[12px]"
 					title={`${prettyCheckLabel(r.check_id, r.target)} · ${r.check_id}\n${cadenceTitle(r.check_id)}${r.summary ? `\n${r.summary}` : ''}`}>
 					<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 					<!-- The label never wraps and the summary gives way instead.
@@ -564,11 +565,11 @@
 					     so the name of the thing was harder to read than its
 					     detail. The summary's full text is on the hover title. -->
 					<span class="num shrink-0 whitespace-nowrap text-[var(--color-default)]">{prettyCheckLabel(r.check_id, r.target)}</span>
-					<span class="num ml-auto min-w-0 truncate text-[10.5px] text-[var(--color-muted)]">{r.summary}</span>
+					<span class="num ml-auto min-w-0 truncate text-[12px] text-[var(--color-muted)]">{r.summary}</span>
 					<!-- How often this is sampled. The L0 rows carry no age, so
 					     the cadence is the only thing saying whether a summary
 					     from "just now" means thirty seconds or an hour. -->
-					<span class="num w-[1.9rem] shrink-0 text-right text-[9px] text-[var(--color-faint)]">
+					<span class="num w-[1.9rem] shrink-0 text-right text-[12px] text-[var(--color-faint)]">
 						{fmtCadence(checksById[r.check_id]?.cadence_s)}
 					</span>
 				</li>
@@ -579,7 +580,7 @@
 				     and Layer3DropsProducerCheck). Shown even when healthy,
 				     because being unable to see that it IS running is exactly
 				     the gap that let it die unnoticed for twelve hours. -->
-				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[11.5px]"
+				<li class="row-hover flex items-center gap-2 px-3 py-1.5 text-[12px]"
 					title={`${prettyCheckLabel(dropsRow.check_id, dropsRow.target)} · ${dropsRow.check_id} — informational, non-paging${dropsRow.summary ? `\n${dropsRow.summary}` : ''}`}>
 					<StatusDot status={dropsRow.status} size={7} pulseKey={sentinel.pulseTick[dropsRow.check_id] ?? 0} />
 					<!-- Via prettyCheckLabel, not hardcoded. Hardcoding it is how
@@ -588,8 +589,8 @@
 					     producer". One source for the label means they cannot
 					     disagree again. -->
 					<span class="text-[var(--color-default)] num">{prettyCheckLabel(dropsRow.check_id, dropsRow.target)}</span>
-					<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">INFO</span>
-					<span class="ml-auto truncate text-[var(--color-muted)] num text-[10.5px]">{dropsRow.summary}</span>
+					<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[12px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">INFO</span>
+					<span class="ml-auto truncate text-[var(--color-muted)] num text-[12px]">{dropsRow.summary}</span>
 				</li>
 			{/if}
 		</ul>
@@ -604,19 +605,19 @@
 	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3">
 		<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5">
 			<span class="label">Radars</span>
-			<span class="num text-[10.5px] text-[var(--color-faint)]">·  {radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}</span>
+			<span class="num text-[12px] text-[var(--color-faint)]">·  {radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}</span>
 			<!-- One control, two states. Two buttons would leave one of them
 			     always a no-op, and the label says what the click will DO
 			     rather than what the rail currently is. -->
 			<button
 				type="button"
-				class="ml-auto num text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				class="ml-auto num text-[12px] uppercase tracking-[0.1em] text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 				onclick={() => setAllRadars(!allRadarsOpen)}
 				title={allRadarsOpen ? 'collapse every radar' : 'expand every radar'}
 			>
 				{allRadarsOpen ? 'Collapse all' : 'Expand all'}
 			</button>
-			<span class="num text-[10.5px] text-[var(--color-muted)]">{sourceLabelFor(sources.radars, 'L2', 'LB2')}</span>
+			<span class="num text-[12px] text-[var(--color-muted)]">{sourceLabelFor(sources.radars, 'L2', 'LB2')}</span>
 		</div>
 		{#if fleetAlerting && fleetRow}
 			<!-- The fleet verdict, where it belongs: above the radars it is a
@@ -631,10 +632,10 @@
 				     gets squashed into a bar without it. -->
 				<span class="mt-[3px] shrink-0"><StatusDot status={fleetRow.status} size={8} /></span>
 				<div class="min-w-0">
-					<div class="label text-[10px] tracking-[0.14em] {statusText(fleetRow.status)}">
+					<div class="label text-[12px] tracking-[0.14em] {statusText(fleetRow.status)}">
 						{fleetRow.check_id === BACKEND_FLEET_CHECK_ID ? 'Radar fleet · backend' : 'X-band fleet'}
 					</div>
-					<div class="num text-[11px] leading-snug text-[var(--color-default)]">
+					<div class="num text-[12px] leading-snug text-[var(--color-default)]">
 						{fleetRow.summary}
 					</div>
 				</div>
@@ -667,6 +668,7 @@
 				{@const ageS = arrival ? latestMetric(arrival.check_id, readoutMetric(arrival.check_id)) : null}
 				{@const cov = imgQc ? latestMetric(imgQc.check_id, 'coverage_pct') : null}
 				{@const qc = imgQc ? parseImageQc(imgQc.summary) : []}
+				{@const fired = qc.filter((v) => !v.ok)}
 				{@const arrivalMetric = arrival ? sparklineMetric(arrival.check_id) : null}
 				<!-- min-w-0 and overflow-hidden are the backstop. A grid item
 				     defaults to min-width:auto, so one child that refuses to
@@ -695,14 +697,9 @@
 							pulseKey={sentinel.pulseTick[arrival?.check_id ?? ''] ?? 0}
 						/>
 						<span class="num tracking-wide text-[13px] text-[var(--color-bright)]">{g.target}</span>
-						<span class="num ml-auto text-[9px] text-[var(--color-faint)]">
-							{g.rows.length} check{g.rows.length === 1 ? '' : 's'}
-						</span>
-						<span
-							class="inline-block w-[0.6rem] shrink-0 text-[9px] text-[var(--color-muted)] transition-transform duration-150"
-							style:transform={open ? 'rotate(90deg)' : 'rotate(0deg)'}
-							aria-hidden="true">▶</span
-						>
+						<!-- The check count lives in the title. At 12 px it left
+						     the name about 20 px in a 150 px card. -->
+						<span class="ml-auto flex"><DisclosureArrow {open} /></span>
 					</button>
 
 					<!-- The arrival age, large, because it is the reading that
@@ -717,7 +714,7 @@
 							{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
 						</span>
 						{#if arrival}
-							<span class="num text-[9px] text-[var(--color-faint)]">
+							<span class="num text-[12px] text-[var(--color-faint)]">
 								every {fmtCadence(checksById[arrival.check_id]?.cadence_s)}
 							</span>
 						{/if}
@@ -743,33 +740,38 @@
 						/>
 					{/if}
 
-					<!-- Image quality, which the page used to discard. Each
-					     detector gets its own token rather than one word for all
-					     four, so a card says WHICH one fired. -->
+					<!-- Image quality, which the page used to discard. A detector
+					     that fired gets its own token, so a card says WHICH one;
+					     the ones that passed fold into "QC ok", since four faint
+					     names at 12 px are wider than the card. -->
 					<!-- Wraps, because the card's width comes from a grid that
-					     reflows: at the narrow end the four chips go to their own
+					     reflows: at the narrow end the tokens go to their own
 					     line rather than squeezing the coverage figure out. -->
 					<div class="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-t border-[var(--color-border)]/60 pt-1.5">
 						{#if imgQc}
 							<span
-								class="num text-[10px] text-[var(--color-muted)]"
+								class="num text-[12px] text-[var(--color-muted)]"
 								title={`${imgQc.check_id} · ${cadenceTitle(imgQc.check_id)}\n${imgQc.summary}`}
 							>
 								cov {cov !== null ? `${cov.toFixed(1)}%` : '—'}
 							</span>
-							<span class="ml-auto flex items-center gap-1" title={`image QC · ${imgQc.summary}`}>
-								{#each qc as v (v.name)}
+							<span
+								class="ml-auto flex flex-wrap items-center gap-1"
+								title={`image QC · ${imgQc.summary}`}
+							>
+								{#each fired as v (v.name)}
 									<span
-										class="num rounded px-[3px] text-[8.5px] leading-[1.6]
-										       {v.ok
-												? 'text-[var(--color-faint)]'
-												: 'bg-[var(--color-fail)]/15 text-[var(--color-fail)]'}"
+										class="num rounded bg-[var(--color-fail)]/15 px-[3px] text-[12px] leading-[1.6] text-[var(--color-fail)]"
 										title={`${v.name}=${v.verdict}`}
 									>{v.name}</span>
+								{:else}
+									{#if qc.length}
+										<span class="num text-[12px] text-[var(--color-faint)]">QC ok</span>
+									{/if}
 								{/each}
 							</span>
 						{:else}
-							<span class="num text-[10px] text-[var(--color-faint)]">no image check</span>
+							<span class="num text-[12px] text-[var(--color-faint)]">no image check</span>
 						{/if}
 					</div>
 
@@ -793,7 +795,7 @@
 								     to show what does not fit; one that truncates is
 								     only a quieter version of the problem. -->
 								<li
-									class="flex flex-col gap-0.5 text-[11px]"
+									class="flex flex-col gap-0.5 text-[12px]"
 									title={`${r.check_id}${meta?.source_label ? ` · read from ${meta.source_label}` : ''}`}
 								>
 									<!-- Nothing in this row may refuse to shrink. Both the
@@ -805,12 +807,12 @@
 									     a short stage name, which is why it fitted there
 									     and nowhere else. -->
 									<div class="flex min-w-0 items-center gap-1.5">
-										<span class="num min-w-0 truncate text-[9.5px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
+										<span class="num min-w-0 truncate text-[12px] uppercase tracking-[0.08em] text-[var(--color-faint)]">
 											{stageLabel(r.stage)}
 										</span>
 										<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 										{#if meta?.source_tag}
-											<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{meta.source_tag}</span>
+											<span class="num shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[12px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]">{meta.source_tag}</span>
 										{/if}
 										{#if diag.spark}
 											<span class="ml-auto w-[62px] min-w-0 shrink">
@@ -830,7 +832,7 @@
 									<!-- break-words, not truncate: these summaries carry
 									     the threshold in parentheses at the END, which is
 									     the half a clipped line always loses. -->
-									<span class="num break-words text-[10.5px] leading-snug {statusText(r.status)}">
+									<span class="num break-words text-[12px] leading-snug {statusText(r.status)}">
 										{r.summary}
 									</span>
 								</li>
@@ -847,21 +849,21 @@
 	<aside class="panel col-span-12 flex max-h-full flex-col overflow-hidden lg:col-span-4">
 		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
 		{#if pairedProducts}
-			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[9.5px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
+			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[12px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
 				<span></span><span>Filesystem</span><span>RadarCA</span>
 			</div>
 		{/if}
 		<div class="overflow-y-auto">
 			{#each productGroups as g}
 				{@const gc = groupCount(g.rows)}
-				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
+				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
 					<span>{g.label}</span>
-					<span class="num text-[9.5px] text-[var(--color-faint)] ml-auto">
+					<span class="num text-[12px] text-[var(--color-faint)] ml-auto">
 						{g.rows.length === 0 ? 'not exposed upstream' : `${gc.pass}/${gc.total}`}
 					</span>
 				</div>
 				{#if g.rows.length === 0}
-					<div class="px-3 py-1.5 text-[10.5px] text-[var(--color-faint)] italic">
+					<div class="px-3 py-1.5 text-[12px] text-[var(--color-faint)] italic">
 						no products in this group.
 					</div>
 				{:else}
@@ -888,7 +890,7 @@
 									<!-- Unpaired: keep the age readout this rail has always
 									     had. It only loses its column when the second source
 									     needs the room. -->
-									<span class="num text-right text-[10.5px] {statusText(lone?.status ?? 'skip')}">
+									<span class="num text-right text-[12px] {statusText(lone?.status ?? 'skip')}">
 										{ageS !== null ? fmtAge(ageS, { signed: true }) : '—'}
 									</span>
 									{@render sourceCell(lone, 'RC', false, 56)}
@@ -901,7 +903,7 @@
 								     rail and the map pin keep their arrival verdict and this
 								     is where the fault is named. -->
 								<li class="row-hover grid grid-cols-[1fr_auto] items-center gap-2
-								           py-1 pl-6 pr-3 text-[10.5px]"
+								           py-1 pl-6 pr-3 text-[12px]"
 									title="layer3.composite.* · {compositeInput.total} expected radars">
 									<span class="num truncate {statusText(compositeInput.worst)}">
 										radar input · {compositeInput.clean}/{compositeInput.total}{
@@ -925,26 +927,27 @@
 	     cards, so what is left here is the three mosaics, which belong to
 	     no other rail. -->
 	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-2">
+			<!-- No source label on the right: the rail has one source, and
+			     "Image Quality" repeated the title and misnamed its L3 row. -->
 			<SectionHeader
 				title="Quality"
 				count="{[...l4Rows, ...l3Rows].filter((r) => r.status === 'pass').length}/{l4Rows.length + l3Rows.length}"
-				right={stageLabel('L4-T1T2')}
 			/>
 			<ul class="divide-y divide-[var(--color-border)]">
 				{#each l4MosaicRows as r (r.check_id)}
 					{@const cov = latestMetric(r.check_id, 'coverage_pct')}
 					{@const qc = parseImageQc(r.summary)}
 					<li
-						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex flex-col gap-0.5 px-3 py-1.5 text-[11px]"
+						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex flex-col gap-0.5 px-3 py-1.5 text-[12px]"
 						title={`${r.check_id} · ${cadenceTitle(r.check_id)}\n${r.summary}`}
 					>
 						<div class="flex items-center gap-1.5">
 							<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 							<span class="num truncate text-[var(--color-default)]">{productLabel(r.target)}</span>
-							<span class="num ml-auto shrink-0 text-[9.5px] {statusText(r.status)}">{qcLabel(qc)}</span>
+							<span class="num ml-auto shrink-0 text-[12px] {statusText(r.status)}">{qcLabel(qc)}</span>
 						</div>
 						<div class="flex items-center gap-1.5 pl-[13px]">
-							<span class="num text-[10px] text-[var(--color-muted)]">
+							<span class="num text-[12px] text-[var(--color-muted)]">
 								{cov !== null ? `${cov.toFixed(1)}%` : '—'}
 							</span>
 							{#if diag.spark}
@@ -968,18 +971,18 @@
 					     says it should have. A different question from the image
 					     checks above, and the only stage with no rail of its own. -->
 					<li
-						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex items-center gap-1.5 px-3 py-1.5 text-[11px]"
+						class="row-hover {isAlerting(r.status) ? 'row-bad' : ''} flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
 						title={`${r.check_id} · ${cadenceTitle(r.check_id)}\n${r.summary}`}
 					>
 						<StatusDot status={r.status} size={7} pulseKey={sentinel.pulseTick[r.check_id] ?? 0} />
 						<span class="num truncate text-[var(--color-default)]">{productLabel(r.target)}</span>
-						<span class="num ml-auto shrink-0 text-[9.5px] text-[var(--color-faint)]" title={stageLabel('L3')}>
+						<span class="num ml-auto shrink-0 text-[12px] text-[var(--color-faint)]" title={stageLabel('L3')}>
 							{(r.summary ?? '').includes('verdict=MATCH') ? 'MATCH' : stageLabel('L3')}
 						</span>
 					</li>
 				{/each}
 				{#if l4Rows.length === 0 && l3Rows.length === 0}
-					<li class="px-3 py-2 text-[10.5px] italic text-[var(--color-faint)]">
+					<li class="px-3 py-2 text-[12px] italic text-[var(--color-faint)]">
 						no image or overlay checks on this deployment.
 					</li>
 				{/if}
@@ -1005,7 +1008,7 @@
 				: 'all clear'}
 		/>
 		{#if sentinel.alarms.length}
-			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-1 text-[10.5px] uppercase tracking-wider text-[var(--color-faint)]">
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider text-[var(--color-faint)]">
 				<span>most severe first · top {ALARM_ROWS}</span>
 				{#if filteredAlarmCount}
 					<span data-alarms-filtered={filteredAlarmCount} class="text-[var(--color-muted)]">
@@ -1052,27 +1055,27 @@
 					     name. "Connectivity" needs about 70px and the column was
 					     51px, so it ran into the id beside it and the row read
 					     "Connectivi#28200". -->
-					<span class="num truncate text-[10.5px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
+					<span class="num truncate text-[12px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 					<span class="num text-[var(--color-bright)]">#{a.id}</span>
 					<span class="text-[var(--color-default)] truncate" title={a.target}>{prettyCheckLabel(a.check_id, a.target)}</span>
 					<span
-						class="num text-[10.5px] text-[var(--color-muted)]"
+						class="num text-[12px] text-[var(--color-muted)]"
 						title="opened {a.opened_at}"
 					>
 						{openedZ}
 					</span>
-					<span class="num text-[10.5px] text-[var(--color-faint)]">
+					<span class="num text-[12px] text-[var(--color-faint)]">
 						{fmtAge(ageS)}
 					</span>
-					<span class="truncate text-[var(--color-muted)] text-[11.5px]">
+					<span class="truncate text-[var(--color-muted)] text-[12px]">
 						{#if isAcked}
-							<span class="text-[10px] uppercase tracking-wider text-[var(--color-ok)] mr-1">acked · {a.ack?.acked_by}</span>
+							<span class="text-[12px] uppercase tracking-wider text-[var(--color-ok)] mr-1">acked · {a.ack?.acked_by}</span>
 						{/if}
 						{a.message}
 					</span>
 					{#if !auth.user}
 						<a
-							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)] hover:text-[var(--color-bright)]"
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-faint)] hover:text-[var(--color-bright)]"
 							href="/login?next={encodeURIComponent('/')}"
 							title="sign in to acknowledge alarms"
 						>
@@ -1081,7 +1084,7 @@
 					{:else if isAcked}
 						<button
 							type="button"
-							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
 							onclick={() => unack(a.id)}
 							title="undo acknowledgment"
 						>
@@ -1090,7 +1093,7 @@
 					{:else}
 						<button
 							type="button"
-							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
+							class="border border-[var(--color-border-strong)] px-2 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)]"
 							onclick={() => ack(a.id)}
 						>
 							ack

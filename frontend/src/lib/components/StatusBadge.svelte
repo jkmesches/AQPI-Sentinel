@@ -12,5 +12,5 @@
 
 <span class="inline-flex items-center gap-1 {statusColor(status)}">
 	<span aria-hidden="true">{glyphs[status] ?? '·'}</span>
-	<span class="uppercase tracking-wider text-[11px]">{label ?? status}</span>
+	<span class="uppercase tracking-wider text-[12px]">{label ?? status}</span>
 </span>

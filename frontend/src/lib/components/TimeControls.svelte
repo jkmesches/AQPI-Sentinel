@@ -118,7 +118,7 @@
 		<span class="num text-[18px] tracking-wide text-[var(--color-bright)]">
 			{labelParts.time || '—:—:—'}
 		</span>
-		<span class="num text-[10px] text-[var(--color-muted)]">
+		<span class="num text-[12px] text-[var(--color-muted)]">
 			{labelParts.day}
 			{labelParts.date}
 		</span>
@@ -174,7 +174,7 @@
 		     load sets the interval and finer control would be a fiction. -->
 		<select
 			data-speed
-			class="ml-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1 py-0.5 text-[10px] num text-[var(--color-default)] hover:text-[var(--color-bright)] disabled:opacity-30 focus:outline-none focus:border-[var(--color-info)]"
+			class="ml-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1 py-0.5 text-[12px] num text-[var(--color-default)] hover:text-[var(--color-bright)] disabled:opacity-30 focus:outline-none focus:border-[var(--color-info)]"
 			value={String(speed)}
 			onchange={(e) =>
 				onSpeed?.(Number((e.target as HTMLSelectElement).value))}
@@ -191,7 +191,7 @@
 		{#if onHelp}
 			<button
 				data-help-toggle
-				class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--color-border-strong)] text-[10px] num text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+				class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--color-border-strong)] text-[12px] num text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 				onclick={onHelp}
 				title="keyboard shortcuts (?)"
 				aria-label="keyboard shortcuts"
@@ -251,7 +251,7 @@
 					></div>
 				{/each}
 			{:else if totalSteps > 0}
-				<div class="absolute inset-0 self-center text-center text-[9px] leading-3 text-[var(--color-faint)]">
+				<div class="absolute inset-0 self-center text-center text-[12px] leading-4 text-[var(--color-faint)]">
 					measuring activity…
 				</div>
 			{/if}
@@ -298,7 +298,7 @@
 				aria-label="scrub frames"
 			/>
 		</div>
-		<div class="flex items-center justify-between text-[9.5px] text-[var(--color-faint)]">
+		<div class="flex items-center justify-between text-[12px] text-[var(--color-faint)]">
 			<span>{disabled ? 'pick a composite to scrub' : 'oldest'}</span>
 			<span class="num text-[var(--color-muted)]">
 				{disabled ? '' : `${stepIdx + 1} / ${totalSteps}`}

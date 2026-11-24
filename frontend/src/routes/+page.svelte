@@ -397,7 +397,7 @@
 									data-dock-tab={i}
 									aria-pressed={dockTarget === i}
 									title="drive pane {'ABC'[i]} from the dock"
-									class="num h-5 w-5 rounded-sm border text-[10.5px] transition-colors {dockTarget === i
+									class="num h-5 w-5 rounded-sm border text-[12px] transition-colors {dockTarget === i
 										? 'border-[var(--color-ok)] bg-[var(--color-ok)]/20 text-[var(--color-bright)]'
 										: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:text-[var(--color-bright)]'}"
 									onclick={() => { dockPane = i; }}
@@ -513,12 +513,12 @@
 					aria-label="Keyboard shortcuts"
 				>
 					<div class="mb-3 flex items-center justify-between">
-						<span class="text-[10px] uppercase tracking-[0.18em]
+						<span class="text-[12px] uppercase tracking-[0.18em]
 						             text-[var(--color-muted)]">
 							Keyboard Shortcuts
 						</span>
 						<button
-							class="text-[11px] text-[var(--color-default)]
+							class="text-[12px] text-[var(--color-default)]
 							       hover:text-[var(--color-bright)]"
 							onclick={() => { helpOpen = false; }}
 							title="Close (Esc)"
@@ -526,10 +526,10 @@
 					</div>
 					<dl class="grid grid-cols-[8.5rem_1fr] gap-x-3 gap-y-1.5">
 						{#each SHORTCUTS as s (s.keys)}
-							<dt class="num text-[11px] text-[var(--color-bright)]">
+							<dt class="num text-[12px] text-[var(--color-bright)]">
 								{s.keys}
 							</dt>
-							<dd class="text-[11px] text-[var(--color-default)]">
+							<dd class="text-[12px] text-[var(--color-default)]">
 								{s.does}
 							</dd>
 						{/each}

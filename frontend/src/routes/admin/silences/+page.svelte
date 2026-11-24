@@ -214,12 +214,12 @@
 	<header class="flex items-baseline justify-between mb-6">
 		<div>
 			<div class="label tracking-[0.18em] text-[var(--color-bright)] mb-1">SILENCES</div>
-			<div class="text-[11px] text-[var(--color-muted)] max-w-2xl">
+			<div class="text-[12px] text-[var(--color-muted)] max-w-2xl">
 				Suppress alarms matching the given criteria during a window. Useful during planned downtime or known-bad upstream issues.
 			</div>
 		</div>
 		<button
-			class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
+			class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
 			onclick={startNew}
 		>
 			+ new silence
@@ -238,7 +238,7 @@
 	{:else if !rows.length}
 		<div class="text-[12px] text-[var(--color-faint)] italic mb-4">no silences.</div>
 	{:else}
-		<table class="w-full text-[11px] mb-6">
+		<table class="w-full text-[12px] mb-6">
 			<thead class="text-[var(--color-muted)]">
 				<tr class="border-b border-[var(--color-border)]">
 					<th class="px-2 py-1 text-left">id</th>
@@ -256,13 +256,13 @@
 						<td class="px-2 py-1 num text-[var(--color-default)]" title={JSON.stringify(s.matchers)}>{matcherSummary(s.matchers)}</td>
 						<td class="px-2 py-1 num text-[var(--color-muted)]">
 							{fmt(s.starts)} → {fmt(s.ends)}
-							{#if active(s)}<span class="ml-1 text-[var(--color-ok)] uppercase text-[9.5px]">active</span>{/if}
+							{#if active(s)}<span class="ml-1 text-[var(--color-ok)] uppercase text-[12px]">active</span>{/if}
 						</td>
 						<td class="px-2 py-1 text-[var(--color-muted)] truncate max-w-md">{s.reason ?? '—'}</td>
 						<td class="px-2 py-1 num text-[var(--color-muted)]">{s.created_by ?? '?'}</td>
 						<td class="px-2 py-1 text-right whitespace-nowrap">
-							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2" onclick={() => startEdit(s)}>edit</button>
-							<button class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]" onclick={() => del(s.id)}>delete</button>
+							<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] mr-2" onclick={() => startEdit(s)}>edit</button>
+							<button class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]" onclick={() => del(s.id)}>delete</button>
 						</td>
 					</tr>
 				{/each}
@@ -286,53 +286,53 @@
 				<div class="px-5 py-4 space-y-3 text-[12px]">
 					{#if !formId}
 						<label class="flex items-center gap-2">
-							<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">ID</span>
+							<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">ID</span>
 							<input
 								type="text"
 								bind:value={idDraft}
-								class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)]"
+								class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 								placeholder="leave blank to auto-generate"
 							/>
 						</label>
 					{/if}
 
 					<label class="flex items-start gap-2">
-						<span class="w-24 mt-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Matcher</span>
+						<span class="w-24 mt-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Matcher</span>
 						<SilenceMatcherPicker bind:value={matchers} summaryWidth="w-full" />
 					</label>
 
 					<!-- Time-zone toggle for the window inputs -->
 					<div class="flex items-center gap-2 pt-1">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Time zone</span>
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Time zone</span>
 						<div class="flex border border-[var(--color-border-strong)]">
-							<button type="button" class="px-2 py-0.5 text-[11px] num {tz === 'UTC' ? 'bg-[var(--color-elevated)] text-[var(--color-bright)]' : 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}" onclick={() => onTzChange('UTC')}>UTC</button>
-							<button type="button" class="px-2 py-0.5 text-[11px] num {tz === 'Local' ? 'bg-[var(--color-elevated)] text-[var(--color-bright)]' : 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}" onclick={() => onTzChange('Local')}>Local</button>
+							<button type="button" class="px-2 py-0.5 text-[12px] num {tz === 'UTC' ? 'bg-[var(--color-elevated)] text-[var(--color-bright)]' : 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}" onclick={() => onTzChange('UTC')}>UTC</button>
+							<button type="button" class="px-2 py-0.5 text-[12px] num {tz === 'Local' ? 'bg-[var(--color-elevated)] text-[var(--color-bright)]' : 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}" onclick={() => onTzChange('Local')}>Local</button>
 						</div>
 						{#if tz === 'Local'}
-							<span class="text-[10.5px] text-[var(--color-faint)] num">{browserZone()}</span>
+							<span class="text-[12px] text-[var(--color-faint)] num">{browserZone()}</span>
 						{/if}
-						<span class="text-[10.5px] text-[var(--color-faint)] ml-auto">stored as UTC</span>
+						<span class="text-[12px] text-[var(--color-faint)] ml-auto">stored as UTC</span>
 					</div>
 
 					<label class="flex items-center gap-2">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Starts</span>
-						<input type="datetime-local" bind:value={starts} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)]" />
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Starts</span>
+						<input type="datetime-local" bind:value={starts} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<label class="flex items-center gap-2">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Ends</span>
-						<input type="datetime-local" bind:value={ends} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)]" />
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Ends</span>
+						<input type="datetime-local" bind:value={ends} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<label class="flex items-center gap-2">
-						<span class="w-24 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Reason</span>
-						<input type="text" bind:value={reason} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-default)]" placeholder="planned downtime / known-bad upstream / …" />
+						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Reason</span>
+						<input type="text" bind:value={reason} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]" placeholder="planned downtime / known-bad upstream / …" />
 					</label>
 				</div>
 
 				<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3">
-					<button type="button" class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={cancel}>cancel</button>
-					<button type="submit" disabled={busy} class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25 disabled:opacity-50">
+					<button type="button" class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]" onclick={cancel}>cancel</button>
+					<button type="submit" disabled={busy} class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25 disabled:opacity-50">
 						{busy ? (formId ? 'saving…' : 'creating…') : (formId ? 'save changes' : 'create silence')}
 					</button>
 				</footer>

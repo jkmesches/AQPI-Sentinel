@@ -85,7 +85,7 @@
 				</svg>
 			</button>
 			<div class="min-w-0 flex-1">
-				<div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+				<div class="flex items-center gap-2 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 					{#if stage}
 						<span title={stage}>{stageLabel(stage)} ({stageTechCode(stage)})</span>
 					{/if}
@@ -95,7 +95,7 @@
 				</div>
 				<div class="num truncate text-[15px] font-semibold text-[var(--color-bright)]">{title}</div>
 				{#if subtitle}
-					<div class="num truncate text-[11px] text-[var(--color-faint)]">{subtitle}</div>
+					<div class="num truncate text-[12px] text-[var(--color-faint)]">{subtitle}</div>
 				{/if}
 			</div>
 		</header>

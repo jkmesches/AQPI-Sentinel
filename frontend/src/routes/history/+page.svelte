@@ -157,13 +157,13 @@
 
 <div class="flex h-full flex-col">
 	<!-- TIME SCRUBBER + FILTERS -->
-	<header class="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] px-4 py-2 text-[11px]">
+	<header class="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] px-4 py-2 text-[12px]">
 		<div class="flex items-center gap-1">
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">since (UTC)</span>
 			<input
 				type="datetime-local"
 				bind:value={since}
-				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)]"
+				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
 		</div>
 		<div class="flex items-center gap-1">
@@ -171,7 +171,7 @@
 			<input
 				type="datetime-local"
 				bind:value={until}
-				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-default)]"
+				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
 		</div>
 
@@ -189,7 +189,7 @@
 		/>
 
 		{#if checkId}
-			<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-info)]/60 bg-[var(--color-info)]/10 px-1.5 py-0.5 text-[10px] num text-[var(--color-info)]">
+			<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-info)]/60 bg-[var(--color-info)]/10 px-1.5 py-0.5 text-[12px] num text-[var(--color-info)]">
 				check_id: {checkId}
 				<button
 					type="button"
@@ -219,13 +219,13 @@
 		{/if}
 
 		<button
-			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+			class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
 			onclick={load}
 		>
 			refresh
 		</button>
 		<button
-			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+			class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 			onclick={exportCsv}
 		>
 			⤓ CSV
@@ -245,7 +245,7 @@
 	-->
 	{#if truncated}
 		<div
-			class="border-b border-[var(--color-border)] bg-[var(--color-warn-bg,transparent)] px-4 py-1.5 text-[11px] text-[var(--color-warn)]"
+			class="border-b border-[var(--color-border)] bg-[var(--color-warn-bg,transparent)] px-4 py-1.5 text-[12px] text-[var(--color-warn)]"
 		>
 			Showing the newest {rows.length.toLocaleString()} of
 			{totalMatching.toLocaleString()} matching runs — the older
@@ -255,7 +255,7 @@
 	{/if}
 
 	<!-- TABS -->
-	<nav class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[11px] uppercase tracking-wider">
+	<nav class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider">
 		<button
 			class={tab === 'alarms'
 				? 'text-[var(--color-bright)] border-b border-[var(--color-bright)] -mb-px py-1'
@@ -283,7 +283,7 @@
 	<!-- TABLE -->
 	<div class="flex-1 overflow-auto">
 		{#if tab === 'alarms'}
-			<table class="w-full text-[11px]">
+			<table class="w-full text-[12px]">
 				<thead class="sticky top-0 bg-[var(--color-canvas)] text-[var(--color-muted)]">
 					<tr class="border-b border-[var(--color-border)]">
 						<th class="px-3 py-1 text-left">severity</th>
@@ -314,7 +314,7 @@
 				</tbody>
 			</table>
 		{:else}
-			<table class="w-full text-[11px]">
+			<table class="w-full text-[12px]">
 				<thead class="sticky top-0 bg-[var(--color-canvas)] text-[var(--color-muted)]">
 					<tr class="border-b border-[var(--color-border)]">
 						<th class="px-3 py-1 text-left">status</th>

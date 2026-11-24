@@ -265,7 +265,7 @@
 			<button
 				type="button"
 				onclick={() => (filterOpen = true)}
-				class="flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] px-3 py-1.5 text-[11px] uppercase tracking-wider text-[var(--color-default)] active:bg-[var(--color-elevated)]/60"
+				class="flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 				aria-label="Open filters"
 			>
@@ -276,7 +276,7 @@
 				</svg>
 				Filters
 				{#if activeFilterCount > 0}
-					<span class="rounded-full bg-[var(--color-ok)]/20 px-1.5 text-[10px] text-[var(--color-bright)] num">{activeFilterCount}</span>
+					<span class="rounded-full bg-[var(--color-ok)]/20 px-1.5 text-[12px] text-[var(--color-bright)] num">{activeFilterCount}</span>
 				{/if}
 			</button>
 		</div>
@@ -297,7 +297,7 @@
 				style="-webkit-tap-highlight-color: transparent; min-height: 36px;"
 			>Check Runs</button>
 		</div>
-		<div class="mt-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-[var(--color-faint)] num">
+		<div class="mt-1.5 flex items-center justify-between text-[12px] uppercase tracking-wider text-[var(--color-faint)] num">
 			<span>{rangePreset === 'custom' ? 'custom range' : `last ${rangePreset}`} · UTC</span>
 			<span>{loading ? '…' : `${rows.length} rows`}</span>
 		</div>
@@ -321,7 +321,7 @@
 	{:else}
 		<div class="flex-1 overflow-auto px-3 pt-2">
 			{#each grouped as g (g.day)}
-				<div class="mt-3 mb-1 px-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">{fmtDay(g.day)}</div>
+				<div class="mt-3 mb-1 px-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">{fmtDay(g.day)}</div>
 				<ul class="overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
 					{#each g.items as r (r.id)}
 						<li class="border-b border-[var(--color-border)]/60 last:border-b-0">
@@ -343,11 +343,11 @@
 										<span class="num truncate text-[13px] text-[var(--color-bright)]">
 											{prettyCheckLabel(r.check_id, r.target)}
 										</span>
-										<span class="shrink-0 num text-[10.5px] text-[var(--color-faint)]">
+										<span class="shrink-0 num text-[12px] text-[var(--color-faint)]">
 											{rowKeyTs(r).slice(11, 16)}Z
 										</span>
 									</div>
-									<div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] uppercase tracking-wider">
+									<div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] uppercase tracking-wider">
 										{#if tab === 'alarms'}
 											<span class={severityChip(r.severity)}>{r.severity}</span>
 											{#if r.closed_at}
@@ -366,7 +366,7 @@
 											{tab === 'alarms' ? r.message : r.summary}
 										</div>
 									{/if}
-									<div class="mt-0.5 text-[10.5px] text-[var(--color-faint)] num">{sinceText(rowKeyTs(r))}</div>
+									<div class="mt-0.5 text-[12px] text-[var(--color-faint)] num">{sinceText(rowKeyTs(r))}</div>
 								</div>
 							</button>
 						</li>
@@ -397,7 +397,7 @@
 			<div class="max-h-[68vh] overflow-auto px-4 py-3 space-y-4">
 				<!-- Time range -->
 				<section>
-					<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time range (UTC)</div>
+					<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time range (UTC)</div>
 					<div class="grid grid-cols-4 gap-1">
 						{#each ['24h','7d','30d','custom'] as p}
 							<button type="button"
@@ -410,7 +410,7 @@
 						{/each}
 					</div>
 					{#if rangePreset === 'custom'}
-						<div class="mt-2 flex flex-col gap-2 text-[11px]">
+						<div class="mt-2 flex flex-col gap-2 text-[12px]">
 							<label class="flex items-center justify-between gap-2">
 								<span class="text-[var(--color-muted)] uppercase tracking-wider">since (UTC)</span>
 								<input type="datetime-local" bind:value={customSince}
@@ -427,12 +427,12 @@
 
 				<!-- Stage -->
 				<section>
-					<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Stage</div>
+					<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Stage</div>
 					<div class="flex flex-wrap gap-1.5">
 						{#each STAGE_OPTIONS as opt}
 							<button type="button"
 								onclick={() => (stages = toggle(stages, opt.value))}
-								class="rounded-md border px-2 py-1 text-[11px] {stages.includes(opt.value)
+								class="rounded-md border px-2 py-1 text-[12px] {stages.includes(opt.value)
 									? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 									: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 								style="-webkit-tap-highlight-color: transparent;"
@@ -445,12 +445,12 @@
 				<!-- Severity (alarms) / Status (checks) -->
 				{#if tab === 'alarms'}
 					<section>
-						<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Severity</div>
+						<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Severity</div>
 						<div class="flex flex-wrap gap-1.5">
 							{#each SEVERITY_OPTIONS as v}
 								<button type="button"
 									onclick={() => (severities = toggle(severities, v))}
-									class="rounded-md border px-2.5 py-1 text-[11px] num uppercase tracking-wider {severities.includes(v)
+									class="rounded-md border px-2.5 py-1 text-[12px] num uppercase tracking-wider {severities.includes(v)
 										? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 										: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 									style="-webkit-tap-highlight-color: transparent;"
@@ -460,12 +460,12 @@
 					</section>
 				{:else}
 					<section>
-						<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Status</div>
+						<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Status</div>
 						<div class="flex flex-wrap gap-1.5">
 							{#each STATUS_OPTIONS as v}
 								<button type="button"
 									onclick={() => (statuses = toggle(statuses, v))}
-									class="rounded-md border px-2.5 py-1 text-[11px] num uppercase tracking-wider {statuses.includes(v)
+									class="rounded-md border px-2.5 py-1 text-[12px] num uppercase tracking-wider {statuses.includes(v)
 										? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 										: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 									style="-webkit-tap-highlight-color: transparent;"
@@ -478,12 +478,12 @@
 				<!-- Target -->
 				{#if targetOptions.length > 0}
 					<section>
-						<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Target</div>
+						<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Target</div>
 						<div class="flex flex-wrap gap-1.5 max-h-[120px] overflow-auto">
 							{#each targetOptions as t}
 								<button type="button"
 									onclick={() => (targets = toggle(targets, t))}
-									class="rounded-md border px-2 py-0.5 text-[11px] num {targets.includes(t)
+									class="rounded-md border px-2 py-0.5 text-[12px] num {targets.includes(t)
 										? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 										: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 									style="-webkit-tap-highlight-color: transparent;"
@@ -495,11 +495,11 @@
 
 				{#if checkId}
 					<section>
-						<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Check ID (from deeplink)</div>
+						<div class="mb-1.5 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Check ID (from deeplink)</div>
 						<div class="flex items-center gap-2">
-							<span class="num text-[11px] text-[var(--color-bright)] truncate flex-1">{checkId}</span>
+							<span class="num text-[12px] text-[var(--color-bright)] truncate flex-1">{checkId}</span>
 							<button type="button" onclick={() => (checkId = '')}
-								class="text-[10.5px] uppercase tracking-wider text-[var(--color-muted)] active:text-[var(--color-fail)]">
+								class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] active:text-[var(--color-fail)]">
 								× clear
 							</button>
 						</div>
@@ -530,29 +530,29 @@
 >
 	{#if detailRow}
 		<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-[12px] num">
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
 			<dd class="text-[var(--color-default)]">{detailRow.target || '—'}</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Stage</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Stage</dt>
 			<dd class="text-[var(--color-default)]">{stageLabel(detailRow.stage)} <span class="text-[var(--color-faint)]">({stageTechCode(detailRow.stage)})</span></dd>
 			{#if detailKind() === 'alarm'}
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Severity</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Severity</dt>
 				<dd class="text-[var(--color-bright)]">{detailRow.severity}</dd>
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Opened</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Opened</dt>
 				<dd class="text-[var(--color-default)]">{detailRow.opened_at.slice(0, 19).replace('T',' ')} UTC</dd>
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Closed</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Closed</dt>
 				<dd class="text-[var(--color-default)]">{detailRow.closed_at ? detailRow.closed_at.slice(0,19).replace('T',' ') + ' UTC' : '— (still open)'}</dd>
 			{:else}
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Status</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Status</dt>
 				<dd class="text-[var(--color-bright)] uppercase">{detailRow.status}</dd>
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Started</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Started</dt>
 				<dd class="text-[var(--color-default)]">{detailRow.started_at.slice(0,19).replace('T',' ')} UTC</dd>
-				<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Finished</dt>
+				<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Finished</dt>
 				<dd class="text-[var(--color-default)]">{detailRow.finished_at.slice(0,19).replace('T',' ')} UTC</dd>
 			{/if}
 		</dl>
 		{#if (detailKind() === 'alarm' ? detailRow.message : detailRow.summary)}
 			<section class="mt-4">
-				<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">{detailKind() === 'alarm' ? 'Message' : 'Summary'}</div>
+				<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">{detailKind() === 'alarm' ? 'Message' : 'Summary'}</div>
 				<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{detailKind() === 'alarm' ? detailRow.message : detailRow.summary}</pre>
 			</section>
 		{/if}
@@ -561,7 +561,7 @@
 		     leaves detailImgRun null and this section drops out). -->
 		{#if detailImgRun && capturedImage(detailImgRun)}
 			<section class="mt-4">
-				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+				<div class="mb-1 flex items-baseline justify-between text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 					<span>Captured image</span>
 					<span class="num text-[var(--color-faint)] normal-case">{detailImgRun.finished_at.slice(11,19)}Z</span>
 				</div>
@@ -585,7 +585,7 @@
 					detailOpen = false;
 					await goto(`/m/timeline?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in Timeline</button>
 			<button type="button"
@@ -598,7 +598,7 @@
 					detailOpen = false;
 					await goto(`/m/uptime?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in Uptime</button>
 		</div>

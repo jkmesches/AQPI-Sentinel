@@ -40,7 +40,7 @@
 	// rest of the console rather than in its quietest grey.
 	const BAR_H = 20;
 	const TICK_H = 4;
-	const LABEL_SIZE = 11;
+	const LABEL_SIZE = 12;
 	/** Clear space between two tick labels, in characters of their own font. */
 	const LABEL_GAP_CHARS = 1;
 	/** The string the character advance is measured from. */

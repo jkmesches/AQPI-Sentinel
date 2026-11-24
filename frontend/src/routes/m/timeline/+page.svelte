@@ -198,19 +198,19 @@
 		<PieStatus counts={totalCounts} size={28} />
 		<div>
 			<h1 class="text-[16px] font-semibold tracking-wide text-[var(--color-bright)]">Timeline</h1>
-			<div class="text-[11px] text-[var(--color-muted)]">
+			<div class="text-[12px] text-[var(--color-muted)]">
 				{totalCounts.pass} pass · {totalCounts.warn} warn · {totalCounts.fail + totalCounts.error} fail · last {hasFilter ? '7 days' : '24h'}
 			</div>
 		</div>
 	</header>
 
 	{#if hasFilter}
-		<div class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-3 py-2 text-[11px]">
-			<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">filtered:</span>
+		<div class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-3 py-2 text-[12px]">
+			<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">filtered:</span>
 			{#if filterStage}<span class="num text-[var(--color-bright)]" title={filterStage}>{stageLabel(filterStage)}</span>{/if}
 			{#if filterTarget}<span class="num text-[var(--color-bright)]">{filterTarget}</span>{/if}
 			{#if filterCheckId}<span class="num text-[var(--color-faint)] truncate max-w-[50%]" title={filterCheckId}>{filterCheckId}</span>{/if}
-			<a href="/m/timeline" class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-info)] active:text-[var(--color-bright)]">× clear</a>
+			<a href="/m/timeline" class="ml-auto text-[12px] uppercase tracking-wider text-[var(--color-info)] active:text-[var(--color-bright)]">× clear</a>
 		</div>
 	{/if}
 
@@ -230,7 +230,7 @@
 		</div>
 	{:else}
 		{#each grouped as g}
-			<div class="mb-2 mt-3 px-1 text-[10px] uppercase tracking-[0.16em] text-[var(--color-muted)]">{fmtDay(g.day)}</div>
+			<div class="mb-2 mt-3 px-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">{fmtDay(g.day)}</div>
 			<ul class="overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
 				{#each g.items as e (`${e.kind}-${e.id}-${e.ts}`)}
 					<li class="border-b border-[var(--color-border)]/60 last:border-b-0">
@@ -250,11 +250,11 @@
 									<span class="num truncate text-[13px] text-[var(--color-bright)]">
 										{prettyCheckLabel(e.check_id, e.target)}
 									</span>
-									<span class="num shrink-0 text-[10.5px] text-[var(--color-faint)]">
+									<span class="num shrink-0 text-[12px] text-[var(--color-faint)]">
 										{e.ts.slice(11, 16)}Z
 									</span>
 								</div>
-								<div class="mt-0.5 flex items-center gap-2 text-[10.5px] uppercase tracking-wider">
+								<div class="mt-0.5 flex items-center gap-2 text-[12px] uppercase tracking-wider">
 									{#if e.kind === 'open'}
 										<span class={severityChip(e.severity)}>{e.severity}</span>
 									{:else}
@@ -267,7 +267,7 @@
 										{e.message}
 									</div>
 								{/if}
-								<div class="mt-0.5 text-[10.5px] text-[var(--color-faint)] num">{sinceText(e.ts)}</div>
+								<div class="mt-0.5 text-[12px] text-[var(--color-faint)] num">{sinceText(e.ts)}</div>
 							</div>
 						</button>
 					</li>
@@ -289,16 +289,16 @@
 >
 	{#if detailEvent}
 		<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-[12px] num">
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Target</dt>
 			<dd class="text-[var(--color-default)]">{detailEvent.target || '—'}</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">When</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">When</dt>
 			<dd class="text-[var(--color-default)]">{detailEvent.ts.slice(0, 19).replace('T', ' ')} UTC</dd>
-			<dt class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Kind</dt>
+			<dt class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Kind</dt>
 			<dd class="text-[var(--color-bright)]">{detailEvent.kind === 'open' ? 'Alarm opened' : 'Alarm cleared'}</dd>
 		</dl>
 		{#if detailEvent.message}
 			<section class="mt-4">
-				<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Message</div>
+				<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Message</div>
 				<pre class="whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px] num text-[var(--color-default)] leading-snug">{detailEvent.message}</pre>
 			</section>
 		{/if}
@@ -308,7 +308,7 @@
 		     drops out. -->
 		{#if detailImgRun && capturedImage(detailImgRun)}
 			<section class="mt-4">
-				<div class="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
+				<div class="mb-1 flex items-baseline justify-between text-[12px] uppercase tracking-wider text-[var(--color-muted)]">
 					<span>Captured image</span>
 					<span class="num text-[var(--color-faint)] normal-case">{detailImgRun.finished_at.slice(11,19)}Z</span>
 				</div>
@@ -340,7 +340,7 @@
 					detailOpen = false;
 					await goto(`/m/uptime?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in Uptime</button>
 			<button
@@ -359,7 +359,7 @@
 					detailOpen = false;
 					await goto(`/m/history?${qs}`);
 				}}
-				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[11.5px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
+				class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/30 px-3 py-2.5 text-center text-[12px] uppercase tracking-wider text-[var(--color-bright)] active:bg-[var(--color-elevated)]/60"
 				style="-webkit-tap-highlight-color: transparent;"
 			>Show in History</button>
 		</div>

@@ -54,7 +54,7 @@
 			AQPI SENTINEL
 		</span>
 		<span class="num text-[13px] tracking-wide text-[var(--color-bright)] ml-auto" title="Current UTC time">
-			{utcClock}<span class="ml-1 text-[10px] text-[var(--color-muted)]">UTC</span>
+			{utcClock}<span class="ml-1 text-[12px] text-[var(--color-muted)]">UTC</span>
 		</span>
 	</header>
 
@@ -65,7 +65,7 @@
 		     with the content rather than fixing above the bottom nav.
 		     Slightly more vertical breathing room than the desktop variant
 		     to keep tap targets at ≥44px. -->
-		<footer class="mt-6 border-t border-[var(--color-border)] pt-3 text-center text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+		<footer class="mt-6 border-t border-[var(--color-border)] pt-3 text-center text-[12px] text-[var(--color-faint)] leading-relaxed">
 			<div>
 				Built by
 				<a

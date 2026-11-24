@@ -134,6 +134,6 @@
 		<path class="stroke" d={result.strokeD} fill="none" {stroke} stroke-width="1" />
 	</svg>
 	{#if showLabel}
-		<span class="num text-[10px] text-[var(--color-muted)] tabular-nums">{result.total}/{win.label}</span>
+		<span class="num text-[12px] text-[var(--color-muted)] tabular-nums">{result.total}/{win.label}</span>
 	{/if}
 </span>

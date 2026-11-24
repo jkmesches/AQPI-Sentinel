@@ -82,7 +82,7 @@
 		<div class="mt-2 text-[13px] uppercase tracking-[0.16em] text-[var(--color-muted)]">no open alarms</div>
 	</div>
 {:else}
-	<div class="mb-3 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
+	<div class="mb-3 px-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)]">
 		{sorted.length} open
 	</div>
 	<ul class="space-y-2.5">
@@ -91,20 +91,20 @@
 				<!-- left severity stripe -->
 				<span class="absolute inset-y-0 left-0 w-1" style="background: currentColor;"></span>
 				<div class="pl-3 pr-3 py-3">
-					<div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em]">
+					<div class="flex items-center gap-2 text-[12px] uppercase tracking-[0.14em]">
 						<span class="font-semibold">{a.severity}</span>
 						<span class="text-[var(--color-faint)]">·</span>
 						<span class="num text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 						<span class="text-[var(--color-faint)]">·</span>
 						<span class="num text-[var(--color-muted)]">{ageOf(a.opened_at)}</span>
 						{#if a.suppressed_by}
-							<span class="ml-auto rounded-sm bg-[var(--color-elevated)] px-1.5 py-0.5 text-[9.5px] text-[var(--color-muted)]">suppressed</span>
+							<span class="ml-auto rounded-sm bg-[var(--color-elevated)] px-1.5 py-0.5 text-[12px] text-[var(--color-muted)]">suppressed</span>
 						{/if}
 					</div>
 					<div class="num mt-1.5 text-[14px] text-[var(--color-bright)]" title={`${a.check_id} · ${a.target}`}>
 						{prettyCheckLabel(a.check_id, a.target)}
 					</div>
-					<div class="num mt-0.5 text-[11px] text-[var(--color-faint)] truncate">
+					<div class="num mt-0.5 text-[12px] text-[var(--color-faint)] truncate">
 						{a.check_id}
 					</div>
 					{#if a.message}
@@ -112,7 +112,7 @@
 					{/if}
 
 					{#if a.ack?.acked_at}
-						<div class="num mt-2 text-[11px] text-[var(--color-muted)]">
+						<div class="num mt-2 text-[12px] text-[var(--color-muted)]">
 							✓ acked by {a.ack.acked_by} · {ageOf(a.ack.acked_at)} ago
 							{#if a.ack.note} · {a.ack.note}{/if}
 						</div>
@@ -140,7 +140,7 @@
 							</button>
 						</div>
 					{:else}
-						<div class="mt-2 text-[11px] text-[var(--color-faint)]">
+						<div class="mt-2 text-[12px] text-[var(--color-faint)]">
 							<a href="/login?next={encodeURIComponent('/m/alarms')}" class="underline">sign in</a> to ack
 						</div>
 					{/if}

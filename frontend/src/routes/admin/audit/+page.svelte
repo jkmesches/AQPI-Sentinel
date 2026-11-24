@@ -29,7 +29,7 @@
 
 <div class="p-6 max-w-5xl">
 	<div class="label tracking-[0.18em] text-[var(--color-bright)] mb-1">AUDIT LOG</div>
-	<div class="text-[11px] text-[var(--color-muted)] mb-4">
+	<div class="text-[12px] text-[var(--color-muted)] mb-4">
 		Who did what and when. Every admin write action lands here.
 	</div>
 
@@ -40,7 +40,7 @@
 	{:else if !rows.length}
 		<div class="text-[12px] text-[var(--color-faint)] italic">no audit entries yet.</div>
 	{:else}
-		<table class="w-full text-[11px]">
+		<table class="w-full text-[12px]">
 			<thead class="text-[var(--color-muted)]">
 				<tr class="border-b border-[var(--color-border)]">
 					<th class="px-2 py-1 text-left">at</th>

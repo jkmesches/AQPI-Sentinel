@@ -156,7 +156,7 @@
 <div class="space-y-4 text-[13px]">
 	<!-- Label -->
 	<section>
-		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Device name</div>
+		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Device name</div>
 		<input
 			type="text"
 			bind:value={label}
@@ -167,13 +167,13 @@
 
 	<!-- Severity floor -->
 	<section>
-		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Minimum severity</div>
+		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Minimum severity</div>
 		<div class="flex gap-1">
 			{#each [['','any'],['info','All'],['warn','Broken only'],['critical','Long outages only']] as [v, lbl]}
 				<button
 					type="button"
 					onclick={() => (severityFloor = v as any)}
-					class="flex-1 rounded-md border px-2 py-2 text-[11.5px] uppercase tracking-wider {severityFloor === v
+					class="flex-1 rounded-md border px-2 py-2 text-[12px] uppercase tracking-wider {severityFloor === v
 						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 					style="-webkit-tap-highlight-color: transparent;"
@@ -182,7 +182,7 @@
 				</button>
 			{/each}
 		</div>
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+		<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
 			<span class="text-[var(--color-bright)]">All</span> = warn-status + fail/error.
 			<span class="text-[var(--color-bright)]">Broken only</span> = fail/error only (skips "degraded" warnings).
 			<span class="text-[var(--color-bright)]">Long outages only</span> = fail/error that stays open past 30 min (auto-promoted to critical).
@@ -193,14 +193,14 @@
 	     Pre-populated lists of known radars + products; click to toggle.
 	     Custom patterns retain a freeform input for advanced cases. -->
 	<section>
-		<div class="mb-2 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Match patterns</div>
+		<div class="mb-2 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Match patterns</div>
 
-		<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Radars</div>
+		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Radars</div>
 		<div class="flex flex-wrap gap-1.5 mb-3">
 			{#each RADAR_IDS as r}
 				{@const sel = patterns.includes(r)}
 				<button type="button" onclick={() => togglePattern(r)}
-					class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
+					class="rounded-md border px-2.5 py-1 text-[12px] num {sel
 						? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 						: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
 				>{r}</button>
@@ -208,12 +208,12 @@
 		</div>
 
 		{#each PRODUCTS_BY_CATEGORY as group}
-			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">{group.label}</div>
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">{group.label}</div>
 			<div class="flex flex-wrap gap-1.5 mb-3">
 				{#each group.products as p}
 					{@const sel = patterns.includes(p)}
 					<button type="button" onclick={() => togglePattern(p)}
-						class="rounded-md border px-2.5 py-1 text-[11.5px] num {sel
+						class="rounded-md border px-2.5 py-1 text-[12px] num {sel
 							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40'}"
 						title={p}
@@ -223,11 +223,11 @@
 		{/each}
 
 		{#if patterns.some((p) => !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p))}
-			<div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Custom patterns</div>
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Custom patterns</div>
 			<div class="flex flex-wrap gap-1.5 mb-3">
 				{#each patterns as p, i}
 					{#if !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p)}
-						<span class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1 text-[11.5px] num text-[var(--color-bright)]">
+						<span class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1 text-[12px] num text-[var(--color-bright)]">
 							{p}
 							<button type="button" class="text-[var(--color-muted)] hover:text-[var(--color-fail)] text-[14px] leading-none" onclick={() => removePattern(i)} aria-label="remove">×</button>
 						</span>
@@ -237,7 +237,7 @@
 		{/if}
 
 		<details class="text-[12px] mb-1">
-			<summary class="cursor-pointer text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add custom pattern</summary>
+			<summary class="cursor-pointer text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add custom pattern</summary>
 			<div class="mt-2 flex items-center gap-2">
 				<input
 					type="text"
@@ -250,7 +250,7 @@
 			</div>
 		</details>
 
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+		<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
 			Selected chips above match notifications whose check ID, target, or title contains them. Empty selection = match everything.<br />
 			<span class="text-[var(--color-bright)]">Always included regardless of selection:</span> L0 connectivity + canary alarms (origin / website / TLS / stream canary).
 		</div>
@@ -258,13 +258,13 @@
 
 	<!-- Delay -->
 	<section>
-		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notify</div>
+		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notify</div>
 		<div class="flex items-center gap-3">
 			<input type="number" min="0" max="60" step="1" bind:value={delayMin}
 				class="w-20 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-2 text-[16px] num text-[var(--color-bright)] text-right" />
 			<span class="text-[12px] text-[var(--color-default)]">minutes</span>
 		</div>
-		<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+		<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
 			Notifications wait this long before delivering. If the alarm
 			<span class="text-[var(--color-bright)]">self-resolves</span>
 			or is <span class="text-[var(--color-bright)]">acknowledged</span>
@@ -275,7 +275,7 @@
 
 	<!-- On-duty schedule -->
 	<section>
-		<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">On-duty schedule (UTC)</div>
+		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">On-duty schedule (UTC)</div>
 		<div class="flex gap-1">
 			{#each ['always','weekly','biweekly'] as k}
 				<button type="button" onclick={() => (kind = k as SchedKind)}
@@ -292,7 +292,7 @@
 			<div class="mt-2 flex flex-wrap gap-1">
 				{#each WEEKDAYS as w}
 					<button type="button" onclick={() => toggleWeekday(w.idx)}
-						class="w-12 rounded-md border py-1.5 text-[11.5px] num {weekdays.includes(w.idx)
+						class="w-12 rounded-md border py-1.5 text-[12px] num {weekdays.includes(w.idx)
 							? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 							: 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 					>
@@ -304,22 +304,22 @@
 				<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 				<span class="text-[var(--color-muted)]">→</span>
 				<input type="time" bind:value={twEnd}   class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
-				<button type="button" class="text-[10.5px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
+				<button type="button" class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
 			</div>
 			{#if kind === 'biweekly'}
 				<div class="mt-2 flex items-center gap-2">
-					<span class="text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Anchor</span>
+					<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Anchor</span>
 					<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 				</div>
 			{/if}
 		{:else}
-			<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">Always on duty. Notifications are not gated by time-of-day.</div>
+			<div class="mt-1 text-[12px] text-[var(--color-faint)]">Always on duty. Notifications are not gated by time-of-day.</div>
 		{/if}
 	</section>
 
 	<!-- Status + save -->
 	<section class="border-t border-[var(--color-border)] pt-3">
-		<div class="mb-2 text-[11px]">
+		<div class="mb-2 text-[12px]">
 			{#if error}<span class="text-[var(--color-fail)]">{error}</span>
 			{:else if info}<span class="text-[var(--color-ok)]">{info}</span>{/if}
 		</div>

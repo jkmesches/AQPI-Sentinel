@@ -178,17 +178,17 @@
 	</a>
 
 	<header class="mb-4">
-		<div class="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Routing</div>
+		<div class="text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Routing</div>
 		<h1 class="text-[18px] font-semibold tracking-wide text-[var(--color-bright)]">{deviceLabel(subscription)}</h1>
 		{#if subscription?.user_agent}
-			<div class="mt-0.5 text-[10.5px] text-[var(--color-faint)] num truncate">{subscription.user_agent}</div>
+			<div class="mt-0.5 text-[12px] text-[var(--color-faint)] num truncate">{subscription.user_agent}</div>
 		{/if}
 	</header>
 
 	<div class="space-y-5 text-[13px]">
 		<!-- Device name -->
 		<section>
-			<label for="device-name" class="mb-1 block text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Device name</label>
+			<label for="device-name" class="mb-1 block text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Device name</label>
 			<input id="device-name"
 				type="text"
 				bind:value={label}
@@ -200,7 +200,7 @@
 		<!-- Severity floor — friendlier wording matches the v0.1.2 reshape.
 		     "Broken only" = fail/error; warn-status (degraded) skipped. -->
 		<section>
-			<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Notify me when</div>
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Notify me when</div>
 			<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
 				{#each [['','Any alarm'],['info','All'],['warn','Broken only'],['critical','Long outages']] as [v, lbl]}
 					<button
@@ -215,7 +215,7 @@
 					</button>
 				{/each}
 			</div>
-			<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
 				<span class="text-[var(--color-bright)]">Broken only</span> skips warnings about
 				degraded-but-not-broken state (e.g. transient image-quality glitches,
 				upstream pipeline hiccups, near-expiry TLS).
@@ -226,12 +226,12 @@
 
 		<!-- Quick-pick patterns -->
 		<section>
-			<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Notify me about</div>
-			<div class="text-[10.5px] text-[var(--color-faint)] mb-2 leading-snug">
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Notify me about</div>
+			<div class="text-[12px] text-[var(--color-faint)] mb-2 leading-snug">
 				Pick any combination. Empty = receive every notification. Patterns match the alarm's check ID, target, or title.
 			</div>
 
-			<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Radars</div>
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Radars</div>
 			<div class="flex flex-wrap gap-1.5 mb-3">
 				{#each RADAR_IDS as r}
 					{@const sel = patterns.includes(r)}
@@ -243,12 +243,12 @@
 				{/each}
 			</div>
 
-			<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Products</div>
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Products</div>
 			<div class="flex flex-wrap gap-1.5 mb-3">
 				{#each PRODUCT_IDS as p}
 					{@const sel = patterns.includes(p)}
 					<button type="button" onclick={() => togglePattern(p)}
-						class="rounded-md border px-2.5 py-1.5 text-[11.5px] num {sel ? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]' : 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
+						class="rounded-md border px-2.5 py-1.5 text-[12px] num {sel ? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]' : 'border-[var(--color-border-strong)] text-[var(--color-muted)] active:bg-[var(--color-elevated)]/60'}"
 						style="-webkit-tap-highlight-color: transparent; min-height: 36px;">
 						{productLabel(p)}
 					</button>
@@ -256,11 +256,11 @@
 			</div>
 
 			{#if patterns.some((p) => !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p))}
-				<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Custom patterns</div>
+				<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Custom patterns</div>
 				<div class="flex flex-wrap gap-1.5 mb-2">
 					{#each patterns as p, i}
 						{#if !RADAR_IDS.includes(p) && !PRODUCT_IDS.includes(p)}
-							<span class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1.5 text-[11.5px] num text-[var(--color-bright)]">
+							<span class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-elevated)]/40 px-2 py-1.5 text-[12px] num text-[var(--color-bright)]">
 								{p}
 								<button type="button" class="text-[var(--color-muted)] active:text-[var(--color-fail)] text-[14px] leading-none" onclick={() => removePattern(i)} aria-label="remove">×</button>
 							</span>
@@ -270,7 +270,7 @@
 			{/if}
 
 			<details class="text-[12px]">
-				<summary class="cursor-pointer text-[11px] uppercase tracking-wider text-[var(--color-muted)] active:text-[var(--color-bright)]">+ add custom pattern</summary>
+				<summary class="cursor-pointer text-[12px] uppercase tracking-wider text-[var(--color-muted)] active:text-[var(--color-bright)]">+ add custom pattern</summary>
 				<div class="mt-2 flex items-center gap-2">
 					<input
 						type="text"
@@ -286,13 +286,13 @@
 
 		<!-- Delay -->
 		<section>
-			<label for="delay-min" class="mb-1 block text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notifying</label>
+			<label for="delay-min" class="mb-1 block text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notifying</label>
 			<div class="flex items-center gap-3">
 				<input id="delay-min" type="number" min="0" max="60" step="1" bind:value={delayMin}
 					class="w-24 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)] text-right" />
 				<span class="text-[13px] text-[var(--color-default)]">minutes</span>
 			</div>
-			<div class="mt-1 text-[10.5px] text-[var(--color-faint)] leading-relaxed">
+			<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
 				Notifications wait this long before delivering. If the
 				alarm self-resolves or is acknowledged during the wait,
 				the notification is dropped.
@@ -301,7 +301,7 @@
 
 		<!-- On-duty schedule -->
 		<section>
-			<div class="mb-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)]">On-duty schedule (UTC)</div>
+			<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">On-duty schedule (UTC)</div>
 			<div class="grid grid-cols-3 gap-1.5">
 				{#each ['always','weekly','biweekly'] as k}
 					<button type="button" onclick={() => (kind = k as any)}
@@ -313,7 +313,7 @@
 			</div>
 			{#if kind !== 'always'}
 				<div class="mt-3">
-					<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Active weekdays</div>
+					<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Active weekdays</div>
 					<div class="flex flex-wrap gap-1.5">
 						{#each WEEKDAYS as w}
 							<button type="button" onclick={() => toggleWeekday(w.idx)}
@@ -325,20 +325,20 @@
 					</div>
 				</div>
 				<div class="mt-3 flex items-center gap-2 flex-wrap">
-					<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Time window</span>
+					<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Time window</span>
 					<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<span class="text-[var(--color-muted)]">→</span>
 					<input type="time" bind:value={twEnd} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
-					<button type="button" class="text-[10px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
+					<button type="button" class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
 				</div>
 				{#if kind === 'biweekly'}
 					<div class="mt-3 flex items-center gap-2 flex-wrap">
-						<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)]">Anchor date</span>
+						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Anchor date</span>
 						<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					</div>
 				{/if}
 			{:else}
-				<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">Always on duty.</div>
+				<div class="mt-1 text-[12px] text-[var(--color-faint)]">Always on duty.</div>
 			{/if}
 		</section>
 
@@ -346,14 +346,14 @@
 		<section>
 			<label class="flex items-center gap-2 mb-1">
 				<input type="checkbox" bind:checked={rdtEnabled} class="accent-[var(--color-ok)] h-4 w-4" />
-				<span class="text-[11px] uppercase tracking-wider text-[var(--color-muted)]">Quiet hours (recurring, UTC)</span>
+				<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Quiet hours (recurring, UTC)</span>
 			</label>
 			{#if rdtEnabled}
 				<div class="mt-2 flex items-center gap-2 flex-wrap">
 					<input type="time" bind:value={rdtStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<span class="text-[var(--color-muted)]">→</span>
 					<input type="time" bind:value={rdtEnd} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
-					<span class="text-[10.5px] text-[var(--color-faint)] num">
+					<span class="text-[12px] text-[var(--color-faint)] num">
 						{#if rdtStart && rdtEnd}
 							{rdtStart > rdtEnd ? 'overnight' : 'same day'}
 						{/if}
@@ -368,11 +368,11 @@
 						</button>
 					{/each}
 				</div>
-				<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+				<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 					Notifications are suppressed during this window on the selected days.
 				</div>
 			{:else}
-				<div class="text-[10.5px] text-[var(--color-faint)]">No recurring quiet hours.</div>
+				<div class="text-[12px] text-[var(--color-faint)]">No recurring quiet hours.</div>
 			{/if}
 		</section>
 

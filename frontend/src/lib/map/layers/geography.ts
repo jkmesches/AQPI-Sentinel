@@ -115,7 +115,7 @@ export const reservoirsLayer: LayerModule = {
 				source: 'reservoirs',
 				layout: {
 					'text-field': ['get', 'name'],
-					'text-size': 9.5,
+					'text-size': 12,
 					'text-offset': [0.6, 0.3],
 					'text-anchor': 'left',
 					'text-font': ['Stadia Regular']

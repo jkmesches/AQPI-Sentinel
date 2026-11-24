@@ -155,7 +155,7 @@
 			<header class="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-3">
 				<div class="flex items-baseline gap-3">
 					<span id="report-export-title" class="label tracking-[0.16em] text-[var(--color-bright)]">EXPORT REPORT</span>
-					<span class="text-[10.5px] text-[var(--color-faint)]">build & download a bucketed CSV</span>
+					<span class="text-[12px] text-[var(--color-faint)]">build & download a bucketed CSV</span>
 				</div>
 				<button
 					class="inline-flex h-6 w-6 items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-bright)]"
@@ -172,39 +172,39 @@
 			<div class="space-y-4 px-5 py-4 text-[12px]">
 				<!-- Date range -->
 				<section>
-					<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time range (UTC)</div>
+					<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Time range (UTC)</div>
 					<div class="flex flex-wrap items-center gap-3">
 						<label class="flex items-center gap-2">
-							<span class="w-14 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">since</span>
+							<span class="w-14 text-[var(--color-muted)] uppercase tracking-wider text-[12px]">since</span>
 							<input
 								type="datetime-local"
 								bind:value={since}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)]"
+								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 							/>
 						</label>
 						<label class="flex items-center gap-2">
-							<span class="w-14 text-[var(--color-muted)] uppercase tracking-wider text-[10.5px]">until</span>
+							<span class="w-14 text-[var(--color-muted)] uppercase tracking-wider text-[12px]">until</span>
 							<input
 								type="datetime-local"
 								bind:value={until}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[11.5px] num text-[var(--color-bright)]"
+								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 							/>
 						</label>
 					</div>
-					<div class="mt-1 text-[10.5px] text-[var(--color-faint)] num">
+					<div class="mt-1 text-[12px] text-[var(--color-faint)] num">
 						{fmt(since)} → {fmt(until)}
 					</div>
 				</section>
 
 				<!-- Resolution -->
 				<section>
-					<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Resolution</div>
+					<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Resolution</div>
 					<div class="flex flex-wrap gap-1">
 						{#each BUCKET_OPTIONS as opt}
 							<button
 								type="button"
 								onclick={() => (bucket = opt.value)}
-								class="rounded-sm border px-2 py-1 text-[11px] num transition-colors {bucket === opt.value
+								class="rounded-sm border px-2 py-1 text-[12px] num transition-colors {bucket === opt.value
 									? 'border-[var(--color-ok)] bg-[var(--color-ok)]/15 text-[var(--color-bright)]'
 									: 'border-[var(--color-border-strong)] text-[var(--color-muted)] hover:bg-[var(--color-elevated)]/40 hover:text-[var(--color-default)]'}"
 							>
@@ -213,7 +213,7 @@
 						{/each}
 					</div>
 					{#if estBuckets > 0}
-						<div class="mt-1 text-[10.5px] text-[var(--color-faint)] num">
+						<div class="mt-1 text-[12px] text-[var(--color-faint)] num">
 							≈ {estBuckets.toLocaleString()} buckets × selected checks
 							{#if estBuckets > 2000}
 								<span class="ml-1 text-[var(--color-warn)]">(consider coarser resolution)</span>
@@ -224,21 +224,21 @@
 
 				<!-- Stage multi-select -->
 				<section>
-					<div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Stages</div>
+					<div class="mb-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">Stages</div>
 					<MultiSelectChips
 						label=""
 						options={STAGE_OPTIONS}
 						bind:selected={stages}
 						width="w-56"
 					/>
-					<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+					<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 						{stages.length === 0 ? 'All stages will be included.' : `${stages.length} stage${stages.length === 1 ? '' : 's'} selected.`}
 					</div>
 				</section>
 
 				<!-- Target multi-select -->
 				<section>
-					<div class="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
+					<div class="mb-1 flex items-center justify-between text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted)]">
 						<span>Targets / products</span>
 						{#if targetsTouched}
 							<button
@@ -260,7 +260,7 @@
 							width="w-56"
 						/>
 					</div>
-					<div class="mt-1 text-[10.5px] text-[var(--color-faint)]">
+					<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 						{#if !targetsTouched}
 							Auto-populated from your stage selection. Click any chip / dropdown action to override.
 						{:else if targets.length === 0}
@@ -274,20 +274,20 @@
 
 			<!-- Actions -->
 			<footer class="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3">
-				<div class="text-[10.5px] text-[var(--color-faint)]">
+				<div class="text-[12px] text-[var(--color-faint)]">
 					CSV: bucket_ts, stage, check_id, target, status, n_runs
 				</div>
 				<div class="flex gap-2">
 					<button
 						type="button"
-						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] hover:bg-[var(--color-elevated)]/40"
+						class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)] hover:bg-[var(--color-elevated)]/40"
 						onclick={close}
 					>
 						cancel
 					</button>
 					<button
 						type="button"
-						class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
+						class="border border-[var(--color-ok)] bg-[var(--color-ok)]/15 px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-ok)]/25"
 						onclick={download}
 					>
 						download CSV

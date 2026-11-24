@@ -11,13 +11,17 @@
  */
 import type { GaugeFetch, GaugePoint } from '$lib/gaugeSeries';
 
-/** Fits a 320px popup with its padding. */
+/** Fits a 320px popup with its padding, so one unit draws about one pixel. */
 export const GC_W = 288;
-export const GC_H = 92;
-export const GC_PAD_L = 34;
+export const GC_H = 96;
+/** Room for a six-character y label ("1.2e-3") in 12 px mono at 7.2 px each. */
+export const GC_PAD_L = 48;
 export const GC_PAD_R = 4;
-export const GC_PAD_T = 6;
-export const GC_PAD_B = 14;
+export const GC_PAD_T = 8;
+/** Room for the x labels under the axis, at the 12 px `.gc-tick` size in app.css. */
+export const GC_PAD_B = 18;
+/** Cap height of the 12 px tick face, to set a label's baseline below its top. */
+const TICK_CAP = 9;
 
 /** Below this, the two series are treated as meeting. */
 const GAP_HOURS = 1.5;
@@ -171,7 +175,8 @@ export function gaugeChartSvg(
 			+ ` width="${(x(gapEnd) - x(gapStart)).toFixed(1)}"`
 			+ ` height="${GC_H - GC_PAD_T - GC_PAD_B}"></rect>`
 			+ `<text class="gc-gaplabel" x="${((x(gapStart) + x(gapEnd)) / 2).toFixed(1)}"`
-			+ ` y="${(GC_H - GC_PAD_B) / 2 + 3}" text-anchor="middle">no data</text>`
+			+ ` y="${(GC_H - GC_PAD_B + GC_PAD_T + TICK_CAP) / 2}" text-anchor="middle">`
+			+ 'no data</text>'
 		: '';
 
 	// Native tooltips over invisible targets: a hover layer that needs no
@@ -190,7 +195,7 @@ export function gaugeChartSvg(
 			     aria-label="observed and forecast flow, ${svgEsc(hhmm(t0))} to ${svgEsc(hhmm(t1))}">
 				<line class="gc-axis" x1="${GC_PAD_L}" y1="${GC_H - GC_PAD_B}"
 				      x2="${GC_W - GC_PAD_R}" y2="${GC_H - GC_PAD_B}"></line>
-				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_PAD_T + 7}"
+				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_PAD_T + TICK_CAP}"
 				      text-anchor="end">${svgEsc(gaugeNum(top))}</text>
 				<text class="gc-tick" x="${GC_PAD_L - 4}" y="${GC_H - GC_PAD_B}"
 				      text-anchor="end">0</text>

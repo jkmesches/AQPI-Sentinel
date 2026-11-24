@@ -110,9 +110,9 @@
 			<!-- The separator goes with the source. A deployment whose backend
 			     does not name one left the header reading "AQPI SENTINEL ·". -->
 			{#if dataSource}
-				<span class="text-[var(--color-faint)] text-[11px]">·</span>
+				<span class="text-[var(--color-faint)] text-[12px]">·</span>
 				<span
-					class="text-[11px] text-[var(--color-muted)] num"
+					class="text-[12px] text-[var(--color-muted)] num"
 					data-data-source>{dataSource}</span>
 			{/if}
 		</div>
@@ -128,7 +128,7 @@
 			{/if}
 		</nav>
 
-		<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px]">
+		<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-[12px]">
 			<!-- dual clock: UTC + local -->
 			<div class="flex items-baseline gap-3">
 				<div class="flex items-baseline gap-1">
@@ -177,7 +177,7 @@
 			<ThemeToggle />
 
 			<!-- AUTH CHIP -->
-			<div class="flex items-center gap-2 border-l border-[var(--color-border)] pl-3 text-[11px]">
+			<div class="flex items-center gap-2 border-l border-[var(--color-border)] pl-3 text-[12px]">
 				{#if auth.loading}
 					<span class="text-[var(--color-faint)]">…</span>
 				{:else if auth.user}
@@ -186,21 +186,21 @@
 					</span>
 					<a
 						href="/settings/devices"
-						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+						class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 						title="Per-device push notification routing"
 					>
 						devices
 					</a>
 					<button
 						type="button"
-						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]"
+						class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-fail)]"
 						onclick={() => auth.logout()}
 					>
 						sign out
 					</button>
 				{:else}
 					<a
-						class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
+						class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]"
 						href="/login"
 					>
 						sign in
@@ -224,18 +224,18 @@
 				: c.warn ? 'warn'
 				: c.pass ? 'pass'
 				: 'skip'}
-			<div class="flex items-center gap-2 text-[11px]" title={`Internal stage: ${stage}`}>
+			<div class="flex items-center gap-2 text-[12px]" title={`Internal stage: ${stage}`}>
 				<StatusDot status={s} size={7} />
 				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stageLabel(stage)}</span>
-				<span class="num text-[10.5px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
-				{#if c.warn}<span class="num text-[10.5px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
-				{#if c.fail}<span class="num text-[10.5px] text-[var(--color-fail)]">{c.fail} F</span>{/if}
-				{#if c.error}<span class="num text-[10.5px] text-[var(--color-error)]">{c.error} E</span>{/if}
+				<span class="num text-[12px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
+				{#if c.warn}<span class="num text-[12px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
+				{#if c.fail}<span class="num text-[12px] text-[var(--color-fail)]">{c.fail} F</span>{/if}
+				{#if c.error}<span class="num text-[12px] text-[var(--color-error)]">{c.error} E</span>{/if}
 			</div>
 			<span class="text-[var(--color-faint)]">·</span>
 		{/each}
 		{#if sentinel.alarms.length}
-			<div class="ml-auto flex items-center gap-2 text-[11px]">
+			<div class="ml-auto flex items-center gap-2 text-[12px]">
 				<span class="label text-[var(--color-fail)]">alarms</span>
 				<span class="num text-[var(--color-bright)]">{sentinel.alarms.length} open</span>
 			</div>
@@ -243,7 +243,7 @@
 	</nav>
 
 	{#if diag.anyDisabled}
-		<div class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[11px] num text-[var(--color-warn)]">
+		<div class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[12px] num text-[var(--color-warn)]">
 			<!-- Names the flags rather than calling them disabled: `probe`
 			     turns a snapshot ON, and a banner reading "disabled = probe"
 			     describes the opposite of what the page is doing. -->
@@ -260,7 +260,7 @@
 	     Wraps below about 380 px: unwrapped, the link group ran to 376 px
 	     and scrolled every page sideways in a 320 px window. -->
 	<footer
-		class="site-footer flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] px-4 py-1.5 text-[10.5px] text-[var(--color-faint)]"
+		class="site-footer flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-[var(--color-border)] px-4 py-1.5 text-[12px] text-[var(--color-faint)]"
 	>
 		<span>
 			Built by

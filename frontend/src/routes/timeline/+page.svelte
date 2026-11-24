@@ -4,6 +4,7 @@
 	import { STATUS_BG, STATUS_WORD, cellFill, cellRatioText } from '$lib/timelineFill';
 	import { prettyCheckLabel, stageLabel, stageColor, fmtAge, statusText, productCategory, PRODUCT_CATEGORY_ORDER, PRODUCT_CATEGORY_LABEL, ALL_STAGES, backendStageOf, isBackendStage } from '$lib/format';
 	import { pairByTarget, endsPairGroup, type Paired } from '$lib/pairing';
+	import DisclosureArrow from '$lib/components/DisclosureArrow.svelte';
 	import { hiddenCheckIds, sourceCounts } from '$lib/checkFilter';
 	import LazyImage from '$lib/components/LazyImage.svelte';
 	import PieStatus from '$lib/components/PieStatus.svelte';
@@ -587,6 +588,25 @@
 		}
 		return false;
 	}
+	// Header label widths at 12 px, measured on the 1366 px render of
+	// 2026-11-24: "23:25 NOW" is 78 px with its padding and "21:00" is 44 px.
+	// Every primary label is five characters, so these hold at every grain.
+	const NOW_LABEL_W = 80;
+	const TICK_LABEL_W = 46;
+	/**
+	 * Whether a tick label at this column clears the newest column's label.
+	 *
+	 * @param bi The column's index in display order.
+	 * @param total The number of columns.
+	 * @returns False when the tick's label would print over "NOW".
+	 */
+	function clearOfNewest(bi: number, total: number): boolean {
+		// Ascending puts the newest label at the right edge, reaching left over
+		// the ticks before it; descending puts it at the left, from column 0.
+		const fromNewest = sortOrder === 'asc' ? total - 1 - bi : bi;
+		const reach = sortOrder === 'asc' ? NOW_LABEL_W + TICK_LABEL_W : NOW_LABEL_W;
+		return fromNewest * bodyColW >= reach;
+	}
 	function relativeAge(iso: string): string {
 		const s = (Date.now() - new Date(iso).getTime()) / 1000;
 		return s < 0 ? 'in future' : `${fmtAge(s)} ago`;
@@ -822,13 +842,13 @@
 				class="ml-1 mr-1 self-stretch border-l border-[var(--color-border-strong)]"
 				aria-hidden="true"
 			></span>
-			<span class="truncate text-[11px]">{col.source_label ?? 'Backend'}</span>
+			<span class="truncate text-[12px]">{col.source_label ?? 'Backend'}</span>
 		{:else}
 			<span class="truncate">{prettyCheckLabel(col.id, col.target)}</span>
 		{/if}
 		{#if r.role !== 'solo'}
 			<span
-				class="ml-auto shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[8.5px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]"
+				class="ml-auto shrink-0 rounded border border-[var(--color-border-strong)] px-[3px] text-[12px] leading-[1.5] tracking-[0.06em] text-[var(--color-faint)]"
 			>{isSecondary ? (col.source_tag ?? 'BK') : 'RC'}</span>
 		{/if}
 	</div>
@@ -873,12 +893,12 @@
 				{t.label}
 			</button>
 		{/each}
-		<span class="ml-3 mb-1.5 text-[10.5px] text-[var(--color-faint)] truncate">
+		<span class="ml-3 mb-1.5 text-[12px] text-[var(--color-faint)] truncate">
 			{tabCfg.desc}
 		</span>
 	</nav>
 
-	<header class="flex flex-wrap items-center gap-4 border-b border-[var(--color-border)] px-4 py-2 text-[11px]">
+	<header class="flex flex-wrap items-center gap-4 border-b border-[var(--color-border)] px-4 py-2 text-[12px]">
 		<div class="flex items-baseline gap-2">
 			<span class="label tracking-[0.18em] text-[var(--color-bright)]">{tabCfg.label.toUpperCase()} · STATE OVER TIME</span>
 			<span class="text-[var(--color-muted)]">·</span>
@@ -890,7 +910,7 @@
 			<div class="flex border border-[var(--color-border-strong)]">
 				{#each BUCKETS as b}
 					<button
-						class="px-2 py-0.5 text-[11px] {bucket === b.key
+						class="px-2 py-0.5 text-[12px] {bucket === b.key
 							? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
 							: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
 						onclick={() => setBucket(b.key)}
@@ -905,7 +925,7 @@
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">rows</span>
 			<div class="flex border border-[var(--color-border-strong)]">
 				<button
-					class="px-2 py-0.5 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-default)]"
+					class="px-2 py-0.5 text-[12px] text-[var(--color-muted)] hover:text-[var(--color-default)]"
 					title={allStagesCollapsed ? 'Expand every stage block' : 'Collapse every stage block'}
 					onclick={() => setAllStages(!allStagesCollapsed)}
 				>{allStagesCollapsed ? 'expand all' : 'collapse all'}</button>
@@ -916,14 +936,14 @@
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">order</span>
 			<div class="flex border border-[var(--color-border-strong)]">
 				<button
-					class="px-2 py-0.5 text-[11px] num {sortOrder === 'asc'
+					class="px-2 py-0.5 text-[12px] num {sortOrder === 'asc'
 						? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
 						: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
 					title="Oldest on the left, newest on the right"
 					onclick={() => (sortOrder = 'asc')}
 				>old→new</button>
 				<button
-					class="px-2 py-0.5 text-[11px] num {sortOrder === 'desc'
+					class="px-2 py-0.5 text-[12px] num {sortOrder === 'desc'
 						? 'bg-[var(--color-elevated)] text-[var(--color-bright)]'
 						: 'text-[var(--color-muted)] hover:text-[var(--color-default)]'}"
 					title="Newest on the left, oldest on the right"
@@ -963,7 +983,7 @@
 
 		<button
 			type="button"
-			class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+			class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
 			onclick={() => (exportOpen = true)}
 			title="Open the export dialog: pick a time range, resolution, stages, and targets — download as CSV. Defaults to what's on the screen right now."
 		>
@@ -977,7 +997,7 @@
 			     on the grid have no key. -->
 			{#each ['pass', 'warn', 'fail', 'error', 'skip', 'unknown'] as s}
 				<span
-					class="flex items-center gap-1 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider"
+					class="flex items-center gap-1 text-[12px] text-[var(--color-muted)] uppercase tracking-wider"
 					title={s === 'error'
 						? 'error — the check could not determine state (upstream API timed out, probe crashed). Not the same as fail.'
 						: s === 'fail'
@@ -1019,7 +1039,7 @@
 			>
 				<!-- TOP-LEFT CORNER -->
 				<div
-					class="sticky left-0 top-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[10px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
+					class="sticky left-0 top-0 z-30 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
 					style="height:{TIME_HDR_H}px;"
 				>
 					check · {sortOrder === 'asc' ? 'time →' : '← time'}
@@ -1044,14 +1064,16 @@
 					     direction (rightmost in asc, leftmost in desc).
 					     Always labeled + bold so the eye anchors on "now". -->
 					{@const isNewest = sortOrder === 'asc' ? isLast : bi === 0}
-					{@const major = isNewest || isMajorTick(b.ts, bi, orderedBuckets.length)}
+					{@const major = isNewest
+						|| (isMajorTick(b.ts, bi, orderedBuckets.length)
+							&& clearOfNewest(bi, orderedBuckets.length))}
 					<!-- Labeled cells need to paint AFTER neighbors so their
 					     overflowing label isn't clipped by the next cell's
 					     opaque background. Bump z-index on major cells; bump
 					     further on the newest cell so its bold label always
 					     wins paint order. -->
 					<div
-						class="tl-header relative sticky top-0 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[10px] num {isNewest ? 'z-[27]' : major ? 'z-[25]' : 'z-20'}"
+						class="tl-header relative sticky top-0 bg-[var(--color-canvas)] border-b border-[var(--color-border)] text-[12px] num {isNewest ? 'z-[27]' : major ? 'z-[25]' : 'z-20'}"
 						style="height:{TIME_HDR_H}px;{major ? ' box-shadow: inset 1px 0 0 var(--color-border-strong);' : ''}"
 						title={`${b.ts} · ${relativeAge(b.ts)}${isNewest ? ' · most recent' : ''}`}
 					>
@@ -1068,7 +1090,7 @@
 								<span>{ts.primary}</span>
 								{#if isNewest}
 									<span
-										class="text-[8.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ok)]"
+										class="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ok)]"
 										style="border: 1px solid var(--color-ok); border-radius: 2px; padding: 0 3px; line-height: 1.1;"
 									>NOW</span>
 								{/if}
@@ -1082,17 +1104,13 @@
 					<!-- Stage separator (sticky-left label + full-width strip) -->
 					<button
 						type="button"
-						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center gap-1 overflow-hidden whitespace-nowrap px-3 text-left text-[10px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
+						class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-t border-r border-[var(--color-border)] flex items-center gap-1 overflow-hidden whitespace-nowrap px-3 text-left text-[12px] uppercase tracking-[0.18em] {stageColor(g.stage)}"
 						style="height:{STAGE_ROW_H}px;"
 						aria-expanded={!stageCollapsed(g.stage)}
 						title={stageCollapsed(g.stage) ? `expand ${g.label}` : `collapse ${g.label}`}
 						onclick={() => toggleStage(g.stage)}
 					>
-						<span
-							class="inline-block w-[0.55rem] shrink-0 text-[8px] text-[var(--color-muted)] transition-transform duration-150"
-							style:transform={stageCollapsed(g.stage) ? 'rotate(0deg)' : 'rotate(90deg)'}
-							aria-hidden="true">▶</span
-						>
+						<DisclosureArrow open={!stageCollapsed(g.stage)} />
 						<span class="truncate">{g.label}</span>
 						<span class="ml-2 text-[var(--color-faint)] num">({g.rows.length})</span>
 					</button>
@@ -1113,7 +1131,7 @@
 					{:else if g.subgroups}
 						{#each g.subgroups as sg}
 							<div
-								class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
+								class="tl-cell sticky left-0 z-10 bg-[var(--color-canvas)] border-b border-r border-[var(--color-border)] flex items-center px-3 text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]"
 								style="height:{Math.max(STAGE_ROW_H - 6, 18)}px;"
 							>
 								<span>{sg.label}</span>
@@ -1136,12 +1154,12 @@
 				{/each}
 			</div>
 
-			<div class="flex items-center justify-center gap-3 px-4 py-3 text-[11px] text-[var(--color-muted)]">
+			<div class="flex items-center justify-center gap-3 px-4 py-3 text-[12px] text-[var(--color-muted)]">
 				{#if loadingMore}
 					<span>loading older…</span>
 				{:else if olderCursor && buckets.length < MAX_BUCKETS}
 					<button
-						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+						class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
 						onclick={loadMore}
 					>
 						load older ({cfg.label} × {cfg.pageLimit})
@@ -1181,7 +1199,7 @@
 					<div class="text-[14px] text-[var(--color-bright)] num truncate">
 						{prettyCheckLabel(detail.col.id, detail.col.target)}
 					</div>
-					<div class="text-[10.5px] text-[var(--color-muted)] num truncate">{detail.col.id}</div>
+					<div class="text-[12px] text-[var(--color-muted)] num truncate">{detail.col.id}</div>
 				</div>
 				<button
 					class="text-[var(--color-muted)] hover:text-[var(--color-bright)] text-lg leading-none"
@@ -1191,7 +1209,7 @@
 			</div>
 
 			<!-- BUCKET META -->
-			<div class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+			<div class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
 				<span class="text-[var(--color-muted)] uppercase tracking-wider">bucket</span>
 				<span class="num">
 					{detail.ts.slice(0, 19)}Z
@@ -1215,13 +1233,13 @@
 				{/if}
 			</div>
 
-			<div class="mt-4 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">about this check</div>
+			<div class="mt-4 text-[12px] text-[var(--color-muted)] uppercase tracking-wider">about this check</div>
 			<p class="mt-1 text-[12px] text-[var(--color-default)] leading-relaxed">
 				{checkBlurb(detail.col)}
 			</p>
 
 			<!-- RUNS -->
-			<div class="mt-4 mb-1 flex items-center gap-3 text-[10.5px] text-[var(--color-muted)] uppercase tracking-wider">
+			<div class="mt-4 mb-1 flex items-center gap-3 text-[12px] text-[var(--color-muted)] uppercase tracking-wider">
 				<span>runs in this bucket</span>
 				{#if failingOnly && detailRuns.length}
 					<span class="num normal-case tracking-normal text-[var(--color-faint)]">
@@ -1237,11 +1255,11 @@
 			</div>
 
 			{#if detailError}
-				<div class="border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[11px] text-[var(--color-fail)]">{detailError}</div>
+				<div class="border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[12px] text-[var(--color-fail)]">{detailError}</div>
 			{:else if !detailLoading && !detailRuns.length}
-				<div class="text-[11px] text-[var(--color-faint)] italic">No runs landed in this bucket.</div>
+				<div class="text-[12px] text-[var(--color-faint)] italic">No runs landed in this bucket.</div>
 			{:else if !detailLoading && !shownRuns.length}
-				<div class="text-[11px] text-[var(--color-faint)] italic">
+				<div class="text-[12px] text-[var(--color-faint)] italic">
 					None of the {detailRuns.length} run{detailRuns.length === 1 ? '' : 's'} in this bucket ended in warn, fail or error.
 				</div>
 			{/if}
@@ -1252,7 +1270,7 @@
 				{@const v = verifyContext(run)}
 				<div data-run-status={run.status} class="mt-2 border border-[var(--color-border)] bg-[var(--color-canvas)] p-3">
 					<!-- Run header line -->
-					<div class="flex items-center gap-2 text-[11px]">
+					<div class="flex items-center gap-2 text-[12px]">
 						<span
 							class="inline-block h-2.5 w-2.5"
 							style="background:{STATUS_BG[run.status] ?? 'var(--color-faint)'}"
@@ -1282,7 +1300,7 @@
 						{@const url = apiUrl(`/api/upstream/image_by_source.png?source=${encodeURIComponent(src)}`)}
 						{@const ageMin = (Date.now() - new Date(run.finished_at).getTime()) / 60000}
 						<div class="mt-3">
-							<div class="text-[10px] text-[var(--color-muted)] uppercase tracking-wider mb-1">
+							<div class="text-[12px] text-[var(--color-muted)] uppercase tracking-wider mb-1">
 								captured image
 							</div>
 							<a
@@ -1292,8 +1310,8 @@
 								class="block border border-[var(--color-border)] bg-black"
 							>
 								{#snippet imgError()}
-									<div class="p-4 text-center text-[11px] text-[var(--color-muted)] leading-relaxed">
-										<div class="text-[var(--color-faint)] uppercase tracking-wider text-[10px] mb-1">
+									<div class="p-4 text-center text-[12px] text-[var(--color-muted)] leading-relaxed">
+										<div class="text-[var(--color-faint)] uppercase tracking-wider text-[12px] mb-1">
 											Image no longer available
 										</div>
 										<div>Radarca only keeps the last ~2 h of scans before rotating files out.</div>
@@ -1304,7 +1322,7 @@
 								{/snippet}
 								<LazyImage src={url} alt="captured scan" minHeight={180} errorSnippet={imgError} />
 							</a>
-							<div class="mt-1 text-[10px] text-[var(--color-faint)] num truncate" title={src}>
+							<div class="mt-1 text-[12px] text-[var(--color-faint)] num truncate" title={src}>
 								source: {src}
 							</div>
 						</div>
@@ -1315,13 +1333,13 @@
 					     verdict by hand without trusting Sentinel's reasoning.
 					     (`v` is declared at the top of the each-block.) -->
 					{#if v.urls.length || v.rows.length}
-						<details class="mt-3 border-t border-[var(--color-border)] pt-2 text-[11px]" open>
-							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[10px]">verify yourself</summary>
+						<details class="mt-3 border-t border-[var(--color-border)] pt-2 text-[12px]" open>
+							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[12px]">verify yourself</summary>
 
 							{#if v.rows.length}
-								<div class="mt-2 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">thresholds vs observed</div>
-								<table class="mt-1 w-full text-[11px]">
-									<thead class="text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
+								<div class="mt-2 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">thresholds vs observed</div>
+								<table class="mt-1 w-full text-[12px]">
+									<thead class="text-[12px] uppercase tracking-wider text-[var(--color-faint)]">
 										<tr>
 											<th class="text-left font-normal pb-0.5 pr-2">field</th>
 											<th class="text-left font-normal pb-0.5 pr-2">observed</th>
@@ -1343,13 +1361,13 @@
 							{/if}
 
 							{#if v.urls.length}
-								<div class="mt-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">upstream calls (click to open)</div>
-								<ul class="mt-1 space-y-1 text-[11px] num">
+								<div class="mt-3 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">upstream calls (click to open)</div>
+								<ul class="mt-1 space-y-1 text-[12px] num">
 									{#each v.urls as u}
 										<li class="flex items-start gap-2">
 											<span class="text-[var(--color-faint)] shrink-0">·</span>
 											<div class="min-w-0 flex-1">
-												<div class="text-[var(--color-muted)] text-[10px] uppercase tracking-wider">{u.label}</div>
+												<div class="text-[var(--color-muted)] text-[12px] uppercase tracking-wider">{u.label}</div>
 												<a class="text-[var(--color-info)] hover:underline break-all" href={u.url} target="_blank" rel="noreferrer">{u.url}</a>
 											</div>
 										</li>
@@ -1358,8 +1376,8 @@
 							{/if}
 
 							{#if v.recipe?.length}
-								<div class="mt-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">how to replicate</div>
-								<ol class="mt-1 list-decimal space-y-0.5 pl-5 text-[11px] text-[var(--color-default)] leading-snug">
+								<div class="mt-3 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">how to replicate</div>
+								<ol class="mt-1 list-decimal space-y-0.5 pl-5 text-[12px] text-[var(--color-default)] leading-snug">
 									{#each v.recipe as step}
 										<li>{step}</li>
 									{/each}
@@ -1370,17 +1388,17 @@
 
 					<!-- Raw summary (already shown above, but useful in raw form) -->
 					{#if run.summary}
-						<details class="mt-2 text-[11px] text-[var(--color-muted)]">
-							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[10px]">raw summary</summary>
-							<pre class="mt-1 whitespace-pre-wrap text-[11px] num text-[var(--color-muted)]">{run.summary}</pre>
+						<details class="mt-2 text-[12px] text-[var(--color-muted)]">
+							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[12px]">raw summary</summary>
+							<pre class="mt-1 whitespace-pre-wrap text-[12px] num text-[var(--color-muted)]">{run.summary}</pre>
 						</details>
 					{/if}
 
 					<!-- Full payload (collapsed) -->
 					{#if run.payload}
-						<details class="mt-1 text-[11px]">
-							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[10px]">full payload</summary>
-							<pre class="mt-1 max-h-72 overflow-auto whitespace-pre-wrap text-[10.5px] num text-[var(--color-muted)]">{JSON.stringify(run.payload, null, 2)}</pre>
+						<details class="mt-1 text-[12px]">
+							<summary class="cursor-pointer text-[var(--color-faint)] uppercase tracking-wider text-[12px]">full payload</summary>
+							<pre class="mt-1 max-h-72 overflow-auto whitespace-pre-wrap text-[12px] num text-[var(--color-muted)]">{JSON.stringify(run.payload, null, 2)}</pre>
 						</details>
 					{/if}
 				</div>
@@ -1401,7 +1419,7 @@
 						`&stage=${encodeURIComponent(d.col.stage)}` +
 						`&since=${encodeURIComponent(sinceIso)}&until=${encodeURIComponent(untilIso)}`}
 					<a
-						class="border border-[var(--color-border-strong)] px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
+						class="border border-[var(--color-border-strong)] px-3 py-1 text-[12px] uppercase tracking-wider text-[var(--color-bright)] hover:bg-[var(--color-elevated)]"
 						{href}
 						title="Open this exact check in the History page with stage + target + check_id + a ±1-bucket time window pre-filled."
 					>

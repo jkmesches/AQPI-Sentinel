@@ -352,13 +352,13 @@
 		<div class="text-[12px] text-[var(--color-muted)]">loading…</div>
 	{:else}
 		<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-start">
-			<label for="dg-enabled" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">send daily</label>
+			<label for="dg-enabled" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] pt-1">send daily</label>
 			<label class="flex items-center gap-2 text-[var(--color-default)]">
 				<input id="dg-enabled" type="checkbox" bind:checked={v.enabled} />
 				enabled
 			</label>
 
-			<label for="dg-title" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">title</label>
+			<label for="dg-title" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] pt-1">title</label>
 			<div>
 				<input
 					id="dg-title"
@@ -368,14 +368,14 @@
 					placeholder={defaultTitle}
 					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
 				/>
-				<div class="text-[11px] text-[var(--color-muted)] pt-1">
+				<div class="text-[12px] text-[var(--color-muted)] pt-1">
 					Leads the subject line and heads the email. Leave it empty for
 					<span class="num text-[var(--color-default)]">{defaultTitle}</span>,
 					which follows this deployment rather than being typed in.
 				</div>
 			</div>
 
-			<label for="dg-to" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">recipients</label>
+			<label for="dg-to" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] pt-1">recipients</label>
 			<div>
 				<textarea
 					id="dg-to"
@@ -384,13 +384,13 @@
 					placeholder="ops@example.edu"
 					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
 				></textarea>
-				<div class="text-[11px] text-[var(--color-muted)] pt-1">
+				<div class="text-[12px] text-[var(--color-muted)] pt-1">
 					One per line. These receive the scheduled report — the test button below
 					never sends to them.
 				</div>
 			</div>
 
-			<label for="dg-hour" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">send at</label>
+			<label for="dg-hour" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] pt-1">send at</label>
 			<div class="flex items-center gap-2">
 				<input
 					id="dg-hour"
@@ -411,7 +411,7 @@
 				</datalist>
 			</div>
 
-			<label for="dg-products" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px] pt-1">include</label>
+			<label for="dg-products" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] pt-1">include</label>
 			<label class="flex items-center gap-2 text-[var(--color-default)]">
 				<input id="dg-products" type="checkbox" bind:checked={v.products} />
 				products as well as radars
@@ -419,10 +419,10 @@
 		</div>
 
 		<div class="mt-6 border-t border-[var(--color-border)] pt-4">
-			<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">
 				Which signal each row is built from
 			</div>
-			<div class="text-[11px] text-[var(--color-muted)] mb-3 max-w-2xl leading-[1.55]">
+			<div class="text-[12px] text-[var(--color-muted)] mb-3 max-w-2xl leading-[1.55]">
 				Every radar and product is watched twice. <span class="text-[var(--color-default)]">radarca</span>
 				is what the display tier believes; <span class="text-[var(--color-default)]">backend files</span>
 				is what has actually landed on both archives. <span class="text-[var(--color-default)]">worse of both</span>
@@ -432,7 +432,7 @@
 			</div>
 
 			<div class="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-[12px] items-center mb-4">
-				<label for="dg-def-radar" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">radars</label>
+				<label for="dg-def-radar" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">radars</label>
 				<select
 					id="dg-def-radar"
 					bind:value={v.default_source.radar}
@@ -443,7 +443,7 @@
 					<option value="combined">worse of both</option>
 				</select>
 
-				<label for="dg-def-product" class="text-[var(--color-muted)] uppercase tracking-wider text-[10px]">products</label>
+				<label for="dg-def-product" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">products</label>
 				<select
 					id="dg-def-product"
 					bind:value={v.default_source.product}
@@ -454,7 +454,7 @@
 					<option value="combined">worse of both</option>
 				</select>
 			</div>
-			<div class="text-[11px] text-[var(--color-muted)] mb-4 max-w-2xl">
+			<div class="text-[12px] text-[var(--color-muted)] mb-4 max-w-2xl">
 				The default applies to anything below still set to <span class="num">default</span>,
 				including a radar added after today. Only the rows you change are stored.
 			</div>
@@ -472,31 +472,31 @@
 						     disclosure nobody can see is just a section that mysteriously
 						     hides half its content. -->
 						<span class="chev text-[var(--color-muted)] text-[14px] leading-none w-2">›</span>
-						<span class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] w-20 shrink-0">
+						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-20 shrink-0">
 							{grp.title}
 						</span>
 						<span class="text-[12px] text-[var(--color-default)]">
 							{sectionSummary(grp.kind)}
 						</span>
 						{#if grp.kind === 'product' && !v.products}
-							<span class="text-[11px] text-[var(--color-warn)]">
+							<span class="text-[12px] text-[var(--color-warn)]">
 								excluded entirely — see “include” above
 							</span>
 						{/if}
 						<span class="grow"></span>
-						<span class="text-[11px] text-[var(--color-faint)] shrink-0">
+						<span class="text-[12px] text-[var(--color-faint)] shrink-0">
 							set per {grp.kind}
 						</span>
 					</summary>
 
 					<div class="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
 						{#if rowsOf(grp.kind).length === 0}
-							<div class="text-[11px] text-[var(--color-muted)] py-2">
+							<div class="text-[12px] text-[var(--color-muted)] py-2">
 								none registered on this deployment
 							</div>
 						{:else}
 							<div
-								class="flex items-center gap-3 pb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]"
+								class="flex items-center gap-3 pb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]"
 							>
 								<span class="w-[17rem] shrink-0">in report</span>
 								<span class="w-56 shrink-0">signal</span>
@@ -561,16 +561,16 @@
 										</option>
 									</select>
 									{#if !shown(e.kind, e.key)}
-										<span class="text-[11px] text-[var(--color-muted)]">not in the report</span>
+										<span class="text-[12px] text-[var(--color-muted)]">not in the report</span>
 									{:else if empty}
 										<span
-											class="text-[11px] text-[var(--color-warn)] truncate"
+											class="text-[12px] text-[var(--color-warn)] truncate"
 											title="This row would be built from a tier that is not checked on this deployment, so it would have no data at all."
 										>
 											{empty}
 										</span>
 									{:else if gap}
-										<span class="text-[11px] text-[var(--color-faint)]">{gap}</span>
+										<span class="text-[12px] text-[var(--color-faint)]">{gap}</span>
 									{/if}
 								</div>
 							{/each}
@@ -600,19 +600,19 @@
 			<!-- The per-subject lists collapse, so a change made inside one has
 			     to stay visible from out here or it gets saved by luck. -->
 			{#if dirty}
-				<span class="text-[11px] text-[var(--color-warn)]">unsaved changes</span>
+				<span class="text-[12px] text-[var(--color-warn)]">unsaved changes</span>
 			{/if}
 			<span class="grow"></span>
-			<span class="text-[11px] text-[var(--color-muted)]">
+			<span class="text-[12px] text-[var(--color-muted)]">
 				Save applies to the daily report only — the gate below saves separately.
 			</span>
 		</div>
 
 		<div class="mt-6 border-t border-[var(--color-border)] pt-4">
-			<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-1">
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">
 				Alarm notifications by tier
 			</div>
-			<div class="text-[11px] text-[var(--color-muted)] mb-3 max-w-2xl leading-[1.55]">
+			<div class="text-[12px] text-[var(--color-muted)] mb-3 max-w-2xl leading-[1.55]">
 				Turning a tier off stops it <span class="text-[var(--color-default)]">notifying</span>
 				and nothing else. Its alarms still open, still carry their severity, still appear on
 				the timeline and still count in this report, and every withheld message is recorded
@@ -638,7 +638,7 @@
 				</button>
 			</div>
 			{#if !tiers.frontend || !tiers.backend}
-				<div class="text-[11px] text-[var(--color-warn)] mb-1">
+				<div class="text-[12px] text-[var(--color-warn)] mb-1">
 					{!tiers.frontend && !tiers.backend
 						? 'Both tiers are silent — no alarm will notify anyone.'
 						: `The ${!tiers.frontend ? 'radarca' : 'backend'} tier is silent.`}
@@ -647,7 +647,7 @@
 		</div>
 
 		<div class="mt-6 border-t border-[var(--color-border)] pt-4">
-			<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
+			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
 				Send a test copy
 			</div>
 			<div class="flex items-center gap-2">
@@ -664,7 +664,7 @@
 					{testing ? 'sending…' : 'Send test'}
 				</button>
 			</div>
-			<div class="text-[11px] text-[var(--color-muted)] pt-2">
+			<div class="text-[12px] text-[var(--color-muted)] pt-2">
 				Goes to this one address only, subject prefixed <span class="num">[TEST]</span>.
 				Works whether or not the daily send is enabled.
 			</div>
@@ -672,14 +672,14 @@
 
 		{#if preview}
 			<div class="mt-6 border-t border-[var(--color-border)] pt-4">
-				<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
+				<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
 					Preview — subject
 				</div>
 				<div class="text-[12px] text-[var(--color-bright)] num mb-3">{preview.subject}</div>
-				<div class="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
+				<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-2">
 					Plain-text part
 				</div>
-				<pre class="overflow-x-auto border border-[var(--color-border)] bg-[var(--color-canvas)] p-3 text-[11px] leading-[1.5] text-[var(--color-default)] num">{preview.text}</pre>
+				<pre class="overflow-x-auto border border-[var(--color-border)] bg-[var(--color-canvas)] p-3 text-[12px] leading-[1.5] text-[var(--color-default)] num">{preview.text}</pre>
 			</div>
 		{/if}
 	{/if}
