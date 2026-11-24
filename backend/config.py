@@ -1392,6 +1392,14 @@ TILT_JSON_DIR: str = "{radar}/json/el_{el}"
 # xband endpoint, and its L4 profile skips the polar range-ring detector.
 L4_XBAND_TARGETS: tuple[str, ...] = ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY", "CBAND")
 L4_MOSAIC_TARGETS: tuple[str, ...] = ("comp_ref", "comp_now", "water_depth")
+# Checks whose alarms are record-only for their first days on a deployment,
+# counted from each check's first stored run (Joseph, 2026-11-23: 14 days).
+# Their QC thresholds were set for other products and have not been tuned on
+# these three, so a run of false warnings must not reach anyone meanwhile.
+RECORD_ONLY_TRIAL_CHECKS: frozenset[str] = frozenset({
+    "layer4.mosaic.water_level", "layer4.mosaic.max_water_depth",
+    "layer4.mosaic.max_water_level"})
+RECORD_ONLY_TRIAL_DAYS: int = 14
 
 # The moment L4 inspects on a radar. Reflectivity is the one every radar in
 # both networks publishes, and the one the map opens on.
@@ -1610,6 +1618,7 @@ if SETTINGS.profile == "xqpi":
     X_MOMENTS = list(_xqpi.MOMENT_TO_PREFIX)
     L4_XBAND_TARGETS = _xqpi.L4_XBAND_TARGETS
     L4_MOSAIC_TARGETS = _xqpi.L4_MOSAIC_TARGETS
+    RECORD_ONLY_TRIAL_CHECKS = _xqpi.RECORD_ONLY_TRIAL_CHECKS
     HAS_RADARCA = False
 if SETTINGS.profile not in ("aqpi", "xqpi"):
     # Fail loudly. A typo here would otherwise start a Sentinel that silently

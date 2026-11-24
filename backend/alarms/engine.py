@@ -17,6 +17,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+import asyncpg
+
+from ..config import RECORD_ONLY_TRIAL_CHECKS  # noqa: TID252  the package imports relatively throughout
 from ..registry import CHECKS
 
 if TYPE_CHECKING:
@@ -31,6 +34,10 @@ from .router import Router, flatten_alarm, severity_for_status, _SEV_RANK
 from .sinks import build_sinks
 
 log = logging.getLogger(__name__)
+
+# What a store call can raise when the database is down or refuses.
+_DB_ERRORS = (asyncpg.PostgresError, asyncpg.InterfaceError, OSError,
+              TimeoutError, RuntimeError)
 TICK_S = 15
 
 #: An alarm event's receiver: (event_type, payload), awaited by _emit.
@@ -115,7 +122,38 @@ class AlarmEngine:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+    async def _seed_trials(self) -> None:
+        """Load each trial check's first run, so a restart keeps its trial's start."""
+        try:
+            first = await self.store.first_runs(RECORD_ONLY_TRIAL_CHECKS)
+        except _DB_ERRORS as e:
+            # Fails quiet: each trial check then starts its trial at its next
+            # run, which lengthens a trial and never shortens one.
+            log.warning("record-only trial starts not loaded (%s); each trial "
+                        "check starts its trial at its next run", e)
+            return
+        record_only_lib.seed(first)
+        # A start found only in check_runs is stored now, before retention
+        # can trim the run it came from.
+        for check_id, started_at in first.items():
+            await self._save_first_run(check_id, started_at)
+
+    async def _save_first_run(self, check_id: str, started_at: datetime) -> None:
+        """Store a trial check's first run, logging rather than raising on failure.
+
+        Args:
+            check_id: The check.
+            started_at: Its first run.
+        """
+        try:
+            await self.store.save_first_run(check_id, started_at)
+        except _DB_ERRORS as e:
+            # The in-memory start still holds until the next restart, which
+            # retries from check_runs.
+            log.warning("record-only trial start for %s not stored: %s", check_id, e)
+
     async def start(self):
+        await self._seed_trials()
         self._ticker_task = asyncio.create_task(self.run(), name="alarm-ticker")
         log.info(
             "alarm engine started — %d routes, %d receivers, sinks=%s",
@@ -156,6 +194,10 @@ class AlarmEngine:
         Args:
             result: The run to judge.
         """
+        # Before anything can open an alarm, so a trial check's first run
+        # starts its trial before its first alarm is judged against it.
+        if record_only_lib.note_run(result.check_id, result.started_at):
+            await self._save_first_run(result.check_id, result.started_at)
         existing = await self.store.find_open_alarm(result.check_id, result.target)
         # An INCONCLUSIVE skip is not news. The scheduler demotes fail/error
         # to skip when an upstream dependency is unhealthy (or our own DNS /
@@ -473,7 +515,7 @@ class AlarmEngine:
         # whatever severity they held when they opened and the timeline would
         # misdescribe them for the rest of their lives. See alarms/tiers.py.
         tier_open = tier_lib.may_notify(tier_cfg, alarm.get("stage", ""))
-        quiet = record_only_lib.record_only(alarm)
+        quiet = record_only_lib.reason(alarm)
 
         # Which steps are due AND not yet fired?
         policy = self.cfg.policy(route.policy)
@@ -525,10 +567,10 @@ class AlarmEngine:
                     receiver=f"(record only: {alarm.get('target', '')})",
                     channel="none", step_idx=step_idx, template=None,
                     body_excerpt=None, status=record_only_lib.STATUS,
-                    error="alarms on NEXRAD radars are recorded, never sent",
+                    error=quiet,
                 )
-                log.info("alarm %s step %d not dispatched: record-only target %s",
-                         alarm["id"], step_idx, alarm.get("target", ""))
+                log.info("alarm %s step %d not dispatched: %s",
+                         alarm["id"], step_idx, quiet)
                 continue
             await self._dispatch(alarm, route, step, step_idx)
 

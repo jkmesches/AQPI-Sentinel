@@ -386,6 +386,8 @@ MOMENT_TO_PREFIX = {m: m for m in MOMENTS}
 L4_XBAND_TARGETS: tuple[str, ...] = ("FLOW",)
 L4_MOSAIC_TARGETS: tuple[str, ...] = (
     "composite_ref", "qpe_15min", "qpe_1hr", "radar_precip_rate")
+# No check here is on a record-only trial.
+RECORD_ONLY_TRIAL_CHECKS: frozenset[str] = frozenset()
 
 # Raw volumes arrive both compressed and not.
 RAW_GLOBS = ("*.netcdf", "*.netcdf.gz")   # [V] both extensions seen in flow/

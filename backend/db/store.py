@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +17,9 @@ from ..alarms.suppression import INCONCLUSIVE_SKIP_REASONS
 from ..checks.base import CheckResult
 
 log = logging.getLogger(__name__)
+
+# The settings key prefix under which a record-only trial's start is kept.
+FIRST_RUN_KEY = "record_only.first_run."
 
 
 async def _init_codecs(conn: asyncpg.Connection) -> None:
@@ -347,6 +351,55 @@ class Store:
         )
         started: datetime | None = row["started"] if row else None
         return started
+
+    async def first_runs(self, check_ids: Collection[str]) -> dict[str, datetime]:
+        """Each check's first run: its stored start, else its earliest run.
+
+        Args:
+            check_ids: The checks to look up.
+
+        Returns:
+            Check id to its first run, for the checks that have one.
+        """
+        if self.pool is None:
+            raise RuntimeError("store is not connected")
+        if not check_ids:
+            return {}
+        # COALESCE stops at the stored start, so check_runs is read only for
+        # a check with none, and then as min() on idx_run_check's prefix,
+        # which the planner answers from one end of the index.
+        rows = await self.pool.fetch(
+            """
+            SELECT c.check_id, COALESCE(
+                (SELECT (value #>> '{}')::timestamptz FROM settings
+                 WHERE key = $2 || c.check_id),
+                (SELECT min(started_at) FROM check_runs r
+                 WHERE r.check_id = c.check_id)) AS first_run
+            FROM unnest($1::text[]) AS c(check_id)
+            """,
+            sorted(check_ids), FIRST_RUN_KEY,
+        )
+        return {r["check_id"]: r["first_run"] for r in rows if r["first_run"] is not None}
+
+    async def save_first_run(self, check_id: str, first_run: datetime) -> None:
+        """Store a check's first run, unless one is stored already.
+
+        Args:
+            check_id: The check.
+            first_run: When it first ran.
+        """
+        if self.pool is None:
+            raise RuntimeError("store is not connected")
+        # Built in SQL rather than passed as JSON, so the jsonb codec on the
+        # pool cannot encode it twice.
+        await self.pool.execute(
+            """
+            INSERT INTO settings (key, value, updated_at, updated_by)
+            VALUES ($1 || $2, to_jsonb($3::timestamptz), now(), 'system:record-only')
+            ON CONFLICT (key) DO NOTHING
+            """,
+            FIRST_RUN_KEY, check_id, first_run,
+        )
 
     async def find_open_alarm(self, check_id: str, target: str) -> dict | None:
         assert self.pool is not None

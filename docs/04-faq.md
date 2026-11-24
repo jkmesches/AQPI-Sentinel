@@ -310,6 +310,14 @@ the daily report, but never send email, webhook or push, because nobody here
 can act on a NEXRAD radar. Each step they would have sent is logged as
 `record-only`. The set is `NEXRAD_RADARS` in `config.py`.
 
+A new check can start on a record-only trial in the same way. Its alarms are
+record-only for its first 14 days on a deployment, counted from its first
+stored run, and an alarm that opened during those days stays record-only until
+it closes. The image checks on water level, maximum water depth and maximum
+water level started on this trial, because their thresholds were set for
+other products and had not yet been tuned on these. The list is
+`RECORD_ONLY_TRIAL_CHECKS` in `config.py`.
+
 **To stop being paged for something you already know about, acknowledge it.**
 An ack stops every channel for that alarm — email, console, webhook, and any
 repeat — and it silences it for the whole team, not just you, because whoever

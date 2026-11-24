@@ -45,7 +45,7 @@ def make_listener(store: Any, send: Sender) -> Listener:  # noqa: ANN401  the st
         if event_type != "alarm_open":
             return
         if record_only(payload):
-            log.info("push withheld, record-only target: %s/%s",
+            log.info("push withheld, record-only: %s/%s",
                      payload.get("check_id"), payload.get("target"))
             return
         try:
