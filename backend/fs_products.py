@@ -26,6 +26,7 @@ import asyncio
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -158,6 +159,44 @@ async def read_steps(product_id: str,
     path = manifest_path(product_id, unit)
     return await asyncio.wait_for(
         asyncio.to_thread(_read_steps_blocking, path), FS_TIMEOUT_S)
+
+
+@dataclass(frozen=True)
+class FileStat:
+    """What a frame file is without reading it: its size and mtime."""
+
+    size: int
+    mtime_ns: int
+
+
+def _stat_blocking(path: str) -> FileStat | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return FileStat(st.st_size, st.st_mtime_ns)
+
+
+async def stat_image(source: str) -> FileStat | None:
+    """A frame's size and mtime, without reading its bytes.
+
+    Args:
+        source: The logical source string, as `read_image` takes it.
+
+    Returns:
+        The size and mtime, or None when the file is missing or the source
+        escapes the published root.
+
+    Raises:
+        TimeoutError: If the stat outlives FS_TIMEOUT_S, which a hung NFS
+            mount causes.
+    """
+    try:
+        path = source_path(source)
+    except ValueError:
+        return None
+    return await asyncio.wait_for(
+        asyncio.to_thread(_stat_blocking, path), FS_TIMEOUT_S)
 
 
 async def read_image(source: str) -> FsResponse:

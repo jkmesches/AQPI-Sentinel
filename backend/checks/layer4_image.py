@@ -14,10 +14,12 @@ Each cycle:
 """
 from __future__ import annotations
 import asyncio
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
-from ..archive import save_image as _archive_save
+from ..archive import (  # noqa: TID252  file convention
+    Observation, save_image as _archive_save, touch_observation as _archive_touch)
 from ..config import (HAS_RADARCA, L4_MOMENT,  # noqa: TID252  file convention
                       L4_MOSAIC_TARGETS, L4_XBAND_TARGETS, PRODUCTS,
                       RADAR_FOLDER, SETTINGS, image_path, l4_profile)
@@ -37,6 +39,88 @@ _LAST_PHASH: dict[str, str] = {}
 # published image reports it as frozen against itself — see the frozen-frame
 # block below.
 _LAST_SOURCE: dict[str, str] = {}
+# A frame file on the mount as (source, size, mtime_ns).
+FrameKey = tuple[str, int, int]
+# The QC thresholds a read judged a frame with: extreme_threshold,
+# skip_frozen, frozen_min_cov_pct, skip_range_ring.
+Knobs = tuple[float, bool, float, bool]
+# Archive saves and touches in flight. The event loop holds only a weak
+# reference to a task, so one with no other reference can be collected
+# before it finishes.
+_BACKGROUND: set[asyncio.Task[str | None] | asyncio.Task[None]] = set()
+
+
+@dataclass(frozen=True)
+class Frame:
+    """One frame a check fetched, or chose not to read because it is unchanged.
+
+    Attributes:
+        content: The PNG bytes, or None when the frame matched the last read.
+        source: The source path or file name it came from.
+        scan_ts: The valid time of the step it draws, for a product frame.
+        published_at: The file's mtime on the mount, UTC.
+        key: The file's stat key on the mount, for the unchanged-frame skip.
+    """
+
+    content: bytes | None
+    source: str
+    scan_ts: datetime | None = None
+    published_at: datetime | None = None
+    key: FrameKey | None = None
+
+
+@dataclass(frozen=True)
+class LastRead:
+    """The last product frame a check read off the mount, and what came of it.
+
+    Attributes:
+        key: The file's stat key when it was read.
+        knobs: The thresholds the read judged it with.
+        result: The result the read produced.
+        frame: The frame, for its product and valid time.
+        save: The archive save the read started, or None with no archive.
+    """
+
+    key: FrameKey
+    knobs: Knobs
+    result: CheckResult
+    frame: Frame
+    save: asyncio.Task[str | None] | None
+
+    def saved_sha(self) -> str | None:
+        """The archived frame's sha256, once its save has finished and worked."""
+        s = self.save
+        if s is None or not s.done() or s.cancelled() or s.exception() is not None:
+            return None
+        return s.result()
+
+    def reusable(self, key: FrameKey, knobs: Knobs) -> bool:
+        """Whether a run may repeat this read instead of reading the file.
+
+        Only for the same file at the same thresholds, and only while the
+        read's archive save is in flight or worked. After a failed save the
+        frame is read again, so its observation row is written.
+
+        Args:
+            key: The file's stat key now.
+            knobs: The thresholds now.
+
+        Returns:
+            True when the read can be repeated.
+        """
+        if key != self.key or knobs != self.knobs:
+            return False
+        return self.save is None or not self.save.done() or self.saved_sha() is not None
+
+
+# The last product frame each check read off the mount (see LastRead).
+_LAST_READ: dict[str, LastRead] = {}
+
+
+def _keep(task: asyncio.Task[str | None] | asyncio.Task[None]) -> None:
+    """Hold a background task until it finishes, so it is not collected early."""
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
 
 
 def _parse_step_ts(s: dict) -> datetime | None:
@@ -113,32 +197,53 @@ class Layer4ImageCheck(Check):
             ]
 
     # ------------------------------------------------------------------
-    async def _fs_radar_image(self) -> tuple[bytes, str] | tuple[None, str]:
+    async def _fs_radar_image(self) -> Frame | str:
         """The newest rendered frame for this radar, off the mount."""
         frames = await _fs.list_moment_frames(self.identifier, L4_MOMENT)
         if not frames:
-            return None, f"no {L4_MOMENT} frames in the window"
+            return f"no {L4_MOMENT} frames in the window"
         ts, name = frames[-1]
         fr = await _fs.read_moment_image(self.identifier, L4_MOMENT, name, ts)
         if fr.status_code != 200:
-            return None, f"frame unreadable on the mount (HTTP {fr.status_code})"
-        return fr.content, name
+            return f"frame unreadable on the mount (HTTP {fr.status_code})"
+        return Frame(fr.content, name)
 
-    async def _fs_product_image(self) -> tuple[bytes, str] | tuple[None, str]:
-        """The frame nearest now for this product, off the mount."""
+    async def _fs_product_image(self, knobs: Knobs) -> Frame | str:
+        """The frame nearest now for this product, off the mount.
+
+        The file is stat'ed first. When its name, size and mtime match the
+        last frame this check read at the same thresholds, the bytes are not
+        read again: a CoSMoS frame changes hourly and this runs every 120 s,
+        and K2 has a saturation history (wiki incidents/48-).
+
+        Args:
+            knobs: The thresholds this run judges with.
+
+        Returns:
+            The frame, with no content when the last read can be repeated, or
+            an error message.
+        """
         steps = await _fs.read_steps(self.identifier)
         if not steps:
-            return None, "no steps in the published manifest"
+            return "no steps in the published manifest"
         target_step = _step_closest_to_now(steps)
         if target_step is None:
-            return None, "no parseable step timestamps"
+            return "no parseable step timestamps"
         file_path = image_path(self.identifier, target_step["imageName"])
+        scan_ts = _parse_step_ts(target_step)
+        st = await _fs.stat_image(file_path)
+        key = None if st is None else (file_path, st.size, st.mtime_ns)
+        published = (None if st is None
+                     else datetime.fromtimestamp(st.mtime_ns / 1e9, tz=timezone.utc))
+        last = _LAST_READ.get(self.id)
+        if key is not None and last is not None and last.reusable(key, knobs):
+            return Frame(None, file_path, scan_ts, published, key)
         ir = await _fs.read_image(file_path)
         if ir.status_code != 200:
-            return None, f"frame unreadable on the mount (HTTP {ir.status_code})"
-        return ir.content, file_path
+            return f"frame unreadable on the mount (HTTP {ir.status_code})"
+        return Frame(ir.content, file_path, scan_ts, published, key)
 
-    async def _fs_image(self) -> tuple[bytes, str] | tuple[None, str]:
+    async def _fs_image(self, knobs: Knobs) -> Frame | str:
         """The newest frame off the mount, for a deployment that has one.
 
         LB1 answers whether a file arrived and never opens it, so a producer
@@ -149,11 +254,10 @@ class Layer4ImageCheck(Check):
         """
         if self.kind == "xband":
             return await self._fs_radar_image()
-        return await self._fs_product_image()
+        return await self._fs_product_image(knobs)
 
-    async def _fetch_image(self, ctx: CheckContext,
-                           ) -> tuple[bytes, str] | tuple[None, str]:
-        """Return (png_bytes, source_label) or (None, error_message).
+    async def _fetch_image(self, ctx: CheckContext, knobs: Knobs) -> Frame | str:
+        """Return the frame, or an error message.
 
         Prefers the mount, the same rule the serving path uses, so this check
         inspects the bytes an operator will actually be shown. A mount that
@@ -162,49 +266,46 @@ class Layer4ImageCheck(Check):
         """
         if _fs.available():
             try:
-                return await self._fs_image()
+                return await self._fs_image(knobs)
             except (OSError, TimeoutError, KeyError, ValueError) as e:
-                return None, f"mount read failed: {e}"
+                return f"mount read failed: {e}"
         return await self._http_image(ctx)
 
-    async def _http_image(self, ctx: CheckContext,
-                          ) -> tuple[bytes, str] | tuple[None, str]:
+    async def _http_image(self, ctx: CheckContext) -> Frame | str:
         """The newest frame from radarca, for a deployment with no mount."""
         if self.kind == "xband":
             return await self._http_radar_image(ctx)
         return await self._http_product_image(ctx)
 
-    async def _http_radar_image(self, ctx: CheckContext,
-                                ) -> tuple[bytes, str] | tuple[None, str]:
+    async def _http_radar_image(self, ctx: CheckContext) -> Frame | str:
         """The newest radar frame from radarca's xband endpoint."""
         r = await ctx.http.get(
             f"{SETTINGS.base}/api/xbandRadarImages/",
             params={"radarFolder": self.folder, "productPrefix": "CorrReflectivity"},
         )
         if r.status_code != 200:
-            return None, f"xbandRadarImages HTTP {r.status_code}"
+            return f"xbandRadarImages HTTP {r.status_code}"
         imgs = r.json().get("images") or []
         if not imgs:
-            return None, "no images in 1h window"
+            return "no images in 1h window"
         latest_file = imgs[-1]
         ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData",
                                 params={"file": latest_file})
         if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/png"):
-            return None, f"imageData HTTP {ir.status_code}"
-        return ir.content, latest_file
+            return f"imageData HTTP {ir.status_code}"
+        return Frame(ir.content, latest_file)
 
-    async def _http_product_image(self, ctx: CheckContext,
-                                  ) -> tuple[bytes, str] | tuple[None, str]:
+    async def _http_product_image(self, ctx: CheckContext) -> Frame | str:
         """The frame nearest now for this product, from radarca."""
         cfg = PRODUCTS[self.identifier]
         r = await ctx.http.get(
             f"{SETTINGS.base}/api/productDetail", params={"file": cfg["details"]},
         )
         if r.status_code != 200:
-            return None, f"productDetail HTTP {r.status_code}"
+            return f"productDetail HTTP {r.status_code}"
         steps = r.json().get("steps", [])
         if not steps:
-            return None, "no steps"
+            return "no steps"
         # Pick the step closest to wall-clock now (in either direction) rather
         # than steps[-1]. For observed products (comp_ref, qpe_*) `steps[-1]`
         # IS roughly "now" so this is a no-op. For forecast products
@@ -214,59 +315,129 @@ class Layer4ImageCheck(Check):
         # as if it were the current state is what made these tickers warn.
         target_step = _step_closest_to_now(steps)
         if target_step is None:
-            return None, "no parseable step timestamps"
+            return "no parseable step timestamps"
         latest = target_step["imageName"]
         file_path = image_path(self.identifier, latest)
         ir = await ctx.http.get(f"{SETTINGS.base}/api/imageData",
                                 params={"file": file_path})
         if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/png"):
-            return None, f"imageData HTTP {ir.status_code}"
-        return ir.content, file_path
+            return f"imageData HTTP {ir.status_code}"
+        return Frame(ir.content, file_path, _parse_step_ts(target_step))
 
     # ------------------------------------------------------------------
+    def _unchanged(self, ctx: CheckContext, t0: datetime) -> CheckResult | None:
+        """The last read's result again, for a frame whose file has not changed.
+
+        Also moves the frame's last_seen_at, as a read would have, once the
+        read's archive save has given its sha256.
+
+        Args:
+            ctx: The run's context, for the pool.
+            t0: When this run started.
+
+        Returns:
+            The last result with this run's times and an "unchanged since"
+            note, or None when there is no last read to repeat.
+        """
+        last = _LAST_READ.get(self.id)
+        if last is None:
+            return None
+        sha = last.saved_sha()
+        if sha is not None and ctx.pool is not None and last.frame.scan_ts is not None:
+            obs = Observation(self.identifier, last.frame.scan_ts, last.frame.published_at)
+            _keep(asyncio.create_task(_archive_touch(ctx.pool, obs, sha)))
+        prev = last.result
+        return replace(
+            prev, started_at=t0, finished_at=utcnow(),
+            summary=f"{prev.summary}  unchanged since {prev.finished_at:%H:%M}Z",
+            payload={**prev.payload, "unchanged_since": prev.finished_at.isoformat()},
+        )
+
+    def _skip(self, t0: datetime, reason: str) -> CheckResult:
+        """A skip result for a run that has no frame to judge.
+
+        Args:
+            t0: When this run started.
+            reason: Why there is no frame.
+
+        Returns:
+            The result.
+        """
+        return CheckResult(
+            check_id=self.id, target=self.target, stage=self.stage,
+            status="skip", started_at=t0, finished_at=utcnow(),
+            summary=f"no image: {reason}", payload={"reason": reason},
+        )
+
+    def _archive(self, ctx: CheckContext, frame: Frame,
+                 content: bytes) -> asyncio.Task[str | None] | None:
+        """Archive a captured frame in the background.
+
+        The timeline detail panel can then still show it after the upstream
+        rotates the file out (radarca keeps only ~2 h of composites and ~1 h
+        of X-band scans). A product frame also records the valid time it
+        draws, so the archive can list a product's frames by time.
+
+        Args:
+            ctx: The run's context, for the pool.
+            frame: The frame.
+            content: Its bytes.
+
+        Returns:
+            The save's task, or None when nothing is archived.
+        """
+        if not SETTINGS.archive_enabled or ctx.pool is None:
+            return None
+        obs = (None if self.kind != "mosaic" or frame.scan_ts is None
+               else Observation(self.identifier, frame.scan_ts, frame.published_at))
+        task = asyncio.create_task(_archive_save(
+            ctx.pool, SETTINGS.archive_root, source=frame.source, content=content,
+            content_type="image/png",
+            origin_url=f"{SETTINGS.base}/api/imageData?file={frame.source}",
+            observation=obs))
+        _keep(task)
+        return task
+
+    def _knobs(self) -> tuple[dict[str, Any], Knobs]:
+        """This product's QC profile and the thresholds a run judges with.
+
+        Forecast products and color-ramp scalar fields get relaxed
+        thresholds. Live values come from backend.thresholds, which falls
+        through to config.L4_PROFILES on a fresh DB, so behavior is unchanged
+        before any admin edit.
+
+        Returns:
+            The profile, and extreme_threshold, skip_frozen,
+            frozen_min_cov_pct and skip_range_ring.
+        """
+        prof = l4_profile(self.identifier)
+        knobs = (
+            float(_thresholds.get_l4(self.identifier, "extreme_threshold",
+                                     prof["extreme_threshold"])),
+            bool(_thresholds.get_l4(self.identifier, "skip_frozen", prof["skip_frozen"])),
+            float(_thresholds.get_l4(self.identifier, "frozen_min_cov_pct",
+                                     prof["frozen_min_cov_pct"])),
+            bool(_thresholds.get_l4(self.identifier, "skip_range_ring",
+                                    prof.get("skip_range_ring", False))),
+        )
+        return prof, knobs
+
     async def run(self, ctx) -> CheckResult:
         t0 = utcnow()
-        png_bytes, src = await self._fetch_image(ctx)
-        if png_bytes is None:
-            return CheckResult(
-                check_id=self.id, target=self.target, stage=self.stage,
-                status="skip",
-                started_at=t0, finished_at=utcnow(),
-                summary=f"no image: {src}",
-                payload={"reason": src},
-            )
-
-        # Archive the captured PNG so the timeline detail panel can still
-        # show this scan after the upstream rotates the file out (radarca
-        # keeps only ~2 h of composites / ~1 h of X-band scans). Saved
-        # off-thread so it doesn't add to the check's wall-clock time.
-        if SETTINGS.archive_enabled and ctx.pool is not None:
-            asyncio.create_task(
-                _archive_save(
-                    ctx.pool, SETTINGS.archive_root,
-                    source=src, content=png_bytes,
-                    content_type="image/png",
-                    origin_url=f"{SETTINGS.base}/api/imageData?file={src}",
-                )
-            )
-
-        # Per-product QC profile knobs. Forecast products and color-ramp
-        # scalar fields get relaxed thresholds. Live values come from
-        # backend.thresholds which falls through to config.L4_PROFILES on
-        # a fresh DB so behavior is unchanged before any admin edit.
-        prof = l4_profile(self.identifier)
-        extreme_threshold = float(_thresholds.get_l4(
-            self.identifier, "extreme_threshold", prof["extreme_threshold"],
-        ))
-        skip_frozen = bool(_thresholds.get_l4(
-            self.identifier, "skip_frozen", prof["skip_frozen"],
-        ))
-        frozen_min_cov_pct = float(_thresholds.get_l4(
-            self.identifier, "frozen_min_cov_pct", prof["frozen_min_cov_pct"],
-        ))
-        skip_range_ring = bool(_thresholds.get_l4(
-            self.identifier, "skip_range_ring", prof.get("skip_range_ring", False),
-        ))
+        # Read before the frame, so an admin's threshold change makes the
+        # unchanged-frame skip read the frame again under the new values.
+        prof, knobs = self._knobs()
+        frame = await self._fetch_image(ctx, knobs)
+        if isinstance(frame, str):
+            return self._skip(t0, frame)
+        if frame.content is None:
+            # Only a check with a last read can return no content, since the
+            # skip compares against it.
+            repeated = self._unchanged(ctx, t0)
+            return repeated or self._skip(t0, "frame unchanged but no earlier result")
+        png_bytes, src = frame.content, frame.source
+        save = self._archive(ctx, frame, png_bytes)
+        extreme_threshold, skip_frozen, frozen_min_cov_pct, skip_range_ring = knobs
 
         # Offload CPU work to a thread so the asyncio loop stays responsive.
         t1 = await asyncio.to_thread(tier1_stats, png_bytes)
@@ -349,7 +520,7 @@ class Layer4ImageCheck(Check):
 
         overall = worst_of(*sub_verdicts) if sub_verdicts else "pass"
 
-        return CheckResult(
+        result = CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,
             status=overall,
             started_at=t0, finished_at=utcnow(),
@@ -375,6 +546,9 @@ class Layer4ImageCheck(Check):
                 "autocorr":     float(t1["autocorr"]),
             },
         )
+        if frame.key is not None:
+            _LAST_READ[self.id] = LastRead(frame.key, knobs, result, frame, save)
+        return result
 
 
 # --------------------------------------------------------------------------

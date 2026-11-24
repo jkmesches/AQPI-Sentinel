@@ -1391,7 +1391,12 @@ TILT_JSON_DIR: str = "{radar}/json/el_{el}"
 # than a placeholder. CBAND rides the xband kind because it shared radarca's
 # xband endpoint, and its L4 profile skips the polar range-ring detector.
 L4_XBAND_TARGETS: tuple[str, ...] = ("XSCV", "XSCW", "XSCR", "XSWR", "XEBY", "CBAND")
-L4_MOSAIC_TARGETS: tuple[str, ...] = ("comp_ref", "comp_now", "water_depth")
+# The last three were added 2026-11-24 so each CoSMoS cycle's frames reach the
+# archive, which is the history the explorer page reads. Each maximum product
+# publishes one step per cycle, so nearest-now captures that cycle's frame.
+L4_MOSAIC_TARGETS: tuple[str, ...] = (
+    "comp_ref", "comp_now", "water_depth",
+    "water_level", "max_water_depth", "max_water_level")
 # Checks whose alarms are record-only for their first days on a deployment,
 # counted from each check's first stored run (Joseph, 2026-11-23: 14 days).
 # Their QC thresholds were set for other products and have not been tuned on

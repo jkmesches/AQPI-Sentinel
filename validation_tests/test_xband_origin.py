@@ -25,6 +25,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -122,6 +123,7 @@ def test_l4_origin(root: str, day: datetime) -> None:
     upstream = load_upstream(root)
     build_tree(root, day)
     from backend.checks.layer4_image import Layer4ImageCheck
+    from backend.checks.transports import CheckContext
     from backend.registry import CHECKS
 
     check("L4 registers on a mounted deployment",
@@ -129,11 +131,13 @@ def test_l4_origin(root: str, day: datetime) -> None:
           str(len([k for k in CHECKS if k.startswith("layer4.")])))
 
     chk = Layer4ImageCheck(kind="xband", identifier="XEBY")
-    body, label = asyncio.run(chk._fetch_image(None))
+    frame = asyncio.run(chk._fetch_image(cast(CheckContext, None), chk._knobs()[1]))
+    # A Frame since 2026-11-24, or the error message as a string.
+    body, label = (None, frame) if isinstance(frame, str) else (frame.content, frame.source)
     check("L4 reads a radar frame without a context",
           body is not None and label.startswith("ebay_"), str(label))
     check("...and the bytes are a PNG rather than an error string",
-          bool(body) and body.startswith(b"\x89PNG"),
+          body is not None and body.startswith(b"\x89PNG"),
           repr(body[:8]) if body else "none")
     # `ctx` stays None on purpose: reaching radarca would raise on it, so a
     # clean read proves nothing touched the HTTP path.
