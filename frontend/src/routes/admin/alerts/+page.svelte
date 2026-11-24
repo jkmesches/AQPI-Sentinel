@@ -844,8 +844,8 @@
 		{#each policies as p, i (i)}
 			<div class="border border-[var(--color-border)] bg-[var(--color-canvas)] p-4 mb-3">
 				<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center mb-3">
-					<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">name</label>
-					<input bind:value={p.name} placeholder="standard"
+					<label for="policy-name-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">name</label>
+					<input id="policy-name-{i}" bind:value={p.name} placeholder="standard"
 						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
 				</div>
 
@@ -1087,44 +1087,45 @@
 					</button>
 					{#if r.showWhen}
 						<div class="mt-2 pl-4 border-l border-[var(--color-border)] grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-[12px] items-center">
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day in</label>
+							<label for="route-tod-in-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day in</label>
 							<div class="flex items-center gap-2">
-								<input bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
+								<input id="route-tod-in-{i}" bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[12px] text-[var(--color-faint)]">interpreted in the timezone below</span>
 							</div>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day not in</label>
-							<input bind:value={r.when.time_of_day_not_in} placeholder="22:00-06:00"
+							<label for="route-tod-not-in-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day not in</label>
+							<input id="route-tod-not-in-{i}" bind:value={r.when.time_of_day_not_in} placeholder="22:00-06:00"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">timezone</label>
+							<label for="route-tz-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">timezone</label>
 							<div class="flex items-center gap-2">
-								<input bind:value={r.when.timezone} placeholder="UTC"
+								<input id="route-tz-{i}" bind:value={r.when.timezone} placeholder="UTC"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[12px] text-[var(--color-faint)]">IANA name (e.g. <span class="num">UTC</span>, <span class="num">America/Los_Angeles</span>). Default = UTC.</span>
 							</div>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">weekdays only</label>
+							<span class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">weekdays only</span>
 							<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
 								<input type="checkbox" bind:checked={r.when.weekday_only} />
 								Mon–Fri only (skip weekends)
 							</label>
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">min duration (min)</label>
-							<input bind:value={r.when.duration_at_severity_min} placeholder="(none)" type="number" min="0"
+							<label for="route-duration-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">min duration (min)</label>
+							<input id="route-duration-{i}" bind:value={r.when.duration_at_severity_min} placeholder="(none)" type="number" min="0"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">peers also failing</label>
-							<input bind:value={r.when.count_of_targets_failing} placeholder=">=2"
+							<label for="route-peers-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">peers also failing</label>
+							<input id="route-peers-{i}" bind:value={r.when.count_of_targets_failing} placeholder=">=2"
 								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
-							<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">metric above</label>
+							<label for="route-metric-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">metric above</label>
 							<div class="flex items-center gap-2">
-								<input bind:value={r.when.metric_above_name} placeholder="metric name"
+								<input id="route-metric-{i}" bind:value={r.when.metric_above_name} placeholder="metric name"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[var(--color-faint)]">&gt;</span>
 								<input bind:value={r.when.metric_above_value} placeholder="value" type="number" step="any"
+									aria-label="metric threshold"
 									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 							</div>
 						</div>
@@ -1135,22 +1136,22 @@
 				<div class="border-t border-[var(--color-border)] pt-3">
 					<div class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] mb-2">Then</div>
 					<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send via plan</label>
-						<select bind:value={r.policy}
+						<label for="route-plan-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send via plan</label>
+						<select id="route-plan-{i}" bind:value={r.policy}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72">
 							<option value="">— pick a plan —</option>
 							{#each policies as p}<option value={p.name}>{p.name || '(unnamed)'}</option>{/each}
 						</select>
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">severity floor</label>
-						<select bind:value={r.severity_floor}
+						<label for="route-floor-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">severity floor</label>
+						<select id="route-floor-{i}" bind:value={r.severity_floor}
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40">
 							<option value="">(none)</option>
 							{#each SEVERITIES as s}<option value={s}>{s}</option>{/each}
 						</select>
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">repeat every</label>
-						<input bind:value={r.repeat_interval} placeholder="1h (blank = no repeat)"
+						<label for="route-repeat-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">repeat every</label>
+						<input id="route-repeat-{i}" bind:value={r.repeat_interval} placeholder="1h (blank = no repeat)"
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 						<label for="route-hold-down-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">only after it lasts</label>
@@ -1158,8 +1159,8 @@
 							placeholder="blank = global ({opaque.hold_down ?? '5m'})"
 							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
-						<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] self-start pt-1">group by</label>
-						<div class="flex flex-wrap gap-2">
+						<span id="route-group-by-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] self-start pt-1">group by</span>
+						<div class="flex flex-wrap gap-2" role="group" aria-labelledby="route-group-by-{i}">
 							{#each GROUP_BY_KEYS as k}
 								<label class="flex items-center gap-1 text-[12px] text-[var(--color-default)] border border-[var(--color-border)] px-2 py-0.5 cursor-pointer hover:bg-[var(--color-elevated)]">
 									<input type="checkbox" checked={r.group_by.includes(k)} onchange={() => toggleGroupBy(i, k)} />

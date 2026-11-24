@@ -13,6 +13,7 @@
 		<span
 			class="inline-block rounded-full {statusDotBg(status)} {pulseKey > 0 ? 'pulse' : ''}"
 			style="width:{size}px; height:{size}px"
+			role="img"
 			aria-label={status}
 		></span>
 	{/key}
@@ -20,6 +21,7 @@
 	<span
 		class="inline-block rounded-full {statusDotBg(status)}"
 		style="width:{size}px; height:{size}px"
+		role="img"
 		aria-label={status}
 	></span>
 {/if}

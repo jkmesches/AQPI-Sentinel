@@ -64,9 +64,27 @@ BAND_JS = """() => {
 
 
 async def rails_text(page: Page) -> str:
-    """The rendered text of every rail."""
-    got: str = await page.evaluate(
-        "() => document.querySelector('[data-rails]')?.innerText ?? ''")
+    """The rendered text of every rail, without the X-band fleet banner.
+
+    The banner names each radar that is not reporting, whatever the filters
+    hide, so on a day the live fleet check fails it put the stand-in's name
+    back in the text and failed the NEXRAD step for a reason the filter
+    does not cover (seen 2026-11-24 on the dev stack).
+
+    Args:
+        page: The loaded dashboard.
+
+    Returns:
+        The rails' innerText with the banner's text taken out, or an empty
+        string when the page has no rails.
+    """
+    got: str = await page.evaluate("""() => {
+        const rails = document.querySelector('[data-rails]');
+        if (!rails) return '';
+        const banner = rails.querySelector('[data-fleet-banner]');
+        const full = rails.innerText;
+        return banner ? full.replace(banner.innerText, '') : full;
+    }""")
     return got
 
 

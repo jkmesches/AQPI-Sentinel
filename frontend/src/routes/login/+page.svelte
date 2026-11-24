@@ -36,7 +36,7 @@
 	>
 		<div class="mb-4">
 			<div class="text-[14px] font-semibold tracking-[0.22em] text-[var(--color-accent)]">AQPI SENTINEL</div>
-			<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mt-1">sign in</div>
+			<h1 class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mt-1">sign in</h1>
 		</div>
 
 		<label class="block mb-3">

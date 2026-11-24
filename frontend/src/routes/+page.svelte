@@ -334,6 +334,7 @@
 <svelte:window onkeydown={onKeydown} bind:innerWidth={pageWidth} />
 
 <div class="h-full p-2">
+	<h1 class="sr-only">Map</h1>
 	<section class="panel relative flex h-full flex-col overflow-hidden">
 		{#if diag.map}
 			<MapToolbar

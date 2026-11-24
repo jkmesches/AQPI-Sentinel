@@ -504,6 +504,7 @@
      followed the tallest rail's content up and down the page as rows
      expanded and collapsed. -->
 <div class="flex h-full flex-col gap-2 p-2">
+<h1 class="sr-only">Dashboard</h1>
 <!-- Source filters. Each appears only where the backend classifies some
      checks that way, so XQPI, which reads no RadarCA and watches no NEXRAD
      radar, shows neither. -->
@@ -547,7 +548,16 @@
 	     scrolling inside a few hundred pixels while a third of the column sat
 	     fixed above it. One scroll region for one column — the expanders are
 	     the reason the old arrangement stopped working. -->
-	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3">
+	<!-- Each rail scrolls, so each takes focus for a keyboard (WCAG 2.1.1,
+	     axe scrollable-region-focusable) and a name for a screen reader.
+	     Svelte's noninteractive-tabindex rule does not know scroll regions,
+	     hence the ignores on the four rails. -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<aside
+		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3"
+		tabindex="0"
+		aria-label="Site checks"
+	>
 		<SectionHeader title="Site" count="{siteRows.filter((r) => r.status === 'pass').length}/{siteRows.length}" right={stageLabel('L0')} />
 		<ul class="shrink-0 divide-y divide-[var(--color-border)]">
 			{#each siteRows as r}
@@ -602,7 +612,12 @@
 	     not what it had moved to. The width buys four readings per row: the
 	     arrival age, its trace, the frame's echo coverage and which image-QC
 	     detector, if any, fired. -->
-	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3">
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<aside
+		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-3"
+		tabindex="0"
+		aria-label="Radars"
+	>
 		<div class="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5">
 			<span class="label">Radars</span>
 			<span class="num text-[12px] text-[var(--color-faint)]">·  {radarRows.filter((r) => r.status === 'pass').length}/{radarRows.length}</span>
@@ -625,6 +640,7 @@
 			     below is explained by this one line, which is the whole point
 			     of the check — one upstream event, not six radar outages. -->
 			<div
+				data-fleet-banner
 				class="flex items-start gap-2 border-b border-[var(--color-border)] bg-[var(--color-fail)]/10 px-3 py-2"
 				title={fleetRow.check_id}
 			>
@@ -846,14 +862,18 @@
 	</aside>
 
 	<!-- RAIL 3: PRODUCTS --------------------------------------------------------------- -->
-	<aside class="panel col-span-12 flex max-h-full flex-col overflow-hidden lg:col-span-4">
+	<aside
+		class="panel col-span-12 flex max-h-full flex-col overflow-hidden lg:col-span-4"
+		aria-label="Products"
+	>
 		<SectionHeader title="Products" count="{productRows.filter((r) => r.status === 'pass').length}/{productRows.length}" right={sourceLabelFor(sources.products, 'L1', 'LB1')} />
 		{#if pairedProducts}
 			<div class="grid grid-cols-[1fr_auto_auto] items-end gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[12px] uppercase tracking-[0.1em] text-[var(--color-muted)]">
 				<span></span><span>Filesystem</span><span>RadarCA</span>
 			</div>
 		{/if}
-		<div class="overflow-y-auto">
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div class="overflow-y-auto" tabindex="0" role="region" aria-label="Product list">
 			{#each productGroups as g}
 				{@const gc = groupCount(g.rows)}
 				<div class="border-b border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-3 py-1 text-[12px] uppercase tracking-[0.16em] text-[var(--color-muted)] flex items-center gap-2">
@@ -926,7 +946,12 @@
 	     nine targets are radars and their numbers now sit on the radar
 	     cards, so what is left here is the three mosaics, which belong to
 	     no other rail. -->
-	<aside class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-2">
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<aside
+		class="panel col-span-12 flex max-h-full flex-col overflow-y-auto lg:col-span-2"
+		tabindex="0"
+		aria-label="Quality"
+	>
 			<!-- No source label on the right: the rail has one source, and
 			     "Image Quality" repeated the title and misnamed its L3 row. -->
 			<SectionHeader

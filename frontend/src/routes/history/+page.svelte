@@ -156,24 +156,25 @@
 </script>
 
 <div class="flex h-full flex-col">
+	<h1 class="sr-only">History</h1>
 	<!-- TIME SCRUBBER + FILTERS -->
 	<header class="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] px-4 py-2 text-[12px]">
-		<div class="flex items-center gap-1">
+		<label class="flex items-center gap-1">
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">since (UTC)</span>
 			<input
 				type="datetime-local"
 				bind:value={since}
 				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
-		</div>
-		<div class="flex items-center gap-1">
+		</label>
+		<label class="flex items-center gap-1">
 			<span class="text-[var(--color-muted)] uppercase tracking-wider">until (UTC)</span>
 			<input
 				type="datetime-local"
 				bind:value={until}
 				class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
-		</div>
+		</label>
 
 		<MultiSelectChips
 			label="stage"
@@ -255,7 +256,10 @@
 	{/if}
 
 	<!-- TABS -->
-	<nav class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider">
+	<nav
+		class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-1 text-[12px] uppercase tracking-wider"
+		aria-label="History views"
+	>
 		<button
 			class={tab === 'alarms'
 				? 'text-[var(--color-bright)] border-b border-[var(--color-bright)] -mb-px py-1'
@@ -280,8 +284,10 @@
 		</button>
 	</nav>
 
-	<!-- TABLE -->
-	<div class="flex-1 overflow-auto">
+	<!-- TABLE. Focusable, so a keyboard can scroll it (WCAG 2.1.1); Svelte's
+	     noninteractive-tabindex rule does not know scroll regions. -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<div class="flex-1 overflow-auto" tabindex="0" role="region" aria-label="History table">
 		{#if tab === 'alarms'}
 			<table class="w-full text-[12px]">
 				<thead class="sticky top-0 bg-[var(--color-canvas)] text-[var(--color-muted)]">

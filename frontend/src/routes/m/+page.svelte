@@ -140,6 +140,7 @@
 	}
 </script>
 
+<h1 class="sr-only">Status</h1>
 <!-- Hero status -->
 <section class="mb-5 px-1 pt-2 text-center">
 	{#if sentinel.loading && !sentinel.rollup}

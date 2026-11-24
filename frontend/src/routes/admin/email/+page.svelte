@@ -109,26 +109,30 @@
 		<div class="text-[12px] text-[var(--color-muted)]">loading…</div>
 	{:else}
 		<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">SMTP host</label>
-			<input bind:value={v.host} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="smtp.gmail.com" />
+			<label for="smtp-host" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">SMTP host</label>
+			<input id="smtp-host" bind:value={v.host} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="smtp.gmail.com" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">port</label>
-			<input bind:value={v.port} type="number" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-24" />
+			<label for="smtp-port" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">port</label>
+			<input id="smtp-port" bind:value={v.port} type="number" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-24" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">username</label>
-			<input bind:value={v.username} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" />
+			<label for="smtp-username" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">username</label>
+			<input id="smtp-username" bind:value={v.username} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">password</label>
-			<input bind:value={v.password} type="password" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" placeholder={updatedAt ? '(unchanged)' : ''} />
+			<label for="smtp-password" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">password</label>
+			<input id="smtp-password" bind:value={v.password} type="password" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" placeholder={updatedAt ? '(unchanged)' : ''} />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from name</label>
-			<input bind:value={v.from_name} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="AQPI Sentinel" />
+			<label for="smtp-from-name" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from name</label>
+			<input id="smtp-from-name" bind:value={v.from_name} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="AQPI Sentinel" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from address</label>
-			<input bind:value={v.from_addr} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="sentinel@example.com" />
+			<label for="smtp-from-addr" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from address</label>
+			<input id="smtp-from-addr" bind:value={v.from_addr} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="sentinel@example.com" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">encryption</label>
-			<div class="flex items-center gap-4 text-[12px] text-[var(--color-default)]">
+			<span id="smtp-encryption" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">encryption</span>
+			<div
+				class="flex items-center gap-4 text-[12px] text-[var(--color-default)]"
+				role="radiogroup"
+				aria-labelledby="smtp-encryption"
+			>
 				<label class="flex items-center gap-2">
 					<input type="radio" name="enc" checked={v.use_starttls && !v.use_tls} onchange={() => { v.use_starttls = true; v.use_tls = false; }} />
 					STARTTLS (587)

@@ -326,23 +326,23 @@
 	<form class="border border-[var(--color-border)] bg-[var(--color-canvas)] p-4" onsubmit={invite}>
 		<div class="label text-[var(--color-bright)] mb-3">INVITE USER</div>
 		<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">email</label>
-			<input bind:value={newEmail} type="email" required class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+			<label for="invite-email" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">email</label>
+			<input id="invite-email" bind:value={newEmail} type="email" required class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">role</label>
-			<select bind:value={newRole} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num w-32">
+			<label for="invite-role" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">role</label>
+			<select id="invite-role" bind:value={newRole} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num w-32">
 				<option value="user">user</option>
 				<option value="admin">admin</option>
 			</select>
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">display name</label>
-			<input bind:value={newDisplay} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
+			<label for="invite-display" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">display name</label>
+			<input id="invite-display" bind:value={newDisplay} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">groups</label>
+			<span id="invite-groups" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">groups</span>
 			{#if allGroups.length === 0}
 				<span class="text-[12px] text-[var(--color-faint)] italic">No groups defined yet. Create some at <a href="/admin/groups" class="underline">/admin/groups</a> to assign new users to them.</span>
 			{:else}
-				<div class="flex flex-wrap gap-1">
+				<div class="flex flex-wrap gap-1" role="group" aria-labelledby="invite-groups">
 					{#each allGroups as g}
 						{@const checked = newGroupIds.includes(g.id)}
 						<button
@@ -358,7 +358,7 @@
 				</div>
 			{/if}
 
-			<label class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send email</label>
+			<span class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send email</span>
 			<label class="flex items-center gap-2 text-[12px] text-[var(--color-default)]">
 				<input type="checkbox" bind:checked={newSendEmail} />
 				Email the reset link to the user (requires <a href="/admin/email" class="underline">SMTP</a>)

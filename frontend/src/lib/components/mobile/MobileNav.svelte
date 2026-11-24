@@ -56,7 +56,8 @@
 		<span class="mob-label">Uptime</span>
 	</a>
 
-	<a href="/m/alarms" class="mob-tab {activeClass('/m/alarms')}" aria-label="Alarms">
+	<!-- No aria-label: it hid the visible alarm count from the tab's name. -->
+	<a href="/m/alarms" class="mob-tab {activeClass('/m/alarms')}">
 		<span class="relative">
 			<svg viewBox="0 0 24 24" class="mob-icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 				<path d="M6 8a6 6 0 1 1 12 0v5l1.5 2.5h-15L6 13V8z" />

@@ -68,7 +68,7 @@
 	</header>
 
 	<!-- Jump list: on a dashboard people arrive looking for one answer. -->
-	<nav class="mb-6 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px]">
+	<nav class="mb-6 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px]" aria-label="Questions">
 		{#each FAQ as f, i}
 			<a
 				href="#{f.id}"
@@ -137,7 +137,17 @@
 			{@html inline(b.text)}
 		</div>
 	{:else if b.kind === 'table'}
-		<div class="mb-2.5 overflow-x-auto">
+		<!-- Focusable, so a keyboard can scroll a table wider than the page
+		     (WCAG 2.1.1; Svelte's noninteractive-tabindex rule does not know
+		     scroll regions), and named by its columns, so two tables' regions
+		     differ. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div
+			class="mb-2.5 overflow-x-auto"
+			tabindex="0"
+			role="region"
+			aria-label={`Table of ${b.head.join(', ')}`}
+		>
 			<table class="w-full border-collapse text-[12px]">
 				<thead>
 					<tr class="border-b border-[var(--color-border-strong)]">

@@ -4912,6 +4912,7 @@
 				     one product while reporting that it had switched them. -->
 				<select
 					data-product-select
+					aria-label="Product"
 					class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 					value={composite}
 					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
@@ -5214,6 +5215,7 @@
 					<span class="num text-[12px] text-[var(--color-muted)] uppercase tracking-wider">tilt</span>
 					<select
 						data-tilt-select
+						aria-label="Tilt"
 						class="flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 						value={tiltEl}
 						onchange={(e) => {
@@ -5264,15 +5266,20 @@
 			{#each selectableRadars as r}
 				{@const st = radarStatusOf(radarStatus, r.id)}
 				{@const checked = isActive(r.id)}
+				<!-- The row's toggle is a real button inside the item, and solo
+				     its sibling: an item with role="button" is not a list item,
+				     and it held the solo button inside itself. -->
 				<li
-					class="group relative flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-1.5 text-[12px] cursor-pointer transition-colors {checked
+					class="group relative border-b border-[var(--color-border)]/60 transition-colors {checked
 						? 'bg-[var(--color-elevated)]/40'
 						: 'hover:bg-[var(--color-elevated)]/25'}"
-					onclick={() => toggleRadar(r.id)}
-					role="button"
-					tabindex="0"
-					onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleRadar(r.id)}
 				>
+					<button
+						type="button"
+						class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[12px]"
+						aria-pressed={checked}
+						onclick={() => toggleRadar(r.id)}
+					>
 					<!-- check mark indicator -->
 					<span
 						class="inline-flex h-3 w-3 items-center justify-center rounded-[2px] border {checked
@@ -5302,11 +5309,13 @@
 					>
 						{statusLabel(st)}
 					</span>
-					<!-- solo button (hover-only) -->
+					</button>
+					<!-- solo, shown on hover, and on focus so a keyboard reaches it -->
 					<button
-						class="absolute right-2 invisible group-hover:visible rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:text-[var(--color-bright)]"
+						type="button"
+						class="absolute right-2 top-1/2 -translate-y-1/2 invisible group-hover:visible group-focus-within:visible rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:text-[var(--color-bright)]"
 						title="show only this radar"
-						onclick={(e) => { e.stopPropagation(); soloRadar(r.id); }}
+						onclick={() => soloRadar(r.id)}
 					>
 						solo
 					</button>

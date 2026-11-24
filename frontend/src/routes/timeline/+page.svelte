@@ -876,8 +876,12 @@
 {/snippet}
 
 <div class="flex h-full flex-col">
+	<h1 class="sr-only">Timeline</h1>
 	<!-- TABS -->
-	<nav class="flex items-end gap-1 border-b border-[var(--color-border)] px-4 pt-2 text-[12px]">
+	<nav
+		class="flex items-end gap-1 border-b border-[var(--color-border)] px-4 pt-2 text-[12px]"
+		aria-label="Timeline sections"
+	>
 		{#each TABS as t}
 			{@const c = tabCounts[t.key]}
 			{@const total = c.pass + c.warn + c.fail + c.error + c.skip}

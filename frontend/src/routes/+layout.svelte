@@ -117,7 +117,10 @@
 			{/if}
 		</div>
 
-		<nav class="flex flex-wrap items-center gap-1 border-l border-[var(--color-border)] pl-3">
+		<nav
+			class="flex flex-wrap items-center gap-1 border-l border-[var(--color-border)] pl-3"
+			aria-label="Pages"
+		>
 			<NavLink href="/" label="Map" />
 			<NavLink href="/dashboard" label="Dashboard" />
 			<NavLink href="/timeline" label="Timeline" />
@@ -215,6 +218,7 @@
 	     the viewport was. -->
 	<nav
 		class="flex flex-wrap items-center gap-x-5 gap-y-0.5 border-b border-[var(--color-border)] px-4 py-1.5"
+		aria-label="Pipeline stages"
 	>
 		{#each Object.entries(counts) as [stage, c]}
 			<!-- Fall through to 'skip' (gray) when nothing in the stage
@@ -243,7 +247,11 @@
 	</nav>
 
 	{#if diag.anyDisabled}
-		<div class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[12px] num text-[var(--color-warn)]">
+		<div
+			class="bg-[var(--color-warn)]/15 border-b border-[var(--color-warn)]/40 px-4 py-1 text-[12px] num text-[var(--color-warn)]"
+			role="region"
+			aria-label="Diagnostic flags"
+		>
 			<!-- Names the flags rather than calling them disabled: `probe`
 			     turns a snapshot ON, and a banner reading "disabled = probe"
 			     describes the opposite of what the page is doing. -->

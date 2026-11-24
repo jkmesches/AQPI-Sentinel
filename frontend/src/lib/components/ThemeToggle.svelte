@@ -24,7 +24,9 @@
 			onclick={() => theme.set(o.mode)}
 		>
 			<span class="num">{o.glyph}</span>
-			<span class="ml-1 label">{o.label}</span>
+			<!-- Not `.label`, whose muted color would override the button's:
+			     muted on the active option's fill in the band is 4.3:1, white 5.9:1. -->
+			<span class="ml-1 font-medium uppercase tracking-[0.14em]">{o.label}</span>
 		</button>
 	{/each}
 </div>
