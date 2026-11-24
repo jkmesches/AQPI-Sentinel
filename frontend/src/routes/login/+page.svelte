@@ -24,9 +24,14 @@
 	}
 </script>
 
-<div class="flex h-full items-center justify-center bg-[var(--color-canvas)]">
+<!-- The outer box scrolls and the inner one centers at no less than its
+     height. Centering in the layout's overflow-hidden main put the button
+     under the footer on a phone held sideways (734 x 343), with no way to
+     scroll to it. -->
+<div class="h-full overflow-y-auto bg-[var(--color-canvas)]">
+<div class="flex min-h-full items-center justify-center p-4">
 	<form
-		class="w-[22rem] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-6 shadow-xl"
+		class="w-full max-w-[22rem] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-6 shadow-xl"
 		onsubmit={submit}
 	>
 		<div class="mb-4">
@@ -70,4 +75,5 @@
 			{busy ? 'signing in…' : 'sign in'}
 		</button>
 	</form>
+</div>
 </div>
