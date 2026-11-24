@@ -28,6 +28,49 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.10] - 2026-11-24
+
+### Added
+
+- **Every CoSMoS frame is captured.** Water level, maximum water depth and
+  maximum water level join the image checks, so each cycle's frames reach the
+  archive, which is the history the CoSMoS explorer page will read. Each
+  product capture now records which forecast valid time the frame draws, and
+  when the file was published, in `image_observations`. A later cycle that
+  republishes a valid time with new bytes adds a row, so both forecasts stay
+  findable. Water depth frames archived before this release are filled in
+  once, at the first start, from their file names.
+- **A record-only trial for new checks.** The three new image checks open
+  their alarms as record-only for their first 14 days on a deployment,
+  counted from each check's first run, because their thresholds were set for
+  other products. Their alarms open and show on the timeline and the
+  dashboard but send no email, webhook or push, and one that opens during
+  the trial stays quiet until it closes. The trial's start is stored, so a
+  restart does not move it.
+
+### Changed
+
+- **Unchanged frames are not read again.** On a deployment that reads
+  frames off the archive mount, a product check whose frame file has the
+  same name, size and modification time as last run, at the same
+  thresholds, repeats its last verdict and says "unchanged since" instead of
+  reading the file. A CoSMoS frame changes hourly and these checks run every
+  two minutes.
+
+### Fixed
+
+- **The login page works on short screens.** On a phone held sideways the
+  Sign In button sat under the footer with no way to scroll to it, and at
+  320 px the card was wider than the screen. The card now scrolls and fits
+  the width.
+- **No page scrolls sideways in a 320 px window.** The footer's links ran to
+  376 px; they now wrap.
+- **Archive retention deletes rows before files.** A delete that failed used
+  to leave rows whose files were already gone. Retention also removes a
+  pruned frame's observation rows. Production leaves archive retention off.
+- **The FAQ no longer says the daily report lists NEXRAD alarms.** It lists
+  no alarms, and none of the record-only checks.
+
 ## [0.15.9] - 2026-11-24
 
 ### Added
