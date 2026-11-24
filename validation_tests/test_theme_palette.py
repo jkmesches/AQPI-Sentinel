@@ -14,6 +14,9 @@ wrong, each silent:
     survived review that way.
   - $lib/palette.ts, which the map paints with because MapLibre cannot read
     CSS custom properties, drifting from app.css after a token edit.
+  - A literal color in a scoped block (.band, the light footer). The ui
+    check's palette is the tokens defined at the root, so a literal there
+    reads as an off-palette color on every page.
 """
 from __future__ import annotations
 
@@ -72,6 +75,23 @@ def tokens(body: str) -> dict[str, str]:
     return {m[1]: m[2].lower() for m in re.finditer(r"--color-([\w-]+):\s*(#[0-9a-fA-F]{6})", body)}
 
 
+def resolved(body: str, theme: dict[str, str]) -> dict[str, str]:
+    """The --color-* tokens a block points at other tokens, resolved in a theme.
+
+    Args:
+        body: A block's text.
+        theme: Token name to hex value, for the var() references to resolve in.
+
+    Returns:
+        Token name without its prefix, to the hex value its reference resolves to.
+
+    Raises:
+        KeyError: If a reference names a token the theme does not define.
+    """
+    refs = re.finditer(r"--color-([\w-]+):\s*var\(--color-([\w-]+)\)", body)
+    return {m[1]: theme[m[2]] for m in refs}
+
+
 def lum(h: str) -> float:
     """WCAG relative luminance of a #rrggbb color."""
     c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -87,8 +107,10 @@ def contrast(a: str, b: str) -> float:
 
 DARK = tokens(block("@theme"))
 LIGHT = {**DARK, **tokens(block('[data-theme="light"]'))}
-BAND = tokens(block(".band"))
+BAND = resolved(block(".band"), DARK)
 BAND_BG = DARK["band"]
+SCOPED = (".band", '[data-theme="light"] .site-footer')
+LITERAL_TEXT_RE = r"--color-(?:default|bright|muted|faint|accent|ok|warn|fail|error|info):\s*#"
 
 
 def test_contrast() -> None:
@@ -102,16 +124,27 @@ def test_contrast() -> None:
     low = [f"{t} {contrast(BAND[t], BAND_BG):.2f}" for t in BAND_TEXT
            if contrast(BAND[t], BAND_BG) < AA]
     check(f"every band token is {AA}:1 on the band", not low, ", ".join(low))
-    foot_dark = re.search(r"--footer-bg:\s*(#[0-9a-fA-F]{6})", block(':root, [data-theme="dark"]'))
+    foot_dark = re.search(r"--color-footer:\s*(#[0-9a-fA-F]{6})",
+                          block(':root, [data-theme="dark"]'))
     if foot_dark is None:
         check("the dark footer has a background", False)
         return
     worst = min(contrast(DARK[t], foot_dark[1]) for t in ("faint", "muted", "default"))
     check(f"dark footer text is {AA}:1", worst >= AA, f"{worst:.2f}")
-    foot = tokens(block('[data-theme="light"] .site-footer'))
-    light_bg = re.search(r"--footer-bg:\s*(#[0-9a-fA-F]{6})", block('[data-theme="light"]'))
-    worst = min(contrast(c, light_bg[1]) for c in foot.values()) if light_bg else 0.0
+    foot = resolved(block('[data-theme="light"] .site-footer'), LIGHT)
+    light_bg = re.search(r"--color-footer:\s*(#[0-9a-fA-F]{6})", block('[data-theme="light"]'))
+    worst = min(contrast(c, light_bg[1]) for c in foot.values()) if light_bg and foot else 0.0
     check(f"light footer text is {AA}:1", worst >= AA, f"{worst:.2f}")
+
+
+def test_scoped_blocks() -> None:
+    """The band and the light footer set their text colors from root tokens."""
+    print("\nscoped blocks:")
+    for selector in SCOPED:
+        literal = re.findall(LITERAL_TEXT_RE, block(selector))
+        check(f"{selector} sets no text color as a literal", not literal, ", ".join(literal))
+    check("the band resolves every text token", set(BAND_TEXT) <= set(BAND),
+          ", ".join(sorted(set(BAND_TEXT) - set(BAND))))
 
 
 def test_claims() -> None:
@@ -119,13 +152,14 @@ def test_claims() -> None:
     print("\ncomments that state a ratio:")
     claims = 0
     for name, theme, body in (("dark", DARK, block("@theme")),
-                              ("light", LIGHT, block('[data-theme="light"]')),
-                              ("band", {**BAND, "on": BAND_BG}, block(".band"))):
+                              ("light", LIGHT, block('[data-theme="light"]'))):
         for m in re.finditer(CLAIM_RE, body):
             token, hex_, said, on = m[1], m[2].lower(), float(m[3]), m[4]
-            where = "band" if name == "band" else (on or "surface-hi")
-            bg = BAND_BG if name == "band" else theme.get(where, "")
-            got = contrast(hex_, bg)
+            where = on or "surface-hi"
+            if where not in theme:
+                check(f"{name} {token} names a surface app.css defines", False, where)
+                continue
+            got = contrast(hex_, theme[where])
             claims += 1
             check(f"{name} {token} {said}:1 on {where}", got >= said - 0.05,
                   f"measured {got:.2f}")
@@ -152,6 +186,7 @@ def main() -> int:
         The process exit status, 1 when any assertion failed.
     """
     test_contrast()
+    test_scoped_blocks()
     test_claims()
     test_map_copy()
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures

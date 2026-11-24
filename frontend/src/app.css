@@ -55,9 +55,21 @@
 	--color-suppress: #8f978e;
 	--color-critical: #f283bd;
 
-	/* The header band, the same in both themes (see .band). */
-	--color-band:      #1E4D2B;       /* CSU Green */
-	--color-band-rule: #C8C372;       /* CSU Gold */
+	/* The header band and its text, the same in both themes (see .band). The
+	   text colors are tokens here rather than literals in .band so that every
+	   color the page draws is a token at the root. */
+	--color-band:       #1E4D2B;      /* CSU Green */
+	--color-band-rule:  #C8C372;      /* 5.3:1 on band, CSU Gold */
+	--color-band-text:  #ffffff;
+	--color-band-muted: #d5e0d6;      /* 7.2:1 on band */
+	--color-band-faint: #b9c9bb;      /* 5.6:1 on band */
+	--color-band-ok:    #58c677;      /* 4.5:1 on band, the pass green's hue */
+	--color-band-warn:  #ffc038;      /* 6.0:1 on band */
+	--color-band-fail:  #ff9a8a;      /* 4.8:1 on band */
+	--color-band-error: #c4a8ff;      /* 4.8:1 on band */
+	--color-band-info:  #6ec0f7;      /* 4.9:1 on band */
+	/* The quiet text on the light theme's Oval Green footer, at 4.8:1. */
+	--color-footer-faint: #d2e6dd;
 
 	/* dBZ accents — scientific colormap, theme-independent */
 	--color-dbz-1: #4b006e;
@@ -92,7 +104,7 @@ body {
 	--map-attrib-fg:   #e3e8e1;
 	--map-attrib-link: #ffffff;
 	/* Darker than CSU Green, so faint text still reads on it (4.7:1). */
-	--footer-bg: #0d2416;
+	--color-footer: #0d2416;
 }
 
 /* ===========================================================================
@@ -126,7 +138,7 @@ body {
 	--map-attrib-bg:   rgba(255,255,255,0.88);
 	--map-attrib-fg:   #1a1d1a;
 	--map-attrib-link: #0b0e0b;
-	--footer-bg: #006144;               /* CSU Oval Green, as colostate.edu's footer */
+	--color-footer: #006144;            /* CSU Oval Green, as colostate.edu's footer */
 }
 
 /* The CSU Green band behind the site header, in both themes. It carries its
@@ -137,16 +149,16 @@ body {
 .band {
 	background: var(--color-band);
 	border-bottom: 2px solid var(--color-band-rule);
-	--color-default:       #ffffff;
-	--color-bright:        #ffffff;
-	--color-muted:         #d5e0d6;     /* 7.2:1 */
-	--color-faint:         #b9c9bb;     /* 5.6:1 */
-	--color-accent:        #C8C372;     /* 5.3:1 */
-	--color-ok:            #58c677;     /* 4.5:1, the pass green's hue */
-	--color-warn:          #ffc038;     /* 6.0:1 */
-	--color-fail:          #ff9a8a;     /* 4.8:1 */
-	--color-error:         #c4a8ff;     /* 4.8:1 */
-	--color-info:          #6ec0f7;     /* 4.9:1 */
+	--color-default:       var(--color-band-text);
+	--color-bright:        var(--color-band-text);
+	--color-muted:         var(--color-band-muted);
+	--color-faint:         var(--color-band-faint);
+	--color-accent:        var(--color-band-rule);
+	--color-ok:            var(--color-band-ok);
+	--color-warn:          var(--color-band-warn);
+	--color-fail:          var(--color-band-fail);
+	--color-error:         var(--color-band-error);
+	--color-info:          var(--color-band-info);
 	--color-surface:       rgba(255,255,255,0.08);
 	--color-surface-hi:    rgba(255,255,255,0.12);
 	--color-elevated:      rgba(255,255,255,0.18);
@@ -154,13 +166,13 @@ body {
 	--color-border-strong: rgba(255,255,255,0.3);
 }
 
-.site-footer { background: var(--footer-bg); }
-/* White on Oval Green, 7.5:1; the faint tint is 4.8:1. */
+.site-footer { background: var(--color-footer); }
+/* White on Oval Green, 7.5:1. */
 [data-theme="light"] .site-footer {
-	--color-default: #ffffff;
-	--color-bright:  #ffffff;
-	--color-muted:   #ffffff;
-	--color-faint:   #d2e6dd;
+	--color-default: var(--color-band-text);
+	--color-bright:  var(--color-band-text);
+	--color-muted:   var(--color-band-text);
+	--color-faint:   var(--color-footer-faint);
 }
 
 * { border-color: var(--color-border); }
