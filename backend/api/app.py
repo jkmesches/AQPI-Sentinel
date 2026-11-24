@@ -4,9 +4,12 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import asyncpg
 from fastapi import FastAPI
 
 from ..alarms.engine import AlarmEngine
+from ..archive.backfill import (  # noqa: TID252  the package imports relatively throughout
+    BACKFILL_PRODUCTS, Pool, backfill_observations)
 from ..alarms.models import load_config_from_db_or_yaml
 from ..checks.network import NetworkMonitor
 from ..checks.transports import CheckContext
@@ -35,12 +38,33 @@ from .ws import ConnectionManager, router as ws_router
 log = logging.getLogger(__name__)
 
 
+async def _backfill_observations(pool: Pool) -> None:
+    """Write observation rows for frames archived before captures wrote them.
+
+    Args:
+        pool: The store's connection pool.
+    """
+    for product_id in BACKFILL_PRODUCTS:
+        try:
+            _ = await backfill_observations(pool, product_id)
+        except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError,
+                TimeoutError, ValueError) as e:
+            # The explorer then lacks the older frames until the next start,
+            # which tries again; the live capture is unaffected.
+            log.warning("observation backfill for %s failed: %s", product_id, e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("starting sentinel — %d checks registered, stages=%s",
              len(CHECKS), sorted(all_stages()))
     store = Store(SETTINGS.db_url)
     await store.connect()
+    # In the background, because it scans image_archive (3.2 M rows on the
+    # test deployment), and kept on app.state so the task is not collected.
+    if SETTINGS.archive_enabled and store.pool is not None:
+        app.state.backfill_task = asyncio.create_task(
+            _backfill_observations(store.pool), name="observation-backfill")
 
     # Bootstrap the threshold registry — seeds from config.py defaults on
     # first boot, otherwise loads the admin-managed blob. Every check reads

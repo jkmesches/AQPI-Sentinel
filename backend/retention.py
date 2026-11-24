@@ -208,6 +208,17 @@ async def prune_archive(pool, archive_root: Path, cutoff: datetime) -> dict:
     if not rows:
         return {"table": "image_archive", "rows": 0, "bytes": 0}
 
+    # Rows first, files after the commit. The other way round, a delete that
+    # failed (a reference added since, or the database down) left rows whose
+    # files were gone, and every sweep repeated it; a file left after a
+    # committed delete only costs disk.
+    shas = [r["sha256"] for r in rows]
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM image_observations WHERE sha256 = ANY($1::text[])",
+                           shas)
+        await conn.execute("DELETE FROM image_index   WHERE sha256 = ANY($1::text[])", shas)
+        await conn.execute("DELETE FROM image_archive WHERE sha256 = ANY($1::text[])", shas)
+
     freed = 0
     for r in rows:
         path = archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}"
@@ -218,11 +229,6 @@ async def prune_archive(pool, archive_root: Path, cutoff: datetime) -> dict:
             pass
         except OSError:
             log.warning("retention: could not unlink %s", path, exc_info=True)
-
-    shas = [r["sha256"] for r in rows]
-    async with pool.acquire() as conn, conn.transaction():
-        await conn.execute("DELETE FROM image_index   WHERE sha256 = ANY($1::text[])", shas)
-        await conn.execute("DELETE FROM image_archive WHERE sha256 = ANY($1::text[])", shas)
     log.info("retention: pruned %d archived images (%.1f MB)", len(shas), freed / 1e6)
     return {"table": "image_archive", "rows": len(shas), "bytes": freed}
 

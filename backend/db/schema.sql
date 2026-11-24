@@ -78,14 +78,41 @@ CREATE TABLE IF NOT EXISTS image_archive (
   origin_url    TEXT
 );
 
+-- One row per frame a check captured: a product, the valid time of the step
+-- it drew, and the bytes. A later cycle that republishes a valid time with
+-- different bytes adds a row, so both forecasts stay findable. One that
+-- republishes identical bytes only moves last_seen_at and keeps the first
+-- cycle's published_at, since identical bytes are the same forecast.
+-- published_at is the frame file's mtime on the mount, which groups one
+-- cycle's frames; it is NULL for a frame fetched over HTTP or backfilled.
 CREATE TABLE IF NOT EXISTS image_observations (
-  ts            TIMESTAMPTZ NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at  TIMESTAMPTZ,
   product_id    TEXT NOT NULL,
   scan_ts       TIMESTAMPTZ NOT NULL,
   sha256        TEXT NOT NULL REFERENCES image_archive(sha256),
-  PRIMARY KEY (product_id, scan_ts)
+  source        TEXT,  -- noqa: RF04  same name and meaning as image_index.source
+  published_at  TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_obs_recent ON image_observations(product_id, ts DESC);
+-- Databases from before 2026-11-24 have the first shape, keyed on
+-- (product_id, scan_ts) with the capture time in `ts`. Nothing wrote to it,
+-- so it is reshaped in place.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND table_name = 'image_observations' AND column_name = 'ts') THEN
+    ALTER TABLE image_observations RENAME COLUMN ts TO first_seen_at;
+  END IF;
+END $$;
+ALTER TABLE image_observations
+  ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS source       TEXT,
+  ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ,
+  DROP CONSTRAINT IF EXISTS image_observations_pkey;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_obs_frame
+  ON image_observations(product_id, scan_ts, sha256);
+CREATE INDEX IF NOT EXISTS idx_obs_recent ON image_observations(product_id, first_seen_at DESC);
 
 -- Source-path → sha256 lookup. Lets us serve an archived image when the
 -- frontend requests it by the same `source` string the L4 check originally

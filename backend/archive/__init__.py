@@ -18,12 +18,71 @@ import hashlib
 import io
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import asyncpg
 from PIL import Image
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Observation:
+    """What a captured frame shows: its product and the valid time it draws.
+
+    Attributes:
+        product_id: The product, as config.PRODUCTS names it.
+        scan_ts: The valid time of the step the frame draws, UTC.
+        published_at: The frame file's mtime on the mount, or None when the
+            frame came over HTTP.
+    """
+
+    product_id: str
+    scan_ts: datetime
+    published_at: datetime | None = None
+
+
+# A repeat capture of the same frame moves last_seen_at and fills in a
+# published_at or source the row lacks, which a backfilled row does. A later
+# cycle that republishes identical bytes for the same valid time therefore
+# keeps the first cycle's published_at, which is right because identical
+# bytes are the same forecast.
+_OBSERVATION_SQL = """
+    INSERT INTO image_observations
+        (product_id, scan_ts, sha256, source, published_at, first_seen_at, last_seen_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $6)
+    ON CONFLICT (product_id, scan_ts, sha256) DO UPDATE
+        SET last_seen_at = EXCLUDED.last_seen_at,
+            published_at = COALESCE(image_observations.published_at,
+                                    EXCLUDED.published_at),
+            source       = COALESCE(image_observations.source, EXCLUDED.source)
+"""
+
+
+async def touch_observation(pool: asyncpg.Pool, obs: Observation, sha256: str) -> None:
+    """Move a frame's last_seen_at to now, for a run that saw it unchanged.
+
+    Moves image_archive's as well, which a read would have, since archive
+    retention prunes on it. Best effort, like save_image: a failure is logged
+    and the run goes on.
+
+    Args:
+        pool: The store's pool.
+        obs: The frame's product and valid time.
+        sha256: Its bytes' hash, from the read that archived it.
+    """
+    try:
+        await pool.execute(
+            "WITH archived AS (UPDATE image_archive SET last_seen_at = now() "
+            "WHERE sha256 = $3) "
+            "UPDATE image_observations SET last_seen_at = now() "
+            "WHERE product_id = $1 AND scan_ts = $2 AND sha256 = $3",
+            obs.product_id, obs.scan_ts, sha256)
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError) as e:
+        log.warning("archive: last_seen_at not moved for %s %s: %s",
+                    obs.product_id, obs.scan_ts, e)
 
 
 def _sha_path(root: Path, sha: str, ext: str) -> Path:
@@ -64,11 +123,14 @@ def _detect_ext(content_type: str | None) -> str:
 
 
 async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
-                     content_type: str | None = None, origin_url: str | None = None) -> str | None:
+                     content_type: str | None = None, origin_url: str | None = None,
+                     observation: Observation | None = None) -> str | None:
     """Best-effort persist. Returns the sha256 on success, None on failure.
 
     Failures are swallowed (the caller is a live check that must keep
-    running). Errors are logged at WARNING.
+    running). Errors are logged at WARNING. With an observation, the frame's
+    image_observations row is written in the same transaction as its
+    image_archive row, which the row's foreign key needs.
     """
     try:
         sha = hashlib.sha256(content).hexdigest()
@@ -123,6 +185,10 @@ async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
                     """,
                     source, sha, now,
                 )
+                if observation is not None:
+                    await conn.execute(
+                        _OBSERVATION_SQL, observation.product_id, observation.scan_ts,
+                        sha, source, observation.published_at, now)
         return sha
     except Exception:
         log.exception("archive.save_image failed for source=%r", source)
