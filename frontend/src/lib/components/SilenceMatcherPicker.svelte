@@ -175,7 +175,7 @@
 					<div class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">Custom matchers</div>
 					<label class="flex items-center gap-2">
 						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">stage</span>
-						<select bind:value={cm_stage} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
+						<select bind:value={cm_stage} class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
 							<option value="">(any)</option>
 							{#each STAGE_OPTIONS as s}
 								<option value={s}>{stageLabel(s)} ({s})</option>
@@ -184,15 +184,15 @@
 					</label>
 					<label class="flex items-center gap-2">
 						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">target</span>
-						<input type="text" bind:value={cm_target} placeholder="XSCV / qpe_15min / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+						<input type="text" bind:value={cm_target} placeholder="XSCV / qpe_15min / …" class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
 						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">check_id</span>
-						<input type="text" bind:value={cm_check} placeholder="layer2.radar.XEBY / …" class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+						<input type="text" bind:value={cm_check} placeholder="layer2.radar.XEBY / …" class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
 						<span class="w-16 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">severity</span>
-						<select bind:value={cm_sev} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
+						<select bind:value={cm_sev} class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]">
 							<option value="">(any)</option>
 							<option value="info">info</option>
 							<option value="warn">warn</option>

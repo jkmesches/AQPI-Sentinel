@@ -168,7 +168,7 @@
 			<input
 				type="datetime-local"
 				bind:value={since}
-				class="min-w-0 max-w-full border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
+				class="min-w-0 max-w-full border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
 		</label>
 		<label class="flex min-w-0 max-w-full flex-wrap items-center gap-1">
@@ -176,7 +176,7 @@
 			<input
 				type="datetime-local"
 				bind:value={until}
-				class="min-w-0 max-w-full border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
+				class="min-w-0 max-w-full border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 			/>
 		</label>
 

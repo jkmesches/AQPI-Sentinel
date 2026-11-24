@@ -312,7 +312,7 @@
 								value={draft.globals[k as keyof Globals] ?? ''}
 								oninput={(e) => (draft!.globals[k as keyof Globals] = parseNum((e.target as HTMLInputElement).value) as any)}
 								placeholder={String(defaultGlobal(k as keyof Globals))}
-								class="w-32 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] text-right"
+								class="w-32 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] text-right"
 							/>
 						</label>
 					{/each}
@@ -345,7 +345,7 @@
 												value={cur[k as keyof ProductOverride] ?? ''}
 												oninput={(e) => (cur[k as keyof ProductOverride] = parseNum((e.target as HTMLInputElement).value) as any)}
 												placeholder={String(defaultProduct(pid, k as keyof ProductOverride) ?? '—')}
-												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
+												class="w-28 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 											/>
 										</td>
 									{/each}
@@ -382,7 +382,7 @@
 												value={cur[k as keyof RadarOverride] ?? ''}
 												oninput={(e) => (cur[k as keyof RadarOverride] = parseNum((e.target as HTMLInputElement).value))}
 												placeholder={String(defaultRadar(rid, k as keyof RadarOverride) ?? '—')}
-												class="w-28 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
+												class="w-28 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 											/>
 										</td>
 									{/each}
@@ -419,7 +419,7 @@
 											value={cur.extreme_threshold ?? ''}
 											oninput={(e) => (cur.extreme_threshold = parseNum((e.target as HTMLInputElement).value))}
 											placeholder={String(defaultL4(pid, 'extreme_threshold') ?? '—')}
-											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
+											class="w-24 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 										/>
 									</td>
 									<td class="px-3 py-1 text-right">
@@ -429,7 +429,7 @@
 											value={cur.frozen_min_cov_pct ?? ''}
 											oninput={(e) => (cur.frozen_min_cov_pct = parseNum((e.target as HTMLInputElement).value))}
 											placeholder={String(defaultL4(pid, 'frozen_min_cov_pct') ?? '—')}
-											class="w-24 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
+											class="w-24 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)] text-right"
 										/>
 									</td>
 									<td class="px-3 py-1 text-center">
@@ -467,12 +467,12 @@
 					<label class="flex items-center gap-2">
 						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">since (UTC)</span>
 						<input type="datetime-local" bind:value={reSince}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+							class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<label class="flex items-center gap-2">
 						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">until (UTC)</span>
 						<input type="datetime-local" bind:value={reUntil}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+							class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 					<div class="flex items-center gap-3">
 						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">stages</span>
@@ -514,7 +514,7 @@
 							type="text"
 							placeholder="type APPLY to confirm"
 							bind:value={reConfirmText}
-							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+							class="w-48 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 						/>
 						<button
 							type="button"

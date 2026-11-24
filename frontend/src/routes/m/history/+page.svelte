@@ -414,12 +414,12 @@
 							<label class="flex items-center justify-between gap-2">
 								<span class="text-[var(--color-muted)] uppercase tracking-wider">since (UTC)</span>
 								<input type="datetime-local" bind:value={customSince}
-									class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+									class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 							</label>
 							<label class="flex items-center justify-between gap-2">
 								<span class="text-[var(--color-muted)] uppercase tracking-wider">until (UTC)</span>
 								<input type="datetime-local" bind:value={customUntil}
-									class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+									class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 							</label>
 						</div>
 					{/if}

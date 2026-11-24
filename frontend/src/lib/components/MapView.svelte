@@ -4849,7 +4849,7 @@
 				data-place-search
 				type="search"
 				placeholder="find a radar, reservoir or watershed"
-				class="w-full rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-bright)] placeholder:text-[var(--color-faint)] focus:border-[var(--color-info)] focus:outline-none"
+				class="w-full rounded-sm border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-bright)] placeholder:text-[var(--color-faint)] focus:border-[var(--color-info)] focus:outline-none"
 				value={searchText}
 				oninput={(e) => {
 					searchText = (e.target as HTMLInputElement).value;
@@ -4916,7 +4916,7 @@
 				<select
 					data-product-select
 					aria-label="Product"
-					class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+					class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 					value={composite}
 					onchange={(e) => (composite = (e.target as HTMLSelectElement).value as Composite)}
 					title="Choose the composite overlay to render on the map"
@@ -5219,7 +5219,7 @@
 					<select
 						data-tilt-select
 						aria-label="Tilt"
-						class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
+						class="min-w-0 flex-1 rounded-sm border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)] focus:outline-none focus:border-[var(--color-info)]"
 						value={tiltEl}
 						onchange={(e) => {
 							tiltEl = Number((e.target as HTMLSelectElement).value);

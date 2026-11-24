@@ -617,7 +617,7 @@
 					type="email"
 					bind:value={quickEmail}
 					placeholder="you@lab.example.edu"
-					class="w-72 border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
+					class="w-72 border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
 				/>
 				<button
 					type="button"
@@ -750,7 +750,7 @@
 					<label class="flex items-center gap-3">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Name</span>
 						<input bind:value={r.name} placeholder="oncall-primary"
-							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+							class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<div class="flex items-start gap-3">
@@ -769,7 +769,7 @@
 							<div class="flex items-center gap-2">
 								<input bind:value={editorPendingEmail} placeholder="you@example.com" type="email"
 									onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); editorAddEmail(); } }}
-									class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+									class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 								<button onclick={editorAddEmail} class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-bright)]">+ add</button>
 							</div>
 						</div>
@@ -805,7 +805,7 @@
 					<label class="flex items-center gap-3">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Webhook</span>
 						<input bind:value={r.webhook} placeholder="https://discord.com/api/webhooks/…"
-							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+							class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 					</label>
 
 					<label class="flex items-center gap-3">
@@ -819,7 +819,7 @@
 					<label class="flex items-center gap-3">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Template</span>
 						<input bind:value={r.template} placeholder="default"
-							class="w-48 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+							class="w-48 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 					</label>
 				</div>
 				<footer class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/40 px-5 py-3 text-[12px]">
@@ -846,7 +846,7 @@
 				<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center mb-3">
 					<label for="policy-name-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">name</label>
 					<input id="policy-name-{i}" bind:value={p.name} placeholder="standard"
-						class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
+						class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72" />
 				</div>
 
 				<div class="space-y-2">
@@ -856,7 +856,7 @@
 								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">step {j + 1}:</span>
 								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">wait</span>
 								<input bind:value={s.delay} placeholder="0m"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-20" />
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-20" />
 								<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">then notify</span>
 								{#if receivers.length === 0 && groupOptions.length === 0}
 									<span class="text-[12px] italic text-[var(--color-faint)]">add a recipient or define a group first</span>
@@ -959,7 +959,7 @@
 						<label class="flex items-center gap-2">
 							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">stage</span>
 							<select value={r.match.stage ?? ''} onchange={(e) => setMatch(i, 'stage', (e.target as HTMLSelectElement).value)}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 								<option value="">(any)</option>
 								{#each STAGES as s}<option value={s}>{stageLabel(s)} ({stageTechCode(s)})</option>{/each}
 							</select>
@@ -967,7 +967,7 @@
 						<label class="flex items-center gap-2">
 							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">status</span>
 							<select value={r.match.status_at_open ?? ''} onchange={(e) => setMatch(i, 'status_at_open', (e.target as HTMLSelectElement).value)}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 								<option value="">(any)</option>
 								{#each STATUSES as s}<option value={s}>{s}</option>{/each}
 							</select>
@@ -976,7 +976,7 @@
 							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">check</span>
 							{#if checkIds.length > 0}
 								<select value={r.match.check_id ?? ''} onchange={(e) => setMatch(i, 'check_id', (e.target as HTMLSelectElement).value)}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 									<option value="">(any)</option>
 									{#each checkIds as cid}
 										<option value={cid}>{cid}</option>
@@ -984,14 +984,14 @@
 								</select>
 							{:else}
 								<input value={r.match.check_id ?? ''} oninput={(e) => setMatch(i, 'check_id', (e.target as HTMLInputElement).value)}
-									placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+									placeholder="(any)" class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
 							{/if}
 						</label>
 						<label class="flex items-center gap-2">
 							<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)] w-14">target</span>
 							{#if targets.length > 0}
 								<select value={r.match.target ?? ''} onchange={(e) => setMatch(i, 'target', (e.target as HTMLSelectElement).value)}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1">
 									<option value="">(any)</option>
 									{#each targets as t}
 										<option value={t}>{t}</option>
@@ -999,7 +999,7 @@
 								</select>
 							{:else}
 								<input value={r.match.target ?? ''} oninput={(e) => setMatch(i, 'target', (e.target as HTMLInputElement).value)}
-									placeholder="(any)" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
+									placeholder="(any)" class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num flex-1" />
 							{/if}
 						</label>
 					</div>
@@ -1030,7 +1030,7 @@
 								<select
 									value={pickedKey}
 									onchange={(e) => (pendingMatcherKey[i] = (e.target as HTMLSelectElement).value)}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
 								>
 									<option value="">key…</option>
 									{#each CUSTOM_KEY_OPTIONS as opt}
@@ -1042,7 +1042,7 @@
 									<input
 										bind:value={pendingMatcherKeyOther[i]}
 										placeholder="field name"
-										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-32"
+										class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-32"
 									/>
 								{/if}
 								<span class="text-[var(--color-faint)]">=</span>
@@ -1050,7 +1050,7 @@
 									<select
 										value={pendingMatcherVal[i] ?? ''}
 										onchange={(e) => (pendingMatcherVal[i] = (e.target as HTMLSelectElement).value)}
-										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
+										class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40"
 									>
 										<option value="">value…</option>
 										{#each valueOpts as v}
@@ -1063,7 +1063,7 @@
 										placeholder={pickedKey ? 'value' : 'pick a key first'}
 										disabled={!pickedKey || (pickedKey === '__custom' && !(pendingMatcherKeyOther[i] ?? '').trim())}
 										onkeydown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addCustomMatcher(i); } }}
-										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40 disabled:opacity-50"
+										class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40 disabled:opacity-50"
 									/>
 								{/if}
 								<button
@@ -1090,18 +1090,18 @@
 							<label for="route-tod-in-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day in</label>
 							<div class="flex items-center gap-2">
 								<input id="route-tod-in-{i}" bind:value={r.when.time_of_day_in} placeholder="09:00-17:00"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[12px] text-[var(--color-faint)]">interpreted in the timezone below</span>
 							</div>
 
 							<label for="route-tod-not-in-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">time of day not in</label>
 							<input id="route-tod-not-in-{i}" bind:value={r.when.time_of_day_not_in} placeholder="22:00-06:00"
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 							<label for="route-tz-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">timezone</label>
 							<div class="flex items-center gap-2">
 								<input id="route-tz-{i}" bind:value={r.when.timezone} placeholder="UTC"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[12px] text-[var(--color-faint)]">IANA name (e.g. <span class="num">UTC</span>, <span class="num">America/Los_Angeles</span>). Default = UTC.</span>
 							</div>
 
@@ -1113,20 +1113,20 @@
 
 							<label for="route-duration-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">min duration (min)</label>
 							<input id="route-duration-{i}" bind:value={r.when.duration_at_severity_min} placeholder="(none)" type="number" min="0"
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
 							<label for="route-peers-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">peers also failing</label>
 							<input id="route-peers-{i}" bind:value={r.when.count_of_targets_failing} placeholder=">=2"
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 
 							<label for="route-metric-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">metric above</label>
 							<div class="flex items-center gap-2">
 								<input id="route-metric-{i}" bind:value={r.when.metric_above_name} placeholder="metric name"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 								<span class="text-[var(--color-faint)]">&gt;</span>
 								<input bind:value={r.when.metric_above_value} placeholder="value" type="number" step="any"
 									aria-label="metric threshold"
-									class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
+									class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-24" />
 							</div>
 						</div>
 					{/if}
@@ -1138,26 +1138,26 @@
 					<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
 						<label for="route-plan-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">send via plan</label>
 						<select id="route-plan-{i}" bind:value={r.policy}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72">
+							class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-72">
 							<option value="">— pick a plan —</option>
 							{#each policies as p}<option value={p.name}>{p.name || '(unnamed)'}</option>{/each}
 						</select>
 
 						<label for="route-floor-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">severity floor</label>
 						<select id="route-floor-{i}" bind:value={r.severity_floor}
-							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40">
+							class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40">
 							<option value="">(none)</option>
 							{#each SEVERITIES as s}<option value={s}>{s}</option>{/each}
 						</select>
 
 						<label for="route-repeat-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">repeat every</label>
 						<input id="route-repeat-{i}" bind:value={r.repeat_interval} placeholder="1h (blank = no repeat)"
-							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+							class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 						<label for="route-hold-down-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">only after it lasts</label>
 						<input id="route-hold-down-{i}" bind:value={r.hold_down}
 							placeholder="blank = global ({opaque.hold_down ?? '5m'})"
-							class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
+							class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num w-40" />
 
 						<span id="route-group-by-{i}" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px] self-start pt-1">group by</span>
 						<div class="flex flex-wrap gap-2" role="group" aria-labelledby="route-group-by-{i}">

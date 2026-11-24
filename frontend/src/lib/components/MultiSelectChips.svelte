@@ -152,7 +152,7 @@
 							type="text"
 							bind:value={custom}
 							{placeholder}
-							class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
+							class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] text-[var(--color-bright)]"
 						/>
 						<button
 							type="submit"

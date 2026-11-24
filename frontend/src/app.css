@@ -30,6 +30,9 @@
 	--color-elevated:      #1e2e24;
 	--color-border:        #1b2920;
 	--color-border-strong: #2f4337;
+	/* The edge of a text field, menu or text area, which WCAG 1.4.11 holds to
+	   3:1 against what is around it. The strong border's hue, lightened. */
+	--color-border-control: #50725d;    /* 3.0:1 on surface-hi */
 	--color-default:       #e3e8e1;     /* 13:1 on surface-hi */
 	--color-muted:         #a4afa2;     /* 7.2:1 on surface-hi */
 	--color-faint:         #808c7f;     /* 4.6:1 on surface-hi */
@@ -121,6 +124,7 @@ body {
 	--color-elevated:      #e5e5dd;
 	--color-border:        #d9d8cf;
 	--color-border-strong: #aeac9f;
+	--color-border-control: #8d8a78;    /* 3.0:1 on surface-hi */
 	--color-default:       #1a1d1a;     /* 14.7:1 on surface-hi */
 	--color-muted:         #4f564d;     /* 6.6:1 on surface-hi */
 	--color-faint:         #61685e;     /* 5.0:1 on surface-hi */
@@ -179,7 +183,11 @@ body {
 	--color-faint:   var(--color-footer-faint);
 }
 
-* { border-color: var(--color-border); }
+/* In the base layer, so the border color classes in the markup win. A rule
+   outside any layer beats every Tailwind utility, whatever its specificity. */
+@layer base {
+	*, ::before, ::after { border-color: var(--color-border); }
+}
 
 /* numerics + ids — always mono with tabular figures */
 .num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

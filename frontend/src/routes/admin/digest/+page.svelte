@@ -366,7 +366,7 @@
 					maxlength="48"
 					bind:value={v.title}
 					placeholder={defaultTitle}
-					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
+					class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
 				/>
 				<div class="text-[12px] text-[var(--color-muted)] pt-1">
 					Leads the subject line and heads the email. Leave it empty for
@@ -382,7 +382,7 @@
 					bind:value={recipientsText}
 					rows="3"
 					placeholder="ops@example.edu"
-					class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
+					class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num"
 				></textarea>
 				<div class="text-[12px] text-[var(--color-muted)] pt-1">
 					One per line. These receive the scheduled report — the test button below
@@ -398,13 +398,13 @@
 					min="0"
 					max="23"
 					bind:value={v.hour}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-20"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-20"
 				/>
 				<span class="text-[var(--color-muted)]">:00 local time in</span>
 				<input
 					list="dg-zones"
 					bind:value={v.tz}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-56"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-56"
 				/>
 				<datalist id="dg-zones">
 					{#each COMMON_TZ as z}<option value={z}></option>{/each}
@@ -436,7 +436,7 @@
 				<select
 					id="dg-def-radar"
 					bind:value={v.default_source.radar}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] w-56"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] w-56"
 				>
 					<option value="frontend">radarca</option>
 					<option value="backend">backend files</option>
@@ -447,7 +447,7 @@
 				<select
 					id="dg-def-product"
 					bind:value={v.default_source.product}
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] w-56"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] w-56"
 				>
 					<option value="frontend">radarca</option>
 					<option value="backend">backend files</option>
@@ -549,7 +549,7 @@
 											setSubject(e.kind, e.key, {
 												source: ev.currentTarget.value as Source | ''
 											})}
-										class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-[2px] text-[12px] w-56 shrink-0 disabled:opacity-40"
+										class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-[2px] text-[12px] w-56 shrink-0 disabled:opacity-40"
 									>
 										<option value="">
 											default ({SOURCE_LABEL[v.default_source[e.kind] ?? 'frontend']})
@@ -654,7 +654,7 @@
 				<input
 					bind:value={testTo}
 					placeholder="you@example.com"
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-72"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-72"
 				/>
 				<button
 					onclick={sendTest}

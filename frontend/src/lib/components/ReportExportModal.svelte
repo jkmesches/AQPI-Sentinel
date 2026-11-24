@@ -179,7 +179,7 @@
 							<input
 								type="datetime-local"
 								bind:value={since}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 							/>
 						</label>
 						<label class="flex items-center gap-2">
@@ -187,7 +187,7 @@
 							<input
 								type="datetime-local"
 								bind:value={until}
-								class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+								class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 							/>
 						</label>
 					</div>

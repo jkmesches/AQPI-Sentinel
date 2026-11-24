@@ -174,7 +174,7 @@
 		     load sets the interval and finer control would be a fiction. -->
 		<select
 			data-speed
-			class="ml-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1 py-0.5 text-[12px] num text-[var(--color-default)] hover:text-[var(--color-bright)] disabled:opacity-30 focus:outline-none focus:border-[var(--color-info)]"
+			class="ml-2 rounded-sm border border-[var(--color-border-control)] bg-[var(--color-surface)] px-1 py-0.5 text-[12px] num text-[var(--color-default)] hover:text-[var(--color-bright)] disabled:opacity-30 focus:outline-none focus:border-[var(--color-info)]"
 			value={String(speed)}
 			onchange={(e) =>
 				onSpeed?.(Number((e.target as HTMLSelectElement).value))}

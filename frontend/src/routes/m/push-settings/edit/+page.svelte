@@ -193,7 +193,7 @@
 				type="text"
 				bind:value={label}
 				placeholder="iPhone, Office laptop, …"
-				class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)]"
+				class="w-full rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)]"
 			/>
 		</section>
 
@@ -277,7 +277,7 @@
 						bind:value={customPattern}
 						placeholder="e.g. layer2.radar"
 						onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }}
-						class="flex-1 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-[16px] num text-[var(--color-bright)]"
+						class="flex-1 rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-3 py-2 text-[16px] num text-[var(--color-bright)]"
 					/>
 					<button type="button" onclick={addCustom} class="rounded-md border border-[var(--color-border-strong)] px-3 text-[12px] uppercase tracking-wider text-[var(--color-default)] active:bg-[var(--color-elevated)]" style="min-height: 44px;">add</button>
 				</div>
@@ -289,7 +289,7 @@
 			<label for="delay-min" class="mb-1 block text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notifying</label>
 			<div class="flex items-center gap-3">
 				<input id="delay-min" type="number" min="0" max="60" step="1" bind:value={delayMin}
-					class="w-24 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)] text-right" />
+					class="w-24 rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-3 py-2.5 text-[16px] num text-[var(--color-bright)] text-right" />
 				<span class="text-[13px] text-[var(--color-default)]">minutes</span>
 			</div>
 			<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
@@ -326,15 +326,15 @@
 				</div>
 				<div class="mt-3 flex items-center gap-2 flex-wrap">
 					<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Time window</span>
-					<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+					<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<span class="text-[var(--color-muted)]">→</span>
-					<input type="time" bind:value={twEnd} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+					<input type="time" bind:value={twEnd} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<button type="button" class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
 				</div>
 				{#if kind === 'biweekly'}
 					<div class="mt-3 flex items-center gap-2 flex-wrap">
 						<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Anchor date</span>
-						<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+						<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					</div>
 				{/if}
 			{:else}
@@ -350,9 +350,9 @@
 			</label>
 			{#if rdtEnabled}
 				<div class="mt-2 flex items-center gap-2 flex-wrap">
-					<input type="time" bind:value={rdtStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+					<input type="time" bind:value={rdtStart} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<span class="text-[var(--color-muted)]">→</span>
-					<input type="time" bind:value={rdtEnd} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+					<input type="time" bind:value={rdtEnd} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 					<span class="text-[12px] text-[var(--color-faint)] num">
 						{#if rdtStart && rdtEnd}
 							{rdtStart > rdtEnd ? 'overnight' : 'same day'}

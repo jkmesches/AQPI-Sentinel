@@ -318,7 +318,7 @@
 								<input
 									type="text"
 									bind:value={draft.name}
-									class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+									class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 								/>
 							</label>
 						</div>
@@ -327,7 +327,7 @@
 							<input
 								type="text"
 								bind:value={draft.description}
-								class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
+								class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]"
 							/>
 						</label>
 						<label class="flex items-center gap-2">
@@ -335,7 +335,7 @@
 							<select
 								value={draft.parent_group_id ?? ''}
 								onchange={(e) => (draft.parent_group_id = (e.target as HTMLSelectElement).value ? Number((e.target as HTMLSelectElement).value) : null)}
-								class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+								class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 							>
 								<option value="">— none —</option>
 								{#each parentOptions as p}
@@ -394,9 +394,9 @@
 								<ul class="space-y-1">
 									{#each draft.time_windows as w, i}
 										<li class="flex items-center gap-2">
-											<input type="time" bind:value={w.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={w.start} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<span class="text-[var(--color-muted)]">→</span>
-											<input type="time" bind:value={w.end} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={w.end} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<button class="text-[12px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeTimeWindow(i)}>remove</button>
 										</li>
 									{/each}
@@ -410,7 +410,7 @@
 								<input
 									type="date"
 									bind:value={draft.anchor_date}
-									class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+									class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 								/>
 								<div class="mt-1 text-[12px] text-[var(--color-faint)]">
 									On-weeks: the week containing the anchor date, and every other week after. Adjust to align with an existing rotation.
@@ -431,9 +431,9 @@
 							<ul class="space-y-1">
 								{#each draft.downtime as d, i}
 									<li class="flex items-center gap-2">
-										<input type="datetime-local" bind:value={d.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+										<input type="datetime-local" bind:value={d.start} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 										<span class="text-[var(--color-muted)]">→</span>
-										<input type="datetime-local" bind:value={d.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+										<input type="datetime-local" bind:value={d.end}   class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 										<button class="text-[12px] text-[var(--color-faint)] hover:text-[var(--color-fail)]" onclick={() => removeDowntime(i)}>remove</button>
 									</li>
 								{/each}
@@ -466,9 +466,9 @@
 											{/each}
 										</div>
 										<div class="flex items-center gap-2">
-											<input type="time" bind:value={r.start} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={r.start} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<span class="text-[var(--color-muted)]">→</span>
-											<input type="time" bind:value={r.end}   class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
+											<input type="time" bind:value={r.end}   class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-0.5 text-[12px] num text-[var(--color-bright)]" />
 											<span class="text-[12px] text-[var(--color-faint)] num">
 												{#if r.start && r.end}
 													{#if r.start > r.end}

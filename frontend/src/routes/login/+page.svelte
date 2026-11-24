@@ -46,7 +46,7 @@
 				bind:value={email}
 				autocomplete="email"
 				required
-				class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]"
+				class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]"
 			/>
 		</label>
 
@@ -57,7 +57,7 @@
 				bind:value={password}
 				autocomplete="current-password"
 				required
-				class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]"
+				class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]"
 			/>
 		</label>
 

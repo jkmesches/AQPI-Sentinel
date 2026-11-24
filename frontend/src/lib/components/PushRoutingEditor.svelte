@@ -161,7 +161,7 @@
 			type="text"
 			bind:value={label}
 			placeholder={subscription?.user_agent ? subscription.user_agent.slice(0, 40) : 'iPhone, Office laptop, …'}
-			class="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-[16px] num text-[var(--color-bright)]"
+			class="w-full rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-3 py-2 text-[16px] num text-[var(--color-bright)]"
 		/>
 	</section>
 
@@ -244,7 +244,7 @@
 					bind:value={pendingPattern}
 					placeholder="e.g. layer2.radar"
 					onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPattern(); } }}
-					class="flex-1 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-[14px] num text-[var(--color-bright)]"
+					class="flex-1 rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-3 py-2 text-[14px] num text-[var(--color-bright)]"
 				/>
 				<button type="button" onclick={addPattern} class="rounded-md border border-[var(--color-border-strong)] px-3 py-2 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)]">add</button>
 			</div>
@@ -261,7 +261,7 @@
 		<div class="mb-1 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Delay before notify</div>
 		<div class="flex items-center gap-3">
 			<input type="number" min="0" max="60" step="1" bind:value={delayMin}
-				class="w-20 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-2 text-[16px] num text-[var(--color-bright)] text-right" />
+				class="w-20 rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-2 text-[16px] num text-[var(--color-bright)] text-right" />
 			<span class="text-[12px] text-[var(--color-default)]">minutes</span>
 		</div>
 		<div class="mt-1 text-[12px] text-[var(--color-faint)] leading-relaxed">
@@ -301,15 +301,15 @@
 				{/each}
 			</div>
 			<div class="mt-2 flex items-center gap-2">
-				<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+				<input type="time" bind:value={twStart} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 				<span class="text-[var(--color-muted)]">→</span>
-				<input type="time" bind:value={twEnd}   class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+				<input type="time" bind:value={twEnd}   class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 				<button type="button" class="text-[12px] uppercase tracking-wider text-[var(--color-faint)] active:text-[var(--color-bright)]" onclick={() => { twStart = ''; twEnd = ''; }}>clear</button>
 			</div>
 			{#if kind === 'biweekly'}
 				<div class="mt-2 flex items-center gap-2">
 					<span class="text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Anchor</span>
-					<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
+					<input type="date" bind:value={anchorDate} class="rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1.5 text-[16px] num text-[var(--color-bright)]" />
 				</div>
 			{/if}
 		{:else}

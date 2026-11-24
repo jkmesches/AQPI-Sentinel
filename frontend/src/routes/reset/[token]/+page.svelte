@@ -77,12 +77,12 @@
 				<label class="block mb-3">
 					<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">new password</span>
 					<input type="password" bind:value={password} required minlength="8"
-						class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
+						class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
 				</label>
 				<label class="block mb-4">
 					<span class="block text-[12px] uppercase tracking-wider text-[var(--color-muted)] mb-1">confirm</span>
 					<input type="password" bind:value={confirm} required
-						class="w-full border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
+						class="w-full border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] text-[var(--color-bright)] num focus:outline-none focus:border-[var(--color-ok)]" />
 				</label>
 				{#if error}
 					<div class="mb-3 border border-[var(--color-fail)]/40 bg-[var(--color-fail)]/10 px-2 py-1 text-[12px] text-[var(--color-fail)]">{error}</div>

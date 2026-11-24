@@ -261,7 +261,7 @@
 						</td>
 						<td class="px-2 py-1">
 							<select
-								class="bg-[var(--color-canvas)] border border-[var(--color-border-strong)] text-[12px] px-1 py-0.5 num"
+								class="bg-[var(--color-canvas)] border border-[var(--color-border-control)] text-[12px] px-1 py-0.5 num"
 								value={u.role}
 								onchange={(e) => setRole(u, (e.currentTarget as HTMLSelectElement).value as 'admin' | 'user')}
 							>
@@ -327,16 +327,16 @@
 		<div class="label text-[var(--color-bright)] mb-3">INVITE USER</div>
 		<div class="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
 			<label for="invite-email" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">email</label>
-			<input id="invite-email" bind:value={newEmail} type="email" required class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
+			<input id="invite-email" bind:value={newEmail} type="email" required class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num" />
 
 			<label for="invite-role" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">role</label>
-			<select id="invite-role" bind:value={newRole} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num w-32">
+			<select id="invite-role" bind:value={newRole} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num w-32">
 				<option value="user">user</option>
 				<option value="admin">admin</option>
 			</select>
 
 			<label for="invite-display" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">display name</label>
-			<input id="invite-display" bind:value={newDisplay} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
+			<input id="invite-display" bind:value={newDisplay} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px]" placeholder="optional" />
 
 			<span id="invite-groups" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">groups</span>
 			{#if allGroups.length === 0}

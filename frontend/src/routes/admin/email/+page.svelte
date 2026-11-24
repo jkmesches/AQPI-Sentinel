@@ -110,22 +110,22 @@
 	{:else}
 		<div class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-[12px] items-center">
 			<label for="smtp-host" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">SMTP host</label>
-			<input id="smtp-host" bind:value={v.host} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="smtp.gmail.com" />
+			<input id="smtp-host" bind:value={v.host} class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="smtp.gmail.com" />
 
 			<label for="smtp-port" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">port</label>
-			<input id="smtp-port" bind:value={v.port} type="number" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-24" />
+			<input id="smtp-port" bind:value={v.port} type="number" class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-24" />
 
 			<label for="smtp-username" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">username</label>
-			<input id="smtp-username" bind:value={v.username} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" />
+			<input id="smtp-username" bind:value={v.username} class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" />
 
 			<label for="smtp-password" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">password</label>
-			<input id="smtp-password" bind:value={v.password} type="password" class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" placeholder={updatedAt ? '(unchanged)' : ''} />
+			<input id="smtp-password" bind:value={v.password} type="password" class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" autocomplete="off" placeholder={updatedAt ? '(unchanged)' : ''} />
 
 			<label for="smtp-from-name" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from name</label>
-			<input id="smtp-from-name" bind:value={v.from_name} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="AQPI Sentinel" />
+			<input id="smtp-from-name" bind:value={v.from_name} class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="AQPI Sentinel" />
 
 			<label for="smtp-from-addr" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">from address</label>
-			<input id="smtp-from-addr" bind:value={v.from_addr} class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="sentinel@example.com" />
+			<input id="smtp-from-addr" bind:value={v.from_addr} class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num" placeholder="sentinel@example.com" />
 
 			<span id="smtp-encryption" class="text-[var(--color-muted)] uppercase tracking-wider text-[12px]">encryption</span>
 			<div
@@ -170,7 +170,7 @@
 				<input
 					bind:value={testTo}
 					placeholder="recipient@example.com"
-					class="border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-72"
+					class="border border-[var(--color-border-control)] bg-[var(--color-canvas)] px-2 py-1.5 text-[12px] num w-72"
 				/>
 				<button
 					class="border border-[var(--color-border-strong)] px-3 py-1.5 text-[12px] uppercase tracking-wider text-[var(--color-default)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-bright)] disabled:opacity-50"

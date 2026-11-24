@@ -17,6 +17,9 @@ wrong, each silent:
   - A literal color in a scoped block (.band, the light footer). The ui
     check's palette is the tokens defined at the root, so a literal there
     reads as an off-palette color on every page.
+  - A text field drawn with an edge under 3:1 (WCAG 1.4.11). Fields sat at
+    1.2 to 1.4:1 until 2026-11-24, because the global border rule sat outside
+    any CSS layer and beat every border color class in the markup.
 """
 from __future__ import annotations
 
@@ -32,6 +35,10 @@ TEXT = ("default", "muted", "faint", "accent", "ok", "warn", "fail", "error", "i
 SURFACES = ("canvas", "surface", "surface-hi")
 BAND_TEXT = ("default", "muted", "faint", "accent", "ok", "warn", "fail", "error", "info")
 AA = 4.5
+NON_TEXT = 3.0
+SRC = ROOT / "frontend" / "src"
+CONTROL_RE = r"<(input|select|textarea)\b"
+BORDER_CLASS_RE = r"(?<![\w-])border(?![\w-])"
 # A token whose comment states a ratio: name, color, ratio, and what it is on.
 CLAIM_RE = r"--color-([\w-]+):\s*(#[0-9a-fA-F]{6});\s*/\*\s*([\d.]+):1(?: on ([\w-]+))?"
 failures: list[str] = []
@@ -166,6 +173,60 @@ def test_claims() -> None:
     check("the comments state ratios to check", claims >= 15, str(claims))
 
 
+def tag_text(source: str, start: int) -> str:
+    """The text of the tag opening at an index, through its closing '>'.
+
+    Args:
+        source: A Svelte file's text.
+        start: The index of the tag's '<'.
+
+    Returns:
+        The tag, skipping any '>' inside quotes or {expressions}.
+
+    Raises:
+        ValueError: If the tag never closes.
+    """
+    depth, quote = 0, ""
+    for i in range(start + 1, len(source)):
+        c = source[i]
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "\"'" and depth == 0:
+            quote = c
+        elif c in "{}":
+            depth += 1 if c == "{" else -1
+        elif c == ">" and depth == 0:
+            return source[start:i + 1]
+    raise ValueError(f"tag at {start} never closes")
+
+
+def test_controls() -> None:
+    """Text fields, menus and text areas have a 3:1 edge, and the markup applies it."""
+    print("\ncontrol edges:")
+    for name, theme in (("dark", DARK), ("light", LIGHT)):
+        low = [f"{s} {contrast(theme['border-control'], theme[s]):.2f}" for s in SURFACES
+               if contrast(theme["border-control"], theme[s]) < NON_TEXT]
+        check(f"{name} border-control is {NON_TEXT}:1 on every surface", not low, ", ".join(low))
+    layered = re.search(r"@layer base \{\s*\*, ::before, ::after \{ border-color:", CSS)
+    check("the global border color sits in the base layer", layered is not None)
+    unlayered = re.findall(r"^\*[^{]*\{[^}]*border-color", CSS, re.M)
+    check("no unlayered rule sets border-color on every element", not unlayered,
+          ", ".join(unlayered))
+    bordered, off = 0, []
+    for path in sorted(SRC.rglob("*.svelte")):
+        source = path.read_text()
+        for m in re.finditer(CONTROL_RE, source):
+            tag = tag_text(source, m.start())
+            if not re.search(BORDER_CLASS_RE, tag):
+                continue
+            bordered += 1
+            if "border-[var(--color-border-control)]" not in tag:
+                line = source.count("\n", 0, m.start()) + 1
+                off.append(f"{path.relative_to(SRC)}:{line}")
+    check("every bordered control uses border-control", not off, ", ".join(off))
+    check("the markup has bordered controls to check", bordered >= 100, str(bordered))
+
+
 def test_map_copy() -> None:
     """$lib/palette.ts holds the same values as app.css."""
     print("\nthe map's copy of the palette:")
@@ -188,6 +249,7 @@ def main() -> int:
     test_contrast()
     test_scoped_blocks()
     test_claims()
+    test_controls()
     test_map_copy()
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall palette assertions passed")

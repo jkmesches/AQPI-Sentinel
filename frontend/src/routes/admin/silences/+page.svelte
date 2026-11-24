@@ -290,7 +290,7 @@
 							<input
 								type="text"
 								bind:value={idDraft}
-								class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
+								class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]"
 								placeholder="leave blank to auto-generate"
 							/>
 						</label>
@@ -316,17 +316,17 @@
 
 					<label class="flex items-center gap-2">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Starts</span>
-						<input type="datetime-local" bind:value={starts} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+						<input type="datetime-local" bind:value={starts} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<label class="flex items-center gap-2">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Ends</span>
-						<input type="datetime-local" bind:value={ends} class="border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
+						<input type="datetime-local" bind:value={ends} class="border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] num text-[var(--color-bright)]" />
 					</label>
 
 					<label class="flex items-center gap-2">
 						<span class="w-24 text-[12px] uppercase tracking-wider text-[var(--color-muted)]">Reason</span>
-						<input type="text" bind:value={reason} class="flex-1 border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]" placeholder="planned downtime / known-bad upstream / …" />
+						<input type="text" bind:value={reason} class="flex-1 border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2 py-1 text-[12px] text-[var(--color-default)]" placeholder="planned downtime / known-bad upstream / …" />
 					</label>
 				</div>
 
