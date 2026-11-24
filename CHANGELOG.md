@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.15.9] - 2026-11-24
+
 ### Added
 
 - **"hide NEXRAD" on the Timeline.** Beside "hide RadarCA" in the Timeline
