@@ -14,7 +14,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 
 from ...checks.transports import CheckContext  # noqa: TID252  relative, as every import in this module
 from ...config import (NEXRAD_SITES, PRODUCTS,  # noqa: TID252  file convention
-                       RADAR_FOLDER, SETTINGS, image_path,
+                       RADAR_FOLDER, SETTINGS, image_path, is_step_named,
                        manifest_rel, moment_to_prefix)
 from ... import fs_products as _fs
 from ...errors import humanize_error
@@ -85,7 +85,8 @@ async def latest_product_image(product_id: str, request: Request,
     file_path = image_path(product_id, latest, unit)
     try:
         body, ct, prov = await _serve_source(
-            request.app, ctx, file_path, fetcher=_product_fetcher(file_path))
+            request.app, ctx, file_path, fetcher=_product_fetcher(file_path),
+            cache_key=_frame_key(product_id, file_path, steps[-1]))
     except HTTPException:
         raise
     except Exception as e:
@@ -182,9 +183,12 @@ async def product_image_by_step(product_id: str, step: int, request: Request,
     _fetch = _product_fetcher(file_path)
 
     # LRU -> local archive -> upstream. Scrubbing over frames Sentinel has
-    # already captured now costs radarca nothing at all.
+    # already captured now costs radarca nothing at all. A step-named
+    # forecast frame skips the archive, which only knows the file name.
     try:
-        body, ct, prov = await _serve_source(request.app, ctx, file_path, fetcher=_fetch)
+        body, ct, prov = await _serve_source(
+            request.app, ctx, file_path, fetcher=_fetch,
+            cache_key=_frame_key(product_id, file_path, steps[step]))
     except HTTPException:
         raise
     except Exception as e:
@@ -217,6 +221,39 @@ from collections import OrderedDict as _OrderedDict
 
 from ...archive import lookup_by_source as _archive_lookup
 from ...archive import save_image as _archive_save
+
+
+def _frame_key(product_id: str, source: str, step: dict[str, Any]) -> str | None:
+    """The memory-cache key for one manifest step's frame, when its name is not enough.
+
+    Most products put the frame's time in its file name, so the name alone
+    identifies the bytes and the caches key on it. A `step_named` product
+    (the HRRR forecasts) overwrites the same names every run, so its key adds
+    the step's valid time, which moves with each run. The manifest is written
+    after the run's frames (measured on the published tree, 2026-11-25), so a
+    manifest's valid time never names bytes from an older run.
+
+    Args:
+        product_id: The product.
+        source: The frame's path, from image_path.
+        step: The manifest step the frame came from.
+
+    Returns:
+        "<source>@<valid time>" for a step-named product, else None, which
+        keeps the plain name as the key and the archive in front of upstream.
+
+    Raises:
+        HTTPException: 502 when a step-named product's step has no valid time,
+            since the name alone would serve an old run's frame.
+    """
+    if not is_step_named(product_id):
+        return None
+    valid = step.get("timestamp")
+    if not valid:
+        raise HTTPException(
+            502, f"{product_id} step {step.get('imageName')!r} has no timestamp, "
+                 "and its file name alone does not identify the frame")
+    return f"{source}@{valid}"
 
 # LRU cache (process-local). Bytes are kept in-memory so re-rendering the
 # same timeline cell doesn't hit the disk or radarca again. Bounded so
@@ -518,11 +555,15 @@ async def image_by_source(source: str, request: Request):
 
 
 async def _serve_source(app, ctx, source: str, fetcher=None,
-                        origin_url: str | None = None,
-                        archive_only: bool = False) -> tuple[bytes, str, str]:
+                        origin_url: str | None = None, *,
+                        archive_only: bool = False,
+                        cache_key: str | None = None) -> tuple[bytes, str, str]:
     """Resolve one upstream image path to bytes, cheapest source first.
 
-    Order: in-process LRU -> local archive -> upstream.
+    Order: in-process LRU -> local archive -> upstream. With `cache_key` (from
+    _frame_key, for a frame whose file name is reused every run) the LRU, the
+    single-flight and the negative cache use that key, and the archive is
+    skipped, since it finds frames by file name alone.
 
     The archive step is the important one and was missing from the map's two
     hot paths (product_image.png, xband_scan.png) — they went straight
@@ -535,19 +576,22 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
     lru | disk | mount | upstream, surfaced as the x-sentinel-cache header.
     A frame that cost radarca something therefore says so in devtools.
     """
-    cached = _IMAGE_CACHE.get(source)
+    if archive_only and cache_key is not None:
+        raise ValueError(f"{source}: archive_only needs a frame the archive can name")
+    key = cache_key or source
+    cached = _IMAGE_CACHE.get(key)
     if cached is not None:
         body, ct = cached
-        _IMAGE_CACHE.move_to_end(source)
+        _IMAGE_CACHE.move_to_end(key)
         return body, ct, "lru"
 
     store = getattr(app.state, "store", None)
     pool = store.pool if store else None
-    if pool is not None and SETTINGS.archive_enabled:
+    if pool is not None and SETTINGS.archive_enabled and cache_key is None:
         hit = await _archive_lookup(pool, SETTINGS.archive_root, source)
         if hit is not None:
             body, ct = hit
-            _IMAGE_CACHE[source] = (body, ct)
+            _IMAGE_CACHE[key] = (body, ct)
             while len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
                 _IMAGE_CACHE.popitem(last=False)
             return body, ct, "disk"
@@ -558,20 +602,24 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
     if archive_only:
         raise HTTPException(404, f"{source} is not in the archive")
 
-    exp = _NEG_CACHE.get(source)
+    exp = _NEG_CACHE.get(key)
     if exp is not None:
         if exp > _time_mod.monotonic():
             raise HTTPException(
                 502, f"upstream image unavailable for {source} (negative-cached)"
             )
-        _NEG_CACHE.pop(source, None)
+        _NEG_CACHE.pop(key, None)
 
-    task = _INFLIGHT.get(source)
+    task = _INFLIGHT.get(key)
     if task is None:
         task = _asyncio.create_task(
-            _fetch_image_upstream(ctx, pool, source, fetcher, origin_url))
-        _INFLIGHT[source] = task
-        task.add_done_callback(lambda t, k=source: _INFLIGHT.pop(k, None))
+            _fetch_image_upstream(ctx, pool, source, fetcher, origin_url, cache_key=key))
+        _INFLIGHT[key] = task
+
+        def _forget(_t: _asyncio.Task[tuple[bytes, str]]) -> None:
+            _ = _INFLIGHT.pop(key, None)
+
+        task.add_done_callback(_forget)
     body, ct = await _asyncio.shield(task)
     # Name the origin the bytes came from rather than the tier's position.
     # "upstream" meant radarca when this was written and now usually means a
@@ -590,8 +638,12 @@ async def _serve_source(app, ctx, source: str, fetcher=None,
 
 
 async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,
-                                origin_url: str | None = None) -> tuple[bytes, str]:
+                                origin_url: str | None = None,
+                                cache_key: str | None = None) -> tuple[bytes, str]:
     """Fetch one image, populate caches, archive it.
+
+    `cache_key` replaces `source` as the LRU and negative-cache key, as in
+    _serve_source. The archive still records the bytes under `source`.
 
     ``fetcher`` lets a second origin reuse every protection built around this
     path — the LRU, the single-flight, the negative cache and the archive are
@@ -608,12 +660,13 @@ async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,
         origin_url = f"{SETTINGS.base}/api/imageData?file={source}"
     else:
         ir = await fetcher()
+    key = cache_key or source
     if ir.status_code != 200 or not ir.headers.get("content-type", "").startswith("image/"):
-        _NEG_CACHE[source] = _time_mod.monotonic() + _NEG_TTL_S
+        _NEG_CACHE[key] = _time_mod.monotonic() + _NEG_TTL_S
         raise HTTPException(502, f"upstream image HTTP {ir.status_code} for {source}")
     body = ir.content
     ct = ir.headers.get("content-type", "image/png")
-    _IMAGE_CACHE[source] = (body, ct)
+    _IMAGE_CACHE[key] = (body, ct)
     while len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
         _IMAGE_CACHE.popitem(last=False)
     # Opportunistically archive — same logic as a live L4 capture, so a
@@ -637,7 +690,7 @@ _activity_cache: dict[str, float] = {}
 
 async def _activity_for(app: FastAPI, ctx: CheckContext, scan_path: str,
                         fetcher: Callable[[], Awaitable[_fs.FsResponse]] | None = None,
-                        ) -> float:
+                        cache_key: str | None = None) -> float:
     """Non-empty pixel fraction for one frame.
 
     Goes through _serve_source, so the sparkline is computed from our own
@@ -647,15 +700,18 @@ async def _activity_for(app: FastAPI, ctx: CheckContext, scan_path: str,
     fetched all of them straight from radarca and decoded each with PIL.
 
     `fetcher` reads the frame off the mount, for a frame radarca does not
-    serve (the NEXRAD sites).
+    serve (the NEXRAD sites). `cache_key` is _frame_key's, for a step-named
+    frame, and keys this cache as it keys _serve_source's.
     """
-    cached = _activity_cache.get(scan_path)
+    key = cache_key or scan_path
+    cached = _activity_cache.get(key)
     if cached is not None:
         return cached
     try:
-        body, _ct, _prov = await _serve_source(app, ctx, scan_path, fetcher=fetcher)
+        body, _ct, _prov = await _serve_source(app, ctx, scan_path, fetcher=fetcher,
+                                               cache_key=cache_key)
     except Exception:
-        _activity_cache[scan_path] = 0.0
+        _activity_cache[key] = 0.0
         return 0.0
     try:
         import io as _io
@@ -665,7 +721,7 @@ async def _activity_for(app: FastAPI, ctx: CheckContext, scan_path: str,
         ratio = float((arr[:, :, 3] > 10).sum()) / arr[:, :, 3].size
     except Exception:
         ratio = 0.0
-    _activity_cache[scan_path] = ratio
+    _activity_cache[key] = ratio
     return ratio
 
 
@@ -691,7 +747,9 @@ async def step_activity(
         for i, s in enumerate(await _product_steps_cached(ctx, product_id, cfg["details"])):
             path = image_path(product_id, s["imageName"])
             out.append({"i": i, "ts": s.get("timestamp"),
-                        "activity": await _activity_for(request.app, ctx, path)})
+                        "activity": await _activity_for(
+                            request.app, ctx, path,
+                            cache_key=_frame_key(product_id, path, s))})
     elif radar and radar in NEXRAD_SITES:
         # Off the mount, since radarca's listing holds no NEXRAD frames.
         for i, (ts, source) in enumerate(await _nexrad_frames(radar, moment)):

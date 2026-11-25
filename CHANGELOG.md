@@ -28,6 +28,18 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The forecast layers show the current model run.** The HRRR forecasts
+  (rain rate, total and cumulative precip, temperature) name their frames by
+  step and overwrite the same names every run. The map, the latest-frame
+  route and the activity strip cached those frames by name and read them from
+  the archive by name, so each step kept the first copy Sentinel had seen of
+  it. On 2026-11-25 the map served temperature frames from August through
+  October, and a rain rate frame with rain in it while radarca's own step was
+  blank. These four products are now cached by name and valid time, and are
+  no longer read from the archive by name.
+
 ## [0.16.3] - 2026-11-25
 
 ### Added

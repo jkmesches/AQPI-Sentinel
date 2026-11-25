@@ -275,29 +275,34 @@ PRODUCTS = {
     #    upstream model adjusts its forecast horizon hour-to-hour
     #    (observed range: 19-130 steps in a single week for fcst_temp).
     #    No fixed tolerance makes sense; the check is skipped per-row.
+    # `step_named`: the frames are named by step (C_hrrr_prate_step41.png),
+    # and every model run overwrites the same names. The file name alone
+    # therefore never identifies the bytes, and the image proxy keys these
+    # frames on name and valid time (see upstream._frame_key). Keyed on the
+    # name, the map served each step's first capture for weeks.
     "fcst_total_precip":      {"details": "total_precip/details_in.json",
                                "image_dir": "total_precip/images/",
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True,
-                               "units": UNITS_DEPTH},
+                               "units": UNITS_DEPTH, "step_named": True},
     "fcst_total_precip_cum":  {"details": "total_precip_cumulative/details_in.json",
                                "image_dir": "total_precip_cumulative/images/",
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in", "unit_subdir": True,
-                               "units": UNITS_DEPTH},
+                               "units": UNITS_DEPTH, "step_named": True},
     "fcst_precip_rate":       {"details": "precip_rate/details_in.json",
                                "image_dir": "precip_rate/images/",
                                "cadence_s": 900, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 1_500,
                                "unit": "in/h", "unit_subdir": True,
-                               "units": UNITS_RATE},
+                               "units": UNITS_RATE, "step_named": True},
     "fcst_temp":              {"details": "temperature/details_F.json",
                                "image_dir": "temperature/images/",
                                "cadence_s": 3600, "expected_steps": None,
                                "max_freshness_s": 7200, "min_png_bytes": 5_000,
-                               "unit": "F", "unit_subdir": True},
+                               "unit": "F", "unit_subdir": True, "step_named": True},
     # The four CoSMoS products are published in meters. radarca's catalog
     # advertises them as feet and this table copied that, while the
     # colorbars the publisher draws beside the frames are labelled m and
@@ -661,6 +666,21 @@ L4_PROFILES: dict[str, dict[str, object]] = {
 def l4_profile(identifier: str) -> dict[str, object]:
     """Merge any per-product overrides over the defaults."""
     return {**DEFAULT_L4_PROFILE, **L4_PROFILES.get(identifier, {})}
+
+
+def is_step_named(product_id: str) -> bool:
+    """Whether a product names its frames by step and overwrites them every run.
+
+    Args:
+        product_id: The product.
+
+    Returns:
+        True for the HRRR forecasts, whose file names never identify the bytes.
+
+    Raises:
+        KeyError: If the product is not published by this profile.
+    """
+    return bool(_product_cfg(product_id).get("step_named"))
 
 
 def image_path(product_id: str, image_name: str,
