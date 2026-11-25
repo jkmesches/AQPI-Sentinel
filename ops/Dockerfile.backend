@@ -51,9 +51,12 @@ COPY backend ./backend
 COPY alerts.yaml ./alerts.yaml
 
 # Non-root runtime user. Owns /app, /data, and the playwright cache so
-# it can launch chromium.
+# it can launch chromium. Docker gives a new, empty named volume the
+# owner of the image's directory at its mount point, and a mount point
+# missing from the image as root:root 755. /data/cold was missing, so
+# the retention sweep could not write its exports and never ran.
 RUN useradd --uid 1000 --create-home sentinel \
- && mkdir -p /data/archive \
+ && mkdir -p /data/archive /data/cold \
  && chown -R sentinel:sentinel /app /data /ms-playwright
 USER sentinel
 
