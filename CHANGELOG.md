@@ -28,6 +28,12 @@ unknown`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dark mode is the default.** A viewer who has not picked a theme now gets
+  dark, where the console followed the operating system's setting. A theme
+  already picked (Light, Auto or Dark) is kept.
+
 ## [0.16.2] - 2026-11-25
 
 ### Changed

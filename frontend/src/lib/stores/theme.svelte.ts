@@ -5,9 +5,13 @@
 
 export type ThemeMode = 'auto' | 'light' | 'dark';
 const KEY = 'sentinel-theme';
+// The mode before a viewer picks one. src/app.html's pre-paint script holds a
+// copy, since it runs before any module loads; the two must agree, or the page
+// paints in one theme and switches on mount.
+export const DEFAULT_MODE: ThemeMode = 'dark';
 
 class ThemeStore {
-	mode = $state<ThemeMode>('auto');
+	mode = $state<ThemeMode>(DEFAULT_MODE);
 	systemDark = $state(false);
 
 	readonly resolved = $derived<'light' | 'dark'>(
@@ -21,7 +25,7 @@ class ThemeStore {
 
 	start() {
 		if (typeof window === 'undefined') return;
-		const saved = (localStorage.getItem(KEY) as ThemeMode | null) ?? 'auto';
+		const saved = (localStorage.getItem(KEY) as ThemeMode | null) ?? DEFAULT_MODE;
 		if (saved === 'auto' || saved === 'light' || saved === 'dark') this.mode = saved;
 		this.mql = window.matchMedia('(prefers-color-scheme: dark)');
 		this.systemDark = this.mql.matches;

@@ -9,7 +9,8 @@
 		<script>
 			(function () {
 				try {
-					var m = localStorage.getItem('sentinel-theme') || 'auto';
+					// The default matches DEFAULT_MODE in src/lib/stores/theme.svelte.ts.
+					var m = localStorage.getItem('sentinel-theme') || 'dark';
 					var dark = m === 'dark' || (m === 'auto' &&
 						window.matchMedia('(prefers-color-scheme: dark)').matches);
 					document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
