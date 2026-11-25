@@ -27,6 +27,7 @@ import asyncio
 import gzip
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,10 @@ FLUSH_BYTES = 4 * 1024 * 1024
 # deletes nothing, and the next day's sweep tries again.
 FILE_TIMEOUT_S = 60.0
 EXPORT_TIMEOUT_S = 1800.0
+# Archive files removed per call to the stores' pool. Kept small because it
+# bounds the window in which a frame saved again can lose its file, which is
+# one chunk's unlinks, and each chunk costs one query.
+UNLINK_CHUNK = 200
 
 
 class OffloadError(RuntimeError):
@@ -356,41 +361,77 @@ async def prune_archive(pool: asyncpg.Pool, archive_root: Path, cutoff: datetime
     Raises:
         OffloadError: When the archive store is not attached or gives no answer.
     """
-    rows = await pool.fetch(
-        "SELECT sha256, ext FROM image_archive WHERE last_seen_at < $1", cutoff
-    )
-    if not rows:
-        return {"table": "image_archive", "rows": 0, "bytes": 0}
     await _require_store(archive_root, marker)
 
     # Rows first, files after the commit. The other way round, a delete that
     # failed (a reference added since, or the database down) left rows whose
     # files were gone, and every sweep repeated it; a file left after a
-    # committed delete only costs disk.
-    shas = [r["sha256"] for r in rows]
+    # committed delete only costs disk. FOR UPDATE makes a capture that sees
+    # one of these frames again wait for the commit, so the DELETEs never take
+    # a frame seen after the SELECT.
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute("DELETE FROM image_observations WHERE sha256 = ANY($1::text[])",
-                           shas)
-        await conn.execute("DELETE FROM image_index   WHERE sha256 = ANY($1::text[])", shas)
-        await conn.execute("DELETE FROM image_archive WHERE sha256 = ANY($1::text[])", shas)
+        rows = await conn.fetch(
+            "SELECT sha256, ext FROM image_archive WHERE last_seen_at < $1 FOR UPDATE", cutoff)
+        shas = [r["sha256"] for r in rows]
+        if shas:
+            await conn.execute("DELETE FROM image_observations WHERE sha256 = ANY($1::text[])",
+                               shas)
+            await conn.execute("DELETE FROM image_index WHERE sha256 = ANY($1::text[])", shas)
+            await conn.execute("DELETE FROM image_archive WHERE sha256 = ANY($1::text[])", shas)
+    if not shas:
+        return {"table": "image_archive", "rows": 0, "bytes": 0}
 
-    paths = [archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}" for r in rows]
-    try:
-        freed = await STORAGE_IO.run(_unlink_all, paths, timeout_s=EXPORT_TIMEOUT_S)
-    except (StorageBusyError, TimeoutError):
-        # The rows are gone, so the files are only disk, and an orphan sweep
-        # can remove them once the store answers.
-        log.warning("retention: the archive store gave no answer; %d image files "
-                    "outlive their rows", len(paths))
-        freed = 0
+    freed = await _unlink_unclaimed(pool, archive_root, rows)
     log.info("retention: pruned %d archived images (%.1f MB)", len(shas), freed / 1e6)
     return {"table": "image_archive", "rows": len(shas), "bytes": freed}
 
 
-def _unlink_all(paths: list[Path]) -> int:
-    """Remove each file, and return the bytes freed. Runs on the stores' pool."""
+async def _unlink_unclaimed(pool: asyncpg.Pool, archive_root: Path,
+                            rows: list[asyncpg.Record]) -> int:
+    """Remove the files of pruned rows, a chunk at a time.
+
+    A capture that found a frame's file just before the delete skips the write
+    and then puts its row back, so each chunk first drops the frames whose
+    rows are back. The window left is one chunk's unlinks, and the next
+    capture of that frame writes the file again.
+
+    Args:
+        pool: The store's pool.
+        archive_root: The archive's root.
+        rows: The deleted rows' sha256 and ext.
+
+    Returns:
+        The bytes freed.
+    """
+    # A chunk that times out keeps running in its thread, which stops at its
+    # next file once this is set, rather than unlinking frames saved later.
+    stop = threading.Event()
+    freed = 0
+    for start in range(0, len(rows), UNLINK_CHUNK):
+        chunk = rows[start:start + UNLINK_CHUNK]
+        back = {r["sha256"] for r in await pool.fetch(
+            "SELECT sha256 FROM image_archive WHERE sha256 = ANY($1::text[])",
+            [r["sha256"] for r in chunk])}
+        paths = [archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}"
+                 for r in chunk if r["sha256"] not in back]
+        try:
+            freed += await STORAGE_IO.run(_unlink_all, paths, stop, timeout_s=FILE_TIMEOUT_S)
+        except (StorageBusyError, TimeoutError):
+            stop.set()
+            # The rows are gone, so the files are only disk, and an orphan sweep
+            # can remove them once the store answers.
+            log.warning("retention: the archive store gave no answer; %d image files "
+                        "outlive their rows", len(rows) - start)
+            break
+    return freed
+
+
+def _unlink_all(paths: list[Path], stop: threading.Event) -> int:
+    """Remove each file until `stop` is set, and return the bytes freed. Runs on the pool."""
     freed = 0
     for path in paths:
+        if stop.is_set():
+            break
         try:
             freed += path.stat().st_size
             path.unlink()

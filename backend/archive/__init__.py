@@ -13,10 +13,12 @@ one image_archive row, with potentially many image_index rows pointing
 at that sha.
 """
 from __future__ import annotations
+import contextlib
 import hashlib
 import io
 import logging
 import os
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,20 +100,42 @@ def _sha_path(root: Path, sha: str, ext: str) -> Path:
 
 
 def _write_blob(root: Path, path: Path, content: bytes, marker: str | None) -> None:
-    """Idempotent write of one content-addressed blob. Runs in a thread.
+    """Write one content-addressed blob unless it is already whole. Runs on the stores' pool.
 
-    Idempotent because many checks hash to the same sha and there's no point
-    rewriting the file; the tmp+rename also avoids a partial file being
-    visible if two checks fire concurrently for the same content. The marker
-    test comes first, so nothing is created on a share that is not attached.
+    Many checks hash to the same sha, so a file of the right size is left
+    alone, and one of another size (cut short by a crash) is written again.
+    Each call writes a temporary file of its own and renames it into place,
+    so the file at `path` is always complete. The marker test comes first,
+    so nothing is created on a share that is not attached.
+
+    Args:
+        root: The archive's root.
+        path: Where the blob goes, under `root`.
+        content: The blob.
+        marker: SETTINGS.storage_marker, or None for no test.
+
+    Raises:
+        StorageNotMountedError: When `root` lacks the marker.
+        OSError: When the store refuses the write.
     """
     require_marker(root, marker)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        return
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(content)
-    os.replace(tmp, path)
+    try:
+        if path.stat().st_size == len(content):
+            return
+    except FileNotFoundError:
+        pass
+    # A shared name let a second writer (another check, or a retry while a
+    # timed-out call still ran on a stalled share) truncate the file the first
+    # was about to rename, which published an empty frame for good.
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        tmp.write_bytes(content)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):  # the write's own error is re-raised below
+            tmp.unlink(missing_ok=True)
+        raise
 
 
 def _read_blob(path: Path) -> bytes | None:

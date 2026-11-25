@@ -43,7 +43,9 @@ unknown`.
   empty local folder that Docker binds in its place. With the setting, the
   backend writes nothing to a store that lacks the file, the retention sweep
   exports and deletes nothing, and `layer0.self.disk` fails with "NOT
-  ATTACHED". Unset, nothing changes.
+  ATTACHED". The check warns when a store's marker test errors or gets no
+  answer, and `ops/preflight.sh` warns when a store is a host path and no
+  marker is set. Unset, nothing changes.
 - **`SENTINEL_STORAGE_GID` adds a group to the backend's user.** The backend
   runs as uid 1000, and store folders on a share may grant write to a group
   instead. The three compose files pass the number to `group_add`, and
@@ -66,6 +68,17 @@ unknown`.
   a time limit on each, and the export streams straight into its gzip file. A
   stalled share costs skipped archive writes and a skipped sweep, and
   `layer0.self.disk` reports it.
+- **An archived frame is never left part-written.** Two saves of the same
+  frame shared one temporary file, so one could truncate the file the other
+  was renaming into place, and later saves then skipped the empty frame for
+  good. Each save now writes a file of its own, and a frame whose size is
+  wrong is written again.
+- **Archive retention keeps a frame seen again while it runs.** The prune
+  could delete the row and file of a frame captured between its query and its
+  delete, and an unlink that timed out on a stalled share went on to remove
+  frames saved after it. The rows are now locked from query to delete, the
+  files go in chunks that skip any frame whose row is back, and an unlink
+  that times out stops at its next file.
 
 ## [0.16.2] - 2026-11-25
 

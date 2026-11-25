@@ -24,9 +24,11 @@ import io
 import os
 import sys
 import tempfile
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -35,7 +37,9 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 import asyncpg  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from backend.archive import Observation, save_image, touch_observation  # noqa: E402
+from backend import retention  # noqa: E402
+from backend.archive import (Observation, lookup_by_source, save_image,  # noqa: E402
+                             touch_observation)
 from backend.archive.backfill import backfill_observations  # noqa: E402
 from backend.db.store import Store  # noqa: E402
 from backend.retention import prune_archive  # noqa: E402
@@ -259,6 +263,75 @@ async def test_after_backfill(pool: asyncpg.Pool, root: Path) -> None:
           f"{result}, {before} observation rows before")
 
 
+async def test_prune_races(pool: asyncpg.Pool, root: Path) -> None:
+    """A prune keeps a frame seen again during it, and its late unlinks stop.
+
+    Args:
+        pool: The pool, in a schema whose archive tables the prune may empty.
+        root: The archive's root.
+    """
+    print("\nprune races:")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    async def stale_frame(seed: int, source: str) -> str:
+        sha = await save_image(pool, root, source=source, content=png(seed), marker=None,
+                               content_type="image/png")
+        await pool.execute("UPDATE image_archive SET last_seen_at = $1 WHERE sha256 = $2",
+                           cutoff - timedelta(days=30), sha)
+        return str(sha)
+
+    def frame(sha: str) -> Path:
+        return root / sha[:2] / f"{sha}.png"
+
+    sha = await stale_frame(21, "races/a.png")
+
+    async def seen_again(store: Path, marker: str | None) -> None:
+        await pool.execute("UPDATE image_archive SET last_seen_at = now() WHERE sha256 = $1",
+                           sha)
+
+    with mock.patch.object(retention, "_require_store", seen_again):
+        result = await prune_archive(pool, root, cutoff, marker=None)
+    kept = await pool.fetchval("SELECT count(*) FROM image_archive WHERE sha256 = $1", sha)
+    check("a frame seen while the prune tests its store keeps its row and file",
+          kept == 1 and frame(sha).exists(), f"{result}, {kept} rows")
+
+    # The share answers only after the prune's unlink call has timed out, and
+    # the frame is saved again in between.
+    sha = await stale_frame(22, "races/b.png")
+    answer, done = threading.Event(), threading.Event()
+    real_unlink = retention._unlink_all
+
+    def late(paths: list[Path], stop: threading.Event) -> int:
+        _ = answer.wait(5)
+        try:
+            return real_unlink(paths, stop)
+        finally:
+            done.set()
+
+    with mock.patch.object(retention, "_unlink_all", late), \
+            mock.patch.object(retention, "FILE_TIMEOUT_S", 0.5):
+        result = await prune_archive(pool, root, cutoff, marker=None)
+    again = await save_image(pool, root, source="races/b.png", content=png(22), marker=None,
+                             content_type="image/png")
+    answer.set()
+    finished = await asyncio.to_thread(done.wait, 5)
+    found = await lookup_by_source(pool, root, "races/b.png")
+    check("a frame saved again after a prune's unlinks timed out keeps its file",
+          result["rows"] == 1 and again == sha and finished and frame(sha).exists()
+          and found is not None, f"{result}, finished {finished}")
+
+    sha = await stale_frame(23, "races/c.png")
+    rows = await pool.fetch("SELECT sha256, ext FROM image_archive WHERE sha256 = $1", sha)
+    freed = await retention._unlink_unclaimed(pool, root, list(rows))
+    check("a prune's unlinks skip a frame whose row is back",
+          freed == 0 and frame(sha).exists(), f"freed {freed}")
+    await pool.execute("DELETE FROM image_index WHERE sha256 = $1", sha)
+    await pool.execute("DELETE FROM image_archive WHERE sha256 = $1", sha)
+    freed = await retention._unlink_unclaimed(pool, root, list(rows))
+    check("...and remove one whose row is gone", freed > 0 and not frame(sha).exists(),
+          f"freed {freed}")
+
+
 async def test_trial_starts(pool: asyncpg.Pool) -> None:
     """A stored trial start wins over check_runs, and is never replaced."""
     print("\ntrial starts:")
@@ -302,6 +375,7 @@ async def run(dsn: str) -> None:
             await asyncio.wait_for(test_upsert(pool, Path(tmp)), TIMEOUT_S)
             await asyncio.wait_for(test_backfill(pool), TIMEOUT_S)
             await asyncio.wait_for(test_after_backfill(pool, Path(tmp)), TIMEOUT_S)
+            await asyncio.wait_for(test_prune_races(pool, Path(tmp)), TIMEOUT_S)
         await asyncio.wait_for(test_trial_starts(pool), TIMEOUT_S)
         await pool.execute("DROP SCHEMA obs_fresh CASCADE; DROP SCHEMA obs_upgrade CASCADE")
     finally:

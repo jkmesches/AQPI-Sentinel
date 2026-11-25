@@ -39,6 +39,8 @@ from .base import Check, CheckResult, Status, utcnow
 # headroom to checkpoint and VACUUM, and the operator needs time to act.
 DISK_WARN_PCT = 75.0
 DISK_FAIL_PCT = 88.0
+# Same limit as the archive's statfs probe.
+MARKER_TIMEOUT_S = 10.0
 
 
 def _usage(path: Path) -> dict:
@@ -52,29 +54,78 @@ def _usage(path: Path) -> dict:
     }
 
 
-def _without_marker(roots: list[Path], marker: str) -> list[str]:
-    """The roots that lack `marker`. Runs on the stores' pool."""
-    return [str(r) for r in roots if not (r / marker).exists()]
+def _has_marker(root: Path, marker: str) -> bool:
+    """Whether `root` holds `marker`. Runs on the stores' pool."""
+    return (root / marker).exists()
 
 
-async def _detached_stores() -> list[str]:
-    """The archive and cold roots missing SETTINGS.storage_marker.
+async def _store_states() -> dict[str, str]:
+    """Each store's state against SETTINGS.storage_marker.
+
+    Each root gets a probe of its own, so a stalled cold store shows even
+    while the archive answers.
 
     Returns:
-        Their paths, or nothing when no marker is set or the stores give no
-        answer, which the archive probe reports on its own.
+        Root path to "attached", "detached", "unreachable" (no answer in time,
+        or the pool full) or "unreadable" (an error such as EACCES or ESTALE),
+        or nothing when no marker is set.
     """
     marker = SETTINGS.storage_marker
     if not marker:
-        return []
-    try:
-        return await STORAGE_IO.run(_without_marker, [SETTINGS.archive_root, SETTINGS.cold_root],
-                                    marker, timeout_s=10)
-    except (TimeoutError, StorageBusyError):
-        return []
+        return {}
+    roots = [SETTINGS.archive_root, SETTINGS.cold_root]
+    answers = await asyncio.gather(
+        *(STORAGE_IO.run(_has_marker, r, marker, timeout_s=MARKER_TIMEOUT_S) for r in roots),
+        return_exceptions=True)
+    states: dict[str, str] = {}
+    for root, answer in zip(roots, answers, strict=True):
+        if isinstance(answer, bool):
+            states[str(root)] = "attached" if answer else "detached"
+        elif isinstance(answer, (TimeoutError, StorageBusyError)):  # before OSError, its base
+            states[str(root)] = "unreachable"
+        elif isinstance(answer, OSError):
+            states[str(root)] = "unreadable"
+        else:
+            raise answer
+    return states
 
 
-async def _archive_report(local: dict, fail_at: float) -> tuple[str, dict[str, object], bool]:
+def _store_report(states: dict[str, str], *,
+                  archive_reported: bool) -> tuple[list[str], dict[str, object], Status]:
+    """Summarize the stores' states.
+
+    Args:
+        states: From _store_states.
+        archive_reported: Whether the archive probe already reported the
+            archive as unreachable or unreadable, so it is not said twice.
+
+    Returns:
+        (summary parts, payload fields, "fail" for a store without its marker,
+        "warn" for one that gives no answer or an error, else "pass").
+    """
+    parts: list[str] = []
+    extra: dict[str, object] = {}
+    status: Status = "pass"
+    archive = str(SETTINGS.archive_root)
+    troubled = {r: s for r, s in states.items() if s in ("unreachable", "unreadable")
+                and not (archive_reported and r == archive)}
+    if troubled:
+        extra["store_errors"] = troubled
+        parts.extend(f"{r} {s.upper()}" for r, s in sorted(troubled.items()))
+        status = "warn"
+    # A store without its marker is a share that did not attach: writes to it
+    # are refused, so captures and exports stop until it is mounted.
+    detached = sorted(r for r, s in states.items() if s == "detached")
+    if detached:
+        extra["detached"] = detached
+        parts.append(f"NOT ATTACHED, no {SETTINGS.storage_marker} in " + ", ".join(detached))
+        status = "fail"
+    return parts, extra, status
+
+
+async def _archive_report(
+    local: dict[str, object], fail_at: float,
+) -> tuple[str, dict[str, object], bool]:
     """Probe the archive mount, when it is a different filesystem from the local one.
 
     On the stores' pool and timed out: in production this path is a `hard` NFS
@@ -153,14 +204,12 @@ class Layer0DiskCheck(Check):
         if warn and status == "pass":
             status = "warn"
 
-        # A store without its marker is a share that did not attach: writes to
-        # it are refused, so captures and exports stop until it is mounted.
-        detached = await _detached_stores()
-        if detached:
-            payload["detached"] = detached
-            parts.append(f"NOT ATTACHED, no {SETTINGS.storage_marker} in "
-                         + ", ".join(detached))
-            status = "fail"
+        store_parts, store_extra, store_status = _store_report(
+            await _store_states(), archive_reported="archive_error" in extra)
+        payload.update(store_extra)
+        parts.extend(store_parts)
+        if store_status == "fail" or (store_status == "warn" and status == "pass"):
+            status = store_status
 
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,

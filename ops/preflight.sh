@@ -123,8 +123,16 @@ if [ -z "$AR" ]; then
 else ok "archive retention: $AR days"; fi
 
 MK="$(get SENTINEL_STORAGE_MARKER)"
+ARCH_PATH="$(get SENTINEL_ARCHIVE_PATH)"; COLD_PATH="$(get SENTINEL_COLD_PATH)"
 case "$MK" in
-  "") ok "storage marker unset, so the stores need no marker file" ;;
+  "")
+    if [[ "$ARCH_PATH" == /* || "$COLD_PATH" == /* ]]; then
+      msg="a store is a host path and SENTINEL_STORAGE_MARKER is unset. If that path is a"
+      msg+=" share that fails to attach, Docker creates an empty local folder there and"
+      warn "$msg the archive fills the local disk. Set a marker and create it in each store."
+    else
+      ok "storage marker unset, and both stores are Docker volumes"
+    fi ;;
   */*|.|..)
     msg="SENTINEL_STORAGE_MARKER=$MK must be a plain file name."
     bad "$msg The backend refuses it and will not start." ;;

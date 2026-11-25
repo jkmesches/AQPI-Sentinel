@@ -22,7 +22,8 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
@@ -31,9 +32,12 @@ import backend.checks as _all  # noqa: F401
 import backend.checks.layer0_selfhost as selfhost
 from backend import archive, config, retention, storage_io
 from backend.registry import CHECKS
+from backend.checks.transports import CheckContext
 from backend.storage_io import STORAGE_IO, StorageBusyError, StorageIO
 
 MARKER = ".sentinel-storage"
+# The disk check reads no transport, so it is given none.
+NO_CONTEXT = cast(CheckContext, None)
 failures: list[str] = []
 
 
@@ -63,7 +67,7 @@ class Stall:
         await asyncio.sleep(0.05)
         return self
 
-    async def __aexit__(self, *_: object) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         self._gate.set()
         _ = await asyncio.wait_for(asyncio.gather(*self._tasks), 10)
 
@@ -244,7 +248,7 @@ async def retention_export(root: Path) -> None:
 async def disk_check_on_a_stall() -> None:
     """The disk check reports a stalled archive store as a warn, without waiting."""
     async with Stall(STORAGE_IO):
-        out, took = await elapsed(CHECKS["layer0.self.disk"].run(None))
+        out, took = await elapsed(CHECKS["layer0.self.disk"].run(NO_CONTEXT))
     ok = not isinstance(out, Exception)
     check("the disk check answers during a stall", ok and took < 2, f"{took:.2f}s")
     if ok:
@@ -293,20 +297,184 @@ async def marker_rules(root: Path) -> None:
     out, _ = await elapsed(retention._require_store(cold, MARKER))
     check("...and one with it lets it run", out is None, repr(out))
 
-    real = selfhost.SETTINGS
-    selfhost.SETTINGS = replace(real, archive_root=arch, cold_root=cold, storage_marker=MARKER)
-    try:
+    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER)
+    with mock.patch.object(selfhost, "SETTINGS", stores):
         (cold / MARKER).unlink()
-        r = await CHECKS["layer0.self.disk"].run(None)
+        r = await CHECKS["layer0.self.disk"].run(NO_CONTEXT)
         check("the disk check fails on a store without the marker",
               r.status == "fail" and "NOT ATTACHED" in r.summary
               and r.payload.get("detached") == [str(cold)], r.summary)
         (cold / MARKER).touch()
-        r = await CHECKS["layer0.self.disk"].run(None)
+        r = await CHECKS["layer0.self.disk"].run(NO_CONTEXT)
         check("...and says nothing of it when both have one",
               "NOT ATTACHED" not in r.summary and "detached" not in r.payload, r.summary)
-    finally:
-        selfhost.SETTINGS = real
+
+
+def blob_writers(root: Path) -> None:
+    """Two writers of one frame never publish a part-written file.
+
+    Writer 1 renames its file while writer 2, which found no file yet, is
+    stopped halfway through its own write. With one temporary name for both,
+    writer 2's open truncated the file writer 1 then renamed into place.
+
+    Args:
+        root: An empty folder for the archive.
+    """
+    print("\narchive writers of one frame:")
+    content = b"X" * 100_000
+    path = root / "ab" / ("ab" + "0" * 62 + ".png")
+    ready, opened = threading.Event(), threading.Event()
+    renamed, release = threading.Event(), threading.Event()
+    real_write, real_replace = Path.write_bytes, os.replace
+    who = threading.local()
+
+    def write_bytes(self: Path, data: bytes) -> int:
+        if getattr(who, "n", 0) != 2:
+            return real_write(self, data)
+        with open(self, "wb") as f:
+            opened.set()
+            _ = release.wait(5)
+            return f.write(data)
+
+    def replace(src: Path, dst: Path) -> None:
+        if getattr(who, "n", 0) == 1:
+            ready.set()
+            _ = opened.wait(5)
+            real_replace(src, dst)
+            renamed.set()
+        else:
+            real_replace(src, dst)
+
+    def writer(n: int) -> None:
+        who.n = n
+        archive._write_blob(root, path, content, None)
+
+    with mock.patch.object(Path, "write_bytes", write_bytes), \
+            mock.patch.object(os, "replace", replace):
+        first = threading.Thread(target=writer, args=(1,))
+        first.start()
+        _ = ready.wait(5)
+        second = threading.Thread(target=writer, args=(2,))
+        second.start()
+        _ = renamed.wait(5)
+        size = path.stat().st_size if path.exists() else -1
+        release.set()
+        first.join(5)
+        second.join(5)
+    check("a frame renamed while another writer is mid-write is whole",
+          size == len(content), f"{size} of {len(content)} bytes")
+    check("...and both writers finish with a whole file and no temporary left",
+          not first.is_alive() and not second.is_alive()
+          and path.stat().st_size == len(content) and not list(root.rglob("*.tmp")),
+          str(sorted(p.name for p in root.rglob("*"))))
+
+
+def blob_repairs(root: Path) -> None:
+    """A frame cut short is written again, and a failed write leaves nothing.
+
+    Args:
+        root: An empty folder for the archive.
+    """
+    content = b"X" * 100_000
+    path = root / "ab" / ("ab" + "0" * 62 + ".png")
+    path.parent.mkdir(parents=True)
+    _ = path.write_bytes(b"cut short")
+    archive._write_blob(root, path, content, None)
+    check("a frame cut short is written again", path.read_bytes() == content)
+    real_write = Path.write_bytes
+
+    def failing_write(self: Path, data: bytes) -> int:
+        _ = real_write(self, data[:10])
+        raise OSError(5, "Input/output error")
+
+    other = root / "cd" / ("cd" + "0" * 62 + ".png")
+    with mock.patch.object(Path, "write_bytes", failing_write):
+        try:
+            archive._write_blob(root, other, content, None)
+            raised = False
+        except OSError:
+            raised = True
+    check("a failed write raises and leaves no temporary file",
+          raised and not other.exists() and not list(other.parent.glob("*.tmp")),
+          str(sorted(p.name for p in other.parent.glob("*"))))
+
+
+def unlink_stop(root: Path) -> None:
+    """A prune's unlink call removes nothing once its stop flag is set.
+
+    The flag is set when the call times out, and the thread runs on after
+    that, so without it a share that answers hours later would lose frames
+    saved again in the meantime.
+
+    Args:
+        root: An empty folder.
+    """
+    print("\nprune unlinks:")
+    root.mkdir(parents=True)
+    files = [root / f"{n}.png" for n in range(3)]
+    for f in files:
+        _ = f.write_bytes(b"frame")
+    stop = threading.Event()
+    stop.set()
+    freed = retention._unlink_all(files, stop)
+    check("an unlink call whose stop flag is set removes nothing",
+          freed == 0 and all(f.exists() for f in files), f"freed {freed}")
+    stop.clear()
+    freed = retention._unlink_all(files, stop)
+    check("...and one whose flag is clear removes every file",
+          freed == 15 and not any(f.exists() for f in files), f"freed {freed}")
+
+
+async def store_probe_faults(root: Path) -> None:
+    """The disk check reports a store whose marker probe errors or stalls.
+
+    Args:
+        root: An empty folder; the archive and cold stores go under it.
+    """
+    print("\nmarker probe faults:")
+    arch, cold = root / "archive", root / "cold"
+    for d in (arch, cold):
+        d.mkdir(parents=True)
+        (d / MARKER).touch()
+    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER)
+    real_probe = selfhost._has_marker
+    gate = threading.Event()
+
+    def refused(r: Path, marker: str) -> bool:
+        if r == cold:
+            raise PermissionError(13, "Permission denied", str(r / marker))
+        return real_probe(r, marker)
+
+    def stalled(r: Path, marker: str) -> bool:
+        if r == cold:
+            _ = gate.wait(5)
+        return real_probe(r, marker)
+
+    with mock.patch.object(selfhost, "SETTINGS", stores):
+        with mock.patch.object(selfhost, "_has_marker", refused):
+            out, _ = await elapsed(CHECKS["layer0.self.disk"].run(NO_CONTEXT))
+        ok = not isinstance(out, Exception)
+        check("the disk check answers when the cold store refuses the probe", ok, repr(out))
+        if ok:
+            check("...with a warn that names the cold store as unreadable",
+                  out.status == "warn"
+                  and out.payload.get("store_errors") == {str(cold): "unreadable"}, out.summary)
+        with mock.patch.object(selfhost, "_has_marker", stalled), \
+                mock.patch.object(selfhost, "MARKER_TIMEOUT_S", 0.3):
+            out, took = await elapsed(CHECKS["layer0.self.disk"].run(NO_CONTEXT))
+        gate.set()
+        ok = not isinstance(out, Exception)
+        check("the disk check answers while the cold store's probe stalls",
+              ok and took < 2, f"{took:.2f}s, {out!r}" if not ok else f"{took:.2f}s")
+        if ok:
+            check("...with a warn that names the cold store as unreachable",
+                  out.status == "warn" and "UNREACHABLE" in out.summary
+                  and out.payload.get("store_errors") == {str(cold): "unreachable"},
+                  out.summary)
+    for _ in range(40):
+        if STORAGE_IO.in_flight == 0:
+            break
+        await asyncio.sleep(0.05)
 
 
 async def main() -> int:
@@ -321,6 +489,10 @@ async def main() -> int:
         await retention_export(Path(td))
         await disk_check_on_a_stall()
         await marker_rules(Path(td) / "marked")
+        blob_writers(Path(td) / "blobs")
+        blob_repairs(Path(td) / "repairs")
+        unlink_stop(Path(td) / "unlink")
+        await store_probe_faults(Path(td) / "probed")
     check("nothing is left in flight", STORAGE_IO.in_flight == 0, str(STORAGE_IO.in_flight))
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall storage-io assertions passed")
