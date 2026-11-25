@@ -78,8 +78,6 @@
 	// ("we could not measure") is not a radar outage ("the thing is broken").
 	const totalFail = $derived(Object.values(counts).reduce((a, b) => a + b.fail, 0));
 	const totalError = $derived(Object.values(counts).reduce((a, b) => a + b.error, 0));
-	const totalSkip = $derived(Object.values(counts).reduce((a, b) => a + (b.skip ?? 0), 0));
-	const total = $derived(Object.values(counts).reduce((a, b) => a + b.total, 0));
 	const sinceUpdate = $derived(
 		sentinel.lastUpdate ? (now.getTime() - sentinel.lastUpdate.getTime()) / 1000 : null
 	);
@@ -118,7 +116,7 @@
 	     that scrolls sideways turns a drag on the map into a pan of the
 	     page. -->
 	<!-- Below 1024 px the header is two rows: the name and a menu button,
-	     then the UTC clock and the pass count. The page links, the theme
+	     then the UTC clock. The page links, the theme
 	     toggle and sign-in open from the menu, and the data source, local
 	     clock and update age wait for a wider window. Unfolded, the same
 	     header took five rows of a 320 px phone before any page content, a
@@ -190,20 +188,6 @@
 					<span class="num text-[18px] tracking-wide text-[var(--color-default)] leading-none">{localParts.time}</span>
 					<span class="label">{localParts.zone || 'local'}</span>
 				</div>
-			</div>
-
-			<!-- ratio + WARN/FAIL/ERROR/SKIP pill — every cell of the sub-strip
-			     contributes here so pass + warn + fail + error + skip = total.
-			     Without skip the math didn't add up (e.g. 36 pass + 1 fail vs 38
-			     total); error is broken out separately from fail so an upstream
-			     API timeout doesn't read as an outage. -->
-			<div class="flex items-center gap-3 num">
-				<span class="text-[var(--color-ok)]">{totalPass}</span>
-				{#if totalWarn}<span class="text-[var(--color-warn)]">{totalWarn} W</span>{/if}
-				{#if totalFail}<span class="text-[var(--color-fail)]">{totalFail} F</span>{/if}
-				{#if totalError}<span class="text-[var(--color-error)]" title="checks that could not determine state (upstream API error, probe crash) — not the same as a failure">{totalError} E</span>{/if}
-				{#if totalSkip}<span class="text-[var(--color-muted)]">{totalSkip} S</span>{/if}
-				<span class="text-[var(--color-faint)]">/ {total}</span>
 			</div>
 
 			<!-- liveness indicator -->
@@ -293,9 +277,15 @@
 				<DisclosureArrow open={stagesOpen} />
 			</span>
 		</button>
+		<!-- Eight stages and the alarm count took 2,127 px in one row, so the
+		     strip wrapped on a 1920 px screen. The dots separate the stages,
+		     without the "·" spans and the 28 px of gap each one added, and
+		     the names track at 0.06em, for 1,744 px. The names use utilities
+		     over `.label`, whose unlayered letter-spacing and color override
+		     any utility. -->
 		<div
 			id="stage-list"
-			class="{stagesOpen ? 'flex' : 'hidden'} flex-wrap items-center gap-x-5 gap-y-0.5 pt-1.5 lg:flex lg:pt-0"
+			class="{stagesOpen ? 'flex' : 'hidden'} flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5 lg:flex lg:pt-0"
 		>
 		{#each Object.entries(counts) as [stage, c]}
 			<!-- Fall through to 'skip' (gray) when nothing in the stage
@@ -305,19 +295,18 @@
 				: c.warn ? 'warn'
 				: c.pass ? 'pass'
 				: 'skip'}
-			<div class="flex items-center gap-2 text-[12px]" title={`Internal stage: ${stage}`}>
+			<div class="flex items-center gap-1.5 whitespace-nowrap text-[12px]" title={`Internal stage: ${stage}`}>
 				<StatusDot status={s} size={7} />
-				<span class="label tracking-[0.18em] text-[var(--color-default)]">{stageLabel(stage)}</span>
-				<span class="num text-[12px] text-[var(--color-muted)]">{c.pass}/{c.total}</span>
-				{#if c.warn}<span class="num text-[12px] text-[var(--color-warn)]">{c.warn} W</span>{/if}
-				{#if c.fail}<span class="num text-[12px] text-[var(--color-fail)]">{c.fail} F</span>{/if}
-				{#if c.error}<span class="num text-[12px] text-[var(--color-error)]">{c.error} E</span>{/if}
+				<span class="font-medium uppercase tracking-[0.06em] text-[var(--color-muted)]">{stageLabel(stage)}</span>
+				<span class="num text-[var(--color-muted)]">{c.pass}/{c.total}</span>
+				{#if c.warn}<span class="num text-[var(--color-warn)]">{c.warn} W</span>{/if}
+				{#if c.fail}<span class="num text-[var(--color-fail)]">{c.fail} F</span>{/if}
+				{#if c.error}<span class="num text-[var(--color-error)]">{c.error} E</span>{/if}
 			</div>
-			<span class="text-[var(--color-faint)]">·</span>
 		{/each}
 		{#if sentinel.alarms.length}
-			<div class="ml-auto hidden items-center gap-2 text-[12px] lg:flex">
-				<span class="label text-[var(--color-fail)]">alarms</span>
+			<div class="ml-auto hidden items-center gap-1.5 whitespace-nowrap text-[12px] lg:flex">
+				<span class="font-medium uppercase tracking-[0.06em] text-[var(--color-muted)]">alarms</span>
 				<span class="num text-[var(--color-bright)]">{sentinel.alarms.length} open</span>
 			</div>
 		{/if}
