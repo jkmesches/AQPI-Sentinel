@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.5] - 2026-11-25
+
 ### Fixed
 
 - **`SENTINEL_STORAGE_GID` sets the backend's primary group.** It added an
