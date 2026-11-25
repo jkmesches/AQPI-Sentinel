@@ -122,6 +122,11 @@ services:
       SENTINEL_PREWARM_ENABLED:     ${SENTINEL_PREWARM_ENABLED:-0}
       SENTINEL_PREWARM_INTERVAL_S:  ${SENTINEL_PREWARM_INTERVAL_S:-300}
       SENTINEL_PREWARM_CONCURRENCY: ${SENTINEL_PREWARM_CONCURRENCY:-3}
+    # A group that may write the stores' folders on a share, joined by the
+    # backend's user (uid 1000). It must be a number, because the image has no
+    # such group by name. The default is that user's own group, a no-op.
+    group_add:
+      - "${SENTINEL_STORAGE_GID:-1000}"
     volumes:
       # Archived L4 images. Point SENTINEL_ARCHIVE_PATH at a large disk or a
       # network mount if you keep images for long: this grows roughly 7 GB a

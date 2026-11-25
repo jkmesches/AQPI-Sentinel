@@ -25,8 +25,14 @@ it is here. The failure this prevents is not a crash — it is a deployment that
 looks like it worked.
 """
 from __future__ import annotations
+import json
+import os
 import re
+import secrets
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -34,7 +40,10 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 PROD = ROOT / "ops" / "docker-compose.prod.yml"
 GHCR = ROOT / "ops" / "docker-compose.ghcr.yml"
+DEPLOY = ROOT / "ops" / "docker-compose.deploy.yml"
 ENV_EXAMPLE = ROOT / "ops" / ".env.prod.example"
+STORAGE_GROUP = ["${SENTINEL_STORAGE_GID:-1000}"]
+RENDER_TIMEOUT_S = 30
 
 failures: list[str] = []
 
@@ -94,6 +103,34 @@ def volume_sources(svc: dict) -> dict[str, str]:
     return out
 
 
+def rendered_groups(compose: Path, gid: str | None) -> list[str] | None:
+    """Render a compose file and return its backend's group_add.
+
+    Args:
+        compose: The compose file.
+        gid: SENTINEL_STORAGE_GID for the render, or None to leave it unset.
+
+    Returns:
+        The rendered groups, or None when the docker CLI is not installed.
+    """
+    if shutil.which("docker") is None:
+        return None
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("SENTINEL_", "POSTGRES_"))}
+    # The files refuse to render without a password; this one reaches no database.
+    env["POSTGRES_PASSWORD"] = secrets.token_hex(8)
+    if gid is not None:
+        env["SENTINEL_STORAGE_GID"] = gid
+    # An empty env file, so compose does not read a real ops/.env beside the file.
+    with tempfile.NamedTemporaryFile("w", suffix=".env") as empty:
+        out = subprocess.run(  # noqa: S603  fixed argument list, no shell
+            ["docker", "compose", "-f", str(compose), "--env-file", empty.name,
+             "config", "--format", "json"],
+            env=env, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, check=True)
+    groups = json.loads(out.stdout)["services"]["backend"].get("group_add") or []
+    return [str(g) for g in groups]
+
+
 def main() -> int:
     # The parser first: everything below is meaningless if it mis-splits.
     check("split_volume ignores the colon inside ${VAR:-default}",
@@ -138,6 +175,7 @@ def main() -> int:
         "SENTINEL_SSCB_HOST_PATH":    "volume source for /sscb",
         "SENTINEL_TILT_HOST_PATH":    "volume source for /tilt",
         "SENTINEL_TAG":               "selects the image tag, not process env",
+        "SENTINEL_STORAGE_GID":       "the backend's group_add, not process env",
     }
     documented = set(re.findall(r"^#?((?:SENTINEL|POSTGRES)_[A-Z0-9_]+)=",
                                 ENV_EXAMPLE.read_text(), re.M))
@@ -191,6 +229,25 @@ def main() -> int:
         got = volume_targets(doc["services"]["backend"])
         check(f"{label}: backend mounts parse to real container paths",
               got == EXPECTED_BACKEND_MOUNTS, f"got {sorted(got)}")
+
+    # The backend joins the stores' group on a share through group_add. Unset,
+    # it must render to the image user's own group (1000, a no-op), since an
+    # empty entry or a name would stop the container from starting.
+    deploy = yaml.safe_load(DEPLOY.read_text())
+    for label, path, doc in (("prod.yml", PROD, prod), ("ghcr.yml", GHCR, ghcr),
+                             ("deploy.yml", DEPLOY, deploy)):
+        got_groups = doc["services"]["backend"].get("group_add")
+        check(f"{label} · backend group_add as written", got_groups == STORAGE_GROUP,
+              f"got {got_groups!r}")
+        unset = rendered_groups(path, None)
+        if unset is None:
+            print(f"  skip  {label} · group_add rendered (no docker CLI)")
+            continue
+        check(f"{label} · group_add rendered, SENTINEL_STORAGE_GID unset",
+              unset == ["1000"], f"got {unset!r}")
+        given = rendered_groups(path, "54321")
+        check(f"{label} · group_add rendered, SENTINEL_STORAGE_GID=54321",
+              given == ["54321"], f"got {given!r}")
 
     for name in ("postgres", "backend", "frontend"):
         check(f"ghcr.yml defines the {name} service", name in (ghcr.get("services") or {}))

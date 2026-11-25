@@ -38,6 +38,8 @@ inside Postgres.
 | `SENTINEL_ARCHIVE_ENABLED` | no | `1` | Persist L4 captured images. `0` to disable. |
 | `SENTINEL_ARCHIVE_ROOT` | no | `/data/archive` | Mount path. Volume-mapped from `sentinel_archive`. |
 | `SENTINEL_ARCHIVE_RETENTION_DAYS` | no | (blank = permanent) | Delete archived PNGs older than N days. |
+| `SENTINEL_STORAGE_MARKER` | no | (blank = none) | A plain file name each store (archive and cold) must hold at its root before the backend writes there. Set it when the stores are on a share, so a share that failed to attach is never filled from the local disk; `layer0.self.disk` fails with "NOT ATTACHED" while a store lacks it. A name with a slash, `.` or `..` refuses to start. |
+| `SENTINEL_STORAGE_GID` | no | `1000` | Numeric id of a group the backend's user joins (compose `group_add`), so it can create folders in group-writable store folders on a share. Read by compose, not the backend. A group name stops the container from starting, since the image cannot resolve it. The default is the user's own group. |
 | `SENTINEL_PREWARM_ENABLED` | no | `0` | Continuously capture **every** published moment and tilt, rather than only what someone has looked at. See the warning below before enabling. |
 | `SENTINEL_PREWARM_INTERVAL_S` | no | `300` | Seconds between sweeps of all streams. Must stay below the origin's rolling-window length or frames are missed permanently — radar-display keeps 7 frames at ~140 s (~16 min). |
 | `SENTINEL_PREWARM_CONCURRENCY` | no | `3` | Simultaneous in-flight prewarm fetches, bounded independently of operator traffic. |

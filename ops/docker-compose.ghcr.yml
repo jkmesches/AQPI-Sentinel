@@ -108,6 +108,11 @@ services:
       # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
       # do not register.
       SENTINEL_RECENTFILES_DIR: ${SENTINEL_RECENTFILES_DIR:-}
+    # A group that may write the stores' folders on a share, joined by the
+    # backend's user (uid 1000). It must be a number, because the image has no
+    # such group by name. The default is that user's own group, a no-op.
+    group_add:
+      - "${SENTINEL_STORAGE_GID:-1000}"
     volumes:
       # === Load-bearing: these accept a HOST PATH, not just a volume name ===
       #

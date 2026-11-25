@@ -516,6 +516,12 @@ writes nothing to a store that lacks the file, the retention sweep exports and
 deletes nothing, and `layer0.self.disk` fails with "NOT ATTACHED" until the
 share is back.
 
+The backend runs as uid 1000. When the share's folders belong to a group with
+group write (e.g., mode 2775), set `SENTINEL_STORAGE_GID` to that group's
+number and recreate the backend, and compose adds the group to the backend's
+user. A group name will not work, because the container has no entry for it
+and refuses to start.
+
 Every call on either store runs on a pool of its own (`backend/storage_io.py`),
 4 threads with at most 16 calls in flight and a time limit on each. A stalled
 `hard` mount then holds those 4 threads, new archive writes are skipped, page

@@ -44,6 +44,11 @@ unknown`.
   backend writes nothing to a store that lacks the file, the retention sweep
   exports and deletes nothing, and `layer0.self.disk` fails with "NOT
   ATTACHED". Unset, nothing changes.
+- **`SENTINEL_STORAGE_GID` adds a group to the backend's user.** The backend
+  runs as uid 1000, and store folders on a share may grant write to a group
+  instead. The three compose files pass the number to `group_add`, and
+  `ops/preflight.sh` refuses a group name, which would stop the container from
+  starting. Unset, the user keeps its own group 1000 and nothing changes.
 
 ### Changed
 

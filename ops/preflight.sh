@@ -122,6 +122,25 @@ if [ -z "$AR" ]; then
   warn "SENTINEL_ARCHIVE_RETENTION_DAYS is blank = keep images forever (~7 GB/month). Fine on a large disk; set a number otherwise."
 else ok "archive retention: $AR days"; fi
 
+MK="$(get SENTINEL_STORAGE_MARKER)"
+case "$MK" in
+  "") ok "storage marker unset, so the stores need no marker file" ;;
+  */*|.|..)
+    msg="SENTINEL_STORAGE_MARKER=$MK must be a plain file name."
+    bad "$msg The backend refuses it and will not start." ;;
+  *) ok "storage marker: each store must hold $MK before Sentinel writes there" ;;
+esac
+
+SGID="$(get SENTINEL_STORAGE_GID)"
+case "$SGID" in
+  "") ok "storage group unset, so the backend keeps its own group 1000" ;;
+  *[!0-9]*)
+    msg="SENTINEL_STORAGE_GID=$SGID is not a number. The container cannot resolve"
+    bad "$msg a group name, so the backend would not start. Use: getent group $SGID" ;;
+  0) warn "SENTINEL_STORAGE_GID=0 gives the backend the root group. Use the share's own group." ;;
+  *) ok "storage group: the backend joins group $SGID" ;;
+esac
+
 avail_kb=$(df -Pk /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}')
 [ -z "$avail_kb" ] && avail_kb=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}')
 if [ -n "$avail_kb" ]; then
