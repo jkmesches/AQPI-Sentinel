@@ -13,7 +13,6 @@ one image_archive row, with potentially many image_index rows pointing
 at that sha.
 """
 from __future__ import annotations
-import asyncio
 import hashlib
 import io
 import logging
@@ -25,7 +24,15 @@ from pathlib import Path
 import asyncpg
 from PIL import Image
 
+from backend.storage_io import STORAGE_IO, StorageBusyError
+
 log = logging.getLogger(__name__)
+
+# A frame is about 100 kB, so a write that takes 30 s is a stalled share, and
+# the capture goes on without it. A read serves a page, which falls back to
+# radarca sooner.
+WRITE_TIMEOUT_S = 30.0
+READ_TIMEOUT_S = 10.0
 
 
 @dataclass(frozen=True)
@@ -146,20 +153,18 @@ async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
             pass
 
         path = _sha_path(archive_root, sha, ext)
-        # === Load-bearing: file I/O goes through a worker thread ===
-        #
-        # As of 2026-08-08 the production archive_root is an NFS bind mount
-        # (Erebor, see docs/MAINTENANCE.md "Disk space"), mounted `hard`. A
-        # hard mount blocks I/O indefinitely while the server is unreachable
-        # rather than returning an error — so doing these stat/write/rename
-        # calls inline, on the event loop, means one NAS reboot wedges the
-        # ENTIRE backend: every check, the API, and the WebSocket fan-out,
-        # not just archiving.
-        #
-        # asyncio.to_thread confines that stall to a thread-pool worker. The
-        # outer `except` still swallows real errors, keeping archiving
-        # best-effort as designed.
-        await asyncio.to_thread(_write_blob, path, content)
+        # File I/O goes through the stores' own pool. The archive root may be
+        # an NFS bind mount mounted `hard`, which blocks I/O while the server
+        # is unreachable instead of returning an error. Inline on the event
+        # loop, one NAS reboot froze every check, the API and the WebSocket.
+        # On asyncio's default pool it held threads the disk check and the
+        # K2 readers need. See backend/storage_io.py.
+        try:
+            await STORAGE_IO.run(_write_blob, path, content, timeout_s=WRITE_TIMEOUT_S)
+        except (StorageBusyError, TimeoutError) as e:
+            log.warning("archive: not saved, the archive store gave no answer (%s): %r",
+                        str(e) or "timed out", source)
+            return None
 
         now = datetime.now(timezone.utc)
         async with pool.acquire() as conn:
@@ -209,9 +214,14 @@ async def lookup_by_source(pool, archive_root: Path, source: str) -> tuple[bytes
             return None
         sha, ext = row["sha256"], row["ext"]
         path = _sha_path(archive_root, sha, ext)
-        # Threaded for the same reason as the write path — this serves the
-        # History detail modal's images straight off the NFS mount.
-        data = await asyncio.to_thread(_read_blob, path)
+        # On the stores' pool for the same reason as the write path. This
+        # serves the History detail modal's images straight off the mount, and
+        # a read that gives no answer falls back to radarca.
+        try:
+            data = await STORAGE_IO.run(_read_blob, path, timeout_s=READ_TIMEOUT_S)
+        except (StorageBusyError, TimeoutError) as e:
+            log.warning("archive: read of %s gave no answer (%s)", path, str(e) or "timed out")
+            return None
         if data is None:
             log.warning("image_index row exists but file missing: %s", path)
             return None

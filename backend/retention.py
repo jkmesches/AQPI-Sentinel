@@ -27,16 +27,29 @@ import asyncio
 import gzip
 import logging
 import os
-import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import asyncpg
+
+from backend.storage_io import STORAGE_IO, StorageBusyError
 
 log = logging.getLogger(__name__)
 
 # Rows per DELETE statement. Matches reprocess_engine's CHUNK for the same
 # reason: short transactions, no long-held locks on a live table.
 CHUNK = 5_000
+
+# COPY output is gathered to this size before each write to the cold store, so
+# a sweep of millions of rows makes a few hundred calls to the store's pool.
+FLUSH_BYTES = 4 * 1024 * 1024
+# A 4 MB write or a mkdir that takes a minute is a stalled share. The whole
+# COPY of a 60-day backlog took under a minute on the reference deployment,
+# so half an hour means it is stuck. Either way the sweep exports nothing and
+# deletes nothing, and the next day's sweep tries again.
+FILE_TIMEOUT_S = 60.0
+EXPORT_TIMEOUT_S = 1800.0
 
 
 class OffloadError(RuntimeError):
@@ -47,40 +60,114 @@ def _cutoff(days: int, now: datetime) -> datetime:
     return now - timedelta(days=days)
 
 
-async def _export_query(pool, query: str, args: list[Any], dest: Path) -> int:
-    """COPY the results of `query` to a gzipped CSV at `dest`. Returns rows.
+def _finish(fh: gzip.GzipFile, part: Path, dest: Path) -> None:
+    """Close the gzip stream, fsync it, and rename it into place. Runs on the pool.
 
-    Writes to `<dest>.part` and renames only after fsync, so an interrupted
-    sweep can never leave a truncated file that looks complete to the
-    verification step (or to a human reading the cold store later).
+    Raises:
+        OffloadError: When the file came out empty.
     """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_suffix(dest.suffix + ".part")
-    raw = dest.with_suffix(dest.suffix + ".raw")
-
-    async with pool.acquire() as conn:
-        status = await conn.copy_from_query(
-            query, *args, output=str(raw), format="csv", header=True
-        )
-    # asyncpg returns the COPY command tag, e.g. "COPY 12345".
-    try:
-        n = int(str(status).split()[-1])
-    except (ValueError, IndexError) as e:
-        raw.unlink(missing_ok=True)
-        raise OffloadError(f"could not parse COPY status {status!r}") from e
-
-    try:
-        with open(raw, "rb") as fsrc, gzip.open(part, "wb", compresslevel=6) as fdst:
-            shutil.copyfileobj(fsrc, fdst, length=1024 * 1024)
-        with open(part, "rb") as fh:
-            os.fsync(fh.fileno())
-    finally:
-        raw.unlink(missing_ok=True)
-
+    fh.close()
+    with open(part, "rb") as f:
+        os.fsync(f.fileno())
     if part.stat().st_size == 0:
         part.unlink(missing_ok=True)
         raise OffloadError(f"export to {dest.name} produced an empty file")
     os.replace(part, dest)
+
+
+def _discard(fh: gzip.GzipFile | None, part: Path) -> None:
+    """Close and remove an export that will not be published. Runs on the pool."""
+    if fh is not None:
+        fh.close()
+    part.unlink(missing_ok=True)
+
+
+class _GzipSink:
+    """Takes COPY output and writes it gzipped to `part` through the stores' pool.
+
+    Args:
+        part: The file to write, beside its final name.
+    """
+
+    def __init__(self, part: Path) -> None:
+        self._part = part
+        self._fh: gzip.GzipFile | None = None
+        self._buf = bytearray()
+
+    async def open(self) -> None:
+        """Create the parent folder and open the gzip stream."""
+        await STORAGE_IO.run(_mkdir, self._part.parent, timeout_s=FILE_TIMEOUT_S)
+        self._fh = await STORAGE_IO.run(gzip.open, self._part, "wb", 6,
+                                        timeout_s=FILE_TIMEOUT_S)
+
+    async def write(self, data: bytes) -> None:
+        """Take one chunk of COPY output. asyncpg awaits this per message."""
+        self._buf += data
+        if len(self._buf) >= FLUSH_BYTES:
+            await self._flush()
+
+    async def publish(self, dest: Path) -> None:
+        """Write what is left, fsync, and rename to `dest`."""
+        await self._flush()
+        if self._fh is None:
+            raise OffloadError(f"export to {dest.name} was never opened")
+        await STORAGE_IO.run(_finish, self._fh, self._part, dest, timeout_s=FILE_TIMEOUT_S)
+
+    async def discard(self) -> None:
+        """Close and remove the part file, as far as the store answers."""
+        try:
+            await STORAGE_IO.run(_discard, self._fh, self._part, timeout_s=FILE_TIMEOUT_S)
+        except (StorageBusyError, TimeoutError, OSError) as e:
+            log.warning("retention: could not remove %s (%s)", self._part,
+                        str(e) or "timed out")
+
+    async def _flush(self) -> None:
+        if not self._buf or self._fh is None:
+            return
+        chunk, self._buf = bytes(self._buf), bytearray()
+        await STORAGE_IO.run(self._fh.write, chunk, timeout_s=FILE_TIMEOUT_S)
+
+
+def _mkdir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+async def _export_query(pool: asyncpg.Pool, query: str, args: list[Any], dest: Path) -> int:
+    """COPY the results of `query` to a gzipped CSV at `dest`. Returns rows.
+
+    Writes to `<dest>.part` and renames only after fsync, so an interrupted
+    sweep can never leave a truncated file that looks complete to the
+    verification step (or to a human reading the cold store later). The COPY
+    streams into the gzip writer, and every call on the cold store goes
+    through the stores' pool (backend/storage_io.py), since the store may be a
+    `hard` NFS mount that blocks while its server is down.
+
+    Raises:
+        OffloadError: When the export fails, stalls or does not verify.
+    """
+    sink = _GzipSink(dest.with_suffix(dest.suffix + ".part"))
+    try:
+        await sink.open()
+        async with pool.acquire() as conn:
+            status = await asyncio.wait_for(
+                conn.copy_from_query(query, *args, output=sink.write,
+                                     format="csv", header=True),
+                EXPORT_TIMEOUT_S)
+        # asyncpg returns the COPY command tag, e.g. "COPY 12345".
+        try:
+            n = int(str(status).split()[-1])
+        except (ValueError, IndexError) as e:
+            raise OffloadError(f"could not parse COPY status {status!r}") from e
+        await sink.publish(dest)
+    except (StorageBusyError, TimeoutError) as e:
+        await sink.discard()
+        raise OffloadError(f"the cold store gave no answer exporting {dest.name}: "
+                           f"{str(e) or 'timed out'}") from e
+    except Exception:
+        # Not on cancellation: a shutdown should not wait on a stalled share,
+        # and a .part left behind is never read as an export.
+        await sink.discard()
+        raise
     return n
 
 
@@ -219,9 +306,23 @@ async def prune_archive(pool, archive_root: Path, cutoff: datetime) -> dict:
         await conn.execute("DELETE FROM image_index   WHERE sha256 = ANY($1::text[])", shas)
         await conn.execute("DELETE FROM image_archive WHERE sha256 = ANY($1::text[])", shas)
 
+    paths = [archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}" for r in rows]
+    try:
+        freed = await STORAGE_IO.run(_unlink_all, paths, timeout_s=EXPORT_TIMEOUT_S)
+    except (StorageBusyError, TimeoutError):
+        # The rows are gone, so the files are only disk, and an orphan sweep
+        # can remove them once the store answers.
+        log.warning("retention: the archive store gave no answer; %d image files "
+                    "outlive their rows", len(paths))
+        freed = 0
+    log.info("retention: pruned %d archived images (%.1f MB)", len(shas), freed / 1e6)
+    return {"table": "image_archive", "rows": len(shas), "bytes": freed}
+
+
+def _unlink_all(paths: list[Path]) -> int:
+    """Remove each file, and return the bytes freed. Runs on the stores' pool."""
     freed = 0
-    for r in rows:
-        path = archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}"
+    for path in paths:
         try:
             freed += path.stat().st_size
             path.unlink()
@@ -229,8 +330,7 @@ async def prune_archive(pool, archive_root: Path, cutoff: datetime) -> dict:
             pass
         except OSError:
             log.warning("retention: could not unlink %s", path, exc_info=True)
-    log.info("retention: pruned %d archived images (%.1f MB)", len(shas), freed / 1e6)
-    return {"table": "image_archive", "rows": len(shas), "bytes": freed}
+    return freed
 
 
 async def run_once(pool, *, settings, now: datetime | None = None) -> list[dict]:

@@ -28,6 +28,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from backend.storage_io import STORAGE_IO, StorageBusyError
+
 from .. import thresholds
 from ..config import SETTINGS
 from ..registry import register
@@ -95,15 +97,14 @@ class Layer0DiskCheck(Check):
 
         # Archive mount, when it's genuinely a different filesystem.
         #
-        # Threaded + timed out: in production this path is a `hard` NFS mount,
-        # where statfs blocks indefinitely while the NAS is unreachable. This
-        # check exists to report trouble, so it must not become the thing that
-        # hangs — a stalled mount is reported as a warn, not a hung check.
+        # On the stores' pool and timed out: in production this path is a
+        # `hard` NFS mount, where statfs blocks indefinitely while the NAS is
+        # unreachable. This check exists to report trouble, so it must not
+        # become the thing that hangs, and a probe left stuck on the stores'
+        # pool cannot hold a thread the local statfs above needs.
         try:
             archive_root = SETTINGS.archive_root
-            arch = await asyncio.wait_for(
-                asyncio.to_thread(_usage_if_exists, archive_root), timeout=10
-            )
+            arch = await STORAGE_IO.run(_usage_if_exists, archive_root, timeout_s=10)
             if arch is not None:
                 if arch["total_gb"] != local["total_gb"]:
                     payload["archive"] = arch
@@ -115,11 +116,14 @@ class Layer0DiskCheck(Check):
                     # escalates past warn on its own.
                     if arch["used_pct"] >= fail_at and status == "pass":
                         status = "warn"
-        except asyncio.TimeoutError:
-            # Almost always a hung NFS mount. Worth a warn on its own — an
+        except (TimeoutError, StorageBusyError) as e:
+            # Almost always a hung NFS mount. Worth a warn on its own, since an
             # unreachable archive means new captures are being dropped.
-            payload["archive_error"] = "timeout"
-            parts.append("archive UNREACHABLE (statfs timed out)")
+            busy = isinstance(e, StorageBusyError)
+            payload["archive_error"] = "busy" if busy else "timeout"
+            parts.append("archive UNREACHABLE ("
+                         + ("its earlier calls never returned" if busy else "statfs timed out")
+                         + ")")
             if status == "pass":
                 status = "warn"
         except OSError:
