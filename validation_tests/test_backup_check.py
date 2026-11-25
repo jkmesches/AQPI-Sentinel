@@ -33,7 +33,7 @@ os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 import backend.checks as _all                              # noqa: E402,F401
 import backend.checks.layer0_selfhost as SH                # noqa: E402
-from backend.checks.base import utcnow                     # noqa: E402
+from backend.checks.base import CheckResult, utcnow
 from backend.registry import CHECKS                        # noqa: E402
 
 failures: list[str] = []
@@ -45,8 +45,16 @@ def check(label: str, cond: bool, detail: str = "") -> None:
         failures.append(label)
 
 
-async def run_with(status_file: Path | None, **fields):
-    """Point the check at a temp status file containing `fields`."""
+async def run_with(status_file: Path | None, **fields: object) -> CheckResult:
+    """Point the check at a temp status file containing `fields`.
+
+    Args:
+        status_file: Where to write the status, or None for a missing file.
+        **fields: The status.json fields to write.
+
+    Returns:
+        The check's result.
+    """
     original = SH.BACKUP_STATUS_PATH
     try:
         if status_file is not None and fields:
@@ -60,7 +68,8 @@ async def run_with(status_file: Path | None, **fields):
 async def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         sf = Path(td) / "status.json"
-        ago = lambda h: (utcnow() - timedelta(hours=h)).isoformat()
+        def ago(h: float) -> str:
+            return (utcnow() - timedelta(hours=h)).isoformat()
 
         # --- not configured is NOT a failure ------------------------------
         r = await run_with(None)
@@ -107,6 +116,53 @@ async def main() -> int:
         r = await run_with(sf, status="ok", detail="x", finished_at="not-a-date", bytes=1)
         check("an unreadable timestamp warns rather than passing",
               r.status == "warn", r.status)
+
+        # --- the copy to a second folder is graded apart from the dump -----
+        fresh = {"status": "ok", "detail": "wrote x", "finished_at": ago(2), "bytes": 1}
+        r = await run_with(sf, **fresh)
+        check("a status file from before the copy existed still passes",
+              r.status == "pass", r.status)
+        r = await run_with(sf, **fresh, copy_status="off")
+        check("a run with no copy folder passes", r.status == "pass", r.status)
+        r = await run_with(sf, **fresh, copy_status="ok", copy_newest_at=ago(2))
+        check("a checked copy passes", r.status == "pass", r.status)
+        r = await run_with(sf, **fresh, copy_status="failed",
+                           copy_detail="/mnt/share gave no answer in 30s",
+                           copy_newest_at=ago(26))
+        check("a failed copy with a day-old checked copy warns", r.status == "warn", r.status)
+        check("...and says the copy failed and why",
+              "copy FAILED" in r.summary and "no answer" in r.summary, r.summary)
+        check("...and reports the copy's age",
+              25 < r.metrics.get("backup_copy_age_hours", 0) < 27,
+              str(r.metrics.get("backup_copy_age_hours")))
+        r = await run_with(sf, **fresh, copy_status="failed", copy_detail="x",
+                           copy_newest_at=ago(SH.BACKUP_FAIL_AGE_H - 1))
+        check("a failed copy just under the fail age still warns", r.status == "warn", r.status)
+        r = await run_with(sf, **fresh, copy_status="failed", copy_detail="x",
+                           copy_newest_at=ago(SH.BACKUP_FAIL_AGE_H + 1))
+        check("a failed copy past the fail age fails", r.status == "fail", r.status)
+        r = await run_with(sf, **fresh, copy_status="failed", copy_detail="x",
+                           copy_newest_at="")
+        check("a failed copy with no checked copy ever fails", r.status == "fail", r.status)
+        r = await run_with(sf, **fresh, copy_status="failed", copy_detail="x",
+                           copy_newest_at=ago(-24 * 365))
+        check("a failed copy dated in the future fails, its age unknown",
+              r.status == "fail", r.status)
+        naive = (utcnow() - timedelta(hours=26)).replace(tzinfo=None).isoformat()
+        r = await run_with(sf, **fresh, copy_status="failed", copy_detail="x",
+                           copy_newest_at=naive)
+        check("a copy time with no zone is read as UTC, not a crash",
+              r.status == "warn", r.status)
+        r = await run_with(sf, **fresh, copy_status="not_run", copy_newest_at=ago(2))
+        check("a copy that never ran after a good dump warns", r.status == "warn", r.status)
+        r = await run_with(sf, status="ok", detail="x", finished_at=ago(80), bytes=1,
+                           copy_status="failed", copy_detail="x", copy_newest_at=ago(26))
+        check("a stale dump's fail outranks the copy's warn", r.status == "fail", r.status)
+        check("...and keeps the dump's reason first",
+              r.summary.startswith("no successful backup"), r.summary)
+        r = await run_with(sf, status="failed", detail="pg_dump failed",
+                           finished_at=ago(0.1), bytes=0, copy_status="not_run")
+        check("a failed dump fails whatever the copy says", r.status == "fail", r.status)
 
         # --- wiring -------------------------------------------------------
         c = CHECKS["layer0.self.backup"]

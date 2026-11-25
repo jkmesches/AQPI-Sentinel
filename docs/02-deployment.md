@@ -681,6 +681,29 @@ documented in the header of `ops/backup.sh`; the important ones are
 `SENTINEL_BACKUP_DIR`, `SENTINEL_BACKUP_KEEP` (must be ≥ 1), and
 `SENTINEL_BACKUP_REQUIRE_MOUNT`.
 
+To keep only a few dumps on the host and a longer history on a share, set
+`SENTINEL_BACKUP_COPY_DIR` to a folder on the share. The dump is still written
+locally first, and each run then copies every local dump the share lacks and
+checks the copy's SHA-256. A local dump past `SENTINEL_BACKUP_KEEP` is pruned
+only once the share holds a checked copy, and the share keeps
+`SENTINEL_BACKUP_COPY_KEEP` dumps (default 14, at least `SENTINEL_BACKUP_KEEP`).
+Neither folder ever prunes the run's own dump. The script refuses a copy folder
+that lands on the root filesystem (the case of a share that failed to attach)
+or on the dump folder's own filesystem, and every call into the share runs under
+`SENTINEL_BACKUP_COPY_TIMEOUT_S` (default 600 s), since a stalled `hard` mount
+never returns an error. Only files named the way the script names its dumps are
+copied or pruned on the share, and a local dump that fails `gzip -t` is never
+copied over the share's copy. A lock on the dump folder keeps two runs from
+overlapping. A failed copy leaves the dump's own status `ok` and records the copy
+apart, so a share that is down costs local disk (one dump a day) and never the
+only copy:
+
+```bash
+0 8 * * * SENTINEL_BACKUP_KEEP=2 \
+  SENTINEL_BACKUP_COPY_DIR=/mnt/share/sentinel/backups \
+  /srv/sentinel/ops/backup.sh >> /var/log/sentinel-backup.log 2>&1
+```
+
 !!! warning "Put the configuration in the cron line, not in your head"
     This bit the reference deployment. The cron line carried no environment
     and relied on the script's defaults; when those defaults changed, backups
@@ -700,6 +723,8 @@ A cron backup fails into a log nobody reads, and the first sign is needing
 one. `backup.sh` records the outcome of every run — success or failure — to
 `status.json`, and the `layer0.self.backup` check reads it and alarms when
 backups go stale (warn at 36 h, fail at 72 h) or when the last run failed.
+With a copy folder set, it also warns when the last copy failed and fails
+when the newest checked copy is 72 h old or no copy was ever checked.
 
 To enable it, point `SENTINEL_BACKUP_PATH` at the same absolute host path the
 cron job writes to, so the backend can see it read-only:

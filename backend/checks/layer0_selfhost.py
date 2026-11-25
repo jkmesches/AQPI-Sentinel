@@ -25,7 +25,7 @@ import asyncio
 import json
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import thresholds
@@ -174,6 +174,71 @@ def _read_backup_status(path: Path) -> dict | None:
         return None
 
 
+_STATUS_RANK = {"pass": 0, "warn": 1, "fail": 2}
+
+
+def _grade_copy(
+    data: dict[str, object], now: datetime
+) -> tuple[str, str, float | None] | None:
+    """Grade the copy of the dumps to SENTINEL_BACKUP_COPY_DIR, if backup.sh made one.
+
+    A failed copy warns while the newest checked copy is younger than the dump's
+    own fail age, and fails past it or when no copy was ever checked. The dump
+    and the copy are graded apart, since a share that is down leaves the local
+    dumps good and the off-host history going stale.
+
+    Args:
+        data: The parsed status.json.
+        now: The current time, UTC.
+
+    Returns:
+        (status, summary, age of the newest checked copy in hours), or None when
+        the run made no copy or the copy succeeded.
+    """
+    copy_status = str(data.get("copy_status") or "off")
+    if copy_status in ("off", "ok"):
+        return None
+    newest_at = str(data.get("copy_newest_at") or "")
+    try:
+        when = datetime.fromisoformat(newest_at.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        age_h: float | None = (now - when).total_seconds() / 3600.0
+    except ValueError:
+        age_h = None
+    detail = str(data.get("copy_detail") or "no detail")
+    if age_h is None:
+        return "fail", f"backup copy FAILED and no copy was ever checked: {detail}", None
+    # A future time means a clock was wrong when the copy was checked, so its
+    # real age is unknown, and an unknown age must not keep reading as a warn.
+    if age_h < 0:
+        return "fail", f"backup copy FAILED, newest checked copy is future-dated: {detail}", None
+    status = "fail" if age_h >= BACKUP_FAIL_AGE_H else "warn"
+    return status, f"backup copy FAILED, newest checked copy {age_h:.0f}h old: {detail}", age_h
+
+
+def _with_copy(
+    data: dict[str, object], status: str, msg: str
+) -> tuple[str, str, float | None]:
+    """Fold the copy's grade into the dump's, the worse status and its reason first.
+
+    Args:
+        data: The parsed status.json.
+        status: The dump's status.
+        msg: The dump's summary.
+
+    Returns:
+        (status, summary, age of the newest checked copy in hours, or None).
+    """
+    copy = _grade_copy(data, utcnow())
+    if copy is None:
+        return status, msg, None
+    copy_status, copy_msg, copy_age_h = copy
+    if _STATUS_RANK[copy_status] >= _STATUS_RANK[status]:
+        return copy_status, copy_msg, copy_age_h
+    return status, f"{msg}; {copy_msg}", copy_age_h
+
+
 @register
 class Layer0BackupCheck(Check):
     """Is the database backup actually running, and recent?"""
@@ -262,10 +327,17 @@ class Layer0BackupCheck(Check):
         else:
             status, msg = "pass", f"last backup {age_h:.1f}h ago ({detail})"
 
+        metrics = {"backup_age_hours": age_h,
+                   "backup_bytes": float(data.get("bytes", 0) or 0)}
+        payload.update({k: data.get(k, "") for k in
+                        ("copy_dir", "copy_status", "copy_detail", "copy_newest",
+                         "copy_newest_at")})
+        status, msg, copy_age_h = _with_copy(data, status, msg)
+        if copy_age_h is not None:
+            metrics["backup_copy_age_hours"] = copy_age_h
+
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,
             status=status, started_at=t0, finished_at=utcnow(),
-            summary=msg, payload=payload,
-            metrics={"backup_age_hours": age_h,
-                     "backup_bytes": float(data.get("bytes", 0) or 0)},
+            summary=msg, payload=payload, metrics=metrics,
         )

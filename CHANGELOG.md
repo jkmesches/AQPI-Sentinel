@@ -28,6 +28,17 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **`ops/backup.sh` can keep a second copy of each dump on a share.**
+  `SENTINEL_BACKUP_COPY_DIR` names the folder. Each run copies every local
+  dump the folder lacks and checks its SHA-256, and a local dump past
+  `SENTINEL_BACKUP_KEEP` is pruned only once the folder holds a checked copy.
+  The folder keeps `SENTINEL_BACKUP_COPY_KEEP` dumps (default 14). A share
+  that is down, unmounted or stalled never fails the dump, and
+  `layer0.self.backup` warns when the copy fails and fails when the newest
+  checked copy is 72 h old. Runs without the setting behave as before.
+
 ### Changed
 
 - **Dark mode is the default.** A viewer who has not picked a theme now gets
