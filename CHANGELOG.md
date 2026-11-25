@@ -28,6 +28,51 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-11-25
+
+### Changed
+
+- **The map's cursor readout reads blended and edge pixels of a product
+  frame.** The composite paints solid 5 dBZ bands and resamples after, and
+  most product frames store their partly transparent edges darkened by
+  their alpha, so about half the composite's painted pixels read "not on
+  this scale".
+  A pixel that mixes two neighboring bands now reads as the span of both
+  ("5.0 to 14.9 dBZ"), never a value inside it, and an edge pixel is read
+  from the frame's own bytes and divided by its alpha. Every tolerance
+  comes from the producer's measured write error, and a pixel that fits
+  more than one reading still says "not on this scale". On the same
+  frames, the share that reads went from 46% to 75% for composite
+  reflectivity and from 27% to 53% for one-hour QPE. No reading of a solid
+  pixel changed. (1a0de9b, 9f8459f)
+- **The stage strip under the header fits one line on a 1920 px screen.**
+  The status dots now separate the stages, and the names are tracked
+  tighter at the same 12 px size. With eight stages it stays on one line
+  in a window wider than about 1,780 px. The header's overall check count
+  ("81 2 W 4 F / 89") is gone, since the strip shows the same counts per
+  stage. (fbe94b4)
+- **The CoSMoS manifest checks are listed under CoSMoS Data, one row
+  each.** The two checks shared one row, named "Cosmos", under "Other".
+  They now read "CoSMoS · cycle outcome" and "CoSMoS · cycle manifest
+  age", beside the products the model run makes. (3c7dcfd)
+
+### Fixed
+
+- **Text fields, menus and text areas have a visible edge.** Their borders
+  measured 1.16 to 1.43:1 against the background, under WCAG's 3:1 for a
+  control's boundary, and no border color class in the markup applied,
+  due to a CSS layer fault. The fault is fixed, and a new control border
+  token meets 3:1 on every surface in both themes. (4f40064)
+- **The dashboard's alarm rows no longer overlap.** "CRITICAL" ran into
+  the stage name beside it, and the "Backend" stage names were cut off.
+  Each column now takes the width of its widest entry. (7862fed)
+- **The backend image creates `/data/cold`.** Without it, Docker made a
+  new `sentinel_cold` volume owned by root, the backend (uid 1000) could
+  not write the retention sweep's exports, and the sweep never removed
+  old rows. A deployment whose cold volume is already root-owned still
+  needs a one-time `chown 1000:1000` of the volume's folder on the host.
+  A bind mount takes the host folder's owner as before. (91bd23c)
+
 ## [0.16.1] - 2026-11-24
 
 ### Fixed
