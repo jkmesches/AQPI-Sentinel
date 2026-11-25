@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.6] - 2026-11-25
+
 ### Added
 
 - **`ops/docker-compose.xqpi.yml` runs an XQPI stack beside an AQPI one.** It
