@@ -1084,7 +1084,12 @@
 				</span>
 			</div>
 		{/if}
-		<ul class="divide-y divide-[var(--color-border)] overflow-y-auto">
+		<!-- The rows share the list's columns (subgrid), each as wide as its
+		     widest cell. Fixed tracks of 2.5rem and 6.5rem held neither
+		     "critical", which ran into the stage name, nor "Backend
+		     Processing", after the type went to 12 px Poppins. The subject
+		     still truncates past 12rem and the message takes the rest. -->
+		<ul class="grid grid-cols-[auto_auto_auto_fit-content(12rem)_auto_auto_minmax(0,1fr)_auto] gap-x-3 divide-y divide-[var(--color-border)] overflow-y-auto">
 			{#each shownAlarms as a (a.id)}
 				{@const opened = new Date(a.opened_at)}
 				{@const ageS = (Date.now() - opened.getTime()) / 1000}
@@ -1098,16 +1103,12 @@
 				{@const isAcked = !!a.ack}
 				<li
 					data-alarm-row
-					class="row-hover sev-bar grid grid-cols-[2.5rem_6.5rem_3.5rem_12rem_auto_auto_1fr_auto] items-center gap-3 px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
+					class="row-hover sev-bar col-span-full grid grid-cols-subgrid items-center px-4 py-1.5 text-[12px] {isAcked ? 'opacity-50' : ''} {sevColor[a.severity] ??
 						''}"
 					title={isAcked ? `acked by ${a.ack?.acked_by} at ${a.ack?.acked_at}${a.ack?.note ? ' — ' + a.ack.note : ''}` : ''}
 				>
-					<span class={severityChip(a.severity)}>{a.severity}</span>
-					<!-- truncate, and a column wide enough for the longest stage
-					     name. "Connectivity" needs about 70px and the column was
-					     51px, so it ran into the id beside it and the row read
-					     "Connectivi#28200". -->
-					<span class="num truncate text-[12px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
+					<span class="justify-self-start {severityChip(a.severity)}">{a.severity}</span>
+					<span class="num whitespace-nowrap text-[12px] text-[var(--color-muted)]" title={a.stage}>{stageLabel(a.stage)}</span>
 					<span class="num text-[var(--color-bright)]">#{a.id}</span>
 					<span class="text-[var(--color-default)] truncate" title={a.target}>{prettyCheckLabel(a.check_id, a.target)}</span>
 					<span
@@ -1154,12 +1155,12 @@
 				</li>
 			{/each}
 			{#if !sentinel.alarms.length}
-				<li class="px-4 py-3 text-[12px] text-[var(--color-faint)]">no open alarms.</li>
+				<li class="col-span-full px-4 py-3 text-[12px] text-[var(--color-faint)]">no open alarms.</li>
 			{:else if !shownAlarms.length}
 				<!-- Open alarms exist but none has a row, because each is
 				     acknowledged or held back by a source filter. Say which,
 				     since "no open alarms" here would be a lie. -->
-				<li data-alarms-empty class="px-4 py-3 text-[12px] text-[var(--color-faint)]">
+				<li data-alarms-empty class="col-span-full px-4 py-3 text-[12px] text-[var(--color-faint)]">
 					{#if ackedCount}
 						{ackedCount} open alarm{ackedCount === 1 ? ' is' : 's are'} acknowledged,
 						<button type="button" class="underline decoration-dotted hover:text-[var(--color-bright)]"
