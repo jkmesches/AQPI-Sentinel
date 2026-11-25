@@ -28,6 +28,8 @@ unknown`.
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-11-25
+
 ### Added
 
 - **`ops/backup.sh` can keep a second copy of each dump on a share.**
