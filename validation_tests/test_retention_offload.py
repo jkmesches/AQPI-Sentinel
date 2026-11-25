@@ -111,8 +111,8 @@ async def main() -> int:
         cutoff = now - timedelta(days=60)
         print(f"seeded {OLD_N} old + {NEW_N} recent rows; cutoff {cutoff:%Y-%m-%d}")
 
-        r1 = await retention.offload_check_runs(pool, cold, cutoff)
-        r2 = await retention.offload_metric_samples(pool, cold, cutoff)
+        r1 = await retention.offload_check_runs(pool, cold, cutoff, marker=None)
+        r2 = await retention.offload_metric_samples(pool, cold, cutoff, marker=None)
         async with pool.acquire() as c:
             left_cr = await c.fetchval("SELECT count(*) FROM check_runs")
             left_ms = await c.fetchval("SELECT count(*) FROM metric_samples")
@@ -149,7 +149,7 @@ async def main() -> int:
 
         retention._export_query = short_export
         try:
-            await retention.offload_check_runs(pool, cold, cutoff)
+            await retention.offload_check_runs(pool, cold, cutoff, marker=None)
             print("  FAIL  short export did not raise OffloadError")
             failures += 1
         except retention.OffloadError:
@@ -160,9 +160,30 @@ async def main() -> int:
         finally:
             retention._export_query = real
 
-        res = await retention.offload_check_runs(pool, cold, now - timedelta(days=3650))
+        res = await retention.offload_check_runs(pool, cold, now - timedelta(days=3650),
+                                                 marker=None)
         assert res["rows"] == 0, res
         print("  ok  no-op when nothing is old enough")
+
+        # A marker the cold store lacks means its share is not attached: the
+        # sweep must export nothing and delete nothing.
+        async with pool.acquire() as c:
+            before = await c.fetchval("SELECT count(*) FROM check_runs")
+        try:
+            await retention.offload_check_runs(pool, cold, cutoff, marker=".sentinel-storage")
+            print("  FAIL  a missing marker did not raise OffloadError")
+            failures += 1
+        except retention.OffloadError:
+            async with pool.acquire() as c:
+                after = await c.fetchval("SELECT count(*) FROM check_runs")
+            exports = list((cold / "check_runs").glob("*")) if (cold / "check_runs").exists() \
+                else []
+            assert after == before, f"rows deleted without the marker: {before} → {after}"
+            print(f"  ok  a missing marker aborted the sweep; {after} rows intact, "
+                  f"{len(exports)} files in check_runs/ from earlier sections")
+        (cold / ".sentinel-storage").touch()
+        res = await retention.offload_check_runs(pool, cold, cutoff, marker=".sentinel-storage")
+        print(f"  ok  with the marker in place the sweep runs ({res['rows']} rows)")
     except AssertionError as e:
         print(f"  FAIL  {e}")
         failures += 1

@@ -506,6 +506,21 @@ Point the backend at it with `SENTINEL_ARCHIVE_HOST_PATH` /
 `SENTINEL_COLD_HOST_PATH` in `ops/.env.prod` — both accept either a bare
 volume name (dev default) or a host path (bind mount).
 
+When the stores are on a share, set `SENTINEL_STORAGE_MARKER` (e.g.,
+`.sentinel-storage`) and create that file once at the root of each store on the
+share. A share that fails to attach leaves its mount point as an empty local
+folder, and Docker creates a missing bind-mount source, so the backend would
+otherwise archive onto the local disk under the share's path, and keep doing so
+after the share mounts over that folder. With the marker set, the backend
+writes nothing to a store that lacks the file, the retention sweep exports and
+deletes nothing, and `layer0.self.disk` fails with "NOT ATTACHED" until the
+share is back.
+
+Every call on either store runs on a pool of its own (`backend/storage_io.py`),
+4 threads with at most 16 calls in flight and a time limit on each. A stalled
+`hard` mount then holds those 4 threads, new archive writes are skipped, page
+reads fall back to radarca, and the rest of the backend keeps running.
+
 ### What filled the disk on 2026-08-01
 
 Worth understanding in full, because the failure mode is silent and the fix

@@ -392,7 +392,7 @@ class Layer4ImageCheck(Check):
                else Observation(self.identifier, frame.scan_ts, frame.published_at))
         task = asyncio.create_task(_archive_save(
             ctx.pool, SETTINGS.archive_root, source=frame.source, content=content,
-            content_type="image/png",
+            marker=SETTINGS.storage_marker, content_type="image/png",
             origin_url=f"{SETTINGS.base}/api/imageData?file={frame.source}",
             observation=obs))
         _keep(task)

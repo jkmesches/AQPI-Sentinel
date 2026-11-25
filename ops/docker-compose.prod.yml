@@ -94,6 +94,9 @@ services:
       # then dropped from the live tables. Unset = keep everything forever.
       SENTINEL_DB_RETENTION_DAYS: ${SENTINEL_DB_RETENTION_DAYS:-}
       SENTINEL_COLD_ROOT:       /data/cold
+      # A file each store must hold before anything is written there, so a share
+      # that failed to attach is never filled from the local disk. Unset = none.
+      SENTINEL_STORAGE_MARKER: ${SENTINEL_STORAGE_MARKER:-}
       SENTINEL_RETENTION_HOUR_UTC: ${SENTINEL_RETENTION_HOUR_UTC:-9}
       # First-run admin bootstrap. Ignored once any user exists.
       SENTINEL_ADMIN_EMAIL:        ${SENTINEL_ADMIN_EMAIL:-}

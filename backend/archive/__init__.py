@@ -24,7 +24,8 @@ from pathlib import Path
 import asyncpg
 from PIL import Image
 
-from backend.storage_io import STORAGE_IO, StorageBusyError
+from backend.storage_io import (STORAGE_IO, StorageBusyError, StorageNotMountedError,
+                                require_marker)
 
 log = logging.getLogger(__name__)
 
@@ -96,13 +97,15 @@ def _sha_path(root: Path, sha: str, ext: str) -> Path:
     return root / sha[:2] / f"{sha}.{ext}"
 
 
-def _write_blob(path: Path, content: bytes) -> None:
+def _write_blob(root: Path, path: Path, content: bytes, marker: str | None) -> None:
     """Idempotent write of one content-addressed blob. Runs in a thread.
 
     Idempotent because many checks hash to the same sha and there's no point
     rewriting the file; the tmp+rename also avoids a partial file being
-    visible if two checks fire concurrently for the same content.
+    visible if two checks fire concurrently for the same content. The marker
+    test comes first, so nothing is created on a share that is not attached.
     """
+    require_marker(root, marker)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         return
@@ -130,6 +133,7 @@ def _detect_ext(content_type: str | None) -> str:
 
 
 async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
+                     marker: str | None,
                      content_type: str | None = None, origin_url: str | None = None,
                      observation: Observation | None = None) -> str | None:
     """Best-effort persist. Returns the sha256 on success, None on failure.
@@ -137,7 +141,9 @@ async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
     Failures are swallowed (the caller is a live check that must keep
     running). Errors are logged at WARNING. With an observation, the frame's
     image_observations row is written in the same transaction as its
-    image_archive row, which the row's foreign key needs.
+    image_archive row, which the row's foreign key needs. `marker` is
+    SETTINGS.storage_marker, required of every caller so none can skip the
+    test that the archive's share is attached.
     """
     try:
         sha = hashlib.sha256(content).hexdigest()
@@ -160,10 +166,14 @@ async def save_image(pool, archive_root: Path, *, source: str, content: bytes,
         # On asyncio's default pool it held threads the disk check and the
         # K2 readers need. See backend/storage_io.py.
         try:
-            await STORAGE_IO.run(_write_blob, path, content, timeout_s=WRITE_TIMEOUT_S)
+            await STORAGE_IO.run(_write_blob, archive_root, path, content, marker,
+                                 timeout_s=WRITE_TIMEOUT_S)
         except (StorageBusyError, TimeoutError) as e:
             log.warning("archive: not saved, the archive store gave no answer (%s): %r",
                         str(e) or "timed out", source)
+            return None
+        except StorageNotMountedError as e:
+            log.warning("archive: not saved: %s", e)
             return None
 
         now = datetime.now(timezone.utc)

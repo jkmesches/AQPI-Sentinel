@@ -32,6 +32,9 @@ class Settings:
     archive_root: Path
     archive_retention_days: int | None    # None == permanent
     cold_root: Path                       # offloaded CSV exports land here
+    # A file that must exist at the root of the archive and cold stores before
+    # anything is written there, or None for no such test. See storage_io.py.
+    storage_marker: str | None
     db_retention_days: int | None         # None == keep all rows in the hot DB
     retention_hour_utc: int               # daily sweep runs at this UTC hour
     admin_email: str                       # bootstrap admin (only used if no users exist)
@@ -67,6 +70,27 @@ def _opt_path(var: str) -> Path | None:
     without worrying about the empty-string case."""
     v = os.environ.get(var, "").strip()
     return Path(v) if v else None
+
+
+def _opt_marker(var: str) -> str | None:
+    """Read an optional marker file name.
+
+    Args:
+        var: The environment variable.
+
+    Returns:
+        The name, or None when unset or empty.
+
+    Raises:
+        ValueError: For a name with a slash in it, or "." or "..", which would
+            name a folder or a file outside the store's root.
+    """
+    v = os.environ.get(var, "").strip()
+    if not v:
+        return None
+    if "/" in v or v in (".", ".."):
+        raise ValueError(f"{var} must be a plain file name, got {v!r}")
+    return v
 
 
 # === Renamed in v0.8.3, and NOT read under the old name on purpose ===
@@ -143,6 +167,7 @@ def _load() -> Settings:
         archive_root=Path(os.environ.get("SENTINEL_ARCHIVE_ROOT", str(data_dir / "archive"))).resolve(),
         archive_retention_days=retention,
         cold_root=Path(os.environ.get("SENTINEL_COLD_ROOT", str(data_dir / "cold"))).resolve(),
+        storage_marker=_opt_marker("SENTINEL_STORAGE_MARKER"),
         db_retention_days=db_retention,
         retention_hour_utc=int(os.environ.get("SENTINEL_RETENTION_HOUR_UTC", "9")),
         admin_email=os.environ.get("SENTINEL_ADMIN_EMAIL", ""),

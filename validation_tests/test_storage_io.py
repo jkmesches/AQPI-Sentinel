@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SENTINEL_DB_URL", "postgresql://unused/unused")
 
 import backend.checks as _all  # noqa: F401
-from backend import archive, retention, storage_io
+import backend.checks.layer0_selfhost as selfhost
+from backend import archive, config, retention, storage_io
 from backend.registry import CHECKS
 from backend.storage_io import STORAGE_IO, StorageBusyError, StorageIO
 
+MARKER = ".sentinel-storage"
 failures: list[str] = []
 
 
@@ -151,7 +154,7 @@ async def archive_on_a_stall(root: Path) -> None:
     """
     async with Stall(STORAGE_IO):
         out, took = await elapsed(archive.save_image(
-            None, root, source="x/y.png", content=b"\x89PNG not really"))
+            None, root, source="x/y.png", content=b"\x89PNG not really", marker=None))
         check("a save during a stall gives up at once", out is None and took < 1,
               f"{out!r} in {took:.2f}s")
         check("...and writes nothing",
@@ -250,6 +253,62 @@ async def disk_check_on_a_stall() -> None:
               out.summary)
 
 
+async def marker_rules(root: Path) -> None:
+    """With a marker named, nothing is written to a store that lacks it.
+
+    Args:
+        root: An empty folder; the archive and cold stores go under it.
+    """
+    for raw, want in (("", None), (".sentinel-storage", ".sentinel-storage")):
+        os.environ["SENTINEL_STORAGE_MARKER"] = raw
+        check(f"SENTINEL_STORAGE_MARKER={raw!r} reads as {want!r}",
+              config._opt_marker("SENTINEL_STORAGE_MARKER") == want)
+    for bad in ("a/b", "..", "."):
+        os.environ["SENTINEL_STORAGE_MARKER"] = bad
+        try:
+            _ = config._opt_marker("SENTINEL_STORAGE_MARKER")
+            check(f"a marker of {bad!r} is refused", False)
+        except ValueError:
+            check(f"a marker of {bad!r} is refused", True)
+    os.environ.pop("SENTINEL_STORAGE_MARKER", None)
+
+    arch, cold = root / "archive", root / "cold"
+    for d in (arch, cold):
+        d.mkdir(parents=True)
+    out = await archive.save_image(None, arch, source="x/y.png", content=b"frame",
+                                   marker=MARKER)
+    made = sorted(p.name for p in arch.rglob("*"))
+    check("a save to an archive without the marker is refused", out is None)
+    check("...and creates nothing, not even a shard folder", not made, str(made))
+    (arch / MARKER).touch()
+    _ = await archive.save_image(None, arch, source="x/y.png", content=b"frame",
+                                 marker=MARKER)
+    files = list(arch.rglob("*.png"))
+    check("with the marker in place the frame is written", len(files) == 1, str(files))
+
+    out, _ = await elapsed(retention._require_store(cold, MARKER))
+    check("a cold store without the marker stops the sweep",
+          isinstance(out, retention.OffloadError) and "not attached" in str(out), repr(out))
+    (cold / MARKER).touch()
+    out, _ = await elapsed(retention._require_store(cold, MARKER))
+    check("...and one with it lets it run", out is None, repr(out))
+
+    real = selfhost.SETTINGS
+    selfhost.SETTINGS = replace(real, archive_root=arch, cold_root=cold, storage_marker=MARKER)
+    try:
+        (cold / MARKER).unlink()
+        r = await CHECKS["layer0.self.disk"].run(None)
+        check("the disk check fails on a store without the marker",
+              r.status == "fail" and "NOT ATTACHED" in r.summary
+              and r.payload.get("detached") == [str(cold)], r.summary)
+        (cold / MARKER).touch()
+        r = await CHECKS["layer0.self.disk"].run(None)
+        check("...and says nothing of it when both have one",
+              "NOT ATTACHED" not in r.summary and "detached" not in r.payload, r.summary)
+    finally:
+        selfhost.SETTINGS = real
+
+
 async def main() -> int:
     """Run every section.
 
@@ -261,6 +320,7 @@ async def main() -> int:
         await archive_on_a_stall(Path(td) / "archive")
         await retention_export(Path(td))
         await disk_check_on_a_stall()
+        await marker_rules(Path(td) / "marked")
     check("nothing is left in flight", STORAGE_IO.in_flight == 0, str(STORAGE_IO.in_flight))
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall storage-io assertions passed")

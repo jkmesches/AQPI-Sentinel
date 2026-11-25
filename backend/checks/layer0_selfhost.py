@@ -33,7 +33,7 @@ from backend.storage_io import STORAGE_IO, StorageBusyError
 from .. import thresholds
 from ..config import SETTINGS
 from ..registry import register
-from .base import Check, CheckResult, utcnow
+from .base import Check, CheckResult, Status, utcnow
 
 # Percent-used thresholds. Deliberately well below 100: Postgres needs
 # headroom to checkpoint and VACUUM, and the operator needs time to act.
@@ -50,6 +50,63 @@ def _usage(path: Path) -> dict:
         "free_gb":   round(free / 1e9, 1),
         "used_pct":  round(used / total * 100, 1) if total else 0.0,
     }
+
+
+def _without_marker(roots: list[Path], marker: str) -> list[str]:
+    """The roots that lack `marker`. Runs on the stores' pool."""
+    return [str(r) for r in roots if not (r / marker).exists()]
+
+
+async def _detached_stores() -> list[str]:
+    """The archive and cold roots missing SETTINGS.storage_marker.
+
+    Returns:
+        Their paths, or nothing when no marker is set or the stores give no
+        answer, which the archive probe reports on its own.
+    """
+    marker = SETTINGS.storage_marker
+    if not marker:
+        return []
+    try:
+        return await STORAGE_IO.run(_without_marker, [SETTINGS.archive_root, SETTINGS.cold_root],
+                                    marker, timeout_s=10)
+    except (TimeoutError, StorageBusyError):
+        return []
+
+
+async def _archive_report(local: dict, fail_at: float) -> tuple[str, dict[str, object], bool]:
+    """Probe the archive mount, when it is a different filesystem from the local one.
+
+    On the stores' pool and timed out: in production this path is a `hard` NFS
+    mount, where statfs blocks indefinitely while the NAS is unreachable. The
+    disk check exists to report trouble, so it must not become the thing that
+    hangs, and a probe left stuck on the stores' pool cannot hold a thread the
+    local statfs needs.
+
+    Args:
+        local: The local disk's usage.
+        fail_at: The percent used at which the local disk fails.
+
+    Returns:
+        (a summary part or "", payload fields, whether to warn).
+    """
+    try:
+        arch = await STORAGE_IO.run(_usage_if_exists, SETTINGS.archive_root, timeout_s=10)
+    except (TimeoutError, StorageBusyError) as e:
+        # Almost always a hung NFS mount. Worth a warn on its own, since an
+        # unreachable archive means new captures are being dropped.
+        busy = isinstance(e, StorageBusyError)
+        why = "its earlier calls never returned" if busy else "statfs timed out"
+        return (f"archive UNREACHABLE ({why})",
+                {"archive_error": "busy" if busy else "timeout"}, True)
+    except OSError:
+        return "archive unreadable", {"archive_error": "unreadable"}, False
+    if arch is None or arch["total_gb"] == local["total_gb"]:
+        return "", {}, False
+    # The archive filling doesn't stop monitoring, so it never escalates past
+    # warn on its own.
+    return (f"archive {arch['used_pct']:.0f}% used ({arch['free_gb']:.0f} GB free)",
+            {"archive": arch}, arch["used_pct"] >= fail_at)
 
 
 def _usage_if_exists(path: Path) -> dict | None:
@@ -85,50 +142,25 @@ class Layer0DiskCheck(Check):
             )
 
         pct = local["used_pct"]
-        if pct >= fail_at:
-            status = "fail"
-        elif pct >= warn_at:
-            status = "warn"
-        else:
-            status = "pass"
-
-        payload = {"local": local, "warn_pct": warn_at, "fail_pct": fail_at}
+        status: Status = "fail" if pct >= fail_at else "warn" if pct >= warn_at else "pass"
+        payload: dict[str, object] = {"local": local, "warn_pct": warn_at, "fail_pct": fail_at}
         parts = [f"local {pct:.0f}% used ({local['free_gb']:.0f} GB free)"]
 
-        # Archive mount, when it's genuinely a different filesystem.
-        #
-        # On the stores' pool and timed out: in production this path is a
-        # `hard` NFS mount, where statfs blocks indefinitely while the NAS is
-        # unreachable. This check exists to report trouble, so it must not
-        # become the thing that hangs, and a probe left stuck on the stores'
-        # pool cannot hold a thread the local statfs above needs.
-        try:
-            archive_root = SETTINGS.archive_root
-            arch = await STORAGE_IO.run(_usage_if_exists, archive_root, timeout_s=10)
-            if arch is not None:
-                if arch["total_gb"] != local["total_gb"]:
-                    payload["archive"] = arch
-                    parts.append(
-                        f"archive {arch['used_pct']:.0f}% used "
-                        f"({arch['free_gb']:.0f} GB free)"
-                    )
-                    # The archive filling doesn't stop monitoring, so it never
-                    # escalates past warn on its own.
-                    if arch["used_pct"] >= fail_at and status == "pass":
-                        status = "warn"
-        except (TimeoutError, StorageBusyError) as e:
-            # Almost always a hung NFS mount. Worth a warn on its own, since an
-            # unreachable archive means new captures are being dropped.
-            busy = isinstance(e, StorageBusyError)
-            payload["archive_error"] = "busy" if busy else "timeout"
-            parts.append("archive UNREACHABLE ("
-                         + ("its earlier calls never returned" if busy else "statfs timed out")
-                         + ")")
-            if status == "pass":
-                status = "warn"
-        except OSError:
-            payload["archive_error"] = "unreadable"
-            parts.append("archive unreadable")
+        part, extra, warn = await _archive_report(local, fail_at)
+        payload.update(extra)
+        if part:
+            parts.append(part)
+        if warn and status == "pass":
+            status = "warn"
+
+        # A store without its marker is a share that did not attach: writes to
+        # it are refused, so captures and exports stop until it is mounted.
+        detached = await _detached_stores()
+        if detached:
+            payload["detached"] = detached
+            parts.append(f"NOT ATTACHED, no {SETTINGS.storage_marker} in "
+                         + ", ".join(detached))
+            status = "fail"
 
         return CheckResult(
             check_id=self.id, target=self.target, stage=self.stage,

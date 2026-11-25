@@ -38,12 +38,29 @@ unknown`.
   that is down, unmounted or stalled never fails the dump, and
   `layer0.self.backup` warns when the copy fails and fails when the newest
   checked copy is 72 h old. Runs without the setting behave as before.
+- **`SENTINEL_STORAGE_MARKER` names a file each store must hold.** With the
+  archive and cold stores on a share, a share that fails to attach leaves an
+  empty local folder that Docker binds in its place. With the setting, the
+  backend writes nothing to a store that lacks the file, the retention sweep
+  exports and deletes nothing, and `layer0.self.disk` fails with "NOT
+  ATTACHED". Unset, nothing changes.
 
 ### Changed
 
 - **Dark mode is the default.** A viewer who has not picked a theme now gets
   dark, where the console followed the operating system's setting. A theme
   already picked (Light, Auto or Dark) is kept.
+
+### Fixed
+
+- **A stalled archive or cold share no longer stops the backend.** The
+  retention sweep's export did its file work on the event loop, so a stall
+  during the 09:00 UTC sweep would have frozen every check and the API. The
+  archive's reads and writes held threads that other checks share. Both stores
+  now run on a pool of their own, 4 threads with at most 16 calls in flight and
+  a time limit on each, and the export streams straight into its gzip file. A
+  stalled share costs skipped archive writes and a skipped sweep, and
+  `layer0.self.disk` reports it.
 
 ## [0.16.2] - 2026-11-25
 

@@ -33,7 +33,8 @@ from typing import Any
 
 import asyncpg
 
-from backend.storage_io import STORAGE_IO, StorageBusyError
+from backend.storage_io import (STORAGE_IO, StorageBusyError, StorageNotMountedError,
+                                require_marker)
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +133,26 @@ def _mkdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+async def _require_store(root: Path, marker: str | None) -> None:
+    """Raise OffloadError unless the store at `root` holds its marker file.
+
+    Args:
+        root: The cold or archive store's root.
+        marker: SETTINGS.storage_marker, or None for no test.
+
+    Raises:
+        OffloadError: When the marker is missing or the store gives no answer.
+    """
+    if not marker:
+        return
+    try:
+        await STORAGE_IO.run(require_marker, root, marker, timeout_s=FILE_TIMEOUT_S)
+    except StorageNotMountedError as e:
+        raise OffloadError(str(e)) from e
+    except (StorageBusyError, TimeoutError) as e:
+        raise OffloadError(f"{root} gave no answer: {str(e) or 'timed out'}") from e
+
+
 async def _export_query(pool: asyncpg.Pool, query: str, args: list[Any], dest: Path) -> int:
     """COPY the results of `query` to a gzipped CSV at `dest`. Returns rows.
 
@@ -194,8 +215,23 @@ async def _delete_chunked(pool, table: str, where: str, args: list[Any]) -> int:
         await asyncio.sleep(0)
 
 
-async def offload_check_runs(pool, cold_root: Path, cutoff: datetime) -> dict:
-    """Export + drop check_runs older than `cutoff`."""
+async def offload_check_runs(pool: asyncpg.Pool, cold_root: Path, cutoff: datetime, *,
+                             marker: str | None) -> dict[str, Any]:
+    """Export + drop check_runs older than `cutoff`.
+
+    Args:
+        pool: The store's pool.
+        cold_root: Where exports go.
+        cutoff: Rows that finished before this are offloaded.
+        marker: SETTINGS.storage_marker, which must be in `cold_root` first.
+
+    Returns:
+        The table, the rows removed and the export's path.
+
+    Raises:
+        OffloadError: When the cold store is not attached, gives no answer, or
+            the export does not verify. Nothing is deleted then.
+    """
     row = await pool.fetchrow(
         "SELECT max(id) AS max_id, count(*) AS n FROM check_runs WHERE finished_at < $1",
         cutoff,
@@ -212,6 +248,7 @@ async def offload_check_runs(pool, cold_root: Path, cutoff: datetime) -> dict:
     stamp = f"{span['lo']:%Y%m%dT%H%M%S}_{span['hi']:%Y%m%dT%H%M%S}"
     dest = cold_root / "check_runs" / f"check_runs_{stamp}.csv.gz"
 
+    await _require_store(cold_root, marker)
     exported = await _export_query(
         pool,
         """
@@ -237,12 +274,26 @@ async def offload_check_runs(pool, cold_root: Path, cutoff: datetime) -> dict:
     return {"table": "check_runs", "rows": removed, "file": str(dest)}
 
 
-async def offload_metric_samples(pool, cold_root: Path, cutoff: datetime) -> dict:
+async def offload_metric_samples(pool: asyncpg.Pool, cold_root: Path, cutoff: datetime, *,
+                                 marker: str | None) -> dict[str, Any]:
     """Export + drop metric_samples older than `cutoff`.
 
-    No id column here, so the sweep is bounded by `ts` alone — safe because
-    every insert stamps ts at write time, so nothing lands behind the cutoff
-    while the sweep runs.
+    No id column here, so the sweep is bounded by `ts` alone. That holds
+    because every insert stamps ts at write time, so nothing lands behind the
+    cutoff while the sweep runs.
+
+    Args:
+        pool: The store's pool.
+        cold_root: Where exports go.
+        cutoff: Samples taken before this are offloaded.
+        marker: SETTINGS.storage_marker, which must be in `cold_root` first.
+
+    Returns:
+        The table, the rows removed and the export's path.
+
+    Raises:
+        OffloadError: When the cold store is not attached, gives no answer, or
+            the export does not verify. Nothing is deleted then.
     """
     row = await pool.fetchrow(
         "SELECT count(*) AS n, min(ts) AS lo, max(ts) AS hi FROM metric_samples WHERE ts < $1",
@@ -255,6 +306,7 @@ async def offload_metric_samples(pool, cold_root: Path, cutoff: datetime) -> dic
     stamp = f"{row['lo']:%Y%m%dT%H%M%S}_{row['hi']:%Y%m%dT%H%M%S}"
     dest = cold_root / "metric_samples" / f"metric_samples_{stamp}.csv.gz"
 
+    await _require_store(cold_root, marker)
     exported = await _export_query(
         pool,
         """
@@ -277,23 +329,39 @@ async def offload_metric_samples(pool, cold_root: Path, cutoff: datetime) -> dic
     return {"table": "metric_samples", "rows": removed, "file": str(dest)}
 
 
-async def prune_archive(pool, archive_root: Path, cutoff: datetime) -> dict:
+async def prune_archive(pool: asyncpg.Pool, archive_root: Path, cutoff: datetime, *,
+                        marker: str | None) -> dict[str, Any]:
     """Drop archived images not seen since `cutoff`.
 
     Opt-in via SENTINEL_ARCHIVE_RETENTION_DAYS, which was parsed into config
-    but read by nothing until 2026-08-08 — a documented knob that silently did
+    but read by nothing until 2026-08-08, a documented knob that silently did
     nothing. Production leaves it unset (permanent) because the archive now
     lives on the NFS share, where 18GB is not worth pruning.
 
     Keyed on `last_seen_at`, not `first_seen_at`: images are content-addressed
     and deduped, so a frame that keeps recurring upstream stays live no matter
     how long ago it first appeared.
+
+    Args:
+        pool: The store's pool.
+        archive_root: The archive's root.
+        cutoff: Images not seen since this are dropped.
+        marker: SETTINGS.storage_marker, which must be in `archive_root` before
+            any row is deleted, so rows never go while their files stay put on a
+            share that is not attached.
+
+    Returns:
+        The table, the rows dropped and the bytes freed.
+
+    Raises:
+        OffloadError: When the archive store is not attached or gives no answer.
     """
     rows = await pool.fetch(
         "SELECT sha256, ext FROM image_archive WHERE last_seen_at < $1", cutoff
     )
     if not rows:
         return {"table": "image_archive", "rows": 0, "bytes": 0}
+    await _require_store(archive_root, marker)
 
     # Rows first, files after the commit. The other way round, a delete that
     # failed (a reference added since, or the database down) left rows whose
@@ -342,7 +410,8 @@ async def run_once(pool, *, settings, now: datetime | None = None) -> list[dict]
         cutoff = _cutoff(settings.db_retention_days, now)
         for fn in (offload_check_runs, offload_metric_samples):
             try:
-                results.append(await fn(pool, settings.cold_root, cutoff))
+                results.append(await fn(pool, settings.cold_root, cutoff,
+                                        marker=settings.storage_marker))
             except Exception as e:
                 # One table failing must not block the other, and must not
                 # take the backend down — this runs unattended.
@@ -352,7 +421,8 @@ async def run_once(pool, *, settings, now: datetime | None = None) -> list[dict]
     if settings.archive_retention_days:
         cutoff = _cutoff(settings.archive_retention_days, now)
         try:
-            results.append(await prune_archive(pool, settings.archive_root, cutoff))
+            results.append(await prune_archive(pool, settings.archive_root, cutoff,
+                                               marker=settings.storage_marker))
         except Exception as e:
             log.exception("retention: prune_archive failed")
             results.append({"table": "image_archive", "error": str(e)})

@@ -6,6 +6,12 @@ flight and a time limit on each await. A stalled share then ties up at most
 WORKERS threads, new calls past the cap fail at once with StorageBusyError, and
 asyncio's default pool, which the disk check and the K2 tree readers share,
 stays free.
+
+An operator can also name a marker file (SENTINEL_STORAGE_MARKER) that must
+exist at the root of each store before anything is written there. A share that
+failed to attach leaves its mount point as an empty folder on the local disk,
+and Docker creates a missing bind-mount source, so without the marker the
+archive would quietly fill the local disk under the share's path.
 """
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TypeVar
 
 log = logging.getLogger(__name__)
@@ -30,6 +37,10 @@ BUSY_LOG_INTERVAL_S = 60.0
 
 class StorageBusyError(RuntimeError):
     """Too many store calls are waiting on the share to start another."""
+
+
+class StorageNotMountedError(RuntimeError):
+    """The store's marker file is missing, so its share is not attached."""
 
 
 class StorageIO:
@@ -103,6 +114,22 @@ class StorageIO:
             self._last_busy_log = now
             log.warning("storage: %d calls in flight, so new ones are refused; "
                         "the archive or cold share is probably stalled", self._in_flight)
+
+
+def require_marker(root: Path, marker: str | None) -> None:
+    """Raise StorageNotMountedError when `marker` is set and missing from `root`.
+
+    Runs on the pool: on a stalled share the test blocks like any other call.
+
+    Args:
+        root: The store's root folder.
+        marker: The marker's file name, or None when no marker is required.
+
+    Raises:
+        StorageNotMountedError: When the marker is required and absent.
+    """
+    if marker and not (root / marker).exists():
+        raise StorageNotMountedError(f"{root} has no {marker}, so its share is not attached")
 
 
 # One pool for the process. The two stores share it, so together they can never

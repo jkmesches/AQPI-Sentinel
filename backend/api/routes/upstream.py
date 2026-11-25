@@ -623,7 +623,7 @@ async def _fetch_image_upstream(ctx, pool, source: str, fetcher=None,
             _archive_save(
                 pool, SETTINGS.archive_root,
                 source=source, content=body, content_type=ct,
-                origin_url=origin_url,
+                marker=SETTINGS.storage_marker, origin_url=origin_url,
             )
         )
     return body, ct

@@ -147,7 +147,7 @@ async def test_upsert(pool: asyncpg.Pool, root: Path) -> None:
     src = "water_level/images/20261124_0300.png"
 
     async def capture(content: bytes, published: datetime | None) -> None:
-        _ = await save_image(pool, root, source=src, content=content,
+        _ = await save_image(pool, root, source=src, content=content, marker=None,
                              content_type="image/png", origin_url="https://x/?file=" + src,
                              observation=Observation("water_level", t, published))
 
@@ -179,7 +179,7 @@ async def test_upsert(pool: asyncpg.Pool, root: Path) -> None:
     check("new bytes for the same valid time add a row", len(both) == 2, str(both))
     check("...with their own published_at", len(both) == 2 and both[1]["published_at"] == p2)
     before = await pool.fetchval("SELECT count(*) FROM image_observations")
-    _ = await save_image(pool, root, source="comp_ref/x.png", content=png(3),
+    _ = await save_image(pool, root, source="comp_ref/x.png", content=png(3), marker=None,
                          content_type="image/png")
     check("a capture without an observation writes none",
           await pool.fetchval("SELECT count(*) FROM image_observations") == before)
@@ -229,13 +229,13 @@ async def test_after_backfill(pool: asyncpg.Pool, root: Path) -> None:
     t = datetime(2026, 11, 24, 3, tzinfo=timezone.utc)
     content = png(7)
     sha = await save_image(pool, root, source="water_depth/images/20261124_0300.png",
-                           content=content, content_type="image/png")
+                           content=content, marker=None, content_type="image/png")
     await pool.execute(
         "INSERT INTO image_observations (product_id, scan_ts, sha256, first_seen_at, "
         "last_seen_at) VALUES ('water_depth', $1, $2, now(), now())", t, sha)
     published = t - timedelta(hours=3)
     _ = await save_image(pool, root, source="water_depth/images/20261124_0300.png",
-                         content=content, content_type="image/png",
+                         content=content, marker=None, content_type="image/png",
                          observation=Observation("water_depth", t, published))
     row = await pool.fetchrow("SELECT published_at, source, last_seen_at FROM "
                               "image_observations WHERE sha256 = $1", sha)
@@ -252,7 +252,8 @@ async def test_after_backfill(pool: asyncpg.Pool, root: Path) -> None:
     check("a touch moves both last_seen_at columns", seen is not None
           and seen["obs"] > t and seen["arc"] > t, str(seen))
     before = await pool.fetchval("SELECT count(*) FROM image_observations")
-    result = await prune_archive(pool, root, datetime.now(timezone.utc) + timedelta(days=1))
+    result = await prune_archive(pool, root, datetime.now(timezone.utc) + timedelta(days=1),
+                                 marker=None)
     check("retention prunes archive rows that observations point at", result["rows"] > 0
           and await pool.fetchval("SELECT count(*) FROM image_observations") == 0,
           f"{result}, {before} observation rows before")
