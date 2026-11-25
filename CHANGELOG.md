@@ -79,6 +79,14 @@ unknown`.
   frames saved after it. The rows are now locked from query to delete, the
   files go in chunks that skip any frame whose row is back, and an unlink
   that times out stops at its next file.
+- **The retention sweep waits for a storage slot, and never publishes an
+  export late.** The export gave up at once when archive saves held all 16
+  of the stores' call slots, which left the rows for another day and could
+  repeat every night on a slow share. It now waits up to a minute for a
+  slot. An export whose last step timed out could also land in the cold
+  store later while its rows stayed in the table, and the next sweep then
+  exported them again (`metric_samples` has no key, so a restore would
+  double them). That late step now removes its file instead.
 
 ## [0.16.2] - 2026-11-25
 

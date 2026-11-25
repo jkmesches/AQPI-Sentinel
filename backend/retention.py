@@ -24,13 +24,15 @@ free space equal to the table); the runbook covers it as a rare operation.
 """
 from __future__ import annotations
 import asyncio
+import contextlib
 import gzip
 import logging
 import os
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import asyncpg
 
@@ -38,6 +40,7 @@ from backend.storage_io import (STORAGE_IO, StorageBusyError, StorageNotMountedE
                                 require_marker)
 
 log = logging.getLogger(__name__)
+T = TypeVar("T")
 
 # Rows per DELETE statement. Matches reprocess_engine's CHUNK for the same
 # reason: short transactions, no long-held locks on a live table.
@@ -52,6 +55,10 @@ FLUSH_BYTES = 4 * 1024 * 1024
 # deletes nothing, and the next day's sweep tries again.
 FILE_TIMEOUT_S = 60.0
 EXPORT_TIMEOUT_S = 1800.0
+# How long the sweep waits for one of the stores' call slots, which archive
+# saves share. The same minute as FILE_TIMEOUT_S: a pool that frees no slot in
+# that time is held by a stalled share, and the sweep gives up for the day.
+SLOT_WAIT_S = FILE_TIMEOUT_S
 # Archive files removed per call to the stores' pool. Kept small because it
 # bounds the window in which a frame saved again can lose its file, which is
 # one chunk's unlinks, and each chunk costs one query.
@@ -66,26 +73,36 @@ def _cutoff(days: int, now: datetime) -> datetime:
     return now - timedelta(days=days)
 
 
-def _finish(fh: gzip.GzipFile, part: Path, dest: Path) -> None:
-    """Close the gzip stream, fsync it, and rename it into place. Runs on the pool.
+async def _on_pool(fn: Callable[..., T], *args: object) -> T:
+    """Run `fn(*args)` on the stores' pool, waiting up to SLOT_WAIT_S for a slot.
+
+    Archive saves give up at once when the pool is full, because a capture
+    must not wait. The sweep can wait, and giving up would leave the rows in
+    the table for another day.
+
+    Args:
+        fn: A blocking function.
+        *args: Its arguments.
+
+    Returns:
+        What `fn` returned.
 
     Raises:
-        OffloadError: When the file came out empty.
+        StorageBusyError: When no slot frees up within SLOT_WAIT_S.
+        TimeoutError: When the call takes longer than FILE_TIMEOUT_S.
     """
-    fh.close()
-    with open(part, "rb") as f:
-        os.fsync(f.fileno())
-    if part.stat().st_size == 0:
-        part.unlink(missing_ok=True)
-        raise OffloadError(f"export to {dest.name} produced an empty file")
-    os.replace(part, dest)
-
-
-def _discard(fh: gzip.GzipFile | None, part: Path) -> None:
-    """Close and remove an export that will not be published. Runs on the pool."""
-    if fh is not None:
-        fh.close()
-    part.unlink(missing_ok=True)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + SLOT_WAIT_S
+    delay = 0.05
+    while True:  # ends at the deadline
+        try:
+            return await STORAGE_IO.run(fn, *args, timeout_s=FILE_TIMEOUT_S)
+        except StorageBusyError:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise
+            await asyncio.sleep(min(delay, remaining))
+            delay = min(delay * 2, 1.0)
 
 
 class _GzipSink:
@@ -99,12 +116,16 @@ class _GzipSink:
         self._part = part
         self._fh: gzip.GzipFile | None = None
         self._buf = bytearray()
+        # A call that times out runs on in its thread. `_stop` tells a late
+        # finish not to publish, and `_finishing` hands the file to the finish,
+        # so a discard never closes it from a second thread.
+        self._stop = threading.Event()
+        self._finishing = threading.Event()
 
     async def open(self) -> None:
         """Create the parent folder and open the gzip stream."""
-        await STORAGE_IO.run(_mkdir, self._part.parent, timeout_s=FILE_TIMEOUT_S)
-        self._fh = await STORAGE_IO.run(gzip.open, self._part, "wb", 6,
-                                        timeout_s=FILE_TIMEOUT_S)
+        _ = await _on_pool(_mkdir, self._part.parent)
+        self._fh = await _on_pool(gzip.open, self._part, "wb", 6)
 
     async def write(self, data: bytes) -> None:
         """Take one chunk of COPY output. asyncpg awaits this per message."""
@@ -113,16 +134,34 @@ class _GzipSink:
             await self._flush()
 
     async def publish(self, dest: Path) -> None:
-        """Write what is left, fsync, and rename to `dest`."""
+        """Write what is left, fsync, and rename to `dest`.
+
+        Args:
+            dest: The export's final name.
+
+        Raises:
+            OffloadError: When the file was never opened or came out empty.
+            StorageBusyError: When no slot frees up.
+            TimeoutError: When the store gives no answer. The finish then
+                removes the file instead of renaming it, if it ever runs on.
+        """
         await self._flush()
         if self._fh is None:
             raise OffloadError(f"export to {dest.name} was never opened")
-        await STORAGE_IO.run(_finish, self._fh, self._part, dest, timeout_s=FILE_TIMEOUT_S)
+        try:
+            _ = await _on_pool(self._finish, self._fh, dest)
+        except TimeoutError:
+            self._stop.set()
+            raise
 
     async def discard(self) -> None:
         """Close and remove the part file, as far as the store answers."""
+        self._stop.set()
+        if self._finishing.is_set():
+            return  # the finish removes the file itself, now or once the store answers
         try:
-            await STORAGE_IO.run(_discard, self._fh, self._part, timeout_s=FILE_TIMEOUT_S)
+            # No wait for a slot: a .part left behind is never read as an export.
+            await STORAGE_IO.run(self._discard, timeout_s=FILE_TIMEOUT_S)
         except (StorageBusyError, TimeoutError, OSError) as e:
             log.warning("retention: could not remove %s (%s)", self._part,
                         str(e) or "timed out")
@@ -131,7 +170,47 @@ class _GzipSink:
         if not self._buf or self._fh is None:
             return
         chunk, self._buf = bytes(self._buf), bytearray()
-        await STORAGE_IO.run(self._fh.write, chunk, timeout_s=FILE_TIMEOUT_S)
+        _ = await _on_pool(self._fh.write, chunk)
+
+    def _finish(self, fh: gzip.GzipFile, dest: Path) -> None:
+        """Close, fsync and rename the file to `dest`. Runs on the pool.
+
+        The file is removed instead when the sweep gave up first, since rows
+        it kept would then sit in two exports once the next sweep ran.
+
+        Args:
+            fh: The open gzip stream.
+            dest: The export's final name.
+
+        Raises:
+            OffloadError: When the sweep gave up first, or the file came out empty.
+        """
+        self._finishing.set()
+        published = False
+        try:
+            if self._stop.is_set():
+                raise OffloadError(f"export to {dest.name} was abandoned before it finished")
+            fh.close()
+            with open(self._part, "rb") as f:
+                os.fsync(f.fileno())
+            if self._part.stat().st_size == 0:
+                raise OffloadError(f"export to {dest.name} produced an empty file")
+            # Again as late as possible: a close or fsync stalled on the share
+            # returns long after the sweep gave up.
+            if self._stop.is_set():
+                raise OffloadError(f"export to {dest.name} was abandoned after its time limit")
+            os.replace(self._part, dest)
+            published = True
+        finally:
+            if not published:
+                with contextlib.suppress(OSError):  # the error above is the one raised
+                    self._part.unlink(missing_ok=True)
+
+    def _discard(self) -> None:
+        """Close and remove an export that will not be published. Runs on the pool."""
+        if self._fh is not None:
+            self._fh.close()
+        self._part.unlink(missing_ok=True)
 
 
 def _mkdir(path: Path) -> None:
@@ -151,7 +230,7 @@ async def _require_store(root: Path, marker: str | None) -> None:
     if not marker:
         return
     try:
-        await STORAGE_IO.run(require_marker, root, marker, timeout_s=FILE_TIMEOUT_S)
+        _ = await _on_pool(require_marker, root, marker)
     except StorageNotMountedError as e:
         raise OffloadError(str(e)) from e
     except (StorageBusyError, TimeoutError) as e:
@@ -415,7 +494,7 @@ async def _unlink_unclaimed(pool: asyncpg.Pool, archive_root: Path,
         paths = [archive_root / r["sha256"][:2] / f"{r['sha256']}.{r['ext']}"
                  for r in chunk if r["sha256"] not in back]
         try:
-            freed += await STORAGE_IO.run(_unlink_all, paths, stop, timeout_s=FILE_TIMEOUT_S)
+            freed += await _on_pool(_unlink_all, paths, stop)
         except (StorageBusyError, TimeoutError):
             stop.set()
             # The rows are gone, so the files are only disk, and an orphan sweep

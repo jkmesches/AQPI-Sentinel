@@ -237,12 +237,78 @@ async def retention_export(root: Path) -> None:
           not dest2.exists() and not list(dest2.parent.glob("t_2*")))
 
     dest3 = root / "cold" / "t" / "t_3.csv.gz"
-    async with Stall(STORAGE_IO):
-        out, took = await elapsed(retention._export_query(CopyPool(chunks), "q", [], dest3))
-    check("an export during a stall raises OffloadError at once",
-          isinstance(out, retention.OffloadError) and took < 1,
+    with mock.patch.object(retention, "SLOT_WAIT_S", 0.3):
+        async with Stall(STORAGE_IO):
+            out, took = await elapsed(retention._export_query(CopyPool(chunks), "q", [], dest3))
+    check("an export during a stall raises OffloadError once no slot frees in SLOT_WAIT_S",
+          isinstance(out, retention.OffloadError) and 0.25 < took < 2,
           f"{type(out).__name__} in {took:.2f}s")
     check("...and writes nothing", not dest3.exists())
+
+
+async def export_waits_for_a_slot(root: Path) -> None:
+    """An export refused a slot by a full pool waits for one, then runs.
+
+    Args:
+        root: An empty folder; the cold store goes under it.
+    """
+    print("\nretention export and a full pool:")
+    chunks = [f"{i},row {i}\n".encode() for i in range(200)]
+    dest = root / "cold" / "w" / "w_1.csv.gz"
+    refused = asyncio.Event()
+    real_note = STORAGE_IO._note_busy
+
+    def note_busy() -> None:
+        refused.set()
+        real_note()
+
+    with mock.patch.object(STORAGE_IO, "_note_busy", note_busy), \
+            mock.patch.object(retention, "SLOT_WAIT_S", 10.0):
+        async with Stall(STORAGE_IO):
+            task = asyncio.create_task(
+                retention._export_query(CopyPool(chunks), "q", [], dest))
+            _ = await asyncio.wait_for(refused.wait(), 5)  # NOLINT(PY032) wait_for bounds it
+        out, took = await elapsed(asyncio.wait_for(task, 10))
+    check("an export refused a slot waits for one and then runs",
+          out == 200 and dest.exists(), f"{out!r} in {took:.2f}s")
+
+
+async def late_finish(root: Path) -> None:
+    """An export whose finish timed out publishes nothing once the store answers.
+
+    Without this, the rename landed after the sweep had given up and kept the
+    rows, and the next sweep exported those rows a second time.
+
+    Args:
+        root: An empty folder; the cold store goes under it.
+    """
+    print("\nretention export finished late:")
+    chunks = [f"{i},row {i}\n".encode() for i in range(200)]
+    dest = root / "cold" / "l" / "l_1.csv.gz"
+    gate, done = threading.Event(), threading.Event()
+    real_fsync = os.fsync
+
+    def stalled_fsync(fd: int) -> None:
+        _ = gate.wait(5)
+        try:
+            real_fsync(fd)
+        finally:
+            done.set()
+
+    with mock.patch.object(os, "fsync", stalled_fsync), \
+            mock.patch.object(retention, "FILE_TIMEOUT_S", 0.3):
+        out, _ = await elapsed(retention._export_query(CopyPool(chunks), "q", [], dest))
+        gate.set()
+        finished = await asyncio.to_thread(done.wait, 5)
+        for _ in range(40):
+            if STORAGE_IO.in_flight == 0:
+                break
+            await asyncio.sleep(0.05)
+    check("an export whose finish times out raises OffloadError",
+          isinstance(out, retention.OffloadError), repr(out))
+    check("...and its finish, once the store answers, publishes nothing and leaves no file",
+          finished and not dest.exists() and not list(dest.parent.glob("l_1*")),
+          str(sorted(p.name for p in dest.parent.glob("*"))))
 
 
 async def disk_check_on_a_stall() -> None:
@@ -487,6 +553,8 @@ async def main() -> int:
         await pool_rules()
         await archive_on_a_stall(Path(td) / "archive")
         await retention_export(Path(td))
+        await export_waits_for_a_slot(Path(td))
+        await late_finish(Path(td))
         await disk_check_on_a_stall()
         await marker_rules(Path(td) / "marked")
         blob_writers(Path(td) / "blobs")
