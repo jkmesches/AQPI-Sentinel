@@ -363,7 +363,8 @@ async def marker_rules(root: Path) -> None:
     out, _ = await elapsed(retention._require_store(cold, MARKER))
     check("...and one with it lets it run", out is None, repr(out))
 
-    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER)
+    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER,
+                     archive_enabled=True, db_retention_days=60)
     with mock.patch.object(selfhost, "SETTINGS", stores):
         (cold / MARKER).unlink()
         r = await CHECKS["layer0.self.disk"].run(NO_CONTEXT)
@@ -502,22 +503,23 @@ async def store_probe_faults(root: Path) -> None:
     for d in (arch, cold):
         d.mkdir(parents=True)
         (d / MARKER).touch()
-    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER)
-    real_probe = selfhost._has_marker
+    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER,
+                     archive_enabled=True, db_retention_days=60)
+    real_probe = selfhost._store_state
     gate = threading.Event()
 
-    def refused(r: Path, marker: str) -> bool:
+    def refused(r: Path, marker: str | None) -> str:
         if r == cold:
-            raise PermissionError(13, "Permission denied", str(r / marker))
+            raise PermissionError(13, "Permission denied", str(r / str(marker)))
         return real_probe(r, marker)
 
-    def stalled(r: Path, marker: str) -> bool:
+    def stalled(r: Path, marker: str | None) -> str:
         if r == cold:
             _ = gate.wait(5)
         return real_probe(r, marker)
 
     with mock.patch.object(selfhost, "SETTINGS", stores):
-        with mock.patch.object(selfhost, "_has_marker", refused):
+        with mock.patch.object(selfhost, "_store_state", refused):
             out, _ = await elapsed(CHECKS["layer0.self.disk"].run(NO_CONTEXT))
         ok = not isinstance(out, Exception)
         check("the disk check answers when the cold store refuses the probe", ok, repr(out))
@@ -525,8 +527,8 @@ async def store_probe_faults(root: Path) -> None:
             check("...with a warn that names the cold store as unreadable",
                   out.status == "warn"
                   and out.payload.get("store_errors") == {str(cold): "unreadable"}, out.summary)
-        with mock.patch.object(selfhost, "_has_marker", stalled), \
-                mock.patch.object(selfhost, "MARKER_TIMEOUT_S", 0.3):
+        with mock.patch.object(selfhost, "_store_state", stalled), \
+                mock.patch.object(selfhost, "STORE_PROBE_TIMEOUT_S", 0.3):
             out, took = await elapsed(CHECKS["layer0.self.disk"].run(NO_CONTEXT))
         gate.set()
         ok = not isinstance(out, Exception)
@@ -541,6 +543,56 @@ async def store_probe_faults(root: Path) -> None:
         if STORAGE_IO.in_flight == 0:
             break
         await asyncio.sleep(0.05)
+
+
+async def store_write_probe(root: Path) -> None:
+    """The disk check fails a store that refuses a new file, marker or not.
+
+    A share once held both markers while it refused every new file the
+    backend made in their folders, and the check passed.
+
+    Args:
+        root: An empty folder; the archive and cold stores go under it.
+    """
+    print("\nstore write probe:")
+    arch, cold = root / "archive", root / "cold"
+    for d in (arch, cold):
+        d.mkdir(parents=True)
+        (d / MARKER).touch()
+    stores = replace(config.SETTINGS, archive_root=arch, cold_root=cold, storage_marker=MARKER,
+                     archive_enabled=True, db_retention_days=60)
+    disk = CHECKS["layer0.self.disk"]
+    with mock.patch.object(selfhost, "SETTINGS", stores):
+        r = await disk.run(NO_CONTEXT)
+        left = sorted(p.name for d in (arch, cold) for p in d.glob(".sentinel-write-probe*"))
+        check("two writable stores pass, and the probe leaves no file",
+              "NOT WRITABLE" not in r.summary and not left, f"{r.summary}; left {left}")
+        if os.geteuid() == 0:
+            print("  skip  a read-only folder does not stop root; run as a normal user")
+        else:
+            cold.chmod(0o555)
+            try:
+                r = await disk.run(NO_CONTEXT)
+                check("a cold store that refuses a new file fails the check",
+                      r.status == "fail" and "NOT WRITABLE" in r.summary
+                      and r.payload.get("unwritable") == [str(cold)], r.summary)
+                with mock.patch.object(selfhost, "SETTINGS", replace(stores, storage_marker=None)):
+                    r = await disk.run(NO_CONTEXT)
+                check("...with no marker set as well",
+                      r.status == "fail" and r.payload.get("unwritable") == [str(cold)],
+                      r.summary)
+            finally:
+                cold.chmod(0o755)
+    off = replace(stores, archive_enabled=False, db_retention_days=None)
+    with mock.patch.object(selfhost, "SETTINGS", off):
+        states = await selfhost._store_states()
+    check("a deployment that writes neither store probes neither", states == {}, str(states))
+    missing = replace(stores, cold_root=root / "not-yet", storage_marker=None)
+    with mock.patch.object(selfhost, "SETTINGS", missing):
+        states = await selfhost._store_states()
+    check("a store folder not created yet is absent, not a fault",
+          states.get(str(root / "not-yet")) == "absent" and not (root / "not-yet").exists(),
+          str(states))
 
 
 async def main() -> int:
@@ -561,6 +613,7 @@ async def main() -> int:
         blob_repairs(Path(td) / "repairs")
         unlink_stop(Path(td) / "unlink")
         await store_probe_faults(Path(td) / "probed")
+        await store_write_probe(Path(td) / "written")
     check("nothing is left in flight", STORAGE_IO.in_flight == 0, str(STORAGE_IO.in_flight))
     print(f"\n{len(failures)} FAILED: {', '.join(failures)}" if failures
           else "\nall storage-io assertions passed")

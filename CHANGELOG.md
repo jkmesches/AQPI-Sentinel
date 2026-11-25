@@ -28,6 +28,21 @@ unknown`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SENTINEL_STORAGE_GID` sets the backend's primary group.** It added an
+  extra group (compose `group_add`), and an NFS server that looks groups up
+  itself ignores a client's extra groups, so the backend still could not write
+  the group-owned store folders it was meant for. The compose files now run the
+  backend as `1000:${SENTINEL_STORAGE_GID:-1000}`, which leaves a deployment
+  without the setting unchanged.
+- **`layer0.self.disk` fails a store that refuses new files.** It tested only
+  that each store's marker was present, and passed while a share held both
+  markers and refused every new folder the backend made. Each run now creates
+  and removes a probe file in the archive (while archiving is on) and the cold
+  store (while the retention sweep runs), and fails with "NOT WRITABLE" when
+  one is refused, with or without a marker.
+
 ## [0.16.4] - 2026-11-25
 
 ### Fixed

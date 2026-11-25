@@ -22,6 +22,7 @@ filesystem (the dev default, where archive lives under ./data).
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import shutil
@@ -40,7 +41,8 @@ from .base import Check, CheckResult, Status, utcnow
 DISK_WARN_PCT = 75.0
 DISK_FAIL_PCT = 88.0
 # Same limit as the archive's statfs probe.
-MARKER_TIMEOUT_S = 10.0
+STORE_PROBE_TIMEOUT_S = 10.0
+WRITE_PROBE_NAME = ".sentinel-write-probe"
 
 
 def _usage(path: Path) -> dict:
@@ -54,33 +56,62 @@ def _usage(path: Path) -> dict:
     }
 
 
-def _has_marker(root: Path, marker: str) -> bool:
-    """Whether `root` holds `marker`. Runs on the stores' pool."""
-    return (root / marker).exists()
+def _store_state(root: Path, marker: str | None) -> str:
+    """Test one store's marker, then whether it takes a new file. Runs on the stores' pool.
+
+    Args:
+        root: The store's root.
+        marker: SETTINGS.storage_marker, or None for no marker test.
+
+    Returns:
+        "detached" when the marker is missing, "absent" when the folder does not
+        exist yet (the backend creates it on first use), "unwritable" when the
+        store refuses a new file, else "attached".
+
+    Raises:
+        OSError: For any other error, such as ESTALE or EIO.
+    """
+    if marker and not (root / marker).exists():
+        return "detached"
+    if not root.exists():
+        return "absent"
+    # The marker shows only that the share is there. A share once held both
+    # markers while it refused every new file the backend made in their
+    # folders, and this check passed.
+    probe = root / f"{WRITE_PROBE_NAME}-{os.getpid()}"
+    try:
+        probe.touch()
+        probe.unlink()
+    except PermissionError:
+        return "unwritable"
+    except OSError as e:
+        if e.errno == errno.EROFS:
+            return "unwritable"
+        raise
+    return "attached"
 
 
 async def _store_states() -> dict[str, str]:
-    """Each store's state against SETTINGS.storage_marker.
+    """Each store's state, for the stores this deployment writes.
 
-    Each root gets a probe of its own, so a stalled cold store shows even
-    while the archive answers.
+    The archive is probed while archiving is on, and the cold store while the
+    retention sweep exports rows. Each root gets a probe of its own, so a
+    stalled cold store shows even while the archive answers.
 
     Returns:
-        Root path to "attached", "detached", "unreachable" (no answer in time,
-        or the pool full) or "unreadable" (an error such as EACCES or ESTALE),
-        or nothing when no marker is set.
+        Root path to a state from _store_state, or "unreachable" (no answer in
+        time, or the pool full) or "unreadable" (an error such as ESTALE).
     """
-    marker = SETTINGS.storage_marker
-    if not marker:
-        return {}
-    roots = [SETTINGS.archive_root, SETTINGS.cold_root]
+    roots = ([SETTINGS.archive_root] if SETTINGS.archive_enabled else []) \
+        + ([SETTINGS.cold_root] if SETTINGS.db_retention_days else [])
     answers = await asyncio.gather(
-        *(STORAGE_IO.run(_has_marker, r, marker, timeout_s=MARKER_TIMEOUT_S) for r in roots),
+        *(STORAGE_IO.run(_store_state, r, SETTINGS.storage_marker,
+                         timeout_s=STORE_PROBE_TIMEOUT_S) for r in roots),
         return_exceptions=True)
     states: dict[str, str] = {}
     for root, answer in zip(roots, answers, strict=True):
-        if isinstance(answer, bool):
-            states[str(root)] = "attached" if answer else "detached"
+        if isinstance(answer, str):
+            states[str(root)] = answer
         elif isinstance(answer, (TimeoutError, StorageBusyError)):  # before OSError, its base
             states[str(root)] = "unreachable"
         elif isinstance(answer, OSError):
@@ -100,8 +131,9 @@ def _store_report(states: dict[str, str], *,
             archive as unreachable or unreadable, so it is not said twice.
 
     Returns:
-        (summary parts, payload fields, "fail" for a store without its marker,
-        "warn" for one that gives no answer or an error, else "pass").
+        (summary parts, payload fields, "fail" for a store without its marker
+        or one that refuses a new file, "warn" for one that gives no answer or
+        an error, else "pass").
     """
     parts: list[str] = []
     extra: dict[str, object] = {}
@@ -119,6 +151,13 @@ def _store_report(states: dict[str, str], *,
     if detached:
         extra["detached"] = detached
         parts.append(f"NOT ATTACHED, no {SETTINGS.storage_marker} in " + ", ".join(detached))
+        status = "fail"
+    # Captures are dropped and the sweep exports nothing while a store refuses
+    # writes, which costs the same as a detached one.
+    unwritable = sorted(r for r, s in states.items() if s == "unwritable")
+    if unwritable:
+        extra["unwritable"] = unwritable
+        parts.append("NOT WRITABLE: " + ", ".join(unwritable))
         status = "fail"
     return parts, extra, status
 

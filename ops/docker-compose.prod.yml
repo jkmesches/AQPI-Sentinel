@@ -134,11 +134,12 @@ services:
       # config.COMPOSITE_INPUT_TREE. Unset, the layer3.input.* checks simply
       # do not register.
       SENTINEL_RECENTFILES_DIR: ${SENTINEL_RECENTFILES_DIR:-}
-    # A group that may write the stores' folders on a share, joined by the
-    # backend's user (uid 1000). It must be a number, because the image has no
-    # such group by name. The default is that user's own group, a no-op.
-    group_add:
-      - "${SENTINEL_STORAGE_GID:-1000}"
+    # The image's user, uid 1000, with SENTINEL_STORAGE_GID as its primary
+    # group, so it can write store folders a group owns on a share. A primary
+    # group because an NFS server that looks groups up itself ignores a
+    # client's extra groups. A number, since the image has no such group by
+    # name. The default is the user's own group, which changes nothing.
+    user: "1000:${SENTINEL_STORAGE_GID:-1000}"
     volumes:
       # Both accept either a named volume (bare name, the dev default) or a
       # host path (leading slash → bind mount). Production points these at the

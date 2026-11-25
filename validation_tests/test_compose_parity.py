@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Any
 from pathlib import Path
 
 import yaml
@@ -42,7 +43,7 @@ PROD = ROOT / "ops" / "docker-compose.prod.yml"
 GHCR = ROOT / "ops" / "docker-compose.ghcr.yml"
 DEPLOY = ROOT / "ops" / "docker-compose.deploy.yml"
 ENV_EXAMPLE = ROOT / "ops" / ".env.prod.example"
-STORAGE_GROUP = ["${SENTINEL_STORAGE_GID:-1000}"]
+STORAGE_USER = "1000:${SENTINEL_STORAGE_GID:-1000}"
 RENDER_TIMEOUT_S = 30
 
 failures: list[str] = []
@@ -103,15 +104,15 @@ def volume_sources(svc: dict) -> dict[str, str]:
     return out
 
 
-def rendered_groups(compose: Path, gid: str | None) -> list[str] | None:
-    """Render a compose file and return its backend's group_add.
+def rendered_user(compose: Path, gid: str | None) -> str | None:
+    """Render a compose file and return its backend's user.
 
     Args:
         compose: The compose file.
         gid: SENTINEL_STORAGE_GID for the render, or None to leave it unset.
 
     Returns:
-        The rendered groups, or None when the docker CLI is not installed.
+        The rendered "uid:gid", or None when the docker CLI is not installed.
     """
     if shutil.which("docker") is None:
         return None
@@ -127,8 +128,33 @@ def rendered_groups(compose: Path, gid: str | None) -> list[str] | None:
             ["docker", "compose", "-f", str(compose), "--env-file", empty.name,
              "config", "--format", "json"],
             env=env, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, check=True)
-    groups = json.loads(out.stdout)["services"]["backend"].get("group_add") or []
-    return [str(g) for g in groups]
+    return str(json.loads(out.stdout)["services"]["backend"].get("user"))
+
+
+def check_backend_user(files: dict[str, tuple[Path, dict[str, Any]]]) -> None:
+    """The backend runs as 1000 with SENTINEL_STORAGE_GID as its primary group.
+
+    An extra group (group_add) is ignored by an NFS server that looks groups up
+    itself. Unset, the user must render to the image's own 1000:1000, since an
+    empty group or a name would stop the container from starting.
+
+    Args:
+        files: Label to the compose file's path and its parsed content.
+    """
+    for label, (path, doc) in files.items():
+        backend = doc["services"]["backend"]
+        check(f"{label} · backend user as written", backend.get("user") == STORAGE_USER,
+              f"got {backend.get('user')!r}")
+        check(f"{label} · backend has no group_add", "group_add" not in backend)
+        unset = rendered_user(path, None)
+        if unset is None:
+            print(f"  skip  {label} · user rendered (no docker CLI)")
+            continue
+        check(f"{label} · user rendered, SENTINEL_STORAGE_GID unset",
+              unset == "1000:1000", f"got {unset!r}")
+        given = rendered_user(path, "54321")
+        check(f"{label} · user rendered, SENTINEL_STORAGE_GID=54321",
+              given == "1000:54321", f"got {given!r}")
 
 
 def main() -> int:
@@ -175,7 +201,7 @@ def main() -> int:
         "SENTINEL_SSCB_HOST_PATH":    "volume source for /sscb",
         "SENTINEL_TILT_HOST_PATH":    "volume source for /tilt",
         "SENTINEL_TAG":               "selects the image tag, not process env",
-        "SENTINEL_STORAGE_GID":       "the backend's group_add, not process env",
+        "SENTINEL_STORAGE_GID":       "the backend's user: group, not process env",
     }
     documented = set(re.findall(r"^#?((?:SENTINEL|POSTGRES)_[A-Z0-9_]+)=",
                                 ENV_EXAMPLE.read_text(), re.M))
@@ -230,24 +256,8 @@ def main() -> int:
         check(f"{label}: backend mounts parse to real container paths",
               got == EXPECTED_BACKEND_MOUNTS, f"got {sorted(got)}")
 
-    # The backend joins the stores' group on a share through group_add. Unset,
-    # it must render to the image user's own group (1000, a no-op), since an
-    # empty entry or a name would stop the container from starting.
-    deploy = yaml.safe_load(DEPLOY.read_text())
-    for label, path, doc in (("prod.yml", PROD, prod), ("ghcr.yml", GHCR, ghcr),
-                             ("deploy.yml", DEPLOY, deploy)):
-        got_groups = doc["services"]["backend"].get("group_add")
-        check(f"{label} · backend group_add as written", got_groups == STORAGE_GROUP,
-              f"got {got_groups!r}")
-        unset = rendered_groups(path, None)
-        if unset is None:
-            print(f"  skip  {label} · group_add rendered (no docker CLI)")
-            continue
-        check(f"{label} · group_add rendered, SENTINEL_STORAGE_GID unset",
-              unset == ["1000"], f"got {unset!r}")
-        given = rendered_groups(path, "54321")
-        check(f"{label} · group_add rendered, SENTINEL_STORAGE_GID=54321",
-              given == ["54321"], f"got {given!r}")
+    check_backend_user({"prod.yml": (PROD, prod), "ghcr.yml": (GHCR, ghcr),
+                        "deploy.yml": (DEPLOY, yaml.safe_load(DEPLOY.read_text()))})
 
     for name in ("postgres", "backend", "frontend"):
         check(f"ghcr.yml defines the {name} service", name in (ghcr.get("services") or {}))

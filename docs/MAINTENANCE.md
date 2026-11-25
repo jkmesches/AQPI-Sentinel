@@ -518,9 +518,14 @@ share is back.
 
 The backend runs as uid 1000. When the share's folders belong to a group with
 group write (e.g., mode 2775), set `SENTINEL_STORAGE_GID` to that group's
-number and recreate the backend, and compose adds the group to the backend's
-user. A group name will not work, because the container has no entry for it
-and refuses to start.
+number and recreate the backend, and compose makes it the backend's primary
+group. It has to be the primary group: an NFS server that looks groups up
+itself (e.g., `rpc.mountd --manage-gids`) finds no account for uid 1000 and
+ignores the extra groups a client sends. A group name will not work, because
+the container has no entry for it and refuses to start. Owning the folders as
+uid 1000 works without the setting. `layer0.self.disk` creates and removes a
+probe file in each store every run, and fails with "NOT WRITABLE" when the
+store refuses it.
 
 Every call on either store runs on a pool of its own (`backend/storage_io.py`),
 4 threads with at most 16 calls in flight and a time limit on each. A stalled
