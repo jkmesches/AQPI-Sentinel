@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PROD = ROOT / "ops" / "docker-compose.prod.yml"
 GHCR = ROOT / "ops" / "docker-compose.ghcr.yml"
 DEPLOY = ROOT / "ops" / "docker-compose.deploy.yml"
+XQPI = ROOT / "ops" / "docker-compose.xqpi.yml"
 ENV_EXAMPLE = ROOT / "ops" / ".env.prod.example"
 STORAGE_USER = "1000:${SENTINEL_STORAGE_GID:-1000}"
 RENDER_TIMEOUT_S = 30
@@ -104,6 +105,34 @@ def volume_sources(svc: dict) -> dict[str, str]:
     return out
 
 
+def render(files: list[Path], extra: dict[str, str]) -> dict[str, Any] | None:
+    """Render compose files with `docker compose config`.
+
+    Args:
+        files: The compose files, base first.
+        extra: Variables to set for the render. Every other SENTINEL_ and
+            POSTGRES_ variable is left unset.
+
+    Returns:
+        The rendered project, or None when the docker CLI is not installed.
+    """
+    if shutil.which("docker") is None:
+        return None
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("SENTINEL_", "POSTGRES_"))}
+    # The files refuse to render without a password; this one reaches no database.
+    env["POSTGRES_PASSWORD"] = secrets.token_hex(8)
+    env.update(extra)
+    args = [a for f in files for a in ("-f", str(f))]
+    # An empty env file, so compose does not read a real ops/.env beside the file.
+    with tempfile.NamedTemporaryFile("w", suffix=".env") as empty:
+        out = subprocess.run(  # noqa: S603  fixed argument list, no shell
+            ["docker", "compose", *args, "--env-file", empty.name, "config", "--format", "json"],
+            env=env, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, check=True)
+    doc: dict[str, Any] = json.loads(out.stdout)
+    return doc
+
+
 def rendered_user(compose: Path, gid: str | None) -> str | None:
     """Render a compose file and return its backend's user.
 
@@ -114,21 +143,89 @@ def rendered_user(compose: Path, gid: str | None) -> str | None:
     Returns:
         The rendered "uid:gid", or None when the docker CLI is not installed.
     """
-    if shutil.which("docker") is None:
-        return None
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("SENTINEL_", "POSTGRES_"))}
-    # The files refuse to render without a password; this one reaches no database.
-    env["POSTGRES_PASSWORD"] = secrets.token_hex(8)
-    if gid is not None:
-        env["SENTINEL_STORAGE_GID"] = gid
-    # An empty env file, so compose does not read a real ops/.env beside the file.
-    with tempfile.NamedTemporaryFile("w", suffix=".env") as empty:
-        out = subprocess.run(  # noqa: S603  fixed argument list, no shell
-            ["docker", "compose", "-f", str(compose), "--env-file", empty.name,
-             "config", "--format", "json"],
-            env=env, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, check=True)
-    return str(json.loads(out.stdout)["services"]["backend"].get("user"))
+    doc = render([compose], {} if gid is None else {"SENTINEL_STORAGE_GID": gid})
+    return None if doc is None else str(doc["services"]["backend"].get("user"))
+
+
+def stack_names(doc: dict[str, Any]) -> dict[str, set[str]]:
+    """The names a rendered stack claims on the Docker host.
+
+    Args:
+        doc: A rendered project.
+
+    Returns:
+        Its container, volume and network names and its published host ports.
+    """
+    services = doc.get("services") or {}
+    return {
+        "containers": {str(s.get("container_name")) for s in services.values()},
+        "volumes": {str(v.get("name")) for v in (doc.get("volumes") or {}).values()},
+        "networks": {str(n.get("name")) for n in (doc.get("networks") or {}).values()},
+        "ports": {str(p.get("published")) for s in services.values()
+                  for p in s.get("ports") or []},
+    }
+
+
+class ComposeLoader(yaml.SafeLoader):
+    """SafeLoader that reads compose's !override and !reset tags as plain values."""
+
+
+def _untagged(loader: yaml.SafeLoader, node: yaml.Node) -> object:
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    raise TypeError(f"unexpected YAML node {type(node).__name__}")
+
+
+for _tag in ("!override", "!reset"):
+    ComposeLoader.add_constructor(_tag, _untagged)
+
+
+def check_second_stack(base: dict[str, Any]) -> None:
+    """The XQPI override shares nothing on the Docker host with the AQPI stack.
+
+    A shared volume name would give both stacks one Postgres data directory,
+    and a shared container name would make one stack's `up` replace the
+    other's container. Apart from those names, the two stacks must render the
+    same, so the override cannot fall behind the base file.
+
+    Args:
+        base: docker-compose.ghcr.yml, parsed.
+    """
+    ovr = yaml.load(XQPI.read_text(), Loader=ComposeLoader)  # noqa: S506  a SafeLoader
+    ovr_services = ovr.get("services") or {}
+    for name, svc in (base.get("services") or {}).items():
+        mine = (ovr_services.get(name) or {}).get("container_name")
+        check(f"xqpi.yml · renames the {name} container",
+              mine is not None and mine != svc.get("container_name"), f"got {mine!r}")
+    for kind in ("volumes", "networks"):
+        for name, spec in (base.get(kind) or {}).items():
+            if not (spec or {}).get("name"):
+                continue
+            mine = ((ovr.get(kind) or {}).get(name) or {}).get("name")
+            check(f"xqpi.yml · renames the pinned {kind[:-1]} {name}",
+                  mine is not None and mine != spec["name"], f"got {mine!r}")
+    aqpi = render([GHCR], {})
+    xqpi = render([GHCR, XQPI], {})
+    if aqpi is None or xqpi is None:
+        print("  skip  xqpi.yml · rendered stacks (no docker CLI)")
+        return
+    a, x = stack_names(aqpi), stack_names(xqpi)
+    for kind in a:
+        check(f"xqpi.yml · shares no {kind} with the AQPI stack",
+              not (a[kind] & x[kind]), f"shared {sorted(a[kind] & x[kind])}")
+    ab, xb = aqpi["services"]["backend"], xqpi["services"]["backend"]
+    check("xqpi.yml · backend profile defaults to xqpi",
+          xb["environment"].get("SENTINEL_PROFILE") == "xqpi",
+          str(xb["environment"].get("SENTINEL_PROFILE")))
+    check("xqpi.yml · backend environment names match the base file's",
+          set(ab["environment"]) == set(xb["environment"]),
+          str(set(ab["environment"]) ^ set(xb["environment"])))
+    check("xqpi.yml · backend mounts and user match the base file's",
+          volume_targets(ab) == volume_targets(xb) and ab.get("user") == xb.get("user"))
 
 
 def check_backend_user(files: dict[str, tuple[Path, dict[str, Any]]]) -> None:
@@ -258,6 +355,7 @@ def main() -> int:
 
     check_backend_user({"prod.yml": (PROD, prod), "ghcr.yml": (GHCR, ghcr),
                         "deploy.yml": (DEPLOY, yaml.safe_load(DEPLOY.read_text()))})
+    check_second_stack(ghcr)
 
     for name in ("postgres", "backend", "frontend"):
         check(f"ghcr.yml defines the {name} service", name in (ghcr.get("services") or {}))

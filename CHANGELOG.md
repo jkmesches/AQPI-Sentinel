@@ -28,6 +28,17 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **`ops/docker-compose.xqpi.yml` runs an XQPI stack beside an AQPI one.** It
+  overrides `ops/docker-compose.ghcr.yml` with the XQPI stack's project,
+  container, volume and network names, ports 8001 and 3001, and an `xqpi`
+  profile default, so the second stack takes every other setting from the
+  base file and gains new ones with each release. `test_compose_parity.py`
+  renders both stacks and fails when they share a container, volume, network
+  or host port, or when the two backends differ in environment names, mounts
+  or user. See [Deployment profiles](07-deployment-profiles.md).
+
 ## [0.16.5] - 2026-11-25
 
 ### Fixed

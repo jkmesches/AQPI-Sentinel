@@ -78,6 +78,36 @@ is the dangerous direction, because nothing turns red.
 
 ---
 
+## Two stacks on one host
+
+An XQPI stack can run on the Docker host of an AQPI one. It uses the same
+`ops/docker-compose.ghcr.yml` with `ops/docker-compose.xqpi.yml` on top, and an
+env file of its own:
+
+```bash
+docker compose -f ops/docker-compose.ghcr.yml -f ops/docker-compose.xqpi.yml \
+    --env-file /path/to/xqpi/.env.prod up -d
+```
+
+The override renames everything that is global to the Docker daemon (the
+project, the three containers, the pinned volumes and the network), moves the
+host ports to 8001 and 3001, and defaults `SENTINEL_PROFILE` to `xqpi`. Every
+other setting comes from the base file, so the second stack gains each new
+setting with the release that adds it. A hand-made copy of the base file did
+not: it fell behind by several settings, and a source label set in its env file
+had no effect because the copy never passed it to the container.
+
+`validation_tests/test_compose_parity.py` renders both stacks and fails when
+they share a container, volume, network or host port. A shared volume name
+would give both stacks one Postgres data directory. The test also fails when
+the two backends differ in their environment names, mounts or user.
+
+The env file names its own stores, labels and backup folder. Labels copied
+from the AQPI stack's file are wrong for XQPI, whose tree is on a different
+share.
+
+---
+
 ## How a check is excluded
 
 Two mechanisms, and only one of them is a guarantee.

@@ -1,0 +1,48 @@
+# XQPI Sentinel as a second stack on the Docker host that runs an AQPI one.
+#
+# It overrides docker-compose.ghcr.yml. It renames what is global to the Docker
+# daemon and changes the defaults that would collide, and everything else comes
+# from the base file, so both stacks change together at each release. A
+# hand-made copy of the base file fell behind it by several settings before
+# this file replaced it.
+#
+#   docker compose -f ops/docker-compose.ghcr.yml -f ops/docker-compose.xqpi.yml \
+#       --env-file /path/to/xqpi/.env.prod up -d
+#
+# Every pinned name below must differ from the base file's. A shared volume name
+# would give the two stacks one Postgres data directory, and a shared container
+# name would make one stack's `up` replace the other's container.
+# validation_tests/test_compose_parity.py renders both stacks and fails on any
+# shared container, volume, network or host port.
+
+name: xqpi-sentinel
+
+services:
+  postgres:  # noqa: CMP004, CMP005, CMP006  an override; limits belong in the base file
+    container_name: xqpi-sentinel-postgres
+  backend:  # noqa: CMP004, CMP005, CMP006  an override; limits belong in the base file
+    container_name: xqpi-sentinel-backend
+    environment:
+      # A missing SENTINEL_PROFILE in the env file would otherwise fall back to
+      # the base file's aqpi, and this stack would watch the wrong network.
+      SENTINEL_PROFILE: ${SENTINEL_PROFILE:-xqpi}
+    # Replaced, not appended: compose merges port lists, and the base file's
+    # 8000 and 3000 belong to the AQPI stack.
+    ports: !override
+      - "${BACKEND_PORT:-8001}:8000"
+  frontend:  # noqa: CMP004, CMP005, CMP006  an override; limits belong in the base file
+    container_name: xqpi-sentinel-frontend
+    ports: !override
+      - "${FRONTEND_PORT:-3001}:3000"
+
+volumes:
+  sentinel_pgdata:
+    name: xqpi_sentinel_pgdata
+  sentinel_archive:
+    name: xqpi_sentinel_archive
+  sentinel_cold:
+    name: xqpi_sentinel_cold
+
+networks:
+  sentinel:
+    name: xqpi-sentinel
