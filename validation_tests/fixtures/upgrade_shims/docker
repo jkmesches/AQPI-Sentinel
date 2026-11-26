@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+"""Stand in for docker in the upgrade.sh tests.
+
+Every answer comes from $FAKE_STATE: flag files under flags/ pick the faults,
+<stack>.gen counts the recreates, and calls.jsonl records each compose call with
+its SENTINEL_TAG and start and end times.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+STATE = Path(os.environ["FAKE_STATE"])
+PROJECT = {"aqpi": "sentinel", "xqpi": "xqpi-sentinel"}
+PREFIX = {"aqpi": "sentinel", "xqpi": "xqpi-sentinel"}
+VOLUME = {"aqpi": "sentinel", "xqpi": "xqpi_sentinel"}
+PORTS = {"aqpi": {"backend": 8000, "frontend": 3000},
+         "xqpi": {"backend": 8001, "frontend": 3001}}
+SERVICES = ("postgres", "backend", "frontend")
+
+
+def flag(name: str) -> str | None:
+    """Return the flag file's text, or None when the flag is not set."""
+    path = STATE / "flags" / name
+    return path.read_text(encoding="utf-8").strip() if path.exists() else None
+
+
+def generation(stack: str) -> int:
+    """Return how many times the fake up has recreated STACK."""
+    path = STATE / f"{stack}.gen"
+    return int(path.read_text(encoding="utf-8")) if path.exists() else 0
+
+
+def record(entry: dict[str, object]) -> None:
+    """Append one call to calls.jsonl."""
+    with (STATE / "calls.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def env_value(env_file: str, key: str) -> str:
+    """Return KEY's value in ENV_FILE, or an empty string."""
+    for line in Path(env_file).read_text(encoding="utf-8").splitlines():
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1]
+    return ""
+
+
+def service(stack: str, svc: str, env_file: str) -> dict[str, object]:
+    """Return one service of a rendered stack.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        svc: one of SERVICES.
+        env_file: the stack's env file, whose password the render carries.
+
+    Returns:
+        The service as compose config --format json prints it.
+    """
+    name = f"{PREFIX[stack]}-{svc}"
+    if stack == "xqpi" and svc == "backend" and flag("collide") is not None:
+        name = "sentinel-backend"
+    tag = os.environ.get("SENTINEL_TAG") or env_value(env_file, "SENTINEL_TAG") or "latest"
+    entry: dict[str, object] = {
+        "container_name": name,
+        "image": "postgres:16" if svc == "postgres" else f"example/sentinel-{svc}:{tag}",
+        "environment": {"POSTGRES_PASSWORD": env_value(env_file, "POSTGRES_PASSWORD")},
+    }
+    if svc in PORTS[stack]:
+        entry["ports"] = [{"target": 8000 if svc == "backend" else 3000,
+                           "published": str(PORTS[stack][svc])}]
+    if svc == "postgres":
+        entry["volumes"] = [{"type": "volume", "source": "sentinel_pgdata",
+                             "target": "/var/lib/postgresql/data"}]
+    if svc == "backend":
+        entry["environment"] = backend_env(stack, env_file)
+        entry["volumes"] = backend_mounts(stack)
+    return entry
+
+
+def backend_env(stack: str, env_file: str) -> dict[str, str]:
+    """Return the backend environment a render carries, from the env file.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        env_file: the stack's env file.
+
+    Returns:
+        The variables upgrade.sh reads from a render, plus the password.
+    """
+    env = {"POSTGRES_PASSWORD": env_value(env_file, "POSTGRES_PASSWORD"),
+           "SENTINEL_ARCHIVE_ROOT": "/data/archive", "SENTINEL_COLD_ROOT": "/data/cold",
+           "SENTINEL_SOURCE_TAG": env_value(env_file, "SENTINEL_SOURCE_TAG"),
+           "SENTINEL_SSCB_SOURCE_TAG": env_value(env_file, "SENTINEL_SSCB_SOURCE_TAG"),
+           "SENTINEL_STORAGE_MARKER": ".sentinel-store"
+           if stack == "aqpi" and flag("no_marker_aqpi") is None else ""}
+    return env
+
+
+def backend_mounts(stack: str) -> list[dict[str, str]]:
+    """Return the backend's mounts: AQPI binds its stores, XQPI uses volumes.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+
+    Returns:
+        The mounts as compose config --format json prints them.
+    """
+    world = STATE.parent
+    if stack == "aqpi":
+        return [{"type": "bind", "source": str(world / "share/aqpi/archive"),
+                 "target": "/data/archive"},
+                {"type": "bind", "source": str(world / "share/aqpi/cold"),
+                 "target": "/data/cold"},
+                {"type": "bind", "source": str(world / "share/aqpi/tree"), "target": "/backend"}]
+    return [{"type": "volume", "source": "sentinel_archive", "target": "/data/archive"},
+            {"type": "volume", "source": "sentinel_cold", "target": "/data/cold"},
+            {"type": "volume", "source": "sentinel_sscb_unset", "target": "/sscb"},
+            {"type": "bind", "source": str(world / "share/xqpi/tree"), "target": "/backend"}]
+
+
+def rendered(stack: str, env_file: str) -> dict[str, object]:
+    """Return the JSON a compose config would print.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        env_file: the stack's env file.
+
+    Returns:
+        The rendered project, with the same top-level keys compose prints.
+    """
+    same = stack == "xqpi" and flag("same_project") is not None
+    vol = VOLUME[stack]
+    return {"name": "sentinel" if same else PROJECT[stack],
+            "services": {svc: service(stack, svc, env_file) for svc in SERVICES},
+            "volumes": {"sentinel_pgdata": {"name": f"{vol}_pgdata"},
+                        "sentinel_archive": {"name": f"{vol}_archive"},
+                        "sentinel_cold": {"name": f"{vol}_cold"},
+                        "sentinel_sscb_unset": {"name": f"{PROJECT[stack]}_sentinel_sscb_unset"}},
+            "networks": {"sentinel": {"name": PREFIX[stack]}}}
+
+
+def compose(args: list[str]) -> int:
+    """Answer one docker compose call and record it.
+
+    Args:
+        args: the arguments after "docker compose".
+
+    Returns:
+        The exit status.
+    """
+    if args[:1] == ["version"]:
+        print("2.20.0" if flag("compose_old") is not None else "2.26.1")
+        return 0
+    files, env_file, project_dir, rest = [], "", "", []
+    i = 0
+    while i < len(args):
+        if args[i] in ("-f", "--env-file", "--project-directory"):
+            if args[i] == "-f":
+                files.append(args[i + 1])
+            elif args[i] == "--env-file":
+                env_file = args[i + 1]
+            else:
+                project_dir = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    missing = [f for f in files if not Path(f).is_file()]
+    if missing:
+        print(f"open {missing[0]}: no such file or directory", file=sys.stderr)
+        return 14
+    stack = "xqpi" if any(f.endswith("docker-compose.xqpi.yml") for f in files) else "aqpi"
+    entry: dict[str, object] = {"stack": stack, "argv": rest, "files": files,
+                                "env_file": env_file, "project_dir": project_dir,
+                                "tag": os.environ.get("SENTINEL_TAG"),
+                                "stdout": os.readlink("/proc/self/fd/1"),
+                                "t0": time.monotonic()}
+    rc = HANDLERS.get(rest[0], unhandled)(stack, env_file, rest)
+    entry.update(t1=time.monotonic(), rc=rc)
+    record(entry)
+    return rc
+
+
+def do_config(stack: str, env_file: str, rest: list[str]) -> int:
+    """Answer compose config: fail on a flag, else print the JSON when asked.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        env_file: the stack's env file.
+        rest: the subcommand and its arguments.
+
+    Returns:
+        The exit status.
+    """
+    if flag(f"render_fail_{stack}") is not None:
+        print("yaml: line 3: mapping values are not allowed here", file=sys.stderr)
+        return 15
+    if "--format" in rest:
+        print(json.dumps(rendered(stack, env_file)))
+    return 0
+
+
+def do_ps(stack: str, _env_file: str, rest: list[str]) -> int:
+    """Answer compose ps -q [SERVICE] with the stack's container names.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        _env_file: unused.
+        rest: the subcommand and its arguments.
+
+    Returns:
+        The exit status.
+    """
+    wanted = [a for a in rest[1:] if not a.startswith("-")]
+    if flag(f"no_containers_{stack}") is None:
+        for svc in SERVICES:
+            if not wanted or svc in wanted:
+                print(f"{PREFIX[stack]}-{svc}")
+    return 0
+
+
+def do_port(stack: str, _env_file: str, rest: list[str]) -> int:
+    """Answer compose port SERVICE PORT with the host binding."""
+    print(f"0.0.0.0:{PORTS[stack][rest[1]]}")
+    return 0
+
+
+def do_pull(stack: str, _env_file: str, _rest: list[str]) -> int:
+    """Answer compose pull after a short delay, so parallel pulls overlap.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        _env_file: unused.
+        _rest: unused.
+
+    Returns:
+        The exit status.
+    """
+    (STATE / f"started_pull_{stack}").touch()
+    time.sleep(float(flag("slow_pull") or 0.3))
+    if flag(f"pull_fail_{stack}") is not None:
+        print("Error response from daemon: manifest unknown", file=sys.stderr)
+        return 1
+    print(f"pulled {stack}")
+    return 0
+
+
+def do_up(stack: str, _env_file: str, _rest: list[str]) -> int:
+    """Answer compose up by counting one more recreate of the stack.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        _env_file: unused.
+        _rest: unused.
+
+    Returns:
+        The exit status.
+    """
+    time.sleep(0.3)
+    if flag(f"up_fail_{stack}") is not None:
+        print("Error response from daemon: driver failed programming", file=sys.stderr)
+        return 1
+    (STATE / f"{stack}.gen").write_text(str(generation(stack) + 1), encoding="utf-8")
+    started = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    (STATE / f"{stack}.started").write_text(f"{started}.{time.time_ns() % 10**9:09d}Z",
+                                            encoding="utf-8")
+    for svc in SERVICES:
+        print(f"Container {PREFIX[stack]}-{svc}  Started")
+    return 0
+
+
+def unhandled(_stack: str, _env_file: str, rest: list[str]) -> int:
+    """Fail loudly on a compose call the fake does not know."""
+    print(f"fake compose: unhandled {rest}", file=sys.stderr)
+    return 99
+
+
+HANDLERS: dict[str, Callable[[str, str, list[str]], int]] = {
+    "config": do_config, "ps": do_ps, "port": do_port, "pull": do_pull, "up": do_up,
+}
+
+
+def stack_of(name: str) -> str | None:
+    """Return the stack whose containers include NAME, or None."""
+    for stack, prefix in PREFIX.items():
+        if name in {f"{prefix}-{svc}" for svc in SERVICES}:
+            return stack
+    return None
+
+
+def state_of(name: str) -> str:
+    """Return the Name|Status|Health|RestartCount line for container NAME.
+
+    Args:
+        name: a container name.
+
+    Returns:
+        The line docker inspect prints for upgrade.sh's state format.
+    """
+    status = "exited" if flag(f"exited_{name}") is not None else "running"
+    restarts = 2 if flag(f"restarts_{name}") is not None else 0
+    health = "healthy" if name.endswith("-postgres") else ""
+    if flag(f"starting_{name}") is not None:
+        health = "starting"
+    left = flag(f"slowstart_{name}")
+    if left is not None and int(left) > 0:
+        (STATE / "flags" / f"slowstart_{name}").write_text(str(int(left) - 1), encoding="utf-8")
+        status = "created"
+    return f"/{name}|{status}|{health}|{restarts}"
+
+
+def owner_of(name: str) -> int:
+    """Print the compose project label of container NAME, or fail as docker does.
+
+    Args:
+        name: a container name.
+
+    Returns:
+        0 when the container exists, else 1.
+    """
+    stack = stack_of(name)
+    if flag(f"foreign_{name}") is not None:
+        print("other-project")
+        return 0
+    if stack is None or flag("fresh_host") is not None:
+        print(f"Error: No such container: {name}", file=sys.stderr)
+        return 1
+    print(PROJECT[stack])
+    return 0
+
+
+def inspect(args: list[str]) -> int:
+    """Answer docker inspect for the three formats upgrade.sh uses.
+
+    Args:
+        args: the arguments after "docker inspect".
+
+    Returns:
+        The exit status.
+    """
+    fmt, names, i = "", [], 0
+    while i < len(args):
+        if args[i] in ("-f", "--format", "--type"):
+            fmt = args[i + 1] if args[i] != "--type" else fmt
+            i += 2
+        else:
+            names.append(args[i])
+            i += 1
+    for name in names:
+        stack = stack_of(name)
+        if "config_files" in fmt and stack:
+            print(f"{PROJECT[stack]}|{config_files(stack)}")
+        elif "com.docker.compose.project" in fmt:
+            if owner_of(name):
+                return 1
+        elif fmt == "{{.Image}}":
+            print("sha256:" + ("b" if stack and generation(stack) else "a") * 64)
+        elif ".State.Status" in fmt:
+            (STATE / "health_polled").touch()
+            print(state_of(name))
+        elif fmt == "{{.State.StartedAt}}" and stack:
+            path = STATE / f"{stack}.started"
+            print(path.read_text(encoding="utf-8") if path.exists()
+                  else "2026-01-01T00:00:00.000000000Z")
+        else:
+            print(f"fake inspect: unhandled format {fmt}", file=sys.stderr)
+            return 99
+    return 0
+
+
+def config_files(stack: str) -> str:
+    """Return the config_files label of STACK's containers.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+
+    Returns:
+        Comma-separated compose files: XQPI's old copy when flagged, else the
+        checkout's files.
+    """
+    world = STATE.parent
+    ops = world / "srv" / "aqpi-sentinel" / "ops"
+    if stack == "xqpi" and flag("old_files_xqpi") is not None:
+        return str(world / "srv" / "xqpi-sentinel" / "docker-compose.ghcr.yml")
+    files = [str(ops / "docker-compose.ghcr.yml")]
+    if stack == "xqpi":
+        files.append(str(ops / "docker-compose.xqpi.yml"))
+    return ",".join(files)
+
+
+def docker_ps(argv: list[str]) -> int:
+    """Answer docker ps -q (running) and docker ps -a --filter ... (stopped).
+
+    Args:
+        argv: the arguments after "docker".
+
+    Returns:
+        The exit status.
+    """
+    if "-a" in argv:
+        for name in (flag("stopped") or "").split():
+            print(name)
+        return 0
+    for prefix in PREFIX.values():
+        for svc in SERVICES:
+            print(f"{prefix}-{svc}")
+    return 0
+
+
+def image(argv: list[str]) -> int:
+    """Answer docker image ls and the three docker image inspect formats.
+
+    Args:
+        argv: the arguments after "docker".
+
+    Returns:
+        The exit status.
+    """
+    if argv[1] == "ls":
+        for ch in "abc":
+            print("sha256:" + ch * 64)
+        return 0
+    fmt, refs = argv[3], argv[4:]
+    for ref in refs:
+        if fmt == "{{.Size}}":
+            print(10**15 if flag("huge_images") is not None else int(flag("image_size") or 1000))
+        elif fmt.startswith("{{join .RepoTags"):
+            print({"a": "example/sentinel-backend:old", "b": "example/sentinel-backend:new"}
+                  .get(ref[7:8], "example/other-tool:1"))
+        elif fmt.startswith("{{.Id}}|"):
+            same = flag("same_digest") is not None
+            rev = "<no value>" if ref.startswith("postgres") else flag("image_rev") or ""
+            print(f"sha256:{('a' if same else 'b') * 64}|{rev}")
+        else:
+            print(f"fake image inspect: unhandled format {fmt}", file=sys.stderr)
+            return 99
+    return 0
+
+
+def prune(argv: list[str]) -> int:
+    """Answer docker system prune -af and record it.
+
+    Args:
+        argv: the arguments after "docker".
+
+    Returns:
+        The exit status.
+    """
+    record({"argv": argv, "t0": time.monotonic()})
+    if flag("prune_fail") is not None:
+        print("Error response from daemon: a prune operation is already running",
+              file=sys.stderr)
+        return 1
+    print("Deleted Images:\nuntagged: example\n\nTotal reclaimed space: 1.2GB")
+    return 0
+
+
+def info(argv: list[str]) -> int:
+    """Answer docker info, and docker info -f with the fake Docker root.
+
+    Args:
+        argv: the arguments after "docker".
+
+    Returns:
+        The exit status.
+    """
+    if flag("daemon_down") is not None:
+        print("Cannot connect to the Docker daemon", file=sys.stderr)
+        return 1
+    if "-f" in argv:
+        print(os.environ["FAKE_DOCKER_ROOT"])
+    return 0
+
+
+def main(argv: list[str]) -> int:  # noqa: PLR0911  one return per docker command
+    """Dispatch one docker call.
+
+    Args:
+        argv: the arguments after "docker".
+
+    Returns:
+        The exit status.
+    """
+    if not argv:
+        return 99
+    if argv[0] == "info":
+        return info(argv)
+    if argv[0] in ("compose", "inspect"):
+        return compose(argv[1:]) if argv[0] == "compose" else inspect(argv[1:])
+    if argv[:2] == ["volume", "inspect"]:
+        return 1 if flag(f"novolume_{argv[2]}") is not None else 0
+    if argv[0] in ("image", "ps"):
+        return image(argv) if argv[0] == "image" else docker_ps(argv)
+    if argv[:2] == ["system", "prune"]:
+        return prune(argv)
+    print(f"fake docker: unhandled {argv}", file=sys.stderr)
+    return 99
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

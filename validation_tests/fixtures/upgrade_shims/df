@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Stand in for df in the upgrade.sh tests: with flags/df_fake set, print its
+# "size used avail" line under a header, else run the real df.
+set -euo pipefail
+: "${FAKE_STATE:?the tests set FAKE_STATE}"
+if [[ -e $FAKE_STATE/flags/df_fake ]]; then
+    echo "1B-blocks Used Avail"
+    cat "$FAKE_STATE/flags/df_fake"
+    echo
+    exit 0
+fi
+exec /usr/bin/df "$@"

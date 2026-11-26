@@ -106,6 +106,28 @@ The env file names its own stores, labels and backup folder. Labels copied
 from the AQPI stack's file are wrong for XQPI, whose tree is on a different
 share.
 
+`ops/upgrade.sh` upgrades both stacks together. A run syncs the checkout the
+script comes from, so install a root-owned copy outside it and check before the
+first real run:
+
+```bash
+sudo install -o root -g root -m 0750 /srv/aqpi-sentinel/ops/upgrade.sh /srv/upgrade.sh
+sudo /srv/upgrade.sh --check
+sudo /srv/upgrade.sh
+```
+
+The check renders both stacks from the target revision and stops on a shared
+name or source tag, a missing database or store volume, or a bind-mount source
+that is missing or empty. It also lists the backup commands it will run and what
+the prune would remove. A real run pulls first, then dumps both databases,
+syncs the checkout and recreates both stacks at once, so each stack is down only
+while its containers restart. It prunes only once every container, HTTP endpoint
+and `layer0.self.disk` check passes, and after a failure it prints the commands
+that return each stack to the compose files and image it ran before. The
+defaults are `/srv/aqpi-sentinel` for the checkout and
+`/srv/xqpi-sentinel/.env.prod` for XQPI's env file, and every run is appended to
+`/var/log/sentinel-upgrade.log`.
+
 ---
 
 ## How a check is excluded

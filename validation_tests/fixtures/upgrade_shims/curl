@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Stand in for curl in the upgrade.sh tests: answer the fake stacks' HTTP checks."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+STATE = Path(os.environ["FAKE_STATE"])
+PORT_STACK = {8000: "aqpi", 3000: "aqpi", 8001: "xqpi", 3001: "xqpi"}
+
+
+def main(argv: list[str]) -> int:  # noqa: PLR0911  one return per fake HTTP answer
+    """Print the body for the URL in ARGV, or fail as a refused connection.
+
+    Args:
+        argv: curl's arguments; the one URL among them picks the answer.
+
+    Returns:
+        0 for an answer, 7 for a refused connection, 22 for a 404.
+    """
+    urls = [a for a in argv if a.startswith("http://")]
+    if len(urls) != 1:
+        return 2
+    url = urlsplit(urls[0])
+    stack = PORT_STACK.get(url.port or 0)
+    if stack is None:
+        return 7
+    gen_file = STATE / f"{stack}.gen"
+    gen = int(gen_file.read_text(encoding="utf-8")) if gen_file.exists() else 0
+    if gen and (STATE / "flags" / f"http_down_{stack}").exists():
+        return 7
+    if gen and url.port in (3000, 3001) and (STATE / "flags" / f"frontend_down_{stack}").exists():
+        return 7
+    if not gen and (STATE / "flags" / f"http_down_before_{stack}").exists():
+        return 7
+    if url.path == "/api/version":
+        if "-o" not in argv:
+            print('{"version": "%s"}' % ("0.16.6" if gen else "0.16.5"))
+        return 0
+    if url.path == "/api/status":
+        print(json.dumps(status(stack, gen)))
+        return 0
+    return 0 if url.path == "/" else 22
+
+
+def status(stack: str, gen: int) -> dict[str, object]:
+    """Return an /api/status body whose disk check row the flags pick.
+
+    Args:
+        stack: "aqpi" or "xqpi".
+        gen: how many times the stack was recreated.
+
+    Returns:
+        The rollup, with one layer0.self.disk row unless it is flagged absent.
+    """
+    flags = STATE / "flags"
+    fresh = gen and not (flags / f"disk_stale_{stack}").exists()
+    when = datetime.now(timezone.utc) if fresh else datetime(2026, 1, 1, tzinfo=timezone.utc)
+    state, summary = "pass", "disk 33% used; stores attached"
+    if (flags / f"disk_fail_{stack}").exists():
+        state, summary = "fail", "NOT ATTACHED, no .sentinel-store in /data/cold"
+    elif (flags / f"disk_warn_{stack}").exists():
+        state, summary = "warn", "UNREACHABLE: /data/archive did not answer in 10 s"
+    elif (flags / f"disk_skip_{stack}").exists():
+        state, summary = "skip", "host offline"
+    rows = [] if (flags / f"disk_absent_{stack}").exists() else [
+        {"check_id": "layer0.self.disk", "status": state, "summary": summary,
+         "finished_at": when.isoformat()}]
+    return {"stages": {"L0": rows}}
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

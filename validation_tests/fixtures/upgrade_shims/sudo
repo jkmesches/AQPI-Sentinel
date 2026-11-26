@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Stand in for sudo in the upgrade.sh tests: log the call, drop -u USER and -H,
+# and run the command as the caller.
+set -euo pipefail
+: "${FAKE_STATE:?the tests set FAKE_STATE}"
+printf '%s\n' "$*" >>"$FAKE_STATE/sudo.log"
+if [[ -e $FAKE_STATE/flags/upstream_fail && $* == *--set-upstream-to* ]]; then
+    echo "fatal: the requested upstream branch does not exist" >&2
+    exit 128
+fi
+while (($#)); do
+    case $1 in
+        -u) shift 2 ;;
+        -H) shift ;;
+        *) break ;;
+    esac
+done
+exec "$@"

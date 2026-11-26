@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stand in for crontab in the upgrade.sh tests: list root's fixture crontab.
+set -euo pipefail
+: "${FAKE_STATE:?the tests set FAKE_STATE}"
+[[ $* == "-l -u root" ]] || { echo "fake crontab: unhandled $*" >&2; exit 99; }
+cat "$FAKE_STATE/crontab"

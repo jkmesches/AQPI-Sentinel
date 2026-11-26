@@ -28,6 +28,21 @@ unknown`.
 
 ## [Unreleased]
 
+### Added
+
+- **`ops/upgrade.sh` upgrades the AQPI and XQPI stacks on one host together.**
+  Run from a root-owned copy (`sudo /srv/upgrade.sh`), it first renders both
+  stacks from the target revision and stops on a shared name or source tag, a
+  missing database or store volume, a bind-mount source that is missing or
+  empty, or a disk too full for the new images. It then pulls, dumps both
+  databases with root's crontab backup lines, syncs the checkout, recreates
+  both stacks at once and waits until every container, HTTP endpoint and
+  `layer0.self.disk` check passes. It prunes only after that, and a failure
+  prints the commands that return each stack to the compose files and image it
+  ran before. `--check` runs the tests alone. `validation_tests/test_upgrade.py`
+  runs it against fake `docker`, `sudo`, `crontab`, `curl` and `df`. See
+  [Deployment profiles](07-deployment-profiles.md#two-stacks-on-one-host).
+
 ## [0.16.6] - 2026-11-25
 
 ### Added
